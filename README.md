@@ -1,7 +1,7 @@
 # ODP-EL-textX
 
 
-This is a an implementation of the subset of ODP-EL in textX.
+This is an implementation of the subset of ODP-EL in textX.
  
 This project is in an initial stage of development.
 
