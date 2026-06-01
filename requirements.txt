@@ -1,0 +1,4 @@
+# ODP-EL-textX toolchain dependencies
+# Install with: pip install -r requirements.txt
+
+textX>=3.0.0
