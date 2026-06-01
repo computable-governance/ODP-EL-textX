@@ -1,0 +1,167 @@
+{
+  "resourceType": "Bundle",
+  "id": "ai-diagnostic-governance-bundle-001",
+  "type": "collection",
+  "timestamp": "2026-05-20T09:00:00Z",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/gp-practice-001",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "gp-practice-001",
+        "name": "Northside GP Practice",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/patient-jane-smith",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-jane-smith",
+        "name": [{"family": "Smith", "given": ["Jane"]}],
+        "birthDate": "1985-03-15"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/gp-dr-chen",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "gp-dr-chen",
+        "name": [{"family": "Chen", "given": ["Wei"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "62247001", "display": "General practitioner"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/specialist-dr-okonkwo",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "specialist-dr-okonkwo",
+        "name": [{"family": "Okonkwo", "given": ["Chidi"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "309343006", "display": "Radiologist"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "Device/ai-diagnostic-agent-001",
+      "resource": {
+        "resourceType": "Device",
+        "id": "ai-diagnostic-agent-001",
+        "deviceName": [{"name": "AI Diagnostic Analysis System", "type": "user-friendly-name"}],
+        "type": {"coding": [{"code": "ai-diagnostic", "display": "AI Diagnostic Agent"}]},
+        "manufacturer": "ComputableGovernance Systems",
+        "owner": {"reference": "Organization/gp-practice-001"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/referral-sr-001",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "referral-sr-001",
+        "status": "active",
+        "intent": "order",
+        "subject": {"reference": "Patient/patient-jane-smith"},
+        "requester": {"reference": "Organization/gp-practice-001"},
+        "performer": [{"reference": "Practitioner/specialist-dr-okonkwo"}],
+        "code": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "363679005", "display": "Imaging"}],
+          "text": "AI-assisted diagnostic imaging analysis"
+        },
+        "note": [{"text": "Seek informed patient consent before AI diagnostic analysis. GP practice is ultimately accountable for consent chain."}],
+        "occurrenceDateTime": "2026-05-20",
+        "priority": "routine",
+        "reasonCode": [{"text": "Suspected early-stage condition requiring specialist imaging review"}]
+      }
+    },
+
+    {
+      "fullUrl": "Task/task-specialist-001",
+      "resource": {
+        "resourceType": "Task",
+        "id": "task-specialist-001",
+        "status": "requested",
+        "intent": "order",
+        "priority": "routine",
+        "basedOn": [{"reference": "ServiceRequest/referral-sr-001"}],
+        "requester": {"reference": "Organization/gp-practice-001"},
+        "owner": {"reference": "Practitioner/specialist-dr-okonkwo"},
+        "description": "Specialist accepts referral and oversees AI diagnostic process",
+        "restriction": {
+          "period": {"end": "2026-05-20T17:00:00Z"}
+        },
+        "note": [{"text": "Sub-delegation to AI agent permitted; specialist retains accountability"}]
+      }
+    },
+
+    {
+      "fullUrl": "Task/task-ai-agent-001",
+      "resource": {
+        "resourceType": "Task",
+        "id": "task-ai-agent-001",
+        "status": "requested",
+        "intent": "order",
+        "priority": "routine",
+        "partOf": [{"reference": "Task/task-specialist-001"}],
+        "basedOn": [{"reference": "ServiceRequest/referral-sr-001"}],
+        "requester": {"reference": "Practitioner/specialist-dr-okonkwo"},
+        "owner": {"reference": "Device/ai-diagnostic-agent-001"},
+        "description": "AI agent performs diagnostic analysis — must seek informed consent before proceeding",
+        "restriction": {
+          "period": {"end": "2026-05-20T17:00:00Z"}
+        },
+        "note": [{"text": "Consent obligation is strict — must be discharged before analysis begins"}]
+      }
+    },
+
+    {
+      "fullUrl": "Consent/consent-ai-diagnostic-001",
+      "resource": {
+        "resourceType": "Consent",
+        "id": "consent-ai-diagnostic-001",
+        "status": "active",
+        "scope": {
+          "coding": [{"system": "http://terminology.hl7.org/CodeSystem/consentscope", "code": "treatment", "display": "Treatment"}]
+        },
+        "category": [{
+          "coding": [{"system": "http://loinc.org", "code": "59284-0", "display": "Patient Consent"}]
+        }],
+        "patient": {"reference": "Patient/patient-jane-smith"},
+        "dateTime": "2026-05-20T09:30:00Z",
+        "performer": [{"reference": "Practitioner/specialist-dr-okonkwo"}],
+        "organization": [{"reference": "Organization/gp-practice-001"}],
+        "policy": [{
+          "uri": "https://www.health.gov.au/resources/publications/my-health-records-act-2012"
+        }],
+        "provision": {
+          "type": "permit",
+          "period": {
+            "start": "2026-05-20",
+            "end": "2026-05-20"
+          },
+          "actor": [{
+            "role": {
+              "coding": [{"system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType", "code": "PRCP", "display": "primary information recipient"}]
+            },
+            "reference": {"reference": "Device/ai-diagnostic-agent-001"}
+          }],
+          "action": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/consentaction", "code": "access", "display": "Access"}]}],
+          "purpose": [{"system": "http://terminology.hl7.org/CodeSystem/v3-ActReason", "code": "TREAT", "display": "Treatment"}],
+          "provision": [{
+            "type": "deny",
+            "action": [{"coding": [{"code": "disclose", "display": "Disclose"}]}],
+            "purpose": [{"system": "http://terminology.hl7.org/CodeSystem/v3-ActReason", "code": "HRESCH", "display": "Healthcare Research"}]
+          }]
+        }
+      }
+    }
+
+  ]
+}
