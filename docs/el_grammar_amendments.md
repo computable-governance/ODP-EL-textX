@@ -1154,6 +1154,58 @@ _Further amendments to be added during walkthrough._
 
 ---
 
+## AM-19 — Capture `kind` in `JoinLeaveEffect`; boolean flag for `unpoliced` in `Enforcement`
+
+**Location:** `JoinLeaveEffect` line ~331; `Enforcement` line ~232
+
+**Fix 1 — `JoinLeaveEffect`:**
+
+Without a named attribute, textX has no field to record which alternative
+(`on_join` vs `on_leave`) matched — the keyword was consumed but not stored.
+Object processors and downstream code could not distinguish the two cases.
+
+```
+// Before
+JoinLeaveEffect:
+    (
+        ('on_join' role_name=ID 'transfer' token=[DeonticToken])
+        | ('on_leave' role_name=ID 'revert' token=[DeonticToken])
+    )
+;
+
+// After
+JoinLeaveEffect:
+    ( kind='on_join'  role_name=ID 'transfer' token=[DeonticToken] )
+    | ( kind='on_leave' role_name=ID 'revert'   token=[DeonticToken] )
+;
+```
+
+`kind` is a string assignment — textX sets it to `'on_join'` or `'on_leave'`
+depending on which alternative matched.
+
+**Fix 2 — `Enforcement`:**
+
+`'unpoliced'` as a bare keyword was consumed but produced no field on the
+object — code could not test whether enforcement was policed or unpoliced
+without checking for the absence of `mode`.
+
+```
+// Before
+        | 'unpoliced'
+
+// After
+        | (unpoliced?='unpoliced')
+```
+
+`unpoliced?=` is a boolean assignment — textX sets `unpoliced = True` when
+the keyword is matched.
+
+**Standard reference:** §7.8.7 NOTE 3 (join/leave effects); §7.9.4 (enforcement modes)
+
+**Status:** CONFIRMED
+
+---
+
 ## AM-15 — Rename `ObjectDecl` → `EnterpriseObjectDecl`
 
 **Location:** `ObjectDecl` rule definition and all 16 cross-references throughout

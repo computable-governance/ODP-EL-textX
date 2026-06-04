@@ -233,7 +233,7 @@ Enforcement:
     'enforcement'
     (
         ('policed' mode=EnforcementMode ('mechanism' ':' mechanism=STRING)?)
-        | 'unpoliced'
+        | (unpoliced?='unpoliced')
     )
 ;
 
@@ -329,10 +329,8 @@ RequiresRelationRule   : 'requires_relation'     ':' description=STRING ;
  * tokens are transferred to/from it via a speech act.
  */
 JoinLeaveEffect:
-    (
-        ('on_join' role_name=ID 'transfer' token=[DeonticToken])
-        | ('on_leave' role_name=ID 'revert' token=[DeonticToken])
-    )
+    ( kind='on_join'  role_name=ID 'transfer' token=[DeonticToken] )
+    | ( kind='on_leave' role_name=ID 'revert'   token=[DeonticToken] )
 ;
 
 // ----------------------------------------------------------------

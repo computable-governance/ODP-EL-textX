@@ -32,10 +32,28 @@ from typing import Any, List, Optional
 try:
     from textx import metamodel_from_file
     from textx.exceptions import TextXError, TextXSemanticError, TextXSyntaxError
+    import textx
+    import textx.model as _tx_model
+    import textx.scoping.tools as _tx_scoping_tools
 except ImportError as exc:
     raise ImportError(
         "textX is required: pip install textX"
     ) from exc
+
+# textX 4.x get_model() loops `while hasattr(p, "parent"): p = p.parent`.
+# Custom dataclass bases that declare parent=None as a field always have the
+# attribute, so the loop overshoots the root and returns None — breaking
+# get_location() and get_parser() for every registered processor.
+# Patch all three binding sites to stop the traversal at None.
+def _get_model_patched(obj):
+    p = obj
+    while hasattr(p, "parent") and p.parent is not None:
+        p = p.parent
+    return p
+
+_tx_model.get_model = _get_model_patched
+textx.get_model = _get_model_patched
+_tx_scoping_tools.get_model = _get_model_patched
 
 from el_domain import DOMAIN_CLASSES
 
@@ -58,6 +76,144 @@ class ParseResult:
         return len(self.errors) == 0
 
 
+# ── Object processors ────────────────────────────────────────────────────────
+
+def process_deontic_token(token):
+    """P1: inject discharge_mode and priority defaults when absent."""
+    if not token.discharge_mode:
+        token.discharge_mode = 'eventual'
+    if not token.priority:
+        token.priority = 'normal'
+
+
+def process_enterprise_object(obj):
+    """P2: flatten ObjectBody fields into EnterpriseObject; discard wrapper."""
+    if obj.body:
+        obj.holds_tokens = [ht.token for ht in obj.body.holds_tokens]
+        if obj.body.delegated_from:
+            obj.delegated_from = obj.body.delegated_from.delegator
+            obj.delegation_duration = obj.body.delegated_from.duration
+        obj.principal_of = [po.agent for po in obj.body.principal_of]
+        obj.body = None
+
+
+def process_role(role):
+    """P3: split role.items into typed sublists."""
+    for item in role.items:
+        cls = type(item).__name__
+        if cls == 'HoldsToken':
+            role.holds_tokens.append(item.token)
+        elif cls == 'PolicyRef':
+            role.policy_refs.append(item)
+        elif cls == 'SubObjectiveRef':
+            role.satisfies_objectives.append(item.objective)
+        elif cls == 'Action':
+            role.actions.append(item)
+        elif cls == 'ConditionalAction':
+            role.conditional_actions.append(item)
+    role.items = []
+
+
+def process_action(action):
+    """P4: unwrap description; split items into typed sublists."""
+    if action.description:
+        action.description = action.description.value
+    for item in action.items:
+        cls = type(item).__name__
+        if cls == 'ActorRef':
+            action.actors.append(item.role_name)
+        elif cls == 'ArtefactRef':
+            action.artefacts.append(item.ref_name)
+        elif cls == 'ResourceRef':
+            action.resources.append(item)
+        elif cls == 'PreconditionDecl':
+            action.preconditions.append(item.description)
+        elif cls == 'DeonticRequirement':
+            action.deontic_requirements.append(item)
+        elif cls == 'DeonticEffect':
+            action.deontic_effects.append(item)
+    action.items = []
+
+
+def process_conditional_action(ca):
+    """P5: unwrap description; split items into typed sublists."""
+    if ca.description:
+        ca.description = ca.description.value
+    for item in ca.items:
+        cls = type(item).__name__
+        if cls == 'RequiresPermitItem':
+            ca.requires_permits.append(item.token)
+        elif cls == 'InhibitedByItem':
+            ca.inhibited_by.append(item.token)
+        elif cls == 'FavouredByItem':
+            ca.favoured_by.append(item.token)
+        elif cls == 'ActorRef':
+            ca.actors.append(item.role_name)
+        elif cls == 'DeonticEffect':
+            ca.deontic_effects.append(item)
+    ca.items = []
+
+
+def process_step(step):
+    """P6: split items; extract nested Steps as sub_steps."""
+    for item in step.items:
+        cls = type(item).__name__
+        if cls == 'DescriptionAttr':
+            step.description = item.value
+        elif cls == 'ActorRef':
+            step.actors.append(item.role_name)
+        elif cls == 'ArtefactRef':
+            step.artefacts.append(item.ref_name)
+        elif cls == 'ResourceRef':
+            step.resources.append(item)
+        elif cls == 'PreconditionDecl':
+            step.preconditions.append(item.description)
+        elif cls == 'DeonticRequirement':
+            step.deontic_requirements.append(item)
+        elif cls == 'DeonticEffect':
+            step.deontic_effects.append(item)
+        elif cls == 'Step':
+            step.sub_steps.append(item)
+    step.items = []
+
+
+def process_process(proc):
+    """P7: unwrap SatisfiesObjective wrappers to direct SubObjective refs."""
+    proc.satisfies_objectives = [s.objective for s in proc.satisfies_objectives]
+
+
+def process_domain(domain):
+    """P8: split body_items into typed sublists."""
+    for item in domain.body_items:
+        cls = type(item).__name__
+        if cls == 'DomainControllingObj':
+            domain.controlling_objects.append(item.obj)
+        elif cls == 'DomainControlledObj':
+            domain.controlled_objects.append(item.obj)
+        elif cls == 'PolicyRef':
+            domain.policy_refs.append(item)
+    domain.body_items = []
+
+
+def process_federation(fed):
+    """P9: split body_items into typed sublists; unwrap thin wrappers."""
+    for item in fed.body_items:
+        cls = type(item).__name__
+        if cls == 'FedSharedObjective':
+            fed.shared_objectives.append(item.description)
+        elif cls == 'MemberRef':
+            fed.members.append(item.community)
+        elif cls == 'PolicyRef':
+            fed.policy_refs.append(item)
+        elif cls == 'Invariant':
+            fed.invariants.append(item)
+        elif cls == 'WithdrawalBehaviour':
+            fed.withdrawal_behaviour = item.description
+        elif cls == 'ConflictResolution':
+            fed.conflict_resolution = item
+    fed.body_items = []
+
+
 # ── Metamodel builder ─────────────────────────────────────────────────────────
 
 def _build_metamodel():
@@ -70,6 +226,17 @@ def _build_metamodel():
       global_model_params — exposed to custom obj processors if needed.
     """
     mm = metamodel_from_file(str(GRAMMAR_PATH), classes=DOMAIN_CLASSES)
+    mm.register_obj_processors({
+        'DeonticToken':       process_deontic_token,       # P1
+        'EnterpriseObject':   process_enterprise_object,   # P2
+        'Role':               process_role,                # P3
+        'Action':             process_action,              # P4
+        'ConditionalAction':  process_conditional_action,  # P5
+        'Step':               process_step,                # P6
+        'Process':            process_process,             # P7
+        'Domain':             process_domain,              # P8
+        'Federation':         process_federation,          # P9
+    })
     return mm
 
 
