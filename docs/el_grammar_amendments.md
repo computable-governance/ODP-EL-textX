@@ -1419,6 +1419,35 @@ Add to enum table: `ViolationResponseKind`: `escalate, remediate, penalise, term
 
 ---
 
+## DOC-03 — Clarify Community Role (§6.3.5) vs Action-Role participants (§6.3.2–6.3.4); `for_action` informational note
+
+**Location:** `Role` rule (§7.8.2–7.8.3 section); `ActorRef`, `ArtefactRef`, `ResourceRef` definitions (§7.8.4 section); `DeonticToken.for_action` field.
+
+**Issue:**
+The word "role" is used in two distinct senses in ISO/IEC 15414:2015:
+
+| Sense | Standard reference | Grammar construct |
+|---|---|---|
+| Community role | §6.3.5, §6.2 — structural position in a community | `Role` rule inside `Community` |
+| Action participation kind | §6.3.2–6.3.4 — actor/artefact/resource for one action | `ActorRef`, `ArtefactRef`, `ResourceRef` in `ActionBodyItem` |
+
+A community role is durable — it persists for the lifetime of the community and carries obligations, permits, and policy references.  Action participation kinds classify how objects relate to a single action execution.  A DSL user or maintainer may conflate the two because both use the word "role" informally.
+
+Additionally, `DeonticToken.for_action` is a plain `STRING` field — it names an action for human readability but cannot be machine-checked against declared `Action` names (see AM-01 for the proposed typed upgrade).
+
+**Changes applied:**
+1. Added a DOC-03 comment block above the `Role:` rule (§7.8.2–7.8.3 section) explaining the community-role vs action-role distinction.
+2. Added a DOC-03 comment before `ActorRef` / `ArtefactRef` / `ResourceRef` (§7.8.4 section) clarifying they are action participation kinds (§6.3.2–6.3.4), not community roles.
+3. Added an inline DOC-03 comment on `for_action` in `DeonticToken` noting it is informational only and referencing AM-01.
+
+**Classification:** Documentation only — no grammar or validator change.
+
+**Standard reference:** §6.2, §6.3.2–6.3.5, §7.8.4
+
+**Status:** CONFIRMED
+
+---
+
 ## AM-18 — Strip `Decl` suffix from all grammar rule names; align with domain class names
 
 **Location:** `grammar/v2/el_grammar.tx` — all rule definitions and cross-references.

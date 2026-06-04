@@ -136,6 +136,9 @@ PrincipalOf:
  */
 DeonticToken:
     kind=DeonticKind name=ID '{'
+        // DOC-03: for_action is informational only — plain STRING, not a
+        // cross-reference; the parser cannot machine-check this against
+        // declared Action names.  See AM-01 for the proposed typed upgrade.
         ('for_action'      ':' for_action=STRING)?
         'state'            ':' state=TokenState
         ('deadline'        ':' deadline=STRING)?
@@ -351,6 +354,25 @@ CommunityInteraction:
 // ================================================================
 
 /*
+ * DOC-03: Community Role (§6.3.5) vs Action-Role participants (§6.3.2–6.3.4).
+ *
+ * Role models a community role per §6.3.5 and §6.2 — a named structural
+ * position within a community, filled by an active enterprise object at
+ * runtime.  A community role is durable; it persists for the lifetime of
+ * the community and carries obligations, permits, and policy references.
+ *
+ * Action participation (actor / artefact / resource per §6.3.2–6.3.4) is
+ * modelled separately via ActorRef, ArtefactRef, ResourceRef inside
+ * ActionBodyItem (see §7.8.4 section below).  Those constructs classify
+ * how objects relate to a single action execution — they are NOT community
+ * roles in the §6.3.5 / §6.2 sense, even though the standard uses the word
+ * "role" informally for action participants.
+ *
+ * Interface roles (§6.3.5) are community roles marked with the 'interface'
+ * keyword, indicating cross-boundary interactions with objects outside the
+ * community boundary.
+ */
+/*
  * interface?='interface' marks roles whose behaviour includes
  * interactions with objects outside the community (§6.3.5, §7.8.3).
  *
@@ -403,6 +425,17 @@ ActionBodyItem:
 
 DescriptionAttr : 'description' ':' value=STRING ;
 
+/*
+ * DOC-03: Action-role participants (§6.3.2–6.3.4) — distinct from community
+ * roles (§6.3.5; Role rule above).  These classify how objects participate in
+ * one action execution; they do NOT define structural positions in a community.
+ *
+ *   actor    (§6.3.2) — active EO that initiates or participates in the action
+ *   artefact (§6.3.3) — EO referenced by the action but not itself acting
+ *   resource (§6.3.4) — EO essential to the action that may become unavailable
+ *
+ * role_name / ref_name are plain IDs (see AM-07 for the proposed typed upgrade).
+ */
 ActorRef    : 'actor'    ':' role_name=ID ;
 ArtefactRef : 'artefact' ':' ref_name=ID ;
 ResourceRef : 'resource' ':' ref_name=ID ('consumable' consumable?='consumable')? ;
