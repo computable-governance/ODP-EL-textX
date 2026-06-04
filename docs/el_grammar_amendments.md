@@ -1364,3 +1364,97 @@ Add to Group I (Accountability Speech Acts):
 Add to enum table: `ViolationResponseKind`: `escalate, remediate, penalise, terminate`
 
 **Status:** CONFIRMED
+
+---
+
+## AM-18 — Strip `Decl` suffix from all grammar rule names; align with domain class names
+
+**Location:** `grammar/v2/el_grammar.tx` — all rule definitions and cross-references.
+Also: `toolchain/el_parser.py` — `GRAMMAR_PATH` fix and `classes=` registration.
+
+**Motivation:**
+textX matches custom classes to grammar rules by `cls.__name__`. The domain
+classes in `el_domain.py` were written with clean names (`Community`,
+`DeonticToken`, `Commitment`, etc.) while the grammar rules carried a `Decl`
+suffix (`CommunityDecl`, `DeonticTokenDecl`, `CommitmentDecl`, etc.). This
+mismatch meant all 37 affected classes would be silently ignored by textX —
+only the 28 rules whose names already matched their domain class would receive
+typed instances. The `classes=` parameter would be effectively dead weight for
+more than half the class list.
+
+**Resolution:** Grammar wins (invariant §10.1). Strip the `Decl` suffix from
+every grammar rule name where the corresponding domain class does not carry
+the suffix. The `.el` surface syntax is unaffected — keywords (`community`,
+`delegation`, `burden`, etc.) drive parsing, not rule names. Cross-references
+(`[OldRule]`) are updated throughout.
+
+**Note — AM-13 interaction:** AM-13 (tentative) proposed renaming `LifecycleDecl`
+to `CommunityLifecycleDecl`. AM-18 supersedes that proposal; the rule is
+renamed to `Lifecycle` (matching the domain class) instead.
+
+**Note — `PreconditionDecl` exception:** `PreconditionDecl` is NOT renamed.
+Its domain class is also `PreconditionDecl` — the names already match.
+Renaming the grammar rule would create a new mismatch.
+
+**Rule renames applied (36 total):**
+
+| Old grammar rule | New grammar rule | Domain class |
+|---|---|---|
+| `EnterpriseObjectDecl` | `EnterpriseObject` | `EnterpriseObject` |
+| `DelegatedFromDecl` | `DelegatedFrom` | `DelegatedFrom` |
+| `PrincipalOfDecl` | `PrincipalOf` | `PrincipalOf` |
+| `DeonticTokenDecl` | `DeonticToken` | `DeonticToken` |
+| `TokenGroupDecl` | `TokenGroup` | `TokenGroup` |
+| `PolicyDecl` | `Policy` | `Policy` |
+| `SettingBehaviourDecl` | `SettingBehaviour` | `SettingBehaviour` |
+| `EnforcementDecl` | `Enforcement` | `Enforcement` |
+| `CommunityDecl` | `Community` | `Community` |
+| `ObjectiveDecl` | `Objective` | `Objective` |
+| `SubObjectiveDecl` | `SubObjective` | `SubObjective` |
+| `ContractDecl` | `Contract` | `Contract` |
+| `InvariantDecl` | `Invariant` | `Invariant` |
+| `AssignmentPolicyDecl` | `AssignmentPolicy` | `AssignmentPolicy` |
+| `RoleDecl` | `Role` | `Role` |
+| `ActionDecl` | `Action` | `Action` |
+| `DeonticReqDecl` | `DeonticRequirement` | `DeonticRequirement` |
+| `DeonticEffectDecl` | `DeonticEffect` | `DeonticEffect` |
+| `ConditionalActionDecl` | `ConditionalAction` | `ConditionalAction` |
+| `ProcessDecl` | `Process` | `Process` |
+| `StepDecl` | `Step` | `Step` |
+| `LifecycleDecl` | `Lifecycle` | `Lifecycle` |
+| `EstablishingDecl` | `Establishing` | `Establishing` |
+| `ChangesDecl` | `Changes` | `Changes` |
+| `TerminatingDecl` | `Terminating` | `Terminating` |
+| `DomainDecl` | `Domain` | `Domain` |
+| `FederationDecl` | `Federation` | `Federation` |
+| `ConflictResolutionDecl` | `ConflictResolution` | `ConflictResolution` |
+| `CommitmentDecl` | `Commitment` | `Commitment` |
+| `DelegationDecl` | `Delegation` | `Delegation` |
+| `AuthorizationDecl` | `Authorization` | `Authorization` |
+| `PrescriptionDecl` | `Prescription` | `Prescription` |
+| `DeclarationDecl` | `Declaration` | `Declaration` |
+| `EvaluationDecl` | `Evaluation` | `Evaluation` |
+| `ViolationResponseDecl` | `ViolationResponse` | `ViolationResponse` |
+| `CorrespondenceDecl` | `Correspondence` | `Correspondence` |
+
+**Cross-references updated** (`[OldName]` → `[NewName]` in every attribute):
+`[EnterpriseObject]`, `[DeonticToken]`, `[TokenGroup]`, `[Policy]`,
+`[Community]`, `[SubObjective]`, `[Role]`, `[Step]`.
+
+**Rule-reference sites updated** (alternation and composition rules):
+`SpecElement`, `ObjectBody`, `Policy`, `Community`, `Objective`, `Contract`,
+`CommunityInteraction`, `FedBodyItem`, `RoleBodyItem`, `ActionBodyItem`,
+`CondActionBodyItem`, `StepBodyItem`, `Process`, `Lifecycle`.
+
+**`el_parser.py` changes (Bug 1 + Bug 2, applied in same commit):**
+- Bug 1 — wrong path: `GRAMMAR_PATH = _HERE / "el_grammar.tx"` →
+  `GRAMMAR_PATH = _HERE.parent / "grammar" / "v2" / "el_grammar.tx"`
+  (`_HERE` is `toolchain/`; the grammar lives in `grammar/v2/`).
+- Bug 2 — no registration: `metamodel_from_file(str(GRAMMAR_PATH))` →
+  `metamodel_from_file(str(GRAMMAR_PATH), classes=DOMAIN_CLASSES)` with
+  `from el_domain import DOMAIN_CLASSES` import added.
+
+**Standard reference:** §6–§7, §11 (rule names are implementation artefacts,
+not standard terms; all standard mappings are preserved).
+
+**Status:** CONFIRMED

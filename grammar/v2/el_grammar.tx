@@ -4,32 +4,37 @@
  * ISO/IEC 15414:2015 (BS ISO/IEC 15414:2015) — Sections 6 & 7
  * textX-compatible grammar — v1.0.0
  *
+ * AM-18: all grammar rule names stripped of the 'Decl' suffix so
+ * they align exactly with the domain class names in el_domain.py.
+ * DeonticReqDecl → DeonticRequirement, DeonticEffectDecl → DeonticEffect.
+ * PreconditionDecl is NOT renamed (domain class retains the suffix).
+ *
  * Concept groupings (§6):
  *   §6.1  System concepts         → EnterpriseSpec (name, scope, foa)
- *   §6.2  Community concepts      → CommunityDecl, ObjectiveDecl
- *   §6.3  Behaviour concepts      → RoleDecl, ProcessDecl, StepDecl,
- *                                   ActionDecl, ActionRoles
- *   §6.4  Deontic concepts        → DeonticTokenDecl, TokenGroupDecl,
- *                                   ConditionalActionDecl, SpeechActDecl
- *   §6.5  Policy concepts         → PolicyDecl, AffectedBehaviour
- *   §6.6  Accountability concepts → CommitmentDecl, DelegationDecl,
- *                                   AuthorizationDecl, PrescriptionDecl,
- *                                   DeclarationDecl, EvaluationDecl
+ *   §6.2  Community concepts      → Community, Objective
+ *   §6.3  Behaviour concepts      → Role, Process, Step,
+ *                                   Action, ActionRoles
+ *   §6.4  Deontic concepts        → DeonticToken, TokenGroup,
+ *                                   ConditionalAction
+ *   §6.5  Policy concepts         → Policy, AffectedBehaviour
+ *   §6.6  Accountability concepts → Commitment, Delegation,
+ *                                   Authorization, Prescription,
+ *                                   Declaration, Evaluation
  *
  * Structuring rules (§7):
  *   §7.1–7.2  Overall / Contents  → EnterpriseSpec, SpecElement
- *   §7.3      Community rules     → CommunityDecl, ContractDecl,
+ *   §7.3      Community rules     → Community, Contract,
  *                                   CommunityInteraction
- *   §7.4      Enterprise objects  → EnterpriseObjectDecl
- *   §7.5      Common types        → DomainDecl, FederationDecl
- *   §7.6      Lifecycle           → LifecycleDecl
- *   §7.7      Objective rules     → ObjectiveDecl, SubObjectiveDecl
- *   §7.8      Behaviour rules     → RoleDecl, ProcessDecl, StepDecl,
- *                                   DeonticTokenDecl
- *   §7.9      Policy rules        → PolicyDecl, EnforcementDecl
- *   §7.10     Accountability rules→ DelegationDecl, AuthorizationDecl,
- *                                   CommitmentDecl, DeclarationDecl,
- *                                   PrescriptionDecl
+ *   §7.4      Enterprise objects  → EnterpriseObject
+ *   §7.5      Common types        → Domain, Federation
+ *   §7.6      Lifecycle           → Lifecycle
+ *   §7.7      Objective rules     → Objective, SubObjective
+ *   §7.8      Behaviour rules     → Role, Process, Step,
+ *                                   DeonticToken
+ *   §7.9      Policy rules        → Policy, Enforcement
+ *   §7.10     Accountability rules→ Delegation, Authorization,
+ *                                   Commitment, Declaration,
+ *                                   Prescription
  * ================================================================
  */
 
@@ -51,21 +56,21 @@ EnterpriseSpec:
  * must precede more-general ones where keywords overlap.
  */
 SpecElement:
-    DomainDecl
-    | FederationDecl
-    | CommunityDecl
-    | EnterpriseObjectDecl
-    | DeonticTokenDecl
-    | TokenGroupDecl
-    | PolicyDecl
-    | CommitmentDecl
-    | DelegationDecl
-    | AuthorizationDecl
-    | PrescriptionDecl
-    | DeclarationDecl
-    | EvaluationDecl
-    | ViolationResponseDecl
-    | CorrespondenceDecl
+    Domain
+    | Federation
+    | Community
+    | EnterpriseObject
+    | DeonticToken
+    | TokenGroup
+    | Policy
+    | Commitment
+    | Delegation
+    | Authorization
+    | Prescription
+    | Declaration
+    | Evaluation
+    | ViolationResponse
+    | Correspondence
 ;
 
 
@@ -81,9 +86,9 @@ SpecElement:
  *   artefact_object— §6.3.3 EO referenced but not acting
  *   resource_object— §6.3.4 EO essential to action, may become unavailable
  */
-EnterpriseObjectDecl:
+EnterpriseObject:
     kind=ObjectKind name=ID
-    ('isa' type_ref=[EnterpriseObjectDecl])?
+    ('isa' type_ref=[EnterpriseObject])?
     ('description' ':' description=STRING)?
     ('{' body=ObjectBody '}')?
 ;
@@ -94,26 +99,26 @@ ObjectKind:
 
 ObjectBody:
     (holds_tokens+=HoldsToken)*
-    (delegated_from=DelegatedFromDecl)?
-    (principal_of+=PrincipalOfDecl)*
+    (delegated_from=DelegatedFrom)?
+    (principal_of+=PrincipalOf)*
 ;
 
 HoldsToken:
-    'holds' token=[DeonticTokenDecl]
+    'holds' token=[DeonticToken]
 ;
 
 /*
- * DelegatedFromDecl captures the static initial delegation described
+ * DelegatedFrom captures the static initial delegation described
  * in §6.6.8 NOTE 3: "A specification may state that, in its initial
  * state, an active enterprise object is an agent of a party."
  */
-DelegatedFromDecl:
-    'delegated_from' delegator=[EnterpriseObjectDecl]
+DelegatedFrom:
+    'delegated_from' delegator=[EnterpriseObject]
     ('duration' ':' duration=STRING)?
 ;
 
-PrincipalOfDecl:
-    'principal_of' agent=[EnterpriseObjectDecl]
+PrincipalOf:
+    'principal_of' agent=[EnterpriseObject]
 ;
 
 
@@ -129,7 +134,7 @@ PrincipalOfDecl:
  *
  * state: active|pending per §7.8.7 (pending = masked/suspended)
  */
-DeonticTokenDecl:
+DeonticToken:
     kind=DeonticKind name=ID '{'
         ('for_action'      ':' for_action=STRING)?
         'state'            ':' state=TokenState
@@ -156,13 +161,13 @@ DischargeMode  : 'eventual' | 'strict' ;
 PriorityLevel  : 'critical' | 'high' | 'normal' | 'low' ;
 
 /*
- * TokenGroupDecl — §6.4.2
+ * TokenGroup — §6.4.2
  * Names a group so that speech acts can operate on the whole group.
  */
-TokenGroupDecl:
+TokenGroup:
     'token_group' name=ID '{'
-        tokens+=[DeonticTokenDecl]
-        (',' tokens+=[DeonticTokenDecl])*
+        tokens+=[DeonticToken]
+        (',' tokens+=[DeonticToken])*
     '}'
 ;
 
@@ -171,15 +176,15 @@ TokenGroupDecl:
 // §6.5, §7.9  — POLICIES
 // ================================================================
 
-PolicyDecl:
+Policy:
     'policy' name=ID '{'
         ('description'    ':' description=STRING)?
         'envelope'        ':' envelope=STRING
         ('default_value'  ':' default_value=STRING)?
         rules+=PolicyRule+
         (affected_elements+=AffectedElement)*
-        (setting_behaviour=SettingBehaviourDecl)?
-        (enforcement=EnforcementDecl)?
+        (setting_behaviour=SettingBehaviour)?
+        (enforcement=Enforcement)?
     '}'
 ;
 
@@ -188,7 +193,7 @@ PolicyDecl:
  *   obligation    → burden token
  *   permission    → permit token
  *   prohibition   → embargo token
- *   authorization → permit + burden (modelled separately in AuthorizationDecl)
+ *   authorization → permit + burden (modelled separately in Authorization)
  */
 PolicyRule:
     kind=DeonticRuleKind 'on' target=ID ':' rule_text=STRING
@@ -207,10 +212,10 @@ AffectedElement:
 AffectedScope : 'role' | 'community' | 'process' | 'action' | 'object' ;
 
 /*
- * SettingBehaviourDecl — §7.9.3
+ * SettingBehaviour — §7.9.3
  * The behaviour that changes the policy value.
  */
-SettingBehaviourDecl:
+SettingBehaviour:
     'setting_behaviour' '{'
         ('description'         ':' description=STRING)?
         ('who_can_change'      ':' who_can_change=STRING)?
@@ -219,12 +224,12 @@ SettingBehaviourDecl:
 ;
 
 /*
- * EnforcementDecl — §7.9.4
+ * Enforcement — §7.9.4
  *   policed pessimistic — preventative (low trust, high damage risk)
  *   policed optimistic  — detect-and-correct (high trust, low damage)
  *   unpoliced           — no enforcement specified
  */
-EnforcementDecl:
+Enforcement:
     'enforcement'
     (
         ('policed' mode=EnforcementMode ('mechanism' ':' mechanism=STRING)?)
@@ -235,7 +240,7 @@ EnforcementDecl:
 EnforcementMode : 'optimistic' | 'pessimistic' ;
 
 PolicyRef:
-    'applies' policy=[PolicyDecl]
+    'applies' policy=[Policy]
     ('to' scope=AffectedScope ref_name=ID)?
 ;
 
@@ -244,18 +249,18 @@ PolicyRef:
 // §6.2, §7.3  — COMMUNITY
 // ================================================================
 
-CommunityDecl:
+Community:
     'community' name=ID
-    ('isa' type_ref=[CommunityDecl])?
+    ('isa' type_ref=[Community])?
     ('description' ':' description=STRING)?
     '{'
-        objective=ObjectiveDecl
-        contract=ContractDecl
-        (roles+=RoleDecl)*
-        (processes+=ProcessDecl)*
+        objective=Objective
+        contract=Contract
+        (roles+=Role)*
+        (processes+=Process)*
         (policy_refs+=PolicyRef)*
         (interactions+=CommunityInteraction)*
-        (lifecycle=LifecycleDecl)?
+        (lifecycle=Lifecycle)?
     '}'
 ;
 
@@ -263,9 +268,9 @@ CommunityDecl:
 // §7.7 — OBJECTIVE RULES
 // ----------------------------------------------------------------
 
-ObjectiveDecl:
+Objective:
     'objective' ':' description=STRING
-    (sub_objectives+=SubObjectiveDecl)*
+    (sub_objectives+=SubObjective)*
 ;
 
 /*
@@ -273,7 +278,7 @@ ObjectiveDecl:
  * assigned_to_kind + assigned_to_name let the validator check
  * that the referenced role/process exists in the community.
  */
-SubObjectiveDecl:
+SubObjective:
     'sub_objective' name=ID ':' description=STRING
     ('assigned_to' assigned_to_kind=AssignableKind assigned_to_name=ID)?
 ;
@@ -284,23 +289,23 @@ AssignableKind : 'role' | 'process' ;
 // CONTRACT — §7.3.1
 // ----------------------------------------------------------------
 
-ContractDecl:
+Contract:
     'contract' '{'
-        (invariants+=InvariantDecl)*
-        (assignment_policies+=AssignmentPolicyDecl)*
+        (invariants+=Invariant)*
+        (assignment_policies+=AssignmentPolicy)*
         (join_leave_effects+=JoinLeaveEffect)*
     '}'
 ;
 
-InvariantDecl:
+Invariant:
     'invariant' name=ID ':' description=STRING
 ;
 
 /*
- * AssignmentPolicyDecl — §7.6.2, §7.8.2
+ * AssignmentPolicy — §7.6.2, §7.8.2
  * Rules governing which objects may fulfil a role.
  */
-AssignmentPolicyDecl:
+AssignmentPolicy:
     'assignment_policy' 'for' role_name=ID '{'
         rules+=AssignmentRule+
     '}'
@@ -325,8 +330,8 @@ RequiresRelationRule   : 'requires_relation'     ':' description=STRING ;
  */
 JoinLeaveEffect:
     (
-        ('on_join' role_name=ID 'transfer' token=[DeonticTokenDecl])
-        | ('on_leave' role_name=ID 'revert' token=[DeonticTokenDecl])
+        ('on_join' role_name=ID 'transfer' token=[DeonticToken])
+        | ('on_leave' role_name=ID 'revert' token=[DeonticToken])
     )
 ;
 
@@ -335,9 +340,9 @@ JoinLeaveEffect:
 // ----------------------------------------------------------------
 
 CommunityInteraction:
-    'interaction' 'with' other=[CommunityDecl] '{'
+    'interaction' 'with' other=[Community] '{'
         (common_policies+=PolicyRef)*
-        (invariants+=InvariantDecl)*
+        (invariants+=Invariant)*
         ('description' ':' description=STRING)?
     '}'
 ;
@@ -353,13 +358,13 @@ CommunityInteraction:
  *
  * RoleBodyItem uses a unified alternation so the specifier may
  * write holds, actions, conditional_actions and policy references
- * in any natural order.  The typed attributes (behaviour_items,
- * holds_tokens, policy_refs, sub_objectives) are populated by the
+ * in any natural order.  The typed attributes (holds_tokens,
+ * policy_refs, satisfies_objectives) are populated by the
  * textX obj_processor registered in el_parser.py.
  */
-RoleDecl:
+Role:
     (interface?='interface')? 'role' name=ID
-    ('isa' type_ref=[RoleDecl])?
+    ('isa' type_ref=[Role])?
     ('description' ':' description=STRING)?
     '{'
         items*=RoleBodyItem
@@ -367,11 +372,11 @@ RoleDecl:
 ;
 
 RoleBodyItem:
-    HoldsToken | PolicyRef | SubObjectiveRef | ActionDecl | ConditionalActionDecl
+    HoldsToken | PolicyRef | SubObjectiveRef | Action | ConditionalAction
 ;
 
 SubObjectiveRef:
-    'satisfies' objective=[SubObjectiveDecl]
+    'satisfies' objective=[SubObjective]
 ;
 
 // ----------------------------------------------------------------
@@ -379,15 +384,14 @@ SubObjectiveRef:
 // ----------------------------------------------------------------
 
 /*
- * ActionDecl: a single action with its action-role classification.
+ * Action: a single action with its action-role classification.
  * §7.8.4: actor (participates), artefact (referenced), resource (essential).
- */
-/*
- * ActionDecl uses a unified ActionBodyItem alternation so actor,
+ *
+ * Action uses a unified ActionBodyItem alternation so actor,
  * artefact, resource, precondition and deontic annotations may
  * appear in any order. Minimum-one-actor is enforced by V-03.
  */
-ActionDecl:
+Action:
     'action' name=ID '{'
         (description=DescriptionAttr)?
         items*=ActionBodyItem
@@ -396,7 +400,7 @@ ActionDecl:
 
 ActionBodyItem:
     ActorRef | ArtefactRef | ResourceRef
-    | PreconditionDecl | DeonticReqDecl | DeonticEffectDecl
+    | PreconditionDecl | DeonticRequirement | DeonticEffect
 ;
 
 DescriptionAttr : 'description' ':' value=STRING ;
@@ -410,11 +414,11 @@ PreconditionDecl:
 ;
 
 /*
- * DeonticReqDecl — §6.4.6 conditional action semantics.
+ * DeonticRequirement — §6.4.6 conditional action semantics.
  * States which tokens are required for, favour, or inhibit the action.
  */
-DeonticReqDecl:
-    kind=DeonticReqKind token=[DeonticTokenDecl] ('for' role_name=ID)?
+DeonticRequirement:
+    kind=DeonticReqKind token=[DeonticToken] ('for' role_name=ID)?
 ;
 
 DeonticReqKind:
@@ -422,12 +426,12 @@ DeonticReqKind:
 ;
 
 /*
- * DeonticEffectDecl — §6.4.7, §7.8.7
+ * DeonticEffect — §6.4.7, §7.8.7
  * Effect on token lifecycle when this action is performed.
  * Supports the full set: create, destroy, transfer, activate, pend, clone.
  */
-DeonticEffectDecl:
-    'effect' operation=TokenOp token=[DeonticTokenDecl]
+DeonticEffect:
+    'effect' operation=TokenOp token=[DeonticToken]
     ('from' from_role=ID)?
     ('to' to_role=ID)?
 ;
@@ -435,10 +439,10 @@ DeonticEffectDecl:
 TokenOp : 'create' | 'destroy' | 'transfer' | 'activate' | 'pend' | 'clone' ;
 
 /*
- * ConditionalActionDecl — §6.4.6
+ * ConditionalAction — §6.4.6
  * An action whose occurrence depends on the deontic state of participants.
  */
-ConditionalActionDecl:
+ConditionalAction:
     'conditional_action' name=ID '{'
         (description=DescriptionAttr)?
         items*=CondActionBodyItem
@@ -447,45 +451,43 @@ ConditionalActionDecl:
 
 CondActionBodyItem:
     RequiresPermitItem | InhibitedByItem | FavouredByItem
-    | ActorRef | DeonticEffectDecl
+    | ActorRef | DeonticEffect
 ;
 
-RequiresPermitItem  : 'requires_permit'       token=[DeonticTokenDecl] ;
-InhibitedByItem     : 'inhibited_by_embargo'  token=[DeonticTokenDecl] ;
-FavouredByItem      : 'favoured_by_burden'    token=[DeonticTokenDecl] ;
+RequiresPermitItem  : 'requires_permit'       token=[DeonticToken] ;
+InhibitedByItem     : 'inhibited_by_embargo'  token=[DeonticToken] ;
+FavouredByItem      : 'favoured_by_burden'    token=[DeonticToken] ;
 
 
 // ================================================================
 // §7.8.5  — PROCESSES AND STEPS
 // ================================================================
 
-ProcessDecl:
+Process:
     'process' name=ID
     ('description' ':' description=STRING)?
     (satisfies_objectives+=SatisfiesObjective)*
     '{'
         'initiates' ':' initiation=STRING
         'terminates' ':' termination=STRING
-        steps+=StepDecl+
+        steps+=Step+
     '}'
 ;
 
 SatisfiesObjective:
-    'satisfies' objective=[SubObjectiveDecl]
+    'satisfies' objective=[SubObjective]
 ;
 
 /*
- * StepDecl — §6.3.7
+ * Step — §6.3.7
  * An abstraction of an action; may leave some participants unspecified.
  * Steps may nest (sub_steps) per §7.8.5 refinement.
- */
-/*
- * StepDecl body is order-independent; description may appear inside
+ * Step body is order-independent; description may appear inside
  * the block.  Minimum-one-actor enforced by V-03.
  */
-StepDecl:
+Step:
     'step' name=ID
-    ('refines' parent=[StepDecl])?
+    ('refines' refines_step=[Step])?
     '{'
         items*=StepBodyItem
     '}'
@@ -493,7 +495,7 @@ StepDecl:
 
 StepBodyItem:
     DescriptionAttr | ActorRef | ArtefactRef | ResourceRef
-    | PreconditionDecl | DeonticReqDecl | DeonticEffectDecl | StepDecl
+    | PreconditionDecl | DeonticRequirement | DeonticEffect | Step
 ;
 
 
@@ -502,9 +504,11 @@ StepBodyItem:
 // ================================================================
 
 /*
- * DomainDecl — §7.5.1: <X>-domain community type.
+ * Domain — §7.5.1: <X>-domain community type.
+ * It IS the community declaration — not a reference to a Community.
+ * Controlling and controlled objects implicitly define membership.
  * Body is fully order-independent using DomainBodyItem to avoid the
- * arpeggio/textX cross-reference list bug (see FederationDecl note).
+ * arpeggio/textX cross-reference list bug (see Federation note).
  *
  * Syntax:
  *   domain D {
@@ -514,7 +518,7 @@ StepBodyItem:
  *       applies policy to ...
  *   }
  */
-DomainDecl:
+Domain:
     'domain' name=ID
     ('characterized_by' ':' relationship=STRING)?
     ('description'       ':' description=STRING)?
@@ -528,11 +532,11 @@ DomainBodyItem:
 ;
 
 DomainControllingObj:
-    'controlling_object' ':' obj=[EnterpriseObjectDecl]
+    'controlling_object' ':' obj=[EnterpriseObject]
 ;
 
 DomainControlledObj:
-    'controlled_object' ':' obj=[EnterpriseObjectDecl]
+    'controlled_object' ':' obj=[EnterpriseObject]
 ;
 
 
@@ -541,17 +545,14 @@ DomainControlledObj:
 // ================================================================
 
 /*
- * FederationDecl — §7.5.2
+ * Federation — §7.5.2
  * Pre-existing communities cooperating toward a shared objective
  * while preserving their autonomy.
  *
  * conflict_resolution captures the four cases of §7.9.2 NOTE 3.
- */
-/*
- * FederationDecl — §7.5.2
  *
  * Cross-reference resolution quirk in arpeggio/textX: a comma-
- * separated [CommunityDecl]* list makes all subsequent sub-rule
+ * separated [Community]* list makes all subsequent sub-rule
  * matches fail because textX continues consuming tokens as cross-
  * reference candidates.
  *
@@ -568,7 +569,7 @@ DomainControlledObj:
  *       conflict_resolution runtime_prevention
  *   }
  */
-FederationDecl:
+Federation:
     'federation' name=ID
     ('description' ':' description=STRING)?
     '{'
@@ -580,9 +581,9 @@ FedBodyItem:
     FedSharedObjective
     | MemberRef
     | PolicyRef
-    | InvariantDecl
+    | Invariant
     | WithdrawalBehaviour
-    | ConflictResolutionDecl
+    | ConflictResolution
 ;
 
 FedSharedObjective:
@@ -590,14 +591,14 @@ FedSharedObjective:
 ;
 
 MemberRef:
-    'member' ':' community=[CommunityDecl]
+    'member' ':' community=[Community]
 ;
 
 WithdrawalBehaviour:
     'withdrawal_behaviour' ':' description=STRING
 ;
 
-ConflictResolutionDecl:
+ConflictResolution:
     'conflict_resolution' kind=ConflictResolutionKind
     ('description' ':' description=STRING)?
 ;
@@ -614,20 +615,20 @@ ConflictResolutionKind:
 // §7.6  — COMMUNITY LIFECYCLE
 // ================================================================
 
-LifecycleDecl:
+Lifecycle:
     'lifecycle' '{'
-        (establishing=EstablishingDecl)?
-        (changes=ChangesDecl)?
-        (terminating=TerminatingDecl)?
+        (establishing=Establishing)?
+        (changes=Changes)?
+        (terminating=Terminating)?
     '}'
 ;
 
 /*
- * EstablishingDecl — §7.6.1
+ * Establishing — §7.6.1
  * May be implicit (existence assumed in initial state) or explicit.
  * The establishing behaviour places obligations on founder members.
  */
-EstablishingDecl:
+Establishing:
     'establishing' '{'
         ('implicit' ':' implicit?='true')?
         ('description' ':' description=STRING)?
@@ -637,17 +638,17 @@ EstablishingDecl:
 
 /*
  * EmbeddedCommitment: inline commitment inside establishing behaviour.
- * Full CommitmentDecl may also appear at top level.
+ * Full Commitment may also appear at top level.
  */
 EmbeddedCommitment:
     'commitment' 'by' actor_name=ID ':' description=STRING
 ;
 
 /*
- * ChangesDecl — §7.6.3
+ * Changes — §7.6.3
  * Dynamic changes allowed during community lifetime.
  */
-ChangesDecl:
+Changes:
     'changes' '{'
         ('roles_dynamic'      ':' roles_dynamic?='true')?
         ('policies_dynamic'   ':' policies_dynamic?='true')?
@@ -657,10 +658,10 @@ ChangesDecl:
 ;
 
 /*
- * TerminatingDecl — §7.6.4
+ * Terminating — §7.6.4
  * permanent?='true' means the community never terminates (§7.6.4 NOTE 2).
  */
-TerminatingDecl:
+Terminating:
     'terminating' '{'
         ('on_objective_achieved' ':' on_objective?='true')?
         ('permanent'             ':' permanent?='true')?
@@ -674,42 +675,42 @@ TerminatingDecl:
 // ================================================================
 
 /*
- * CommitmentDecl — §6.6.2, §7.10.3
+ * Commitment — §6.6.2, §7.10.3
  * Establishes an obligation on the actor (and principals, if delegated).
  * The created burden is the anchor for delegation chain tracing.
  */
-CommitmentDecl:
+Commitment:
     'commitment' name=ID '{'
-        'by'              ':' actor=[EnterpriseObjectDecl]
+        'by'              ':' actor=[EnterpriseObject]
         'obligation'      ':' obligation=STRING
-        'creates_burden'  ':' burden=[DeonticTokenDecl]
+        'creates_burden'  ':' burden=[DeonticToken]
         ('principals_obligated' ':'
-            principals+=[EnterpriseObjectDecl]
-            (',' principals+=[EnterpriseObjectDecl])*
+            principals+=[EnterpriseObject]
+            (',' principals+=[EnterpriseObject])*
         )?
         ('description'    ':' description=STRING)?
     '}'
 ;
 
 /*
- * DelegationDecl — §6.6.6, §7.10.1
+ * Delegation — §6.6.6, §7.10.1
  * KEY construct for accountability chain reasoning.
  *
  * Design notes aligned with §7.10.1:
- *  - transfers_burden links to the burden name established by a CommitmentDecl
+ *  - transfers_burden links to the burden name established by a Commitment
  *  - creates_reporting_burden: §7.10.1 "additional burdens expressing
  *    associated reporting and monitoring responsibilities assigned to the principal"
  *  - sub_delegation_allowed: §7.10.1 "enterprise specification may specify
  *    further delegation by that agent to another active enterprise object"
  *  - revocable: §6.6.6 "a delegation, once made, may later be withdrawn"
  */
-DelegationDecl:
+Delegation:
     'delegation' name=ID '{'
-        'from'             ':' delegator=[EnterpriseObjectDecl]
-        'to'               ':' delegate=[EnterpriseObjectDecl]
+        'from'             ':' delegator=[EnterpriseObject]
+        'to'               ':' delegate=[EnterpriseObject]
         'obligation'       ':' obligation=STRING
-        ('transfers_burden' ':' burden=[DeonticTokenDecl])?
-        ('transfers_token_group' ':' token_group=[TokenGroupDecl])?
+        ('transfers_burden' ':' burden=[DeonticToken])?
+        ('transfers_token_group' ':' token_group=[TokenGroup])?
         ('creates_reporting_burden' ':' creates_reporting_burden?='true')?
         ('duration'        ':' duration=STRING)?
         ('conditions'      ':' conditions=STRING)?
@@ -720,16 +721,16 @@ DelegationDecl:
 ;
 
 /*
- * AuthorizationDecl — §6.6.4, §7.10.2, §7.8.8.4
+ * Authorization — §6.6.4, §7.10.2, §7.8.8.4
  * An empowerment (unlike mere permission).
  * The authority grants a permit AND undertakes a burden to facilitate.
  */
-AuthorizationDecl:
+Authorization:
     'authorization' name=ID '{'
-        'authority'                ':' authority=[EnterpriseObjectDecl]
-        'to_agent'                 ':' authorized_agent=[EnterpriseObjectDecl]
-        'grants_permit'            ':' permit=[DeonticTokenDecl]
-        ('creates_burden_on_authority' ':' auth_burden=[DeonticTokenDecl])?
+        'authority'                ':' authority=[EnterpriseObject]
+        'to_agent'                 ':' authorized_agent=[EnterpriseObject]
+        'grants_permit'            ':' permit=[DeonticToken]
+        ('creates_burden_on_authority' ':' auth_burden=[DeonticToken])?
         ('duration'                ':' duration=STRING)?
         ('conditions'              ':' conditions=STRING)?
         ('sub_delegation_allowed'  ':' sub_delegation_allowed?='true')?
@@ -740,42 +741,42 @@ AuthorizationDecl:
 ;
 
 /*
- * PrescriptionDecl — §6.6.3, §7.10.5
+ * Prescription — §6.6.3, §7.10.5
  * Establishes a rule. The actor must be: a party by nature, previously
  * specified to establish rules, or delegated the permit to prescribe.
  */
-PrescriptionDecl:
+Prescription:
     'prescription' name=ID '{'
-        'by'              ':' actor=[EnterpriseObjectDecl]
+        'by'              ':' actor=[EnterpriseObject]
         'establishes_rule' ':' rule_text=STRING
-        ('requires_permit' ':' permit=[DeonticTokenDecl])?
+        ('requires_permit' ':' permit=[DeonticToken])?
         ('creates_oversight_burden' ':' creates_oversight_burden?='true')?
         ('description'    ':' description=STRING)?
     '}'
 ;
 
 /*
- * DeclarationDecl — §6.6.5, §7.10.4
+ * Declaration — §6.6.5, §7.10.4
  * Establishes a state of affairs by virtue of the act itself.
  * Requires a permit; may only become effective after an interaction.
  */
-DeclarationDecl:
+Declaration:
     'declaration' name=ID '{'
-        'by'                       ':' actor=[EnterpriseObjectDecl]
+        'by'                       ':' actor=[EnterpriseObject]
         'state_of_affairs'         ':' state_of_affairs=STRING
-        ('requires_permit'         ':' permit=[DeonticTokenDecl])?
+        ('requires_permit'         ':' permit=[DeonticToken])?
         ('effective_on_interaction' ':' effective_on_interaction?='true')?
         ('description'             ':' description=STRING)?
     '}'
 ;
 
 /*
- * EvaluationDecl — §6.6.7
+ * Evaluation — §6.6.7
  * Assesses value (credit rating, system state, behaviour preference, etc.)
  */
-EvaluationDecl:
+Evaluation:
     'evaluation' name=ID '{'
-        'by'          ':' evaluator=[EnterpriseObjectDecl]
+        'by'          ':' evaluator=[EnterpriseObject]
         'of_target'   ':' target=STRING
         'result'      ':' result=STRING
         ('description' ':' description=STRING)?
@@ -788,7 +789,7 @@ EvaluationDecl:
 // ================================================================
 
 /*
- * ViolationResponseDecl — §6.3.8, §7.8.6, §7.8.6 NOTE 2
+ * ViolationResponse — §6.3.8, §7.8.6, §7.8.6 NOTE 2
  *
  * Declares the prescribed obligation that applies to a specified actor
  * when a named burden is violated (not discharged by its deadline).
@@ -803,13 +804,13 @@ EvaluationDecl:
  *   penalise   — apply a specified sanction
  *   terminate  — terminate the community / delegation / session
  */
-ViolationResponseDecl:
+ViolationResponse:
     'violation_response' name=ID '{'
-        'on_violation_of'  ':' violated_burden=[DeonticTokenDecl]
-        'obligates'        ':' responding_actor=[EnterpriseObjectDecl]
+        'on_violation_of'  ':' violated_burden=[DeonticToken]
+        'obligates'        ':' responding_actor=[EnterpriseObject]
         'response_kind'    ':' response_kind=ViolationResponseKind
-        ('creates_burden'  ':' creates_burden=[DeonticTokenDecl])?
-        ('escalate_to'     ':' escalate_to=[EnterpriseObjectDecl])?
+        ('creates_burden'  ':' creates_burden=[DeonticToken])?
+        ('escalate_to'     ':' escalate_to=[EnterpriseObject])?
         ('description'     ':' description=STRING)?
     '}'
 ;
@@ -824,11 +825,11 @@ ViolationResponseKind:
 // ================================================================
 
 /*
- * CorrespondenceDecl maps enterprise concepts to other viewpoint
+ * Correspondence maps enterprise concepts to other viewpoint
  * concepts (§11.2–11.5). Required correspondence statements are
  * declared here; required correspondences are checked by the validator.
  */
-CorrespondenceDecl:
+Correspondence:
     'correspondence' enterprise_concept=ID
     'to' viewpoint=ViewpointName ':' viewpoint_concept=ID
     ('description' ':' description=STRING)?

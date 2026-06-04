@@ -56,7 +56,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -182,11 +182,29 @@ class ViolationResponseKind(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# _ELNode — textX compatibility base class
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _ELNode:
+    """Base for all textX custom domain classes.
+
+    textX 4.x injects a 'parent' keyword argument into every custom class's
+    __init__ call (_end_model_construction in textx/model.py).  Declaring
+    'parent' here makes all subclasses accept it transparently.  The field
+    stores the textX containment parent (the enclosing grammar object), not
+    to be confused with domain-level 'parent' cross-references such as
+    Step.refines_step.
+    """
+    parent: Optional[Any] = field(default=None, repr=False, compare=False)
+
+
+# ---------------------------------------------------------------------------
 # Group A — Top-level container
 # ---------------------------------------------------------------------------
 
 @dataclass
-class EnterpriseSpec:
+class EnterpriseSpec(_ELNode):
     """§7.1, §7.2 — top-level enterprise specification container.
 
     Grammar rule: EnterpriseSpec
@@ -205,7 +223,7 @@ class EnterpriseSpec:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class DelegatedFrom:
+class DelegatedFrom(_ELNode):
     """§6.6.8 NOTE 3 — static initial delegation declaration.
 
     Grammar rule: DelegatedFromDecl
@@ -216,7 +234,7 @@ class DelegatedFrom:
 
 
 @dataclass
-class PrincipalOf:
+class PrincipalOf(_ELNode):
     """Grammar rule: PrincipalOfDecl — inverse of delegated_from.
 
     Folded into EnterpriseObject by object processor (P2).
@@ -225,7 +243,7 @@ class PrincipalOf:
 
 
 @dataclass
-class HoldsToken:
+class HoldsToken(_ELNode):
     """Grammar rule: HoldsToken — token held by an enterprise object.
 
     Wrapper dissolved by object processor (P2/P3).
@@ -234,7 +252,7 @@ class HoldsToken:
 
 
 @dataclass
-class ObjectBody:
+class ObjectBody(_ELNode):
     """Grammar rule: ObjectBody — body of an EnterpriseObjectDecl.
 
     Wrapper dissolved by object processor (P2); fields folded into
@@ -246,7 +264,7 @@ class ObjectBody:
 
 
 @dataclass
-class EnterpriseObject:
+class EnterpriseObject(_ELNode):
     """§6.3.1, §6.6.1, §6.6.8, §7.4 — enterprise object (party, agent, etc.).
 
     Grammar rule: EnterpriseObjectDecl (renamed from ObjectDecl per AM-15).
@@ -277,7 +295,7 @@ class EnterpriseObject:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class DeonticToken:
+class DeonticToken(_ELNode):
     """§6.4.3–6.4.5, §7.8.7 — deontic token (burden, permit, or embargo).
 
     Grammar rule: DeonticTokenDecl
@@ -301,7 +319,7 @@ class DeonticToken:
 
 
 @dataclass
-class TokenGroup:
+class TokenGroup(_ELNode):
     """§6.4.2 — named group of deontic tokens.
 
     Grammar rule: TokenGroupDecl
@@ -315,7 +333,7 @@ class TokenGroup:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class PolicyRule:
+class PolicyRule(_ELNode):
     """§6.5.1, §7.8.8 — a single deontic rule within a policy.
 
     Grammar rule: PolicyRule
@@ -326,7 +344,7 @@ class PolicyRule:
 
 
 @dataclass
-class AffectedElement:
+class AffectedElement(_ELNode):
     """§6.5.2 — identifies which roles/processes/actions a policy constrains.
 
     Grammar rule: AffectedElement
@@ -336,7 +354,7 @@ class AffectedElement:
 
 
 @dataclass
-class SettingBehaviour:
+class SettingBehaviour(_ELNode):
     """§7.9.3 — behaviour that changes the policy value.
 
     Grammar rule: SettingBehaviourDecl
@@ -347,7 +365,7 @@ class SettingBehaviour:
 
 
 @dataclass
-class Enforcement:
+class Enforcement(_ELNode):
     """§7.9.4 — enforcement mode for a policy.
 
     Grammar rule: EnforcementDecl
@@ -359,7 +377,7 @@ class Enforcement:
 
 
 @dataclass
-class PolicyRef:
+class PolicyRef(_ELNode):
     """Policy reference used inside Community, Role, Federation, Domain.
 
     Grammar rule: PolicyRef
@@ -370,7 +388,7 @@ class PolicyRef:
 
 
 @dataclass
-class Policy:
+class Policy(_ELNode):
     """§6.5, §7.9 — governance policy declaration.
 
     Grammar rule: PolicyDecl
@@ -390,7 +408,7 @@ class Policy:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class SubObjective:
+class SubObjective(_ELNode):
     """§7.7 — sub-objective within a community objective.
 
     Grammar rule: SubObjectiveDecl
@@ -402,13 +420,13 @@ class SubObjective:
 
 
 @dataclass
-class SubObjectiveRef:
+class SubObjectiveRef(_ELNode):
     """Grammar rule: SubObjectiveRef — wrapper dissolved by P3."""
     objective: Optional[object] = None   # → SubObjective ref
 
 
 @dataclass
-class Objective:
+class Objective(_ELNode):
     """§6.2, §7.7 — community objective.
 
     Grammar rule: ObjectiveDecl
@@ -418,7 +436,7 @@ class Objective:
 
 
 @dataclass
-class Invariant:
+class Invariant(_ELNode):
     """Community or federation invariant.
 
     Grammar rule: InvariantDecl
@@ -428,7 +446,7 @@ class Invariant:
 
 
 @dataclass
-class AssignmentPolicy:
+class AssignmentPolicy(_ELNode):
     """§7.6.2, §7.8.2 — rules governing role fulfilment.
 
     Grammar rule: AssignmentPolicyDecl
@@ -440,29 +458,29 @@ class AssignmentPolicy:
 # AssignmentRule subtypes — four concrete alternatives
 
 @dataclass
-class RequiresCapabilityRule:
+class RequiresCapabilityRule(_ELNode):
     """Grammar rule: RequiresCapabilityRule"""
     description: str = ""
 
 @dataclass
-class ExcludesRoleRule:
+class ExcludesRoleRule(_ELNode):
     """Grammar rule: ExcludesRoleRule"""
     excluded_role_name: str = ""
 
 @dataclass
-class RequiresTokenRule:
+class RequiresTokenRule(_ELNode):
     """Grammar rule: RequiresTokenRule"""
     kind:        str = ""   # DeonticKind
     description: str = ""
 
 @dataclass
-class RequiresRelationRule:
+class RequiresRelationRule(_ELNode):
     """Grammar rule: RequiresRelationRule"""
     description: str = ""
 
 
 @dataclass
-class JoinLeaveEffect:
+class JoinLeaveEffect(_ELNode):
     """§7.8.7 NOTE 3 — token transfer when object fills or leaves a role.
 
     Grammar rule: JoinLeaveEffect
@@ -474,7 +492,7 @@ class JoinLeaveEffect:
 
 
 @dataclass
-class Contract:
+class Contract(_ELNode):
     """§7.3.1 — community contract.
 
     Grammar rule: ContractDecl
@@ -485,7 +503,7 @@ class Contract:
 
 
 @dataclass
-class CommunityInteraction:
+class CommunityInteraction(_ELNode):
     """§7.3.2 — relationship between communities.
 
     Grammar rule: CommunityInteraction
@@ -497,7 +515,7 @@ class CommunityInteraction:
 
 
 @dataclass
-class Community:
+class Community(_ELNode):
     """§6.2, §7.3 — purpose-bound grouping with shared objective and contract.
 
     Grammar rule: CommunityDecl
@@ -519,7 +537,7 @@ class Community:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class DescriptionAttr:
+class DescriptionAttr(_ELNode):
     """Grammar artefact: DescriptionAttr wrapper.
 
     Dissolved by object processors P4/P5 — .value → parent.description.
@@ -528,26 +546,26 @@ class DescriptionAttr:
 
 
 @dataclass
-class ActorRef:
+class ActorRef(_ELNode):
     """Grammar rule: ActorRef — actor role reference inside an action/step."""
     role_name: str = ""
 
 
 @dataclass
-class ArtefactRef:
+class ArtefactRef(_ELNode):
     """Grammar rule: ArtefactRef — artefact reference inside an action/step."""
     ref_name: str = ""
 
 
 @dataclass
-class ResourceRef:
+class ResourceRef(_ELNode):
     """Grammar rule: ResourceRef — resource reference inside an action/step."""
     ref_name:   str  = ""
     consumable: bool = False
 
 
 @dataclass
-class DeonticRequirement:
+class DeonticRequirement(_ELNode):
     """§6.4.6 — deontic requirement on an action participant.
 
     Grammar rule: DeonticReqDecl
@@ -558,7 +576,7 @@ class DeonticRequirement:
 
 
 @dataclass
-class DeonticEffect:
+class DeonticEffect(_ELNode):
     """§6.4.7, §7.8.7 — effect on token lifecycle when action is performed.
 
     Grammar rule: DeonticEffectDecl
@@ -570,7 +588,7 @@ class DeonticEffect:
 
 
 @dataclass
-class PreconditionDecl:
+class PreconditionDecl(_ELNode):
     """Grammar rule: PreconditionDecl — action/step precondition."""
     description: str = ""
 
@@ -578,23 +596,23 @@ class PreconditionDecl:
 # ConditionalAction item wrappers — dissolved by P5
 
 @dataclass
-class RequiresPermitItem:
+class RequiresPermitItem(_ELNode):
     """Grammar rule: RequiresPermitItem"""
     token: Optional[object] = None   # → DeonticToken ref
 
 @dataclass
-class InhibitedByItem:
+class InhibitedByItem(_ELNode):
     """Grammar rule: InhibitedByItem"""
     token: Optional[object] = None   # → DeonticToken ref
 
 @dataclass
-class FavouredByItem:
+class FavouredByItem(_ELNode):
     """Grammar rule: FavouredByItem"""
     token: Optional[object] = None   # → DeonticToken ref
 
 
 @dataclass
-class Action:
+class Action(_ELNode):
     """§6.3.6, §7.8.4 — enterprise action.
 
     Grammar rule: ActionDecl
@@ -614,7 +632,7 @@ class Action:
 
 
 @dataclass
-class ConditionalAction:
+class ConditionalAction(_ELNode):
     """§6.4.6 — action whose occurrence depends on deontic state.
 
     Grammar rule: ConditionalActionDecl
@@ -633,20 +651,20 @@ class ConditionalAction:
 
 
 @dataclass
-class SatisfiesObjective:
+class SatisfiesObjective(_ELNode):
     """Grammar rule: SatisfiesObjective — wrapper dissolved by P7."""
     objective: Optional[object] = None   # → SubObjective ref
 
 
 @dataclass
-class Step:
+class Step(_ELNode):
     """§6.3.7, §7.8.5 — abstraction of an action within a process.
 
     Grammar rule: StepDecl
     Object processor (P6) splits .items.
     """
     name:   str            = ""
-    parent: Optional[object] = None   # → Step ref (refines)
+    refines_step: Optional[object] = None   # → Step ref (refines)
     items:  List           = field(default_factory=list)  # raw; P6 splits
 
     # Populated by object processor P6:
@@ -661,7 +679,7 @@ class Step:
 
 
 @dataclass
-class Process:
+class Process(_ELNode):
     """§6.3.7, §7.8.5 — collection of steps in a prescribed manner.
 
     Grammar rule: ProcessDecl
@@ -676,13 +694,13 @@ class Process:
 
 
 @dataclass
-class Role:
+class Role(_ELNode):
     """§6.3.5, §7.8.2, §7.8.3 — abstract position in a community.
 
     Grammar rule: RoleDecl
     Object processor (P3) splits .items into typed sublists.
     """
-    is_interface: bool          = False   # interface?='interface'
+    interface:    bool          = False   # interface?='interface'
     name:         str           = ""
     type_ref:     Optional[object] = None  # → Role (isa)
     description:  Optional[str] = None
@@ -701,7 +719,7 @@ class Role:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class EmbeddedCommitment:
+class EmbeddedCommitment(_ELNode):
     """Inline commitment inside establishing behaviour.
 
     Grammar rule: EmbeddedCommitment
@@ -712,7 +730,7 @@ class EmbeddedCommitment:
 
 
 @dataclass
-class Establishing:
+class Establishing(_ELNode):
     """§7.6.1 — community establishing behaviour.
 
     Grammar rule: EstablishingDecl
@@ -723,7 +741,7 @@ class Establishing:
 
 
 @dataclass
-class Changes:
+class Changes(_ELNode):
     """§7.6.3 — dynamic changes allowed during community lifetime.
 
     Grammar rule: ChangesDecl
@@ -735,7 +753,7 @@ class Changes:
 
 
 @dataclass
-class Terminating:
+class Terminating(_ELNode):
     """§7.6.4 — community termination conditions.
 
     Grammar rule: TerminatingDecl
@@ -747,7 +765,7 @@ class Terminating:
 
 
 @dataclass
-class Lifecycle:
+class Lifecycle(_ELNode):
     """§7.6 — community lifecycle declaration.
 
     Grammar rule: LifecycleDecl
@@ -762,18 +780,18 @@ class Lifecycle:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class DomainControllingObj:
+class DomainControllingObj(_ELNode):
     """Grammar rule: DomainControllingObj"""
     obj: Optional[object] = None   # → EnterpriseObject ref
 
 @dataclass
-class DomainControlledObj:
+class DomainControlledObj(_ELNode):
     """Grammar rule: DomainControlledObj"""
     obj: Optional[object] = None   # → EnterpriseObject ref
 
 
 @dataclass
-class Domain:
+class Domain(_ELNode):
     """§7.5.1 — <X>-domain community type.
 
     Grammar rule: DomainDecl
@@ -791,23 +809,23 @@ class Domain:
 
 
 @dataclass
-class FedSharedObjective:
+class FedSharedObjective(_ELNode):
     """Grammar rule: FedSharedObjective — wrapper dissolved by P9."""
     description: str = ""
 
 @dataclass
-class MemberRef:
+class MemberRef(_ELNode):
     """Grammar rule: MemberRef — wrapper dissolved by P9."""
     community: Optional[object] = None   # → Community ref
 
 @dataclass
-class WithdrawalBehaviour:
+class WithdrawalBehaviour(_ELNode):
     """Grammar rule: WithdrawalBehaviour — wrapper dissolved by P9."""
     description: str = ""
 
 
 @dataclass
-class ConflictResolution:
+class ConflictResolution(_ELNode):
     """§7.9.2 NOTE 3 — federation conflict resolution strategy.
 
     Grammar rule: ConflictResolutionDecl
@@ -817,7 +835,7 @@ class ConflictResolution:
 
 
 @dataclass
-class Federation:
+class Federation(_ELNode):
     """§7.5.2, §7.9.2 — federation of pre-existing communities.
 
     Grammar rule: FederationDecl
@@ -841,7 +859,7 @@ class Federation:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class Commitment:
+class Commitment(_ELNode):
     """§6.6.2, §7.10.3 — speech act creating an obligation.
 
     Grammar rule: CommitmentDecl
@@ -858,7 +876,7 @@ class Commitment:
 
 
 @dataclass
-class Delegation:
+class Delegation(_ELNode):
     """§6.6.6, §7.10.1 — speech act transferring obligation to an agent.
 
     Grammar rule: DelegationDecl
@@ -879,7 +897,7 @@ class Delegation:
 
 
 @dataclass
-class Authorization:
+class Authorization(_ELNode):
     """§6.6.4, §7.10.2, §7.8.8.4 — speech act granting a permission.
 
     Grammar rule: AuthorizationDecl
@@ -900,7 +918,7 @@ class Authorization:
 
 
 @dataclass
-class Prescription:
+class Prescription(_ELNode):
     """§6.6.3, §7.10.5 — speech act establishing a rule.
 
     Grammar rule: PrescriptionDecl
@@ -915,7 +933,7 @@ class Prescription:
 
 
 @dataclass
-class Declaration:
+class Declaration(_ELNode):
     """§6.6.5, §7.10.4 — speech act establishing a state of affairs.
 
     Grammar rule: DeclarationDecl
@@ -930,7 +948,7 @@ class Declaration:
 
 
 @dataclass
-class Evaluation:
+class Evaluation(_ELNode):
     """§6.6.7 — assessment of value or system state.
 
     Grammar rule: EvaluationDecl
@@ -943,7 +961,7 @@ class Evaluation:
 
 
 @dataclass
-class ViolationResponse:
+class ViolationResponse(_ELNode):
     """§6.3.8, §7.8.6, §7.8.6 NOTE 2 — prescribed obligation upon violation.
 
     Grammar rule: ViolationResponseDecl (AM-17)
@@ -970,7 +988,7 @@ class ViolationResponse:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class Correspondence:
+class Correspondence(_ELNode):
     """§11.2–11.5 — correspondence between enterprise and other viewpoints.
 
     Grammar rule: CorrespondenceDecl

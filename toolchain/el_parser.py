@@ -37,10 +37,12 @@ except ImportError as exc:
         "textX is required: pip install textX"
     ) from exc
 
+from el_domain import DOMAIN_CLASSES
+
 # ── Path resolution ──────────────────────────────────────────────────────────
 
 _HERE = Path(__file__).parent
-GRAMMAR_PATH = _HERE / "el_grammar.tx"
+GRAMMAR_PATH = _HERE.parent / "grammar" / "v2" / "el_grammar.tx"
 
 
 # ── Result type ──────────────────────────────────────────────────────────────
@@ -67,7 +69,7 @@ def _build_metamodel():
                         so validators never see None for empty lists.
       global_model_params — exposed to custom obj processors if needed.
     """
-    mm = metamodel_from_file(str(GRAMMAR_PATH))
+    mm = metamodel_from_file(str(GRAMMAR_PATH), classes=DOMAIN_CLASSES)
     return mm
 
 
