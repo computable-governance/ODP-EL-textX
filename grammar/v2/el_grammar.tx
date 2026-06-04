@@ -20,7 +20,7 @@
  *   §7.1–7.2  Overall / Contents  → EnterpriseSpec, SpecElement
  *   §7.3      Community rules     → CommunityDecl, ContractDecl,
  *                                   CommunityInteraction
- *   §7.4      Enterprise objects  → ObjectDecl
+ *   §7.4      Enterprise objects  → EnterpriseObjectDecl
  *   §7.5      Common types        → DomainDecl, FederationDecl
  *   §7.6      Lifecycle           → LifecycleDecl
  *   §7.7      Objective rules     → ObjectiveDecl, SubObjectiveDecl
@@ -54,7 +54,7 @@ SpecElement:
     DomainDecl
     | FederationDecl
     | CommunityDecl
-    | ObjectDecl
+    | EnterpriseObjectDecl
     | DeonticTokenDecl
     | TokenGroupDecl
     | PolicyDecl
@@ -64,6 +64,7 @@ SpecElement:
     | PrescriptionDecl
     | DeclarationDecl
     | EvaluationDecl
+    | ViolationResponseDecl
     | CorrespondenceDecl
 ;
 
@@ -80,9 +81,9 @@ SpecElement:
  *   artefact_object— §6.3.3 EO referenced but not acting
  *   resource_object— §6.3.4 EO essential to action, may become unavailable
  */
-ObjectDecl:
+EnterpriseObjectDecl:
     kind=ObjectKind name=ID
-    ('isa' type_ref=[ObjectDecl])?
+    ('isa' type_ref=[EnterpriseObjectDecl])?
     ('description' ':' description=STRING)?
     ('{' body=ObjectBody '}')?
 ;
@@ -107,12 +108,12 @@ HoldsToken:
  * state, an active enterprise object is an agent of a party."
  */
 DelegatedFromDecl:
-    'delegated_from' delegator=[ObjectDecl]
+    'delegated_from' delegator=[EnterpriseObjectDecl]
     ('duration' ':' duration=STRING)?
 ;
 
 PrincipalOfDecl:
-    'principal_of' agent=[ObjectDecl]
+    'principal_of' agent=[EnterpriseObjectDecl]
 ;
 
 
@@ -373,10 +374,6 @@ SubObjectiveRef:
     'satisfies' objective=[SubObjectiveDecl]
 ;
 
-BehaviourItem:
-    ActionDecl | ConditionalActionDecl
-;
-
 // ----------------------------------------------------------------
 // §7.8.4 — ENTERPRISE OBJECTS AND ACTIONS
 // ----------------------------------------------------------------
@@ -531,11 +528,11 @@ DomainBodyItem:
 ;
 
 DomainControllingObj:
-    'controlling_object' ':' obj=[ObjectDecl]
+    'controlling_object' ':' obj=[EnterpriseObjectDecl]
 ;
 
 DomainControlledObj:
-    'controlled_object' ':' obj=[ObjectDecl]
+    'controlled_object' ':' obj=[EnterpriseObjectDecl]
 ;
 
 
@@ -683,12 +680,12 @@ TerminatingDecl:
  */
 CommitmentDecl:
     'commitment' name=ID '{'
-        'by'              ':' actor=[ObjectDecl]
+        'by'              ':' actor=[EnterpriseObjectDecl]
         'obligation'      ':' obligation=STRING
         'creates_burden'  ':' burden=[DeonticTokenDecl]
         ('principals_obligated' ':'
-            principals+=[ObjectDecl]
-            (',' principals+=[ObjectDecl])*
+            principals+=[EnterpriseObjectDecl]
+            (',' principals+=[EnterpriseObjectDecl])*
         )?
         ('description'    ':' description=STRING)?
     '}'
@@ -708,8 +705,8 @@ CommitmentDecl:
  */
 DelegationDecl:
     'delegation' name=ID '{'
-        'from'             ':' delegator=[ObjectDecl]
-        'to'               ':' delegate=[ObjectDecl]
+        'from'             ':' delegator=[EnterpriseObjectDecl]
+        'to'               ':' delegate=[EnterpriseObjectDecl]
         'obligation'       ':' obligation=STRING
         ('transfers_burden' ':' burden=[DeonticTokenDecl])?
         ('transfers_token_group' ':' token_group=[TokenGroupDecl])?
@@ -729,8 +726,8 @@ DelegationDecl:
  */
 AuthorizationDecl:
     'authorization' name=ID '{'
-        'authority'                ':' authority=[ObjectDecl]
-        'to_agent'                 ':' authorized_agent=[ObjectDecl]
+        'authority'                ':' authority=[EnterpriseObjectDecl]
+        'to_agent'                 ':' authorized_agent=[EnterpriseObjectDecl]
         'grants_permit'            ':' permit=[DeonticTokenDecl]
         ('creates_burden_on_authority' ':' auth_burden=[DeonticTokenDecl])?
         ('duration'                ':' duration=STRING)?
@@ -749,7 +746,7 @@ AuthorizationDecl:
  */
 PrescriptionDecl:
     'prescription' name=ID '{'
-        'by'              ':' actor=[ObjectDecl]
+        'by'              ':' actor=[EnterpriseObjectDecl]
         'establishes_rule' ':' rule_text=STRING
         ('requires_permit' ':' permit=[DeonticTokenDecl])?
         ('creates_oversight_burden' ':' creates_oversight_burden?='true')?
@@ -764,7 +761,7 @@ PrescriptionDecl:
  */
 DeclarationDecl:
     'declaration' name=ID '{'
-        'by'                       ':' actor=[ObjectDecl]
+        'by'                       ':' actor=[EnterpriseObjectDecl]
         'state_of_affairs'         ':' state_of_affairs=STRING
         ('requires_permit'         ':' permit=[DeonticTokenDecl])?
         ('effective_on_interaction' ':' effective_on_interaction?='true')?
@@ -778,11 +775,47 @@ DeclarationDecl:
  */
 EvaluationDecl:
     'evaluation' name=ID '{'
-        'by'          ':' evaluator=[ObjectDecl]
+        'by'          ':' evaluator=[EnterpriseObjectDecl]
         'of_target'   ':' target=STRING
         'result'      ':' result=STRING
         ('description' ':' description=STRING)?
     '}'
+;
+
+
+// ================================================================
+// §6.3.8, §7.8.6  — VIOLATION RESPONSE
+// ================================================================
+
+/*
+ * ViolationResponseDecl — §6.3.8, §7.8.6, §7.8.6 NOTE 2
+ *
+ * Declares the prescribed obligation that applies to a specified actor
+ * when a named burden is violated (not discharged by its deadline).
+ *
+ * §7.8.6 NOTE 2: "A rule prescribing types of actions to be taken by
+ * an object in the event of certain types of violations. That rule is
+ * an obligation, which applies to that object."
+ *
+ * response_kind values:
+ *   escalate   — notify the principal / next level of accountability chain
+ *   remediate  — take corrective action to address the violation
+ *   penalise   — apply a specified sanction
+ *   terminate  — terminate the community / delegation / session
+ */
+ViolationResponseDecl:
+    'violation_response' name=ID '{'
+        'on_violation_of'  ':' violated_burden=[DeonticTokenDecl]
+        'obligates'        ':' responding_actor=[EnterpriseObjectDecl]
+        'response_kind'    ':' response_kind=ViolationResponseKind
+        ('creates_burden'  ':' creates_burden=[DeonticTokenDecl])?
+        ('escalate_to'     ':' escalate_to=[EnterpriseObjectDecl])?
+        ('description'     ':' description=STRING)?
+    '}'
+;
+
+ViolationResponseKind:
+    'escalate' | 'remediate' | 'penalise' | 'terminate'
 ;
 
 

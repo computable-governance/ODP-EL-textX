@@ -1151,3 +1151,216 @@ def check_duplicate_correspondences(spec):
 
 ---
 _Further amendments to be added during walkthrough._
+
+---
+
+## AM-15 — Rename `ObjectDecl` → `EnterpriseObjectDecl`
+
+**Location:** `ObjectDecl` rule definition and all 16 cross-references throughout
+the grammar.
+
+**Motivation:**
+The generic name `ObjectDecl` creates a namespace collision risk as the
+computable-governance project develops separate DSLs for the other four ODP
+viewpoints (computational, information, engineering, technology). Each viewpoint
+has its own object taxonomy (computational object, information object, etc.),
+and if each viewpoint DSL uses `ObjectDecl` as its object rule name, cross-
+viewpoint tooling that loads multiple grammars will face both keyword and Python
+class name collisions.
+
+Renaming to `EnterpriseObjectDecl` at this stage:
+1. Makes the viewpoint origin self-documenting in the grammar
+2. Allows future viewpoint DSLs to follow the same convention
+   (`ComputationalObjectDecl`, `InformationObjectDecl`, etc.) without collision
+3. Aligns the grammar rule name directly with the target Python class name
+   `EnterpriseObject` — no surprise renaming needed in the `classes=` mapping
+
+**Cross-viewpoint naming convention established:**
+`<Viewpoint>ObjectDecl` in grammar → `<Viewpoint>Object` in Python domain class.
+All future viewpoint DSLs should follow this pattern.
+
+**Changes applied:**
+- Rule definition: `ObjectDecl:` → `EnterpriseObjectDecl:`
+- `SpecElement` dispatch: `| ObjectDecl` → `| EnterpriseObjectDecl`
+- `isa` self-reference: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `DelegatedFromDecl.delegator`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `PrincipalOfDecl.agent`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `DomainControllingObj.obj`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `DomainControlledObj.obj`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `CommitmentDecl.actor`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `CommitmentDecl.principals`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `DelegationDecl.delegator`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `DelegationDecl.delegate`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `AuthorizationDecl.authority`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `AuthorizationDecl.authorized_agent`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `PrescriptionDecl.actor`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `DeclarationDecl.actor`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- `EvaluationDecl.evaluator`: `[ObjectDecl]` → `[EnterpriseObjectDecl]`
+- Header comment: `→ ObjectDecl` → `→ EnterpriseObjectDecl`
+
+**Standard reference:** §6.3, §6.6.1, §6.6.8, §7.4
+
+**Status:** CONFIRMED
+
+---
+
+## AM-16 — Remove dead `BehaviourItem` rule
+
+**Location:** Lines ~376–378 in the original grammar (between `SubObjectiveRef`
+and the `ActionDecl` section header).
+
+**Current (removed):**
+```
+BehaviourItem:
+    ActionDecl | ConditionalActionDecl
+;
+```
+
+**Issue:**
+`BehaviourItem` is defined but never referenced by any other grammar rule.
+`RoleBodyItem` (the actual dispatch rule used in `RoleDecl`) already includes
+`ActionDecl` and `ConditionalActionDecl` directly. `BehaviourItem` is therefore
+a dead rule that adds noise without contributing to the grammar.
+
+**Change:** Rule deleted entirely.
+
+**Impact:** None — no other rule references `BehaviourItem`. Confirmed by
+`grep BehaviourItem el_grammar.tx` returning no results after deletion.
+
+**Standard reference:** §6.3.6, §6.4.6 (the concepts remain; only the dead
+rule is removed)
+
+**Status:** CONFIRMED
+
+---
+
+## AM-17 — Add `ViolationResponseDecl` as a top-level declaration
+
+**Standard references:** §6.3.8, §7.8.6, §7.8.6 NOTE 2
+
+**Standard basis (read directly from ISO/IEC 15414:2015):**
+
+§6.3.8 defines: *"violation: A behaviour contrary to that required by a
+rule. NOTE — A rule or policy may provide behaviour which is to occur upon
+violation of that, or some other, rule or policy."*
+
+§7.8.6 states: *"An enterprise specification can provide mechanisms for
+detecting violations and for appropriate recovery or sanction mechanisms."*
+
+§7.8.6 NOTE 2 states: *"An enterprise specification may include a rule
+prescribing types of actions to be taken by an object in the event of
+certain types of violations. That rule is an obligation, which applies to
+that object. Failure to take the prescribed actions is a violation of
+that rule."*
+
+**Design rationale:**
+
+§7.8.6 NOTE 2 makes the modelling decision explicit: a violation response
+is itself a *prescribed obligation* (a burden) on the responding actor —
+not a property of the violated token. This rules out an inline sub-block
+inside `DeonticTokenDecl` and points instead to a top-level declaration
+that:
+
+1. References the burden whose violation triggers the response
+2. Identifies which actor is obligated to respond
+3. Creates a new burden on that actor as the prescribed consequence
+4. Optionally specifies the response kind and description
+
+This keeps `ViolationResponseDecl` within the existing speech act
+vocabulary (it is a specialised form of prescription/obligation) and
+means violation response participates in the same accountability chain
+reasoning as any other obligation. A violation of the response burden
+is itself a violation of a rule (§7.8.6 NOTE 2, second sentence) —
+this nesting is handled correctly because `creates_burden` is a
+cross-reference to a `DeonticTokenDecl`.
+
+**Grammar addition — new rule added to `SpecElement` dispatch and
+defined after `EvaluationDecl`:**
+
+```
+SpecElement:
+    ...
+    | EvaluationDecl
+    | ViolationResponseDecl     ← added
+    | CorrespondenceDecl
+;
+
+/*
+ * ViolationResponseDecl — §6.3.8, §7.8.6, §7.8.6 NOTE 2
+ *
+ * Declares the prescribed obligation that applies to a specified actor
+ * when a named burden is violated (i.e. not discharged by its deadline).
+ *
+ * §7.8.6 NOTE 2: "A rule prescribing types of actions to be taken by
+ * an object in the event of certain types of violations. That rule is
+ * an obligation, which applies to that object."
+ *
+ * response_kind values:
+ *   escalate   — notify the principal / next level of accountability chain
+ *   remediate  — take corrective action to address the violation
+ *   penalise   — apply a specified sanction
+ *   terminate  — terminate the community / delegation / session
+ */
+ViolationResponseDecl:
+    'violation_response' name=ID '{'
+        'on_violation_of'  ':' violated_burden=[DeonticTokenDecl]
+        'obligates'        ':' responding_actor=[EnterpriseObjectDecl]
+        'response_kind'    ':' response_kind=ViolationResponseKind
+        ('creates_burden'  ':' creates_burden=[DeonticTokenDecl])?
+        ('escalate_to'     ':' escalate_to=[EnterpriseObjectDecl])?
+        ('description'     ':' description=STRING)?
+    '}'
+;
+
+ViolationResponseKind:
+    'escalate' | 'remediate' | 'penalise' | 'terminate'
+;
+```
+
+**Example usage (consent scenario):**
+
+```
+burden consentViolationRemedyBurden {
+    state: active
+    discharge_mode: strict
+    priority: critical
+    for_action: "suspend_session_and_notify"
+}
+
+violation_response ConsentViolationResponse {
+    on_violation_of: seekConsentObligation
+    obligates:       GPPracticeParty
+    response_kind:   escalate
+    creates_burden:  consentViolationRemedyBurden
+    escalate_to:     GPPracticeParty
+    description:     "§7.8.6: GP practice notified; session suspended pending consent"
+}
+```
+
+**Validator rule required:**
+
+V-NEW-15: `on_violation_of` must reference a `burden` token (not a
+`permit` or `embargo`) — violations in the obligation-discharge sense
+apply only to burdens. Trace: §6.4.3, §6.3.8.
+
+V-NEW-16: If `response_kind` is `escalate`, `escalate_to` must be
+present and must be a `party` (not an `agent`). Trace: §7.10.1 — the
+ultimate accountable party is always a party.
+
+**Impact on Step 1 mapping table:**
+
+Add to Group I (Accountability Speech Acts):
+
+| Class | `ViolationResponse` |
+|---|---|
+| `name` | `str` |
+| `violated_burden` | `DeonticToken` (Ref) |
+| `responding_actor` | `EnterpriseObject` (Ref) |
+| `response_kind` | `ViolationResponseKind` (Enum) |
+| `creates_burden` | `Optional[DeonticToken]` (Ref) |
+| `escalate_to` | `Optional[EnterpriseObject]` (Ref) |
+| `description` | `Optional[str]` |
+
+Add to enum table: `ViolationResponseKind`: `escalate, remediate, penalise, terminate`
+
+**Status:** CONFIRMED
