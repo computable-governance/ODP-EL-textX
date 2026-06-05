@@ -1288,6 +1288,153 @@ class ObligationVerdict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Hybrid mode bridge: Layer 3 (Runtime/WorldState) → Layer 4 (Kripke)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List[str]:
+    """Walk DelegationDecl back-links to build [root, …, holder] for a token."""
+    parent: Dict[str, str] = {}
+    for d in _collect(spec, "DelegationDecl"):
+        b = getattr(d, "burden", None)
+        if b and _obj_name(b) == token_name:
+            frm, to = _obj_name(d.delegator), _obj_name(d.delegate)
+            if frm and to:
+                parent[to] = frm
+    chain, cur = [holder], holder
+    while cur in parent:
+        cur = parent[cur]
+        if cur in chain:
+            break
+        chain.insert(0, cur)
+    return chain
+
+
+def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
+    """
+    Hybrid mode (ISO 15414 Annex C): KripkeModel anchored to runtime.current_state().
+
+    burden/active→PENDING, /discharged or in ledger→DISCHARGED, /violated→VIOLATED.
+    Actors from WorldState→ACTIVE. BFS expansion uses the same T1/T2/T3 rules.
+    """
+    state, spec, ledger = runtime.current_state(), runtime._spec, runtime._ledger
+    discharged_in_ledger: Set[str] = {n for r in ledger for n in r.discharged}
+    init_obligs: Dict[str, ObligationState] = {}
+    descriptors: Dict[str, ObligationDescriptor] = {}
+
+    for tok in state.tokens:
+        if tok.kind != "burden":
+            continue
+        obl_st = (
+            ObligationState.DISCHARGED
+            if tok.state in ("discharged", "terminated") or tok.token_name in discharged_in_ledger
+            else ObligationState.VIOLATED if tok.state == "violated"
+            else ObligationState.PENDING
+        )
+        init_obligs[tok.token_name] = obl_st
+        spec_tok = next(
+            (e for e in spec.elements
+             if type(e).__name__ == "DeonticToken" and e.name == tok.token_name), None
+        )
+        dl = getattr(spec_tok, "deadline", None)
+        try:
+            steps = int(dl) if dl else 3
+        except (ValueError, TypeError):
+            steps = _parse_deadline_steps(dl, default=3)
+        chain = _delegation_chain_for_token(spec, tok.token_name, tok.holder)
+        descriptors[tok.token_name] = ObligationDescriptor(
+            obligation_id=tok.token_name, obligation_text=tok.token_name,
+            deadline_steps=steps, holder=tok.holder, chain=chain,
+            revocable=False, sub_delegation_allowed=False,
+            discharge_mode=tok.discharge_mode or "eventual",
+            priority_weight=_priority_weight(tok.priority),
+        )
+
+    init_actors: Dict[str, ActorStatus] = {a.actor_name: ActorStatus.ACTIVE for a in state.actors}
+    for desc in descriptors.values():
+        for m in desc.chain:
+            if m not in init_actors:
+                init_actors[m] = ActorStatus.ACTIVE
+    w0 = _make_world(init_obligs, init_actors, step=state.tick)
+    worlds, edges, labels, queue = {w0}, {}, {}, deque([w0])
+
+    while queue:
+        w = queue.popleft()
+        obligs, actors = w.obligation_dict(), w.actor_dict()
+        for oid, desc in descriptors.items():
+            if obligs.get(oid) == ObligationState.PENDING:
+                if actors.get(desc.holder) == ActorStatus.ACTIVE:
+                    wd = _make_world({**obligs, oid: ObligationState.DISCHARGED}, actors, w.step)
+                    if wd not in worlds:
+                        worlds.add(wd)
+                        if wd.step < horizon:
+                            queue.append(wd)
+                    edges.setdefault(w, set()).add(wd)
+                    labels[(w, wd)] = f"discharge:{oid} by {desc.holder}"
+                if w.step >= desc.deadline_steps:
+                    wv = _make_world({**obligs, oid: ObligationState.VIOLATED}, actors, w.step)
+                    if wv not in worlds:
+                        worlds.add(wv)
+                    edges.setdefault(w, set()).add(wv)
+                    labels[(w, wv)] = f"violate:{oid}"
+        if w.step < horizon and any(
+            obligs.get(o) == ObligationState.PENDING
+            and descriptors[o].discharge_mode == "eventual"
+            for o in descriptors
+        ) and not any(
+            obligs.get(o) == ObligationState.PENDING
+            and descriptors[o].discharge_mode == "strict"
+            and actors.get(descriptors[o].holder) == ActorStatus.ACTIVE
+            for o in descriptors
+        ):
+            wt = _make_world(obligs, actors, w.step + 1)
+            if wt not in worlds:
+                worlds.add(wt)
+                queue.append(wt)
+            edges.setdefault(w, set()).add(wt)
+            labels[(w, wt)] = "tick"
+
+    props = {w: _build_propositions(w) for w in worlds}
+    return KripkeModel(
+        initial=w0, worlds=worlds, edges=edges, propositions=props,
+        labels=labels, obligation_descriptors=descriptors, horizon=horizon,
+    )
+
+
+def _run_hybrid_smoke_test() -> None:
+    """Hybrid mode smoke test: Runtime → KripkeModel with AF/EF checks."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent))
+    from el_parser import parse
+    from el_runtime import Runtime
+    from el_engine import grant_token, token_from_spec
+
+    scenario = Path(__file__).parent.parent / "scenarios" / "consent" / "consent_scenario.el"
+    result = parse(scenario, validate=False)
+    if not result.ok:
+        print(f"[hybrid] Parse failed: {result.errors}"); return
+
+    rt = Runtime.build_from_spec(result.model)
+    if not rt.current_state().tokens:        # fallback: grant tokens manually
+        for name, holder in [("seekConsentObligation", "AIDiagnosticAgent"),
+                              ("aiAnalysisPermit",      "AIDiagnosticAgent")]:
+            rt._state = grant_token(rt._state, token_from_spec(result.model, name, holder))
+
+    rt.advance("seek_patient_consent", "AIDiagnosticAgent")   # one step forward
+
+    km = build_kripke_from_runtime(rt, horizon=5)
+    print(f"\n{'═' * 60}")
+    print("Consent Scenario — Hybrid Kripke Model (anchored to Runtime state)")
+    print(f"{'═' * 60}")
+    print(f"  Worlds: {len(km.worlds)}  Tick: {km.initial.step}  Initial: {km.initial}")
+    for oid in km.obligation_descriptors:
+        vaf, vef = km.check_obligation(oid), km.check_permission(oid)
+        print(f"  {oid}:")
+        print(f"    AF (obligation) : {'✓ SATISFIED' if vaf.satisfied else '✗ NOT SATISFIED'}")
+        print(f"    EF (permission) : {'✓ SATISFIED' if vef.satisfied else '✗ NOT SATISFIED'}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Standalone: consent scenario synthetic test
 # (runs without a parsed spec; validates the module independently)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1424,3 +1571,4 @@ def _run_consent_scenario() -> None:
 
 if __name__ == "__main__":
     _run_consent_scenario()
+    _run_hybrid_smoke_test()
