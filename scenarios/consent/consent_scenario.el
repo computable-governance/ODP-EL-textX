@@ -107,16 +107,14 @@ community ConsentCommunity
             sub_objective obtain_consent: "Obtain documented patient consent"
                 assigned_to role aiAgentRole
 
-        contract {
-            invariant consentBeforeAnalysis:
-                "AI diagnostic analysis must not proceed without documented patient consent"
-            invariant consentDocumented:
-                "Every consent interaction must be recorded in the patient record"
+        invariant consentBeforeAnalysis:
+            "AI diagnostic analysis must not proceed without documented patient consent"
+        invariant consentDocumented:
+            "Every consent interaction must be recorded in the patient record"
 
-            assignment_policy for aiAgentRole {
-                requires_capability: "Must hold a valid clinical AI certification"
-                requires_token burden: "Must hold seekConsentObligation"
-            }
+        assignment_policy for aiAgentRole {
+            requires_capability: "Must hold a valid clinical AI certification"
+            requires_token burden: "Must hold seekConsentObligation"
         }
 
         role gpRole

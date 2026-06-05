@@ -11,6 +11,7 @@ Seven-step execution pipeline (CLAUDE.md §7.1):
   3. Discharge key   — identify burdens this action discharges:
                        a) explicit DeonticEffect(destroy, burden) in grammar action
                        b) burden.for_action == action_name  (informational match)
+                       c) burden.discharged_by event == action's emits event (AM-22)
   4. Preconditions   — grammar precondition strings checked against facts dict;
                        absent key → blocked  (fail-safe, not fail-open — see §7.3)
   5. Embargo sweep   — active embargo on actor targeting this action → blocked
@@ -128,6 +129,28 @@ def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int
     )
 
 
+def _find_spec_tokens_for_event(spec, event_name: str, attr: str) -> set:
+    """Return names of spec tokens whose `attr` (triggered_by/discharged_by) matches event_name.
+
+    Checks both top-level DeonticToken declarations and InlineTokens inside roles.
+    """
+    result = set()
+    for el in spec.elements:
+        if type(el).__name__ == "DeonticToken":
+            ref = getattr(el, attr, None)
+            if ref is not None and getattr(ref, "name", None) == event_name:
+                result.add(el.name)
+    for el in spec.elements:
+        if type(el).__name__ == "Community":
+            for role in el.roles:
+                for tok in role.holds_tokens:
+                    if type(tok).__name__ == "InlineToken":
+                        ref = getattr(tok, attr, None)
+                        if ref is not None and getattr(ref, "name", None) == event_name:
+                            result.add(tok.name)
+    return result
+
+
 # ── Core engine function ──────────────────────────────────────────────────────
 
 def advance(
@@ -179,13 +202,22 @@ def advance(
             if eff.operation == "destroy" and eff.token:
                 explicit_destroys.add(eff.token.name)
 
+    # AM-22: burdens discharged by the event this action emits
+    event_discharged: set = set()
+    if grammar_action and grammar_action.emits:
+        event_discharged = _find_spec_tokens_for_event(
+            spec, grammar_action.emits.name, "discharged_by"
+        )
+
     # Burdens dischargeable by this action (actor must hold them, state active)
     dischargeable: list[str] = []
     for tok in state.tokens:
         if (tok.holder == actor_name
                 and tok.kind == "burden"
                 and tok.state == "active"):
-            if tok.token_name in explicit_destroys or tok.for_action == action_name:
+            if (tok.token_name in explicit_destroys
+                    or tok.for_action == action_name
+                    or tok.token_name in event_discharged):
                 dischargeable.append(tok.token_name)
 
     # ── Step 4: Preconditions ─────────────────────────────────────────────────
@@ -328,6 +360,20 @@ def advance(
                         ))
                         effects_log.append(f"cloned '{tok_ref.name}' to '{actor_name}'")
                         break
+
+    # 7c — AM-22: event-triggered token activation
+    if grammar_action and grammar_action.emits:
+        event_name = grammar_action.emits.name
+        triggered = _find_spec_tokens_for_event(spec, event_name, "triggered_by")
+        if triggered:
+            tokens = [
+                _transition(t, "active") if t.token_name in triggered else t
+                for t in tokens
+            ]
+            for name in triggered:
+                effects_log.append(
+                    f"event '{event_name}' triggered activation of '{name}'"
+                )
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
     record = TransitionRecord(

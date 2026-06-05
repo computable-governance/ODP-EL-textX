@@ -1539,3 +1539,117 @@ Renaming the grammar rule would create a new mismatch.
 not standard terms; all standard mappings are preserved).
 
 **Status:** CONFIRMED
+
+---
+
+## AM-21 — Dissolve `Contract` sub-block; promote contents to community body
+
+**Standard references:** ODP Part 2 §11.2.1, ISO 15414 §7.3, §7.3.1, §7.7
+
+**Rationale:**
+A Community IS a contract — it is the governance specification that constitutes the contractual agreement. Having a `contract {}` sub-block inside a community creates a contract-within-a-contract, which is a category error. V1 correctly used `contract?='contract'` as an optional qualifier keyword on the community declaration.
+
+**Grammar changes:**
+- Removed the `Contract` rule entirely.
+- Added optional `(contract?='contract')?` qualifier before the `community` keyword in the `Community` rule.
+- Promoted `(invariants+=Invariant)*`, `(assignment_policies+=AssignmentPolicy)*`, and `(join_leave_effects+=JoinLeaveEffect)*` to direct body items of `Community`.
+- Removed reference to `Contract` from grammar file header comment (§7.3 line).
+
+**el_domain.py changes:**
+- Removed `Contract` dataclass.
+- Updated `Community`: replaced `contract: Optional[Contract]` with `contract: bool = False`; added `invariants`, `assignment_policies`, `join_leave_effects` as direct fields.
+- Removed `Contract` from `DOMAIN_CLASSES`.
+
+**Scenario changes:**
+- `scenarios/consent/consent_scenario.el`: removed `contract { ... }` wrapper; promoted invariants and assignment_policy one level up.
+- `scenarios/fhir/generated_governance.el`: same.
+- `scenarios/ecommerce/ecommerce_scenario.el`: no `contract {}` block present; no change needed.
+
+**Status:** CONFIRMED
+
+---
+
+## AM-22 — Add `EventDecl` scoped to community; event-driven token lifecycle
+
+**Standard references:** ODP Part 2 §8.4, ISO 15414 §3.1
+
+**Rationale:**
+Events are explicitly imported into ISO 15414 §3.1 from ODP Part 2, making them normatively in scope. V2 omitted events entirely — a gap relative to both standards. Events are named facts, scoped to a community. Token lifecycle: `triggered_by` activates a token; `discharged_by` discharges a burden.
+
+**Grammar changes:**
+- Added `(events+=EventDecl)*` to `Community` body (after `objective`).
+- Added new `EventDecl` rule (ODP Part 2 §8.4) in the Community section.
+- Added `('triggered_by' ':' triggered_by=[EventDecl])?` and `('discharged_by' ':' discharged_by=[EventDecl])?` to `DeonticToken`, after `deadline`.
+- Added `EmitsDecl` as a new `ActionBodyItem` alternative.
+- Added new `EmitsDecl` rule: `'emits' ':' event=[EventDecl]`.
+
+**Note on cross-reference scope:** `[EventDecl]` in top-level `DeonticToken` declarations crosses the community boundary. textX global resolution will attempt to resolve across the whole spec. If this causes issues, a scope provider will be added in a follow-up amendment.
+
+**el_domain.py changes:**
+- Added `EventDecl` dataclass (Group E).
+- Added `EmitsDecl` dataclass (Group F).
+- Added `triggered_by: Optional[object]` and `discharged_by: Optional[object]` to `DeonticToken`.
+- Added `emits: Optional[object]` to `Action` (populated by object processor P4).
+- Added `events: List` to `Community`.
+- Added `EventDecl` and `EmitsDecl` to `DOMAIN_CLASSES`.
+
+**el_parser.py changes (object processors):**
+- P4 (`process_action`): added `EmitsDecl` branch — extracts `item.event` into `action.emits`.
+- P1 (`_inject_token_defaults`): documents `triggered_by`/`discharged_by` default to `None`.
+
+**el_engine.py changes:**
+- Added `_find_spec_tokens_for_event(spec, event_name, attr)` helper.
+- Step 3: added event-based discharge — burdens whose `discharged_by` matches `grammar_action.emits` are added to `dischargeable`.
+- Step 7c (new): event-triggered activation — tokens whose `triggered_by` matches emitted event are transitioned to `active`.
+
+**Status:** CONFIRMED
+
+---
+
+## AM-23 — Restore V1 typed policy values; add typed `PolicyEnvelope`
+
+**Standard references:** ISO 15414 Figure A.4, ODP Part 2 §11.2.1
+
+**Rationale:**
+Figure A.4 shows `Policy → PolicyEnvelope → PolicyValue` with `PolicyValue` as a typed value. V2 collapsed policy values to plain `STRING` — losing type safety entirely. V1 implemented typed `PolicyValue` correctly.
+
+**Grammar changes:**
+- Replaced the `Policy` rule: added `':' policy_type=PolicyType` after the name; replaced `envelope: STRING` and `default_value: STRING` with `initial_value: PolicyValue` and optional `(envelope=PolicyEnvelope)?`; made `rules+=PolicyRule` optional (`*`).
+- Added new rules: `PolicyType` (`integer | number | string | boolean | duration | ID`), `PolicyValue` (ordered alternatives: `Duration | NumberInterval | FLOAT | INT | STRING | BOOL | ID`), `Duration` (`value=INT unit=DurationUnit`), `DurationUnit` (all time units), `NumberInterval` (`lower=INT '..' upper=INT` — renamed from `from/to` to avoid Python keyword conflict), `PolicyEnvelope` (`'envelope' '{' envelope_rules+=EnvelopeRule+ '}'`), `EnvelopeRule` (`kind=EnvelopeRuleKind 'of' '[' values+=PolicyValue[','] ']'`), `EnvelopeRuleKind` (`'one' | 'set' | 'list'`).
+
+**Note on `values+=PolicyValue[',']`:** This is a comma-separated list of inline rule matches, not a `[Rule]` cross-reference list — it does not trigger the arpeggio bug documented in §5.3.
+
+**el_domain.py changes:**
+- Added `DurationUnit` and `EnvelopeRuleKind` enums.
+- Added `Duration`, `NumberInterval`, `EnvelopeRule`, `PolicyEnvelope` dataclasses (Group D).
+- Updated `Policy`: added `policy_type: str`; replaced `envelope: str` and `default_value` with `initial_value: Optional[object]` and `envelope: Optional[PolicyEnvelope]`.
+- Added `Duration`, `NumberInterval`, `EnvelopeRule`, `PolicyEnvelope` to `DOMAIN_CLASSES`.
+
+**Status:** CONFIRMED
+
+---
+
+## AM-24 — Inline token shorthand on roles
+
+**Standard references:** ISO 15414 §6.4, §7.8.2
+
+**Rationale:**
+For simple scenarios where a token applies to exactly one role and is not shared or delegated, requiring a top-level declaration creates unnecessary non-locality. V1 allowed inline token declarations on roles. V2 now supports both top-level (for shared/delegated tokens) and inline (for locally-scoped tokens).
+
+**Grammar changes:**
+- Added `InlineToken` as an alternative in `RoleBodyItem` (after `HoldsToken`).
+- Added new `InlineToken` rule with the same fields as `DeonticToken` (minus the conditional-action fields `requires_permit_for`, `inhibited_by_embargo`, `favoured_by_burden`). Includes `triggered_by` and `discharged_by` from AM-22.
+- `InlineToken` is NOT added to `SpecElement` — it is only reachable via `RoleBodyItem`.
+
+**Validator rule required:**
+V-NEW-18: An `InlineToken` may not be referenced by name from a `DelegationDecl`, `CommitmentDecl`, or `AuthorizationDecl`. It is local to its role. Trace: §6.4, §7.10.
+
+**el_domain.py changes:**
+- Added `InlineToken` dataclass (Group F, same fields as `DeonticToken` minus conditional-action fields).
+- Added `InlineToken` to `DOMAIN_CLASSES`.
+
+**el_parser.py changes:**
+- P3 (`process_role`): added `InlineToken` branch — appends the `InlineToken` instance directly to `role.holds_tokens` (it is the token itself, not a wrapper around a reference).
+- Added `process_inline_token` (P1b): applies same `discharge_mode`/`priority` defaults as P1; registered for `'InlineToken'`.
+
+**Status:** CONFIRMED

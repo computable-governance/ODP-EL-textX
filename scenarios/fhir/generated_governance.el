@@ -68,17 +68,15 @@ community AiDiagnosticGovernanceBundle001Community
     {
         objective: "Seek informed patient consent before AI diagnostic analysis. GP practice is ultimately accountable for consent chain."
 
-        contract {
-            invariant consentBeforeAnalysis:
-                "AI diagnostic analysis must not proceed without documented patient consent"
-            assignment_policy for specialistDrOkonkwoRole {
-                requires_capability: "Must hold delegated obligation"
-                requires_token burden: "Must hold ReferralSr001Obligation"
-            }
-            assignment_policy for aiDiagnosticAgent001Role {
-                requires_capability: "Must hold delegated obligation"
-                requires_token burden: "Must hold ReferralSr001Obligation"
-            }
+        invariant consentBeforeAnalysis:
+            "AI diagnostic analysis must not proceed without documented patient consent"
+        assignment_policy for specialistDrOkonkwoRole {
+            requires_capability: "Must hold delegated obligation"
+            requires_token burden: "Must hold ReferralSr001Obligation"
+        }
+        assignment_policy for aiDiagnosticAgent001Role {
+            requires_capability: "Must hold delegated obligation"
+            requires_token burden: "Must hold ReferralSr001Obligation"
         }
         role specialistDrOkonkwoRole
             description: "Role for SpecialistDrOkonkwo"

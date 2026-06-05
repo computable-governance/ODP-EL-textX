@@ -31,12 +31,13 @@ Class inventory (mirrors STEP1_grammar_audit.md):
     Group B  — EnterpriseObject, ObjectBody, DelegatedFrom, PrincipalOf
     Group C  — DeonticToken, TokenGroup
     Group D  — Policy, PolicyRule, AffectedElement, SettingBehaviour,
-               Enforcement
-    Group E  — Community, Objective, SubObjective, Contract, Invariant,
+               Enforcement, Duration, NumberInterval,
+               PolicyEnvelope, EnvelopeRule
+    Group E  — Community, EventDecl, Objective, SubObjective, Invariant,
                AssignmentPolicy, AssignmentRule subtypes, JoinLeaveEffect,
                CommunityInteraction
-    Group F  — Role, Action, DeonticRequirement, DeonticEffect,
-               ConditionalAction, Process, Step,
+    Group F  — Role, InlineToken, Action, EmitsDecl, DeonticRequirement,
+               DeonticEffect, ConditionalAction, Process, Step,
                ActorRef, ArtefactRef, ResourceRef, DescriptionAttr,
                SubObjectiveRef, SatisfiesObjective,
                RequiresPermitItem, InhibitedByItem, FavouredByItem
@@ -49,7 +50,7 @@ Class inventory (mirrors STEP1_grammar_audit.md):
                Declaration, Evaluation, ViolationResponse
     Group J  — Correspondence
     Group K  — PolicyRef
-    Enums    — all enum types
+    Enums    — all enum types (incl. AM-23: DurationUnit, EnvelopeRuleKind)
 """
 
 from __future__ import annotations
@@ -181,6 +182,23 @@ class ViolationResponseKind(str, Enum):
     terminate = "terminate"
 
 
+class DurationUnit(str, Enum):
+    """AM-23: time unit for Duration policy values."""
+    minute  = "minute";  minutes = "minutes"
+    hour    = "hour";    hours   = "hours"
+    day     = "day";     days    = "days"
+    week    = "week";    weeks   = "weeks"
+    month   = "month";   months  = "months"
+    year    = "year";    years   = "years"
+
+
+class EnvelopeRuleKind(str, Enum):
+    """AM-23: policy envelope constraint type."""
+    one  = "one"
+    set  = "set"
+    list = "list"
+
+
 # ---------------------------------------------------------------------------
 # _ELNode — textX compatibility base class
 # ---------------------------------------------------------------------------
@@ -310,6 +328,8 @@ class DeonticToken(_ELNode):
     for_action:           Optional[str] = None
     state:                str            = ""      # TokenState
     deadline:             Optional[str] = None
+    triggered_by:         Optional[object] = None  # AM-22: → EventDecl ref
+    discharged_by:        Optional[object] = None  # AM-22: → EventDecl ref
     discharge_mode:       str            = "eventual"  # DischargeMode; P1 default
     priority:             str            = "normal"    # PriorityLevel; P1 default
     description:          Optional[str] = None
@@ -388,15 +408,45 @@ class PolicyRef(_ELNode):
 
 
 @dataclass
+class Duration(_ELNode):
+    """AM-23: typed duration value (e.g. 30 minutes). ISO 15414 Figure A.4."""
+    value: int = 0
+    unit:  str = ""   # DurationUnit
+
+
+@dataclass
+class NumberInterval(_ELNode):
+    """AM-23: integer range value (e.g. 7..10). ISO 15414 Figure A.4.
+    Grammar attrs: lower=INT '..' upper=INT (renamed from from/to — Python keyword conflict).
+    """
+    lower: int = 0
+    upper: int = 0
+
+
+@dataclass
+class EnvelopeRule(_ELNode):
+    """AM-23: single constraint inside a PolicyEnvelope."""
+    kind:   str  = ""    # EnvelopeRuleKind
+    values: List = field(default_factory=list)  # List[PolicyValue]
+
+
+@dataclass
+class PolicyEnvelope(_ELNode):
+    """AM-23, ISO 15414 Figure A.4, §7.9.2 — constrains the set of policy values."""
+    envelope_rules: List = field(default_factory=list)  # List[EnvelopeRule]
+
+
+@dataclass
 class Policy(_ELNode):
     """§6.5, §7.9 — governance policy declaration.
 
     Grammar rule: PolicyDecl
     """
     name:              str            = ""
+    policy_type:       str            = ""      # AM-23: PolicyType keyword or user-defined ID
     description:       Optional[str] = None
-    envelope:          str            = ""
-    default_value:     Optional[str] = None
+    initial_value:     Optional[object] = None  # AM-23: PolicyValue (typed)
+    envelope:          Optional[PolicyEnvelope] = None  # AM-23: replaces plain str
     rules:             List           = field(default_factory=list)  # List[PolicyRule]
     affected_elements: List           = field(default_factory=list)  # List[AffectedElement]
     setting_behaviour: Optional[SettingBehaviour] = None
@@ -423,6 +473,26 @@ class SubObjective(_ELNode):
 class SubObjectiveRef(_ELNode):
     """Grammar rule: SubObjectiveRef — wrapper dissolved by P3."""
     objective: Optional[object] = None   # → SubObjective ref
+
+
+@dataclass
+class InlineToken(_ELNode):
+    """AM-24, §6.4, §7.8.2 — token declared and held inline on a role.
+
+    Scoped to one role; cannot be referenced from DelegationDecl,
+    CommitmentDecl, or AuthorizationDecl (V-NEW-18).
+    Object processor P3 adds InlineToken instances to Role.holds_tokens.
+    """
+    kind:          str            = ""      # DeonticKind
+    name:          str            = ""
+    for_action:    Optional[str] = None
+    state:         str            = ""      # TokenState
+    deadline:      Optional[str] = None
+    triggered_by:  Optional[object] = None  # AM-22: → EventDecl ref
+    discharged_by: Optional[object] = None  # AM-22: → EventDecl ref
+    discharge_mode: str           = "eventual"   # DischargeMode; P1 default
+    priority:      str            = "normal"     # PriorityLevel; P1 default
+    description:   Optional[str] = None
 
 
 @dataclass
@@ -492,17 +562,6 @@ class JoinLeaveEffect(_ELNode):
 
 
 @dataclass
-class Contract(_ELNode):
-    """§7.3.1 — community contract.
-
-    Grammar rule: ContractDecl
-    """
-    invariants:         List = field(default_factory=list)  # List[Invariant]
-    assignment_policies: List = field(default_factory=list)  # List[AssignmentPolicy]
-    join_leave_effects:  List = field(default_factory=list)  # List[JoinLeaveEffect]
-
-
-@dataclass
 class CommunityInteraction(_ELNode):
     """§7.3.2 — relationship between communities.
 
@@ -515,21 +574,41 @@ class CommunityInteraction(_ELNode):
 
 
 @dataclass
+class EventDecl(_ELNode):
+    """ODP Part 2 §8.4 — named event scoped to a community.
+
+    Events trigger and discharge deontic tokens (§6.4) and communicate
+    state changes between roles (§6.3.6).
+    Grammar rule: EventDecl
+    """
+    name:        str            = ""
+    description: Optional[str] = None
+
+
+@dataclass
 class Community(_ELNode):
     """§6.2, §7.3 — purpose-bound grouping with shared objective and contract.
 
-    Grammar rule: CommunityDecl
+    Grammar rule: Community
+    AM-21: contract?='contract' qualifier promoted to boolean flag;
+           invariants, assignment_policies, join_leave_effects promoted
+           from Contract sub-block to direct community fields.
+    AM-22: events list added for community-scoped EventDecl declarations.
     """
-    name:         str              = ""
-    type_ref:     Optional[object] = None   # → Community (isa)
-    description:  Optional[str]   = None
-    objective:    Optional[Objective] = None
-    contract:     Optional[Contract]  = None
-    roles:        List = field(default_factory=list)  # List[Role]
-    processes:    List = field(default_factory=list)  # List[Process]
-    policy_refs:  List = field(default_factory=list)  # List[PolicyRef]
-    interactions: List = field(default_factory=list)  # List[CommunityInteraction]
-    lifecycle:    Optional[object] = None              # → Lifecycle
+    contract:            bool           = False  # AM-21: optional 'contract' qualifier
+    name:                str            = ""
+    type_ref:            Optional[object] = None   # → Community (isa)
+    description:         Optional[str]  = None
+    objective:           Optional[Objective] = None
+    events:              List = field(default_factory=list)  # AM-22: List[EventDecl]
+    invariants:          List = field(default_factory=list)  # AM-21: List[Invariant]
+    assignment_policies: List = field(default_factory=list)  # AM-21: List[AssignmentPolicy]
+    join_leave_effects:  List = field(default_factory=list)  # AM-21: List[JoinLeaveEffect]
+    roles:               List = field(default_factory=list)  # List[Role]
+    processes:           List = field(default_factory=list)  # List[Process]
+    policy_refs:         List = field(default_factory=list)  # List[PolicyRef]
+    interactions:        List = field(default_factory=list)  # List[CommunityInteraction]
+    lifecycle:           Optional[object] = None              # → Lifecycle
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +672,16 @@ class PreconditionDecl(_ELNode):
     description: str = ""
 
 
+@dataclass
+class EmitsDecl(_ELNode):
+    """AM-22, ODP Part 2 §8.4 — event raised when an action is performed.
+
+    Grammar rule: EmitsDecl (ActionBodyItem alternative).
+    Object processor P4 extracts .event into Action.emits.
+    """
+    event: Optional[object] = None   # → EventDecl ref
+
+
 # ConditionalAction item wrappers — dissolved by P5
 
 @dataclass
@@ -629,6 +718,7 @@ class Action(_ELNode):
     preconditions:        List = field(default_factory=list)  # List[str]
     deontic_requirements: List = field(default_factory=list)  # List[DeonticRequirement]
     deontic_effects:      List = field(default_factory=list)  # List[DeonticEffect]
+    emits:                Optional[object] = None  # AM-22: → EventDecl ref; P4 from EmitsDecl
 
 
 @dataclass
@@ -1023,13 +1113,14 @@ DOMAIN_CLASSES = [
     # D
     Policy, PolicyRule, AffectedElement, SettingBehaviour, Enforcement,
     PolicyRef,
+    Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
     # E
-    Community, Objective, SubObjective, SubObjectiveRef, Contract, Invariant,
+    Community, EventDecl, Objective, SubObjective, SubObjectiveRef, Invariant,
     AssignmentPolicy, RequiresCapabilityRule, ExcludesRoleRule,
     RequiresTokenRule, RequiresRelationRule,
     JoinLeaveEffect, CommunityInteraction,
     # F
-    Role, Action, ConditionalAction, Process, Step,
+    Role, InlineToken, Action, EmitsDecl, ConditionalAction, Process, Step,
     DeonticRequirement, DeonticEffect, PreconditionDecl,
     DescriptionAttr, ActorRef, ArtefactRef, ResourceRef,
     RequiresPermitItem, InhibitedByItem, FavouredByItem,

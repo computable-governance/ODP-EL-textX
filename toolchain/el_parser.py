@@ -78,12 +78,28 @@ class ParseResult:
 
 # ── Object processors ────────────────────────────────────────────────────────
 
-def process_deontic_token(token):
-    """P1: inject discharge_mode and priority defaults when absent."""
+def _inject_token_defaults(token):
+    """Shared default injection for DeonticToken and InlineToken."""
     if not token.discharge_mode:
         token.discharge_mode = 'eventual'
     if not token.priority:
         token.priority = 'normal'
+    # AM-22: triggered_by / discharged_by default to None (already set by
+    # dataclass, but explicit here for documentation and future processors).
+    if not hasattr(token, 'triggered_by'):
+        token.triggered_by = None
+    if not hasattr(token, 'discharged_by'):
+        token.discharged_by = None
+
+
+def process_deontic_token(token):
+    """P1: inject discharge_mode and priority defaults when absent."""
+    _inject_token_defaults(token)
+
+
+def process_inline_token(token):
+    """P1b: same defaults as P1 for role-scoped InlineToken (AM-24)."""
+    _inject_token_defaults(token)
 
 
 def process_enterprise_object(obj):
@@ -103,6 +119,9 @@ def process_role(role):
         cls = type(item).__name__
         if cls == 'HoldsToken':
             role.holds_tokens.append(item.token)
+        elif cls == 'InlineToken':
+            # AM-24: InlineToken is the token itself (not a wrapper around a ref)
+            role.holds_tokens.append(item)
         elif cls == 'PolicyRef':
             role.policy_refs.append(item)
         elif cls == 'SubObjectiveRef':
@@ -132,6 +151,9 @@ def process_action(action):
             action.deontic_requirements.append(item)
         elif cls == 'DeonticEffect':
             action.deontic_effects.append(item)
+        elif cls == 'EmitsDecl':
+            # AM-22: last EmitsDecl wins if multiple appear (grammar allows only one)
+            action.emits = item.event
     action.items = []
 
 
@@ -228,6 +250,7 @@ def _build_metamodel():
     mm = metamodel_from_file(str(GRAMMAR_PATH), classes=DOMAIN_CLASSES)
     mm.register_obj_processors({
         'DeonticToken':       process_deontic_token,       # P1
+        'InlineToken':        process_inline_token,        # P1b (AM-24)
         'EnterpriseObject':   process_enterprise_object,   # P2
         'Role':               process_role,                # P3
         'Action':             process_action,              # P4

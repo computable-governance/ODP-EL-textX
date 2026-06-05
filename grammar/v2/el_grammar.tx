@@ -23,8 +23,7 @@
  *
  * Structuring rules (§7):
  *   §7.1–7.2  Overall / Contents  → EnterpriseSpec, SpecElement
- *   §7.3      Community rules     → Community, Contract,
- *                                   CommunityInteraction
+ *   §7.3      Community rules     → Community, CommunityInteraction
  *   §7.4      Enterprise objects  → EnterpriseObject
  *   §7.5      Common types        → Domain, Federation
  *   §7.6      Lifecycle           → Lifecycle
@@ -142,6 +141,9 @@ DeonticToken:
         ('for_action'      ':' for_action=STRING)?
         'state'            ':' state=TokenState
         ('deadline'        ':' deadline=STRING)?
+        // AM-22: event-driven token lifecycle
+        ('triggered_by'    ':' triggered_by=[EventDecl])?
+        ('discharged_by'   ':' discharged_by=[EventDecl])?
         // AM-13: modal discharge mode — controls Layer 4 AF verification
         // 'eventual' (default) — holder may delay; AF may not hold
         // 'strict'             — holder must act at first opportunity; AF holds
@@ -180,16 +182,58 @@ TokenGroup:
 // ================================================================
 
 Policy:
-    'policy' name=ID '{'
+    'policy' name=ID ':' policy_type=PolicyType '{'
         ('description'    ':' description=STRING)?
-        'envelope'        ':' envelope=STRING
-        ('default_value'  ':' default_value=STRING)?
-        rules+=PolicyRule+
+        'initial_value'   ':' initial_value=PolicyValue
+        (envelope=PolicyEnvelope)?
+        (rules+=PolicyRule)*
         (affected_elements+=AffectedElement)*
         (setting_behaviour=SettingBehaviour)?
         (enforcement=Enforcement)?
     '}'
 ;
+
+PolicyType:
+    'integer' | 'number' | 'string' | 'boolean' | 'duration' | ID
+;
+
+/*
+ * PolicyValue — ISO 15414 Figure A.4
+ * Ordered: Duration and NumberInterval before INT/FLOAT to avoid
+ * the PEG parser consuming the leading integer prematurely.
+ */
+PolicyValue:
+    Duration | NumberInterval | FLOAT | INT | STRING | BOOL | ID
+;
+
+Duration:
+    value=INT unit=DurationUnit
+;
+
+DurationUnit:
+    'minute' | 'minutes' | 'hour' | 'hours' | 'day' | 'days'
+    | 'week' | 'weeks' | 'month' | 'months' | 'year' | 'years'
+;
+
+NumberInterval:
+    lower=INT '..' upper=INT
+;
+
+/*
+ * PolicyEnvelope — ISO 15414 Figure A.4, §7.9.2
+ * Constrains the set of values the policy may take.
+ */
+PolicyEnvelope:
+    'envelope' '{'
+        envelope_rules+=EnvelopeRule+
+    '}'
+;
+
+EnvelopeRule:
+    kind=EnvelopeRuleKind 'of' '[' values+=PolicyValue[','] ']'
+;
+
+EnvelopeRuleKind: 'one' | 'set' | 'list' ;
 
 /*
  * PolicyRule maps directly to §6.6.2–6.6.4, §7.8.8:
@@ -253,18 +297,37 @@ PolicyRef:
 // ================================================================
 
 Community:
-    'community' name=ID
+    (contract?='contract')? 'community' name=ID
     ('isa' type_ref=[Community])?
     ('description' ':' description=STRING)?
     '{'
         objective=Objective
-        contract=Contract
+        (events+=EventDecl)*
+        (invariants+=Invariant)*
+        (assignment_policies+=AssignmentPolicy)*
+        (join_leave_effects+=JoinLeaveEffect)*
         (roles+=Role)*
         (processes+=Process)*
         (policy_refs+=PolicyRef)*
         (interactions+=CommunityInteraction)*
         (lifecycle=Lifecycle)?
     '}'
+;
+
+// ----------------------------------------------------------------
+// ODP Part 2 §8.4 — COMMUNITY-SCOPED EVENTS
+// ----------------------------------------------------------------
+
+/*
+ * EventDecl — ODP Part 2 §8.4
+ * A named event scoped to this community.
+ * An event is the fact that an action has taken place.
+ * Events are used to trigger and discharge deontic tokens (§6.4)
+ * and to communicate state changes between roles (§6.3.6).
+ */
+EventDecl:
+    'event' name=ID
+    ('description' ':' description=STRING)?
 ;
 
 // ----------------------------------------------------------------
@@ -287,18 +350,6 @@ SubObjective:
 ;
 
 AssignableKind : 'role' | 'process' ;
-
-// ----------------------------------------------------------------
-// CONTRACT — §7.3.1
-// ----------------------------------------------------------------
-
-Contract:
-    'contract' '{'
-        (invariants+=Invariant)*
-        (assignment_policies+=AssignmentPolicy)*
-        (join_leave_effects+=JoinLeaveEffect)*
-    '}'
-;
 
 Invariant:
     'invariant' name=ID ':' description=STRING
@@ -392,11 +443,32 @@ Role:
 ;
 
 RoleBodyItem:
-    HoldsToken | PolicyRef | SubObjectiveRef | Action | ConditionalAction
+    HoldsToken | InlineToken | PolicyRef | SubObjectiveRef | Action | ConditionalAction
 ;
 
 SubObjectiveRef:
     'satisfies' objective=[SubObjective]
+;
+
+/*
+ * InlineToken — AM-24, ISO 15414 §6.4, §7.8.2
+ * Declares and holds a token in one step, local to this role.
+ * Equivalent to a top-level DeonticToken + HoldsToken, but scoped
+ * to the role. Cannot be referenced by other roles or speech acts
+ * (DelegationDecl, CommitmentDecl, AuthorizationDecl) — V-NEW-18.
+ * Use top-level DeonticToken for shared or delegated tokens.
+ */
+InlineToken:
+    kind=DeonticKind name=ID '{'
+        ('for_action'      ':' for_action=STRING)?
+        'state'            ':' state=TokenState
+        ('deadline'        ':' deadline=STRING)?
+        ('triggered_by'    ':' triggered_by=[EventDecl])?
+        ('discharged_by'   ':' discharged_by=[EventDecl])?
+        ('discharge_mode'  ':' discharge_mode=DischargeMode)?
+        ('priority'        ':' priority=PriorityLevel)?
+        ('description'     ':' description=STRING)?
+    '}'
 ;
 
 // ----------------------------------------------------------------
@@ -421,6 +493,16 @@ Action:
 ActionBodyItem:
     ActorRef | ArtefactRef | ResourceRef
     | PreconditionDecl | DeonticRequirement | DeonticEffect
+    | EmitsDecl
+;
+
+/*
+ * EmitsDecl — AM-22, ODP Part 2 §8.4
+ * Raises a community-scoped event when this action is performed.
+ * The emitted event may trigger or discharge tokens in this community.
+ */
+EmitsDecl:
+    'emits' ':' event=[EventDecl]
 ;
 
 DescriptionAttr : 'description' ':' value=STRING ;
