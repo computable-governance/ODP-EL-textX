@@ -1061,8 +1061,10 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     labels: Dict[Tuple[World, World], str]   = {}
     queue: deque[World]                      = deque([w0])
 
+    _iter_count = 0
     while queue:
         w = queue.popleft()
+        _iter_count += 1
         current_obligs = w.obligation_dict()
         current_actors = w.actor_dict()
 
@@ -1146,6 +1148,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 edges.setdefault(w, set()).add(w_tick)
                 labels[(w, w_tick)] = label
                 successors_for_w.add(w_tick)
+
+    print(f"[Kripke] Converged in {_iter_count} iterations")
 
     # Build proposition sets for every world
     propositions = {w: _build_propositions(w) for w in worlds}
@@ -1485,8 +1489,10 @@ def _run_consent_scenario() -> None:
     queue: deque[World]                    = deque([w0])
     horizon = 5
 
+    _iter_count = 0
     while queue:
         w = queue.popleft()
+        _iter_count += 1
         obligs = w.obligation_dict()
         act    = w.actor_dict()
 
@@ -1520,6 +1526,8 @@ def _run_consent_scenario() -> None:
             edges.setdefault(w, set()).add(wt)
             labels[(w, wt)] = "tick (time passes)"
 
+    print(f"[Kripke] Converged in {_iter_count} iterations")
+
     props = {w: _build_propositions(w) for w in worlds}
 
     km = KripkeModel(
@@ -1546,6 +1554,10 @@ def _run_consent_scenario() -> None:
     print()
 
     # Utility ranking
+    print("[Diagnostic] Actual outcome score mapping in utility() (§C.3):")
+    print("  DISCHARGED → +1.0  |  PENDING → +0.3  |  EXPIRED →  0.0  |  VIOLATED → -1.0")
+    print("  (paper claims PENDING=0; implementation uses +0.3 — explains utility=+0.30 for PENDING worlds)")
+    print()
     print("§C.3/C.4 — Utility-ranked reachable worlds from w₀:")
     for w, u in km.ranked_reachable(km.initial):
         obl_str = ", ".join(
