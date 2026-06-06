@@ -47,6 +47,7 @@ class ActorState:
     """An actor enrolled in the community, optionally filling a named role."""
     actor_name: str
     role_name: Optional[str] = None
+    community_tag: str = ""   # AM-25: domain name the actor belongs to
 
 
 @dataclass(frozen=True)
@@ -395,9 +396,16 @@ def initial_state() -> WorldState:
     return WorldState(tokens=(), actors=(), tick=0)
 
 
-def enroll(state: WorldState, actor_name: str, role_name: Optional[str] = None) -> WorldState:
-    """Add an actor (optionally filling role_name) to state.actors."""
-    new_actors = list(state.actors) + [ActorState(actor_name=actor_name, role_name=role_name)]
+def enroll(state: WorldState, actor_name: str, role_name: Optional[str] = None,
+           community_tag: str = "") -> WorldState:
+    """Add an actor (optionally filling role_name) to state.actors.
+
+    community_tag (AM-25): domain name the actor belongs to, used by
+    build_from_federation() to track cross-domain membership.
+    """
+    new_actors = list(state.actors) + [
+        ActorState(actor_name=actor_name, role_name=role_name, community_tag=community_tag)
+    ]
     return WorldState(tokens=state.tokens, actors=tuple(new_actors), tick=state.tick)
 
 
