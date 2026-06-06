@@ -32,28 +32,14 @@ from typing import Any, List, Optional
 try:
     from textx import metamodel_from_file
     from textx.exceptions import TextXError, TextXSemanticError, TextXSyntaxError
-    import textx
-    import textx.model as _tx_model
-    import textx.scoping.tools as _tx_scoping_tools
 except ImportError as exc:
     raise ImportError(
         "textX is required: pip install textX"
     ) from exc
 
-# textX 4.x get_model() loops `while hasattr(p, "parent"): p = p.parent`.
-# Custom dataclass bases that declare parent=None as a field always have the
-# attribute, so the loop overshoots the root and returns None — breaking
-# get_location() and get_parser() for every registered processor.
-# Patch all three binding sites to stop the traversal at None.
-def _get_model_patched(obj):
-    p = obj
-    while hasattr(p, "parent") and p.parent is not None:
-        p = p.parent
-    return p
-
-_tx_model.get_model = _get_model_patched
-textx.get_model = _get_model_patched
-_tx_scoping_tools.get_model = _get_model_patched
+# textX get_model() walks via hasattr(p, 'parent'); root objects must not
+# declare parent — use _ELNode for roots, _ELParentable for contained objects.
+# See el_domain.py base class hierarchy and Igor Dejanovic's recommendation (June 2026).
 
 from el_domain import DOMAIN_CLASSES
 
