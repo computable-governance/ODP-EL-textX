@@ -683,15 +683,17 @@ DomainControlledObj:
  *   }
  */
 Federation:
-    'federation' name=ID
+    (contract?='contract')? 'federation' name=ID
     ('description' ':' description=STRING)?
     '{'
+        objective=Objective
         body_items*=FedBodyItem
     '}'
 ;
 
 FedBodyItem:
     FedSharedObjective
+    | EventDecl
     | MemberRef
     | PolicyRef
     | Invariant

@@ -1154,6 +1154,57 @@ _Further amendments to be added during walkthrough._
 
 ---
 
+## AM-25 — Federation as community type: `contract` qualifier, mandatory `objective`, `EventDecl` body, `Domain` inherits `Community`
+
+**Standard references:** ISO 15414 §7.5, §7.5.1, §7.5.2, §7.7
+
+**Rationale:**
+§7.5 states that `<X>-domain` and `<X>-federation` are both **community types** —
+they ARE communities, not separate structural concepts. The grammar modelled
+`Domain` and `Federation` as independent rules, causing `MemberRef` (which
+references `[Community]`) to fail when federation members are `Domain`
+declarations. This is AM-12 (tentative) resolved.
+
+**Grammar changes (`grammar/v2/el_grammar.tx`):**
+
+1. `Federation`: add `(contract?='contract')?` qualifier before `'federation'`
+   keyword — mirrors the same qualifier on `Community` (AM-21); federation
+   documents a contractual arrangement between autonomous communities.
+
+2. `Federation`: add mandatory `objective=Objective` as the first item inside
+   the body block — every community type requires an objective per §7.7.
+   Matches the structural pattern of `Community`.
+
+3. `FedBodyItem`: add `| EventDecl` alternative — federations may declare
+   scoped events for cross-community state changes (AM-22 pattern).
+
+**Domain class changes (`toolchain/el_domain.py`):**
+
+4. `Domain` now inherits `Community` instead of `_ELNode`. textX uses
+   `isinstance()` when resolving `[Community]` cross-references; making
+   `Domain` a Python subclass of `Community` makes Domain instances valid
+   targets for `MemberRef.community`. Fields already present in Community
+   (`name`, `description`, `policy_refs`, `events`, `invariants`) are
+   inherited and not redeclared. Domain-specific fields retained:
+   `relationship` (characterized_by), `body_items`, `controlling_objects`,
+   `controlled_objects`.
+
+5. `Federation`: added `contract: bool = False`, `objective: Optional[Objective] = None`,
+   and `events: List` fields to mirror the grammar additions.
+
+**Parser change (`toolchain/el_parser.py`):**
+
+6. `process_federation` (P9): added `EventDecl` branch — appends items to
+   `fed.events`. Note: `objective` is set directly by textX as a grammar
+   attribute and requires no P9 handling.
+
+**Resolves:** AM-12 (tentative) — `MemberRef` accepting Domain as a community
+member. AM-12 is now CONFIRMED and closed by this amendment.
+
+**Status:** CONFIRMED
+
+---
+
 ## AM-19 — Capture `kind` in `JoinLeaveEffect`; boolean flag for `unpoliced` in `Enforcement`
 
 **Location:** `JoinLeaveEffect` line ~331; `Enforcement` line ~232

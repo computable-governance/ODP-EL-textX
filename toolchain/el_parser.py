@@ -218,7 +218,11 @@ def process_domain(domain):
 
 
 def process_federation(fed):
-    """P9: split body_items into typed sublists; unwrap thin wrappers."""
+    """P9: split body_items into typed sublists; unwrap thin wrappers.
+
+    AM-25: objective is set directly by textX (direct grammar attribute, not in
+    body_items). EventDecl items are now collected into fed.events.
+    """
     for item in fed.body_items:
         cls = type(item).__name__
         if cls == 'FedSharedObjective':
@@ -233,6 +237,8 @@ def process_federation(fed):
             fed.withdrawal_behaviour = item.description
         elif cls == 'ConflictResolution':
             fed.conflict_resolution = item
+        elif cls == 'EventDecl':              # AM-25
+            fed.events.append(item)
     fed.body_items = []
 
 

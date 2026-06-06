@@ -881,21 +881,22 @@ class DomainControlledObj(_ELNode):
 
 
 @dataclass
-class Domain(_ELNode):
+class Domain(Community):
     """§7.5.1 — <X>-domain community type.
 
-    Grammar rule: DomainDecl
+    AM-25: inherits Community (§7.5 — domain IS a community type), so Domain
+    instances satisfy [Community] cross-references in MemberRef via isinstance.
+    name, description, policy_refs, events, invariants are inherited from
+    Community and not redeclared here.
+
+    Grammar rule: Domain
     Object processor (P8) splits body_items.
     """
-    name:         str            = ""
-    relationship: Optional[str] = None   # characterized_by
-    description:  Optional[str] = None
-    body_items:   List           = field(default_factory=list)  # raw; P8 splits
-
-    # Populated by object processor P8:
+    # Domain-specific fields only — Community fields inherited above
+    relationship:        Optional[str] = None   # characterized_by
+    body_items:          List = field(default_factory=list)  # raw; P8 splits
     controlling_objects: List = field(default_factory=list)  # List[EnterpriseObject]
     controlled_objects:  List = field(default_factory=list)  # List[EnterpriseObject]
-    policy_refs:         List = field(default_factory=list)  # List[PolicyRef]
 
 
 @dataclass
@@ -928,20 +929,25 @@ class ConflictResolution(_ELNode):
 class Federation(_ELNode):
     """§7.5.2, §7.9.2 — federation of pre-existing communities.
 
-    Grammar rule: FederationDecl
+    AM-25: contract qualifier, mandatory objective (§7.7), and events list added.
+
+    Grammar rule: Federation
     Object processor (P9) splits body_items.
     """
+    contract:    bool           = False               # AM-25: optional 'contract' qualifier
     name:        str            = ""
     description: Optional[str] = None
+    objective:   Optional[Objective] = None           # AM-25: mandatory per §7.7; set by grammar directly
     body_items:  List           = field(default_factory=list)  # raw; P9 splits
 
     # Populated by object processor P9:
-    shared_objectives:   List = field(default_factory=list)  # List[str]
-    members:             List = field(default_factory=list)  # List[Community]
-    policy_refs:         List = field(default_factory=list)  # List[PolicyRef]
-    invariants:          List = field(default_factory=list)  # List[Invariant]
+    shared_objectives:    List = field(default_factory=list)  # List[str]
+    members:              List = field(default_factory=list)  # List[Community|Domain]
+    policy_refs:          List = field(default_factory=list)  # List[PolicyRef]
+    invariants:           List = field(default_factory=list)  # List[Invariant]
+    events:               List = field(default_factory=list)  # AM-25: List[EventDecl]
     withdrawal_behaviour: Optional[str] = None
-    conflict_resolution: Optional[ConflictResolution] = None
+    conflict_resolution:  Optional[ConflictResolution] = None
 
 
 # ---------------------------------------------------------------------------
