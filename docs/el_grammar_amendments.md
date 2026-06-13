@@ -1200,6 +1200,71 @@ replacement (no migration) was possible.
 
 ---
 
+## AM-27 — `SatisfactionCondition` on `Objective`: machine-checkable community goal
+
+**Standard references:** ISO 15414 §6.2, §7.7
+
+**Rationale:**
+The `Objective` rule previously held only a free-text `description` string. This
+gave no way for the toolchain to determine programmatically whether a community
+objective had been achieved. The Layer 4 Kripke verifier needed a structured
+condition it could evaluate against world state to emit
+`objective_satisfied:<community>` propositions, enabling CTL reasoning over
+goal achievement.
+
+**Grammar changes (`grammar/v2/el_grammar.tx`):**
+- Added optional `('satisfaction' ':' satisfaction=SatisfactionCondition)?`
+  to the `Objective` rule, between `description` and `sub_objectives`.
+- Added new `SatisfactionCondition` rule:
+  ```
+  SatisfactionCondition:
+      operator=SatisfactionOp '(' group=[TokenGroup] ')'
+  ;
+  SatisfactionOp: 'all_discharged' | 'any_discharged' ;
+  ```
+  `group` is a cross-reference to a top-level `TokenGroup` declaration.
+  Operator semantics:
+  - `all_discharged` — every member of the group is DISCHARGED or SUPERSEDED
+  - `any_discharged` — at least one member of the group is DISCHARGED
+
+**Domain class changes (`toolchain/el_domain.py`):**
+- Added `SatisfactionCondition` dataclass with fields `operator: str` and
+  `group: Optional[object]` (→ `TokenGroup` ref).
+- Added `satisfaction: Optional[object]` field to `Objective` (→
+  `SatisfactionCondition`).
+- Added `SatisfactionCondition` to `DOMAIN_CLASSES`.
+
+**Kripke verifier changes (`toolchain/el_kripke.py`):**
+- Added `_build_satisfaction_conditions(model)` helper: scans all
+  `Community`, `Federation`, and `Domain` elements for objectives with a
+  `SatisfactionCondition`; returns
+  `{community_name: (operator, [member_token_ids])}`.
+- Extended `_build_propositions(world, satisfaction_conditions=None)`:
+  evaluates each condition against the world's `obligation_states` and adds
+  `objective_satisfied:<community_name>` to the proposition set when satisfied.
+  SUPERSEDED counts as resolved for `all_discharged`; only DISCHARGED satisfies
+  `any_discharged`.
+- `KripkeModel` carries a `satisfaction_conditions` field populated by both
+  `build_kripke_model()` and `build_kripke_from_runtime()`.
+
+**Usage in `.el` files:**
+```
+token_group ConsentGroup {
+  member: seekConsentObligation
+  member: informPatientObligation
+}
+
+community ConsentCommunity {
+  objective: "Obtain patient consent before AI diagnosis"
+    satisfaction: all_discharged(ConsentGroup)
+  ...
+}
+```
+
+**Status:** CONFIRMED
+
+---
+
 ## AM-25 — Federation as community type: `contract` qualifier, mandatory `objective`, `EventDecl` body, `Domain` inherits `Community`
 
 **Standard references:** ISO 15414 §7.5, §7.5.1, §7.5.2, §7.7
