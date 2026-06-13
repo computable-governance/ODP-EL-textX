@@ -1815,3 +1815,82 @@ V-NEW-18: An `InlineToken` may not be referenced by name from a `DelegationDecl`
 - Added `process_inline_token` (P1b): applies same `discharge_mode`/`priority` defaults as P1; registered for `'InlineToken'`.
 
 **Status:** CONFIRMED
+
+---
+
+## Validator fixes applied 2026-06-14 — consequences of AM-18, AM-21, and P2
+
+**Location:** `toolchain/el_validator.py`
+
+Three silent bugs made V-01–V-15 effective no-ops at runtime. All three
+stem from the validator not tracking grammar/parser changes.
+
+**Bug 1 — AM-18 class name mismatch (all `_collect` calls):**
+Every `_collect(model, "XxxDecl")` call used the pre-AM-18 grammar rule
+names. After AM-18 stripped the `Decl` suffix from all rule names and
+the custom classes were registered, `type(obj).__name__` returns the new
+name (`"Community"`, `"EnterpriseObject"`, etc.). All eight affected
+`_collect` calls were updated:
+
+| Old string | New string |
+|---|---|
+| `"ObjectDecl"` | `"EnterpriseObject"` |
+| `"DeonticTokenDecl"` | `"DeonticToken"` |
+| `"CommunityDecl"` | `"Community"` |
+| `"PolicyDecl"` | `"Policy"` |
+| `"CommitmentDecl"` | `"Commitment"` |
+| `"DelegationDecl"` | `"Delegation"` |
+| `"FederationDecl"` | `"Federation"` |
+| `"PrescriptionDecl"` | `"Prescription"` |
+
+**Bug 2 — AM-21 contract dissolution (V-05):**
+V-05 accessed `c.contract.assignment_policies` treating `contract` as a
+sub-object. AM-21 dissolved the `Contract` sub-block: `contract` is now
+a `bool` flag and `assignment_policies` is a direct field on `Community`.
+Fixed: iterate `c.assignment_policies` directly, removing the `contract`
+guard.
+
+**Bug 3 — P2 body dissolution (V-09):**
+V-09 guarded with `if not body: continue`. P2 (`process_enterprise_object`)
+dissolves `ObjectBody` into the parent `EnterpriseObject` and sets
+`obj.body = None`. The guard therefore skipped every object. Fixed:
+iterate `obj.holds_tokens` directly (a `List[DeonticToken]` populated by P2).
+
+**Status:** CONFIRMED
+
+---
+
+## V-01 extended to Federation; V-12 extended to Domain — consequence of AM-25
+
+**Location:** `toolchain/el_validator.py`
+
+**V-01 for Federation:**
+AM-25 added a mandatory `objective=Objective` to the `Federation` grammar
+rule, making federation a fully-fledged community type per §7.7.
+V-01 now runs an independent loop over `Federation` elements in addition
+to the existing `Community` loop. The two loops are kept separate because
+Federation has no roles, processes, or assignment policies — per-community
+rules V-02–V-06 and V-14 must not run against Federation instances.
+
+**V-12 Domain inclusion:**
+AM-25 made `Domain` inherit `Community` in Python so that Domain instances
+satisfy `[Community]` cross-references in `MemberRef`. The `all_communities`
+index used by V-12 previously contained only `Community` instances; Domain
+members of a federation were therefore falsely flagged as undeclared.
+Fixed: `all_communities` now includes all elements whose `type().__name__`
+is `"Community"` or `"Domain"`.
+
+**Why Domain does NOT receive V-01:**
+The `Domain` grammar rule has no `objective=Objective` field. A Domain
+instance's `.objective` attribute is `None` at all times — it exists only
+because `Domain` inherits the `Community` dataclass, which declares
+`objective: Optional[Objective] = None`. Applying V-01 to Domain would
+produce a false error on every domain in every specification. Adding an
+objective to the Domain grammar rule is a separate future amendment (see
+§7.5.1 — "An enterprise specification should include an objective for each
+community"). Until that amendment is made, V-01 is scoped to Community and
+Federation only.
+
+**Standard reference:** §7.5, §7.5.1, §7.5.2, §7.7
+
+**Status:** CONFIRMED
