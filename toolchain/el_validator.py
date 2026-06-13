@@ -26,8 +26,8 @@ Rules implemented
         or 'agent'.                                              §6.6.2
   V-11  A PrescriptionDecl actor must be party/agent, or the
         spec must include a permit enabling prescription.        §7.10.5
-  V-12  Every FederationDecl member must reference a declared
-        CommunityDecl.                                           §7.5.2
+  V-12  Every Federation member must reference a declared
+        Community or Domain (both are community types).         §7.5.2
   V-13  Policed-pessimistic policies must declare a mechanism.  §7.9.4
   V-14  A PolicyRef target must resolve to a declared role,
         community, process, action, or object in scope.         §7.9.1
@@ -81,23 +81,34 @@ def validate_spec(model) -> List[str]:
 
     # Pre-index objects and communities for cross-reference checks
     all_objects: Dict[str, Any] = {
-        e.name: e for e in _collect(model, "ObjectDecl")
+        e.name: e for e in _collect(model, "EnterpriseObject")
     }
     all_tokens: Dict[str, Any] = {
-        e.name: e for e in _collect(model, "DeonticTokenDecl")
+        e.name: e for e in _collect(model, "DeonticToken")
     }
+    # Domain inherits Community in Python (AM-25) and is a valid MemberRef target,
+    # so it must be included here for V-12 not to falsely flag Domain members.
     all_communities: Dict[str, Any] = {
-        e.name: e for e in _collect(model, "CommunityDecl")
+        e.name: e
+        for e in model.elements
+        if _cls(e) in ("Community", "Domain")
     }
     all_policies: Dict[str, Any] = {
-        e.name: e for e in _collect(model, "PolicyDecl")
+        e.name: e for e in _collect(model, "Policy")
     }
-    commitments: List[Any] = _collect(model, "CommitmentDecl")
-    delegations: List[Any] = _collect(model, "DelegationDecl")
+    commitments: List[Any] = _collect(model, "Commitment")
+    delegations: List[Any] = _collect(model, "Delegation")
 
-    # V-01 through V-06 operate per-community
-    for community in all_communities.values():
+    # V-01 through V-06, V-14 — per Community
+    for community in _collect(model, "Community"):
         errors.extend(_validate_community(community))
+
+    # V-01 for Federation — AM-25 made objective mandatory on federation (§7.7)
+    for fed in _collect(model, "Federation"):
+        if not getattr(fed, "objective", None):
+            errors.append(
+                f"[V-01] Federation '{fed.name}' must have an objective. (§7.7)"
+            )
 
     # V-07, V-08 — delegation structural rules
     errors.extend(_validate_delegations(delegations, commitments, all_objects))
@@ -110,11 +121,11 @@ def validate_spec(model) -> List[str]:
         errors.extend(_validate_commitment(c, all_objects))
 
     # V-11 — prescription actor rules
-    for p in _collect(model, "PrescriptionDecl"):
+    for p in _collect(model, "Prescription"):
         errors.extend(_validate_prescription(p, all_objects))
 
     # V-12 — federation member references
-    for fed in _collect(model, "FederationDecl"):
+    for fed in _collect(model, "Federation"):
         errors.extend(_validate_federation(fed, all_communities))
 
     # V-13 — pessimistic enforcement mechanism
@@ -148,15 +159,14 @@ def _validate_community(c) -> List[str]:
     role_names = {r.name for r in getattr(c, "roles", [])}
     process_names = {p.name for p in getattr(c, "processes", [])}
 
-    # V-05: assignment policy roles must exist
-    contract = getattr(c, "contract", None)
-    if contract:
-        for ap in getattr(contract, "assignment_policies", []):
-            if ap.role_name not in role_names:
-                errors.append(
-                    f"[V-05] Community '{cname}': assignment_policy references "
-                    f"unknown role '{ap.role_name}'. (§7.8.2)"
-                )
+    # V-05: assignment policy roles must exist.
+    # AM-21: contract dissolved — assignment_policies is now a direct field on Community.
+    for ap in getattr(c, "assignment_policies", []):
+        if ap.role_name not in role_names:
+            errors.append(
+                f"[V-05] Community '{cname}': assignment_policy references "
+                f"unknown role '{ap.role_name}'. (§7.8.2)"
+            )
 
     # V-06: sub-objective assignments
     obj = getattr(c, "objective", None)
@@ -271,12 +281,10 @@ def _validate_token_holders(model, all_tokens: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
     token_holders: Dict[str, List[str]] = {}
 
-    for obj in [e for e in model.elements if _cls(e) == "ObjectDecl"]:
-        body = getattr(obj, "body", None)
-        if not body:
-            continue
-        for ht in getattr(body, "holds_tokens", []):
-            token_name = getattr(ht.token, "name", None)
+    # After P2, body is dissolved — holds_tokens is a direct List[DeonticToken] on the object.
+    for obj in [e for e in model.elements if _cls(e) == "EnterpriseObject"]:
+        for token in getattr(obj, "holds_tokens", []):
+            token_name = getattr(token, "name", None)
             if token_name:
                 token_holders.setdefault(token_name, []).append(obj.name)
 
