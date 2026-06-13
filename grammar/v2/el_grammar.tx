@@ -168,12 +168,21 @@ PriorityLevel  : 'critical' | 'high' | 'normal' | 'low' ;
 /*
  * TokenGroup — §6.4.2
  * Names a group so that speech acts can operate on the whole group.
+ *
+ * AM-26: per-line 'member: <token>' declarations (TokenGroupMember)
+ * replace the old comma-separated [DeonticToken]* list, which triggered
+ * the arpeggio cross-reference list bug (CLAUDE.md §5.3).
+ * Object processor P10 unwraps TokenGroupMember wrappers into
+ * TokenGroup.tokens so callers always read group.tokens directly.
  */
 TokenGroup:
     'token_group' name=ID '{'
-        tokens+=[DeonticToken]
-        (',' tokens+=[DeonticToken])*
+        (members+=TokenGroupMember)*
     '}'
+;
+
+TokenGroupMember:
+    'member' ':' token=[DeonticToken]
 ;
 
 
@@ -334,10 +343,28 @@ EventDecl:
 // §7.7 — OBJECTIVE RULES
 // ----------------------------------------------------------------
 
+/*
+ * Objective — §6.2, §7.7
+ *
+ * AM-27: optional 'satisfaction' clause adds a machine-checkable condition
+ * over a named TokenGroup, replacing the purely free-text objective.
+ * Operator semantics:
+ *   all_discharged — every member of the group must be DISCHARGED (or SUPERSEDED)
+ *   any_discharged — at least one member of the group is DISCHARGED
+ * Used by _build_propositions() (P5) to derive objective_satisfied:<community>.
+ * TokenGroup must be declared at top level (cross-reference resolves globally).
+ */
 Objective:
     'objective' ':' description=STRING
+    ('satisfaction' ':' satisfaction=SatisfactionCondition)?
     (sub_objectives+=SubObjective)*
 ;
+
+SatisfactionCondition:
+    operator=SatisfactionOp '(' group=[TokenGroup] ')'
+;
+
+SatisfactionOp: 'all_discharged' | 'any_discharged' ;
 
 /*
  * Sub-objectives may be assigned to a role or a process (§7.7).

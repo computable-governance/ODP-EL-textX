@@ -353,10 +353,21 @@ class DeonticToken(_ELParentable):
 class TokenGroup(_ELParentable):
     """§6.4.2 — named group of deontic tokens.
 
-    Grammar rule: TokenGroupDecl
+    Grammar rule: TokenGroup
     """
-    name:   str  = ""
-    tokens: List = field(default_factory=list)  # List[DeonticToken] refs
+    name:    str  = ""
+    members: List = field(default_factory=list)  # List[TokenGroupMember]; cleared by P10
+    tokens:  List = field(default_factory=list)  # List[DeonticToken]; populated by P10
+
+
+@dataclass
+class TokenGroupMember(_ELParentable):
+    """§6.4.2 — thin wrapper for one member declaration in a TokenGroup.
+
+    Grammar rule: TokenGroupMember
+    Object processor P10 unwraps .token into TokenGroup.tokens and clears members.
+    """
+    token: Optional[object] = None   # → DeonticToken ref
 
 
 # ---------------------------------------------------------------------------
@@ -507,13 +518,26 @@ class InlineToken(_ELParentable):
 
 
 @dataclass
+class SatisfactionCondition(_ELParentable):
+    """AM-27 — machine-checkable objective satisfaction condition.
+
+    Grammar rule: SatisfactionCondition
+    Expresses whether the community objective is satisfied by checking
+    the states of all members of a named TokenGroup.
+    """
+    operator: str            = ""    # SatisfactionOp: 'all_discharged' | 'any_discharged'
+    group:    Optional[object] = None  # → TokenGroup ref
+
+
+@dataclass
 class Objective(_ELParentable):
     """§6.2, §7.7 — community objective.
 
-    Grammar rule: ObjectiveDecl
+    Grammar rule: Objective
     """
-    description:    str  = ""
-    sub_objectives: List = field(default_factory=list)  # List[SubObjective]
+    description:    str            = ""
+    satisfaction:   Optional[object] = None  # → SatisfactionCondition (AM-27)
+    sub_objectives: List           = field(default_factory=list)  # List[SubObjective]
 
 
 @dataclass
@@ -1126,13 +1150,13 @@ DOMAIN_CLASSES = [
     # B
     EnterpriseObject, ObjectBody, DelegatedFrom, PrincipalOf, HoldsToken,
     # C
-    DeonticToken, TokenGroup,
+    DeonticToken, TokenGroup, TokenGroupMember,
     # D
     Policy, PolicyRule, AffectedElement, SettingBehaviour, Enforcement,
     PolicyRef,
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
     # E
-    Community, EventDecl, Objective, SubObjective, SubObjectiveRef, Invariant,
+    Community, EventDecl, SatisfactionCondition, Objective, SubObjective, SubObjectiveRef, Invariant,
     AssignmentPolicy, RequiresCapabilityRule, ExcludesRoleRule,
     RequiresTokenRule, RequiresRelationRule,
     JoinLeaveEffect, CommunityInteraction,

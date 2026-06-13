@@ -111,10 +111,16 @@ class ObligationState(Enum):
     Corresponds to the deontic token states in ISO 15414 Annex A
     (Figure A.6: pending → active → discharged / violated / expired).
     """
-    PENDING    = auto()   # obligation is active but not yet discharged
+    PENDING    = auto()   # obligation is active and awaiting discharge
     DISCHARGED = auto()   # obligation has been fulfilled — the goal state
     VIOLATED   = auto()   # deadline elapsed without discharge
     EXPIRED    = auto()   # context no longer applies (actor left community etc.)
+    SUPERSEDED = auto()   # a sibling in the same TokenGroup discharged first;
+                          # this obligation's purpose is fulfilled — not a failure.
+                          # Excluded from utility() numerator and denominator (P3).
+    WAITING    = auto()   # triggered_by event has not yet fired; not eligible for
+                          # T1 discharge or T2 violation. Transitions to PENDING
+                          # when its trigger event fires (P6 cascade).
 
 
 class ActorStatus(Enum):
@@ -174,8 +180,15 @@ class World:
         return dict(self.actor_states)
 
     def all_discharged(self) -> bool:
-        """True iff every obligation in this world is DISCHARGED."""
-        return all(s == ObligationState.DISCHARGED for _, s in self.obligation_states)
+        """True iff every obligation in this world is DISCHARGED or SUPERSEDED.
+
+        SUPERSEDED obligations had their purpose fulfilled by a group sibling,
+        so they count as resolved for the all_discharged test.
+        """
+        return all(
+            s in (ObligationState.DISCHARGED, ObligationState.SUPERSEDED)
+            for _, s in self.obligation_states
+        )
 
     def any_violated(self) -> bool:
         """True iff any obligation in this world is VIOLATED."""
@@ -222,6 +235,13 @@ class ObligationDescriptor:
     #   critical → 1.00   high → 0.75   normal → 0.50   low → 0.25
     # Used by the weighted utility function (§C.3) to reflect modeller-specified
     # importance ordering across obligations.
+    triggered_by: Optional[str] = None
+    # Event name (from DeonticToken.triggered_by) whose firing moves this
+    # obligation from WAITING → PENDING. None means obligation starts PENDING.
+    fires_event: Optional[str] = None
+    # Event name (from DeonticToken.discharged_by) emitted when this obligation
+    # is discharged. Bidirectional convention: discharging this obligation fires
+    # this event, which may cascade to trigger other WAITING obligations (P6).
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -256,6 +276,16 @@ class KripkeModel:
     labels: Dict[Tuple[World, World], str]          # edge labels (for explanation)
     obligation_descriptors: Dict[str, ObligationDescriptor]
     horizon: int
+    group_index: Dict[str, List[str]] = field(default_factory=dict)
+    # group_index: {group_name: [obligation_id, ...]} built from TokenGroup
+    # declarations.  Used by T1 (P6) to find siblings for SUPERSEDED
+    # transitions, and by _build_propositions (P5) for objective_satisfied
+    # propositions.  Empty dict is safe for all existing callers.
+    satisfaction_conditions: Dict[str, Tuple[str, List[str]]] = field(default_factory=dict)
+    # satisfaction_conditions: {community_name: (operator, [member_ids])}
+    # built from Community/Federation Objective.satisfaction clauses (AM-27).
+    # operator is 'all_discharged' or 'any_discharged'.
+    # Used by _build_propositions to emit objective_satisfied:<community>.
 
     # ── Satisfaction relation ──────────────────────────────────────────────────
 
@@ -471,15 +501,22 @@ class KripkeModel:
             ObligationState.VIOLATED:   -1.0,
         }
         obl_dict = dict(world.obligation_states)
-        total_weight = sum(
-            desc.priority_weight for desc in self.obligation_descriptors.values()
-        )
+        # Exclude SUPERSEDED and WAITING obligations from both numerator and
+        # denominator. SUPERSEDED: purpose fulfilled by a group sibling.
+        # WAITING: trigger not yet fired; obligation not yet in play.
+        _excluded = (ObligationState.SUPERSEDED, ObligationState.WAITING)
+        active_items = [
+            (oid, desc)
+            for oid, desc in self.obligation_descriptors.items()
+            if obl_dict.get(oid) not in _excluded
+        ]
+        total_weight = sum(desc.priority_weight for _, desc in active_items)
         if total_weight == 0:
             return 0.0
         weighted_sum = sum(
             outcome_scores.get(obl_dict.get(oid, ObligationState.PENDING), 0.0)
             * desc.priority_weight
-            for oid, desc in self.obligation_descriptors.items()
+            for oid, desc in active_items
         )
         return weighted_sum / total_weight
 
@@ -859,18 +896,18 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
     4. Record the full accountability chain.
     """
     # Index burdens by name.
-    # The grammar uses DeonticTokenDecl for all token kinds (burden/permit/embargo);
-    # we filter by kind == "burden".
+    # The grammar uses DeonticToken for all token kinds (burden/permit/embargo);
+    # we filter by kind == "burden". (AM-18 renamed DeonticTokenDecl → DeonticToken)
     burdens: Dict[str, Any] = {
         t.name: t
-        for t in _collect(model, "DeonticTokenDecl")
+        for t in _collect(model, "DeonticToken")
         if getattr(t, "kind", None) == "burden"
     }
 
     # Build delegation graph: from_name → list of (to_name, obligation_text)
     # (duplicates el_reasoner.delegation_graph but avoids import)
     del_graph: Dict[str, List[Tuple[str, str, bool, bool]]] = {}
-    for d in _collect(model, "DelegationDecl"):
+    for d in _collect(model, "Delegation"):  # AM-18: DelegationDecl → Delegation
         from_name = _obj_name(d.delegator)
         to_name   = _obj_name(d.delegate)
         if from_name and to_name:
@@ -902,7 +939,7 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
 
     descriptors: Dict[str, ObligationDescriptor] = {}
 
-    for c in _collect(model, "CommitmentDecl"):
+    for c in _collect(model, "Commitment"):  # AM-18: CommitmentDecl → Commitment
         burden_ref = getattr(c, "burden", None)
         burden_name = _obj_name(burden_ref)
         actor_name  = _obj_name(getattr(c, "actor", None))
@@ -920,10 +957,18 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
         # Use sub_delegation_allowed / revocable from the LAST delegation link
         # that terminates at holder, if any
         sda, rev = False, False
-        for d in _collect(model, "DelegationDecl"):
+        for d in _collect(model, "Delegation"):  # AM-18: DelegationDecl → Delegation
             if _obj_name(d.delegate) == holder:
                 sda = getattr(d, "sub_delegation_allowed", False)
                 rev = getattr(d, "revocable", False)
+
+        # P6: extract event wiring from the burden token
+        triggered_by = _obj_name(getattr(burden, "triggered_by", None))
+        fires_event  = _obj_name(getattr(burden, "discharged_by", None))
+        # fires_event convention: DeonticToken.discharged_by names the event that
+        # fires when this obligation is discharged (bidirectional: the same event
+        # that the holder's action emits). Used by T1 cascade to activate WAITING
+        # obligations whose triggered_by matches this event name.
 
         descriptors[burden_name] = ObligationDescriptor(
             obligation_id=burden_name,
@@ -935,25 +980,97 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
             sub_delegation_allowed=sda,
             discharge_mode=getattr(burden, "discharge_mode", "") or "eventual",
             priority_weight=_priority_weight(getattr(burden, "priority", None)),
+            triggered_by=triggered_by,
+            fires_event=fires_event,
         )
 
     return descriptors
 
 
-def _build_propositions(world: World) -> Set[str]:
+def _build_group_index(model: Any) -> Dict[str, List[str]]:
+    """
+    Build a group membership index from all TokenGroup declarations in the spec.
+
+    Returns {group_name: [obligation_id, ...]} where obligation_ids are the
+    names of the DeonticToken members of each group.  Only groups whose
+    token refs resolved (non-None name) are included.
+
+    Used by:
+      - T1 extension (P6): find sibling obligations to mark SUPERSEDED when
+        one group member discharges.
+      - _build_propositions (P5): derive objective_satisfied:<community>
+        proposition from any_discharged / all_discharged over a named group.
+    """
+    index: Dict[str, List[str]] = {}
+    for el in model.elements:
+        if type(el).__name__ != "TokenGroup":
+            continue
+        member_ids = [
+            _obj_name(tok)
+            for tok in getattr(el, "tokens", [])
+            if _obj_name(tok)
+        ]
+        if member_ids:
+            index[el.name] = member_ids
+    return index
+
+
+def _build_satisfaction_conditions(
+    model: Any,
+) -> Dict[str, Tuple[str, List[str]]]:
+    """
+    Extract objective satisfaction conditions from Community/Federation/Domain
+    declarations that carry a SatisfactionCondition on their objective (AM-27).
+
+    Returns {community_name: (operator, [member_ids])} where:
+      operator   — 'all_discharged' or 'any_discharged'
+      member_ids — names of the DeonticToken members of the referenced TokenGroup
+
+    Used by _build_propositions() to emit objective_satisfied:<community_name>
+    when the condition holds in a given world.
+    """
+    conditions: Dict[str, Tuple[str, List[str]]] = {}
+    for el in model.elements:
+        if type(el).__name__ not in ("Community", "Federation", "Domain"):
+            continue
+        obj = getattr(el, "objective", None)
+        if obj is None:
+            continue
+        sat = getattr(obj, "satisfaction", None)
+        if sat is None:
+            continue
+        group = getattr(sat, "group", None)
+        if group is None:
+            continue
+        member_ids = [
+            _obj_name(tok)
+            for tok in getattr(group, "tokens", [])
+            if _obj_name(tok)
+        ]
+        if member_ids:
+            conditions[el.name] = (sat.operator, member_ids)
+    return conditions
+
+
+def _build_propositions(
+    world: World,
+    satisfaction_conditions: Optional[Dict[str, Tuple[str, List[str]]]] = None,
+) -> Set[str]:
     """
     Compute the set of true propositions V(world) — the valuation function.
 
     Named propositions:
-      "discharged:<id>"   ↔  obligation_states[id] == DISCHARGED
-      "pending:<id>"      ↔  obligation_states[id] == PENDING
-      "violated:<id>"     ↔  obligation_states[id] == VIOLATED
-      "expired:<id>"      ↔  obligation_states[id] == EXPIRED
-      "active:<actor>"    ↔  actor_states[actor]   == ACTIVE
-      "inactive:<actor>"  ↔  actor_states[actor]   == INACTIVE
-      "all_discharged"    ↔  every obligation is DISCHARGED
-      "any_violated"      ↔  at least one obligation is VIOLATED
-      "any_pending"       ↔  at least one obligation is PENDING
+      "discharged:<id>"             ↔  obligation_states[id] == DISCHARGED
+      "pending:<id>"                ↔  obligation_states[id] == PENDING
+      "violated:<id>"               ↔  obligation_states[id] == VIOLATED
+      "expired:<id>"                ↔  obligation_states[id] == EXPIRED
+      "superseded:<id>"             ↔  obligation_states[id] == SUPERSEDED
+      "active:<actor>"              ↔  actor_states[actor]   == ACTIVE
+      "inactive:<actor>"            ↔  actor_states[actor]   == INACTIVE
+      "all_discharged"              ↔  every obligation is DISCHARGED/SUPERSEDED
+      "any_violated"                ↔  at least one obligation is VIOLATED
+      "any_pending"                 ↔  at least one obligation is PENDING
+      "objective_satisfied:<name>"  ↔  community <name> satisfaction condition holds (AM-27)
     """
     props: Set[str] = set()
 
@@ -962,9 +1079,13 @@ def _build_propositions(world: World) -> Set[str]:
         ObligationState.PENDING:    "pending",
         ObligationState.VIOLATED:   "violated",
         ObligationState.EXPIRED:    "expired",
+        ObligationState.SUPERSEDED: "superseded",
+        ObligationState.WAITING:    "waiting",
     }
+    obl_dict: Dict[str, ObligationState] = {}
     for oid, state in world.obligation_states:
         props.add(f"{state_tags[state]}:{oid}")
+        obl_dict[oid] = state
 
     actor_tags = {
         ActorStatus.ACTIVE:   "active",
@@ -979,6 +1100,25 @@ def _build_propositions(world: World) -> Set[str]:
         props.add("any_violated")
     if any(s == ObligationState.PENDING for _, s in world.obligation_states):
         props.add("any_pending")
+    if any(s == ObligationState.WAITING for _, s in world.obligation_states):
+        props.add("any_waiting")
+
+    # AM-27: objective_satisfied:<community_name> propositions
+    if satisfaction_conditions:
+        discharged_or_superseded = {ObligationState.DISCHARGED, ObligationState.SUPERSEDED}
+        for community_name, (operator, member_ids) in satisfaction_conditions.items():
+            if operator == "all_discharged":
+                satisfied = all(
+                    obl_dict.get(mid) in discharged_or_superseded
+                    for mid in member_ids
+                )
+            else:  # any_discharged
+                satisfied = any(
+                    obl_dict.get(mid) == ObligationState.DISCHARGED
+                    for mid in member_ids
+                )
+            if satisfied:
+                props.add(f"objective_satisfied:{community_name}")
 
     return props
 
@@ -1027,13 +1167,15 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     KripkeModel with all worlds, edges, propositions, and descriptors populated.
     """
     descriptors = _build_obligation_descriptors(model)
+    group_index = _build_group_index(model)
+    satisfaction_conditions = _build_satisfaction_conditions(model)
 
     if not descriptors:
         # No obligations found — return trivial model
         w0_obligs = frozenset()
         w0_actors = frozenset()
         w0 = World(obligation_states=w0_obligs, actor_states=w0_actors, step=0)
-        props = {w0: _build_propositions(w0)}
+        props = {w0: _build_propositions(w0, satisfaction_conditions)}
         props[w0].add("all_discharged")  # vacuously true
         return KripkeModel(
             initial=w0,
@@ -1043,6 +1185,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             labels={},
             obligation_descriptors={},
             horizon=horizon,
+            group_index=group_index,
+            satisfaction_conditions=satisfaction_conditions,
         )
 
     # Collect all actors appearing in any chain
@@ -1050,8 +1194,12 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     for desc in descriptors.values():
         all_actors.update(desc.chain)
 
-    # Build initial world: all obligations PENDING, all actors ACTIVE
-    init_obligs = {oid: ObligationState.PENDING for oid in descriptors}
+    # Build initial world: obligations with triggered_by start WAITING (trigger
+    # not yet fired); all others start PENDING. All actors start ACTIVE.
+    init_obligs = {
+        oid: (ObligationState.WAITING if desc.triggered_by else ObligationState.PENDING)
+        for oid, desc in descriptors.items()
+    }
     init_actors = {actor: ActorStatus.ACTIVE for actor in all_actors}
     w0 = _make_world(init_obligs, init_actors, step=0)
 
@@ -1080,6 +1228,29 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             # Holder discharges this obligation
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.DISCHARGED
+
+            # P6a — triggered_by cascade: if this obligation fires an event,
+            # any WAITING obligation with triggered_by = that event becomes PENDING.
+            # Applied before SUPERSEDED suppression so P6b can override P6a when
+            # the same token is both a group sibling and a cascade target.
+            if desc.fires_event:
+                for other_oid, other_desc in descriptors.items():
+                    if (other_desc.triggered_by == desc.fires_event
+                            and new_obligs.get(other_oid) == ObligationState.WAITING):
+                        new_obligs[other_oid] = ObligationState.PENDING
+
+            # P6b — SUPERSEDED sibling suppression: other PENDING or WAITING
+            # members of the same TokenGroup are superseded because one member
+            # already discharged. SUPERSEDED overrides any P6a activation.
+            for group_members in group_index.values():
+                if oid in group_members:
+                    for sibling_oid in group_members:
+                        if sibling_oid == oid:
+                            continue
+                        sibling_state = new_obligs.get(sibling_oid)
+                        if sibling_state in (ObligationState.PENDING,
+                                             ObligationState.WAITING):
+                            new_obligs[sibling_oid] = ObligationState.SUPERSEDED
 
             w_prime = _make_world(new_obligs, current_actors, w.step)
             label   = f"discharge:{oid} by {desc.holder}"
@@ -1152,7 +1323,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     print(f"[Kripke] Converged in {_iter_count} iterations")
 
     # Build proposition sets for every world
-    propositions = {w: _build_propositions(w) for w in worlds}
+    propositions = {w: _build_propositions(w, satisfaction_conditions) for w in worlds}
 
     return KripkeModel(
         initial=w0,
@@ -1162,6 +1333,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         labels=labels,
         obligation_descriptors=descriptors,
         horizon=horizon,
+        group_index=group_index,
+        satisfaction_conditions=satisfaction_conditions,
     )
 
 
@@ -1298,7 +1471,7 @@ class ObligationVerdict:
 def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List[str]:
     """Walk DelegationDecl back-links to build [root, …, holder] for a token."""
     parent: Dict[str, str] = {}
-    for d in _collect(spec, "DelegationDecl"):
+    for d in _collect(spec, "Delegation"):  # AM-18: DelegationDecl → Delegation
         b = getattr(d, "burden", None)
         if b and _obj_name(b) == token_name:
             frm, to = _obj_name(d.delegator), _obj_name(d.delegate)
@@ -1321,6 +1494,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     Actors from WorldState→ACTIVE. BFS expansion uses the same T1/T2/T3 rules.
     """
     state, spec, ledger = runtime.current_state(), runtime._spec, runtime._ledger
+    group_index = _build_group_index(spec)
+    satisfaction_conditions = _build_satisfaction_conditions(spec)
     discharged_in_ledger: Set[str] = {n for r in ledger for n in r.discharged}
     init_obligs: Dict[str, ObligationState] = {}
     descriptors: Dict[str, ObligationDescriptor] = {}
@@ -1397,10 +1572,12 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             edges.setdefault(w, set()).add(wt)
             labels[(w, wt)] = "tick"
 
-    props = {w: _build_propositions(w) for w in worlds}
+    props = {w: _build_propositions(w, satisfaction_conditions) for w in worlds}
     return KripkeModel(
         initial=w0, worlds=worlds, edges=edges, propositions=props,
         labels=labels, obligation_descriptors=descriptors, horizon=horizon,
+        group_index=group_index,
+        satisfaction_conditions=satisfaction_conditions,
     )
 
 
@@ -1538,6 +1715,8 @@ def _run_consent_scenario() -> None:
         labels=labels,
         obligation_descriptors=descriptors,
         horizon=horizon,
+        group_index={},
+        satisfaction_conditions={},
     )
 
     print(km.render_summary())

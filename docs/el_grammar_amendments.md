@@ -1154,6 +1154,52 @@ _Further amendments to be added during walkthrough._
 
 ---
 
+## AM-26 — Fix `TokenGroup` arpeggio cross-reference list bug; add `TokenGroupMember`
+
+**Standard references:** ISO 15414 §6.4.2
+
+**Rationale:**
+The original `TokenGroup` rule used a comma-separated `[DeonticToken]*` list:
+```
+TokenGroup:
+    'token_group' name=ID '{'
+        tokens+=[DeonticToken]
+        (',' tokens+=[DeonticToken])*
+    '}'
+;
+```
+This triggers the confirmed arpeggio/textX bug (CLAUDE.md §5.3): a
+comma-separated `[Rule]*` cross-reference list causes arpeggio to continue
+consuming tokens as cross-reference candidates, silently breaking subsequent
+sub-rule matches. No existing scenario used `token_group`, so clean
+replacement (no migration) was possible.
+
+**Grammar changes (`grammar/v2/el_grammar.tx`):**
+- Replaced the `TokenGroup` body with `(members+=TokenGroupMember)*` —
+  one `member: <token>` declaration per member, mirroring the `MemberRef`
+  pattern used in `Federation`.
+- Added new `TokenGroupMember` rule: `'member' ':' token=[DeonticToken]`.
+
+**Domain class changes (`toolchain/el_domain.py`):**
+- `TokenGroup`: replaced single `tokens: List` field with two fields:
+  `members: List` (populated by textX from grammar; cleared by P10) and
+  `tokens: List` (populated by P10 from unwrapped members). Callers always
+  read `group.tokens` — the `members` list is a parsing artefact only.
+- Added new `TokenGroupMember` dataclass with single `token: Optional[object]`
+  field (cross-reference to `DeonticToken`).
+- Added `TokenGroupMember` to `DOMAIN_CLASSES`.
+
+**Parser changes (`toolchain/el_parser.py`):**
+- Added `process_token_group` (P10): iterates `group.members`, appends
+  `m.token` to `group.tokens` for each non-None member, then clears
+  `group.members`.
+- Registered `'TokenGroup': process_token_group` in
+  `mm.register_obj_processors`.
+
+**Status:** CONFIRMED
+
+---
+
 ## AM-25 — Federation as community type: `contract` qualifier, mandatory `objective`, `EventDecl` body, `Domain` inherits `Community`
 
 **Standard references:** ISO 15414 §7.5, §7.5.1, §7.5.2, §7.7

@@ -203,6 +203,14 @@ def process_domain(domain):
     domain.body_items = []
 
 
+def process_token_group(group):
+    """P10: unwrap TokenGroupMember wrappers into TokenGroup.tokens (AM-26)."""
+    for m in group.members:
+        if m.token is not None:
+            group.tokens.append(m.token)
+    group.members = []
+
+
 def process_federation(fed):
     """P9: split body_items into typed sublists; unwrap thin wrappers.
 
@@ -251,6 +259,7 @@ def _build_metamodel():
         'Process':            process_process,             # P7
         'Domain':             process_domain,              # P8
         'Federation':         process_federation,          # P9
+        'TokenGroup':         process_token_group,         # P10 (AM-26)
     })
     return mm
 
