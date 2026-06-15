@@ -70,7 +70,7 @@ class AccountabilityChain:
     """
     obligation: str
     root_party: str                          # ultimately accountable
-    root_commitment: Optional[str]           # CommitmentDecl name, if any
+    root_commitment: Optional[str]           # Commitment name, if any
     chain: List[DelegationLink]              # ordered from root → current holder
     current_holder: str                      # who currently holds the obligation
 
@@ -160,7 +160,7 @@ def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
     """
     graph: Dict[str, List[DelegationLink]] = {}
 
-    for d in _collect(model, "DelegationDecl"):
+    for d in _collect(model, "Delegation"):
         from_name = _obj_name(d.delegator)
         to_name   = _obj_name(d.delegate)
         if not from_name or not to_name:
@@ -220,7 +220,7 @@ def ultimate_accountability(
     graph = delegation_graph(model)
 
     # Index commitments by obligation text
-    all_commitments = _collect(model, "CommitmentDecl")
+    all_commitments = _collect(model, "Commitment")
     matching_commitments = [
         c for c in all_commitments
         if obligation.lower() in c.obligation.lower()
@@ -228,7 +228,7 @@ def ultimate_accountability(
 
     # Also match delegations whose obligation text matches —
     # some obligations enter via delegation without an explicit top-level commitment.
-    all_delegations = _collect(model, "DelegationDecl")
+    all_delegations = _collect(model, "Delegation")
     matching_delegations = [
         d for d in all_delegations
         if obligation.lower() in d.obligation.lower()
@@ -358,23 +358,25 @@ def can_perform(model, actor_name: str, action_name: str) -> CanPerformResult:
     bodies and role assignments. Runtime token state changes (via speech
     acts) are not modelled here — this is structural, not operational.
     """
-    # Collect all tokens held by actor at spec level
-    all_objects = {_name(e): e for e in _collect(model, "ObjectDecl")}
+    # Collect all tokens held by actor at spec level.
+    # P2 (process_enterprise_object) dissolves ObjectBody: holds_tokens is
+    # promoted to a flat list of DeonticToken objects on the EnterpriseObject itself.
+    all_objects = {_name(e): e for e in _collect(model, "EnterpriseObject")}
     actor_obj = all_objects.get(actor_name)
 
     held_token_names: Set[str] = set()
-    if actor_obj and actor_obj.body:
-        for ht in getattr(actor_obj.body, "holds_tokens", []):
-            tok = getattr(ht, "token", None)
-            if tok and _name(tok):
+    if actor_obj:
+        for tok in getattr(actor_obj, "holds_tokens", []):
+            if _name(tok):
                 held_token_names.add(_name(tok))
 
-    # Find the action across all communities
+    # Find the action across all communities.
+    # P3 (process_role) dissolves role.items into role.actions; iterate directly.
     action = None
-    for community in _collect(model, "CommunityDecl"):
+    for community in _collect(model, "Community"):
         for role in getattr(community, "roles", []):
-            for item in getattr(role, "behaviour_items", []):
-                if _cls(item) == "ActionDecl" and item.name == action_name:
+            for item in getattr(role, "actions", []):
+                if item.name == action_name:
                     action = item
 
     if action is None:
@@ -441,7 +443,7 @@ def policy_conflicts(model) -> List[PolicyConflict]:
     but one states 'obligation' and another states 'prohibition' for that target.
     """
     conflicts: List[PolicyConflict] = []
-    communities = _collect(model, "CommunityDecl")
+    communities = _collect(model, "Community")
 
     # Collect policy rules per community
     PolicyEntry = Tuple[str, str, str]  # (community, kind, target)
