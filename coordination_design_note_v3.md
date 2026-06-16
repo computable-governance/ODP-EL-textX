@@ -3,9 +3,11 @@
 **Status:** working design note, reflecting implementation state as of
 commits 894afdb (P1-P6), a87720c (AM-27 log), 2913d48 (validator fixes),
 b52be43 (validator amendments log), a9c8449 (CLAUDE.md public),
-ebefde7 (el_reasoner.py AM-18 fix), 4b25855 (GP-referral scenario +
-verification). The GP-referral scenario is now built and verified —
-see §13.1 (Milestones) for results.
+ebefde7 (el_reasoner.py AM-18 fix + GP-referral scenario, initial build),
+1802c70 (P6b SUPERSEDED suppression limited to any_discharged groups),
+4b25855 (GP-referral Commitment fix + verify_gp_referral.py). The
+GP-referral scenario is now built and verified — see §13.1 (Milestones)
+for results.
 
 ## 1. Framing: a second field of application
 
@@ -312,12 +314,34 @@ raw parsed objects into clean domain objects.
   backing `Commitment` — see §13.2 item 7.
 
 **`el_reasoner.py`** — Layer 2 accountability queries (governance)
-Fixed 2026-06-15 (commit ebefde7): same AM-18 stale-class-name bug as
-`el_kripke.py`/`el_validator.py` made all `_collect()` calls return empty
-lists, so this file was a silent no-op at runtime — every query against
-a real parsed model returned trivially empty results. Now genuinely
-operational; verified end-to-end by the GP-referral scenario (§13.1).
-Four functions:
+Fixed 2026-06-15/16 (commit ebefde7): same AM-18 stale-class-name bug as
+`el_kripke.py`/`el_validator.py` — the third file affected by the same
+historical renaming gap. Seven stale pre-AM-18 class names corrected
+across the file's functions:
+
+- `DelegationDecl` → `Delegation` (`delegation_graph`,
+  `ultimate_accountability` ×2)
+- `CommitmentDecl` → `Commitment` (`ultimate_accountability`)
+- `ObjectDecl` → `EnterpriseObject` (`can_perform`)
+- `CommunityDecl` → `Community` (`can_perform`, `policy_conflicts`)
+- `ActionDecl` → `Action` (`can_perform`)
+
+Two further structural fixes were needed, reflecting object-processor
+dissolutions (P2, P3) that had changed the shape of parsed objects since
+these functions were last correct:
+
+- `can_perform`: `actor_obj.body.holds_tokens` (pre-P2 path) →
+  `actor_obj.holds_tokens` (flat `DeonticToken` list after P2 dissolved
+  the `body` wrapper).
+- `can_perform`: `role.behaviour_items`/`ActionDecl` check (pre-P3 path)
+  → `role.actions` (typed list after P3).
+
+Prior to this fix, all `_collect()` calls returned empty lists, so the
+file was a silent no-op at runtime — every query against a real parsed
+model returned trivially empty results. Now genuinely operational;
+verified end-to-end by the GP-referral scenario (§13.1), including for
+the first time across a federation boundary, not just within a single
+community. Four functions:
 
 - `ultimate_accountability(model, oid)`: walks delegation chain → root
   accountable party.
@@ -513,18 +537,19 @@ once a scenario motivates it.
 
 ### 13.1 First end-to-end accountability chain resolution from a parsed spec, and GP-referral scenario verified (2026-06-15/16)
 
-Prior to the AM-18 fix in `el_reasoner.py` (commit ebefde7),
-`ultimate_accountability()`, `can_perform()`, and `policy_conflicts()` were
-silent no-ops — all `_collect()` calls returned empty lists, so no chains
-were ever built from parsed `.el` files. The GP-referral scenario is the
-first scenario where Layer 2 governance reasoning is genuinely operational
-end-to-end, and the first full build-and-verify pass of the scenario
-itself:
+Prior to the AM-18 fix in `el_reasoner.py` (commit ebefde7, see §9 for
+the full list of seven stale class names and two structural fixes
+involved), `ultimate_accountability()`, `can_perform()`, and
+`policy_conflicts()` were silent no-ops — all `_collect()` calls returned
+empty lists, so no chains were ever built from parsed `.el` files. The
+GP-referral scenario is the first scenario where Layer 2 governance
+reasoning is genuinely operational end-to-end, and the first full
+build-and-verify pass of the scenario itself:
 
 - `ultimate_accountability('referralResponseBurden')` correctly traces
   `GPPracticeParty → SpecialistClinicianAgent` — the cross-community
-  delegation chain, with `GPPracticeParty` confirmed as root accountable
-  party per §7.10.1/NOTE 5.
+  delegation chain (`gpToSpecialistDelegation`), with `GPPracticeParty`
+  confirmed as root accountable party per §7.10.1/NOTE 5.
 - `ultimate_accountability('referralInitiationBurden')` correctly traces
   to `GPPracticeParty` directly (no delegation).
 - `can_perform('SpecialistClinicianAgent', 'acknowledgeReferral')`
@@ -539,23 +564,45 @@ itself:
   matching the designed topology, and validating the §9 description of
   `delegation_graph()`.
 
-Scenario built at `scenarios/gp_referral/gp_referral_scenario.el`,
-verified via `scenarios/gp_referral/verify_gp_referral.py`. All four
-Layer 4 verification questions (Q1–Q4) PASS against expected values:
+Scenario built at `scenarios/gp_referral/gp_referral_scenario.el`
+(commit ebefde7, initial build), verified via
+`scenarios/gp_referral/verify_gp_referral.py` (commit 4b25855). First
+run was 6/7 PASS — Q3 EF failed because two `TokenGroup` members
+(`clinicalHandoverBurden`, `assessmentSchedulingBurden`) had no backing
+`Commitment` and so had no Kripke world-state entry, making the
+federation objective vacuously unsatisfiable rather than genuinely false
+(see §13.2 item 7 for the full root cause). After adding the two missing
+`Commitment` declarations (commit 4b25855), **7/7 PASS**:
 
 - Q1: `AF(discharged:referralInitiationBurden)` → YES (strict)
-- Q2: `AF(discharged:referralResponseBurden)` → NO; `EF` → YES (eventual)
-- Q3: `objective_satisfied:ReferralFederation` (`all_discharged`) → EF only
-- Q4: `objective_satisfied:SpecialistCommunity` (`any_discharged`) → EF only
+- Q2: `AF(discharged:referralResponseBurden)` → NO (eventual,
+  counterexample: tick→tick→violate); `EF` → YES (witness: direct
+  discharge at step 0)
+- Q3: `AF(objective_satisfied:ReferralFederation)` → NO (blocked by
+  eventual `referralResponseBurden`); `EF` → YES (all four group members
+  now tracked; satisfiable on one path)
+- Q4: `AF(objective_satisfied:SpecialistCommunity)` → NO (both specialist
+  burdens eventual; no guarantee either fires); `EF` → YES
+  (`any_discharged` satisfied when `referralResponseBurden` discharges)
 
-Kripke model: 102 worlds (grew from an initial 27 once two
+Kripke model: 102 worlds (grew from an initial 27 once the two
 previously-untracked `TokenGroup` members were given backing
-`Commitment`s — see §13.2 item 7). This is the first scenario to
+`Commitment`s — see §13.2 item 8). This is the first scenario to
 exercise both AM-27 `SatisfactionCondition` operators (`all_discharged`,
 `any_discharged`) together, and the first to confirm the EF≠AF finding
 holds across a federation boundary via cross-community delegation
 (`GPPracticeParty → SpecialistClinicianAgent`), not just within a
 single community as in the consent scenario.
+
+A side effect observed in the Q2 AF counterexample also serves as
+corroborating evidence for an earlier fix made the same day (commit
+`1802c70`, "P6b SUPERSEDED suppression limited to `any_discharged`
+groups only"): in that path, `assessmentSchedulingBurden` discharges
+first, causing sibling `referralResponseBurden` (both members of the
+`any_discharged` group `specialistBurdenGroup`) to transition to
+SUPERSEDED rather than being left dangling — the first time that fix
+has been exercised by a real multi-burden `any_discharged` group in an
+actual verification run, behaving as intended.
 
 Full details: `SESSION_SUMMARY_2026_06_16.md`.
 
