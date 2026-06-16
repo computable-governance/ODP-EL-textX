@@ -410,6 +410,22 @@ commitment referralResponseCommitment {
     description: "GP practice commits to ensuring specialist responds to the referral and schedules assessment"
 }
 
+// Third commitment — GPPracticeParty is accountable for clinical handover to the specialist.
+commitment clinicalHandoverCommitment {
+    by: GPPracticeParty
+    obligation: "Provide complete clinical handover documentation to specialist"
+    creates_burden: clinicalHandoverBurden
+    description: "GP practice commits to providing complete clinical handover documentation to the specialist"
+}
+
+// Fourth commitment — SpecialistParty is accountable for scheduling a specialist assessment.
+commitment assessmentSchedulingCommitment {
+    by: SpecialistParty
+    obligation: "Schedule specialist assessment appointment for the patient"
+    creates_burden: assessmentSchedulingBurden
+    description: "Specialist party commits to scheduling a specialist assessment appointment for the referred patient"
+}
+
 // Cross-community delegation — GP practice delegates referral response to specialist clinician.
 // §7.10.1: SpecialistClinicianAgent becomes accountable for referralResponseBurden;
 // GPPracticeParty retains ultimate accountability for the referral outcome.
