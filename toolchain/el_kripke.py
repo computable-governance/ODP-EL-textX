@@ -1015,6 +1015,36 @@ def _build_group_index(model: Any) -> Dict[str, List[str]]:
     return index
 
 
+def _build_any_discharged_groups(model: Any) -> Set[str]:
+    """
+    Return the set of TokenGroup names whose satisfaction operator is
+    'any_discharged' in at least one Community/Federation objective.
+
+    P6b (SUPERSEDED sibling suppression) is semantically correct only for
+    these groups: when one member discharges, the group's purpose is fulfilled
+    and siblings are no longer needed.  For 'all_discharged' groups every
+    member must independently discharge; applying SUPERSEDED there would
+    incorrectly prevent siblings from being evaluated.
+    """
+    result: Set[str] = set()
+    for el in model.elements:
+        if type(el).__name__ not in ("Community", "Federation", "Domain"):
+            continue
+        obj = getattr(el, "objective", None)
+        if obj is None:
+            continue
+        sat = getattr(obj, "satisfaction", None)
+        if sat is None:
+            continue
+        if getattr(sat, "operator", None) == "any_discharged":
+            group = getattr(sat, "group", None)
+            if group is not None:
+                gname = _obj_name(group)
+                if gname:
+                    result.add(gname)
+    return result
+
+
 def _build_satisfaction_conditions(
     model: Any,
 ) -> Dict[str, Tuple[str, List[str]]]:
@@ -1168,6 +1198,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     """
     descriptors = _build_obligation_descriptors(model)
     group_index = _build_group_index(model)
+    any_discharged_groups = _build_any_discharged_groups(model)
     satisfaction_conditions = _build_satisfaction_conditions(model)
 
     if not descriptors:
@@ -1239,10 +1270,16 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                             and new_obligs.get(other_oid) == ObligationState.WAITING):
                         new_obligs[other_oid] = ObligationState.PENDING
 
-            # P6b — SUPERSEDED sibling suppression: other PENDING or WAITING
-            # members of the same TokenGroup are superseded because one member
-            # already discharged. SUPERSEDED overrides any P6a activation.
-            for group_members in group_index.values():
+            # P6b — SUPERSEDED sibling suppression (any_discharged groups only).
+            # When a member of an any_discharged group discharges, the remaining
+            # siblings are superseded — their purpose is fulfilled by the
+            # discharged member.  SUPERSEDED overrides any P6a activation.
+            # Skipped for all_discharged groups: every member must independently
+            # discharge; suppressing siblings would prevent the group condition
+            # from ever being fully satisfied.
+            for group_name, group_members in group_index.items():
+                if group_name not in any_discharged_groups:
+                    continue
                 if oid in group_members:
                     for sibling_oid in group_members:
                         if sibling_oid == oid:
