@@ -157,7 +157,45 @@ semantics. Redundant capacity is built into the specification — "did
 anyone" (observable) rather than "who must" (unresolvable from outside).
 SUPERSEDED handles the siblings once one discharges.
 
-## 6. Objective satisfaction
+### 5.1 SUPERSEDED — plain-language definition and worked example
+
+**SUPERSEDED, in one sentence:** an obligation becomes moot because a
+sibling obligation in the same collective-responsibility group already
+discharged it — not a failure, just no-longer-needed.
+
+**Worked example.** Three role-fillers (Role A, Role B, Role C) share one
+collective obligation via an `any_discharged` `TokenGroup` — any one of
+them discharging satisfies the group's purpose. All three start PENDING.
+Role A discharges first. At that moment, P6b looks at the other members
+of the same group: Role B and Role C are both still PENDING, so both
+transition to SUPERSEDED. The group's purpose (at least one member
+discharged) is satisfied; B and C's individual burdens are not violations
+— they simply never needed to be acted on, because A already covered the
+collective responsibility.
+
+**What this means in practice for B and C:** their burden disappears from
+having any further bearing on the objective. It is not scored as a
+partial success or a partial failure — `utility_for_objective()` (§12.2)
+excludes SUPERSEDED members from scoring entirely, and `all_discharged`
+counts SUPERSEDED the same as DISCHARGED for satisfaction purposes (§6).
+SUPERSEDED is a *resolution*, not an outcome on its own terms.
+
+**Open edge case (unresolved, not yet decided):** the example above
+assumes B and C are still PENDING (or WAITING) at the moment A discharges.
+P6b only acts on siblings that are PENDING or WAITING when it runs — it
+does not retroactively revisit a sibling that independently became
+VIOLATED (deadline elapsed) or EXPIRED (context removed) *before* A
+discharged. So a group could end up with one member DISCHARGED, one
+member independently VIOLATED, and only the remaining member SUPERSEDED.
+`any_discharged` is still satisfied in that case (one member did
+discharge), but whether the already-VIOLATED sibling's record should be
+retroactively reinterpreted, left as-is, or flagged some other way is not
+addressed anywhere in the design note or the implementation as currently
+specified. Worth a decision if/when a scenario actually produces this
+ordering — not yet exercised by either the consent or GP-referral
+scenarios.
+
+
 
 `Objective` gains a machine-checkable `satisfaction:` clause (AM-27):
 
@@ -201,7 +239,121 @@ without one is silently untracked, and the satisfaction condition can
 become unsatisfiable without any obvious error. See §13.2, item 7 for
 the proposed validator fix.
 
-## 7. Runtime execution sequence
+### 6.1 Provenance and scope of `TokenGroup` relative to `Objective` (revised 2026-06-17)
+
+**Status: design clarification, supersedes the original AM-29 framing
+below in spirit — kept here as a record of how the thinking developed,
+see the revised position at the end of this subsection.**
+
+It is worth being precise about three distinct historical layers that
+get easily conflated, because the standard, the 2011 collective-obligation
+paper, and the EDOC26 toolchain each contribute something different, in
+a specific order:
+
+**Layer 1 — the standard's own `Objective` concept.** ISO/IEC 15414:2015
+defines `objective (of an <X>)` deliberately broadly and entity-agnostically:
+"practical advantage or intended effect, expressed as preferences about
+future states" (applicable to a Party, an AI agent, or a community alike).
+For communities specifically, §7.7 and the contract clauses say the
+objective is *stated* in the contract, which *governs* structure/behaviour/
+policies and *constrains* member behaviour in service of it — but the
+standard does not specify any formal satisfaction relation between the
+objective and individual deontic tokens. There is no `TokenGroup`-equivalent
+concept anywhere in the standard's metamodel (see Annex A Figure A.2:
+`DeonticToken`/`Burden`/`Embargo`/`Permit` are all owned by individual
+`ActiveEO`s; nothing groups them). The link from objective to token is
+simply not addressed at the standard level.
+
+**Layer 2 — the EDOC26 paper's pre-existing, general-purpose link.** Before
+`TokenGroup` existed in this toolchain at all, the paper had *already*
+solved "how do individual deontic tokens relate to community-level
+outcomes" — via AF/EF over individually-owned obligations (§C.2) and the
+priority-weighted utility function (§C.3), demonstrated on
+`seekConsentObligation` and `reportingObligation` as two entirely separate,
+individually-held tokens, with no grouping construct needed anywhere. This
+*is* the general-purpose mechanism connecting individual deontic constraints
+to community-level judgment that the standard's broad `Objective` concept
+calls for — it predates and does not depend on `TokenGroup`.
+
+**Layer 3 — `TokenGroup`, from Linington & Milosevic (2011).** This is a
+narrower, separate problem: "if an obligation is on a community of equal
+members, who acts, and why not leave it to another?" — i.e. collective
+obligation among role-fillers, not the general objective-to-token link.
+`TokenGroup` + `any_discharged` + SUPERSEDED (P3/P6) is this toolchain's
+answer to that 2011 problem, and it is a good answer to it — but it is an
+answer to a different, narrower question than Layer 2 already solved.
+
+**Where AM-27 introduced an unintended coupling.** When `Objective.satisfaction`
+was specified (AM-27) as `operator(TokenGroup)` — i.e. *every* satisfaction
+condition routes through the Layer 3 mechanism — this implicitly made the
+narrow collective-obligation construct carry the weight of the standard's
+general `Objective` concept, even though Layer 2's individual-obligation
+AF/EF/utility machinery already provided that general link, and predates
+`TokenGroup`'s introduction. The original framing of this subsection
+(below the line, kept for record) treated this as a usability/boilerplate
+problem solvable by adding a `discharged(<token>)` shorthand alongside the
+group operators. On reflection that undersells the issue: the concern is
+not merely that singleton groups are verbose, but that promoting
+`TokenGroup` to the *sole* sanctioned mechanism risks implying the standard's
+`Objective` concept is intrinsically collective-obligation-shaped, which it
+is not — the standard never says this, and the paper's own pre-`TokenGroup`
+machinery shows it isn't necessary.
+
+**Revised position:** `Objective.satisfaction` should be understood as
+*primarily* expressed through the individual-obligation machinery the
+paper already has (AF/EF reachability and utility scoring over the
+obligations a community's contract constrains) — this is the general,
+standard-aligned link. `TokenGroup`/`any_discharged`/SUPERSEDED should be
+treated as an optional, named *refinement*, reached for specifically when
+an objective's satisfaction genuinely depends on a collective-responsibility
+relationship among several equally-capable role-fillers — not as a
+mandatory wrapper that every objective, collective or not, must be
+expressed through. Singleton `TokenGroup` usage (per the original AM-29
+text below) is one *legitimate* way to wire a single obligation to an
+objective under the current grammar, but it should not be read as the only
+correct or intended way, and a future grammar revision should make the
+non-collective case expressible without implying a collective relationship
+that isn't actually present in the domain. This is a positioning/emphasis
+question for documentation and future grammar work, not a correctness bug
+in what is already implemented and verified (§13.1).
+
+---
+
+**Original framing (2026-06-16), kept for record:**
+
+As currently specified, `TokenGroup` is the *only* mechanism linking
+`Objective.satisfaction` to the token layer — `all_discharged`/
+`any_discharged` both take a `TokenGroup` reference, and there is no
+grammar form for "the objective is satisfied when this one specific
+token discharges" that doesn't route through a TokenGroup wrapper. In
+practice this means an objective backed by a single, individually-owned
+obligation — the common case, not the exception; see e.g.
+`referralInitiationBurden` in the GP-referral scenario, which has no
+collective-responsibility semantics at all — still requires declaring a
+`token_group` block containing exactly one `member:` line purely to
+satisfy the grammar, not because anything in the domain is actually
+collective.
+
+A singleton `TokenGroup` (one member, `any_discharged` or
+`all_discharged` — equivalent when there is only one member) currently
+serves as objective-to-token linkage by borrowing the syntax built for
+collective obligation. This works, and is not a bug, but — per the
+revised position above — should not be read as evidence that the
+standard's `Objective` concept is itself collective in nature; it's an
+artefact of `TokenGroup` currently being the only available wiring,
+not a reflection of what `Objective.satisfaction` is supposed to mean
+in general.
+
+A possible future grammar form, *not currently planned as a required
+change*, would extend `satisfaction:` to also accept a direct
+single-token reference (e.g. `satisfaction: discharged(referralInitiationBurden)`)
+for the non-collective case, leaving `all_discharged`/`any_discharged`
+over an explicit `TokenGroup` reserved for cases that are genuinely
+collective. Whether this is worth implementing, versus simply documenting
+clearly that singleton groups are a legitimate non-collective idiom under
+the current grammar, is an open question — see §13.2 item 9.
+
+
 
 This is what actually drives coordination behaviour at runtime:
 
@@ -504,6 +656,35 @@ the low-priority one is SUPERSEDED scores differently from the reverse. The
 already provide everything needed; this is a small contained extension
 (~10-15 lines, new method on `KripkeModel`).
 
+**Scope clarification (2026-06-17): "global" does not mean "federation-only".**
+`utility(world)` scores every obligation in `self.obligation_descriptors` —
+i.e. the whole tracked model, meaning whatever set of obligations got
+collected when the current spec was parsed and the Kripke model built from
+it. That set could be two obligations from a single-community spec (the
+consent scenario — `seekConsentObligation` + `reportingObligation`, no
+federation involved, and the source of the paper's worked `u=+0.60`
+example) or four obligations spanning two communities in a federation
+(GP-referral). `utility()` has no concept of community boundaries either
+way — it just sums over whatever flat pool of tracked obligations exists
+in the model. What actually motivates `utility_for_objective()` is not
+"is there a federation" but "are there multiple objectives' worth of
+obligations being tracked in one model, such that a single blended number
+would obscure how any one of them is doing" — federations are the most
+common case where that arises (because federating is exactly what bundles
+multiple communities' objectives into one model), but it is the number of
+distinct objectives in play, not the presence of a federation per se, that
+makes the scoped version necessary.
+
+**Note on per-state scores:** the EDOC26 paper's §4.4/Equation (1) text
+states PENDING=0, but the actual implementation
+(`el_kripke.py`, confirmed by Kripke output) uses PENDING=+0.3 — this is a
+known paper/implementation discrepancy, already tracked in
+`EDOC26_revision_notes.md` item 15, with the implementation judged correct
+and the paper's stated table needing correction before submission.
+`utility_for_objective()` should use the same +0.3 value for consistency
+(see §13.2 item 7/9 area — also worth checking against the actual
+`utility_for_objective_spec.md` handoff, which already used +0.3 correctly).
+
 **Level 3 — Kripke + Bellman value iteration** (future work):
 Optimal path to the objective. Rather than just "is there a feasible path?"
 (EF), Bellman asks "what is the *optimal sequence* of role-filler actions —
@@ -630,6 +811,39 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
    how state-space size scales with concurrent obligation count — relevant
    context for the EDOC26 31-vs-30-worlds discrepancy (§13.3 item below)
    and for any future scalability remarks in the safety paper.
+9. **Revised (2026-06-17, was "Proposed AM-29"): position `TokenGroup`
+   as an optional collective-responsibility refinement, not the sole
+   sanctioned link between `Objective` and tokens.** Originally raised
+   2026-06-16 as a usability concern (singleton `TokenGroup` declarations
+   as boilerplate); revised after tracing the provenance more carefully —
+   see §6.1 for the full discussion. The standard's own `Objective`
+   concept (broad, entity-agnostic, §7.7) does not specify any
+   token-level satisfaction mechanism at all; the EDOC26 paper's
+   individual-obligation AF/EF/utility machinery already provides a
+   general-purpose link from tokens to community-level judgment,
+   predating `TokenGroup`; `TokenGroup` itself answers a narrower,
+   separate question from Linington & Milosevic (2011) — collective
+   responsibility among role-fillers, not general objective-to-token
+   linkage. AM-27's `satisfaction: operator(TokenGroup)` form is not
+   wrong or blocking, but should not be read as implying every objective
+   is intrinsically collective in nature. Whether a future grammar
+   revision should add a non-collective `discharged(<token>)` form
+   (the original AM-29 idea, kept as one option) or simply document
+   singleton-`TokenGroup` as a legitimate non-collective idiom under the
+   current grammar is still open — worth scheduling alongside the V-16
+   validator decision (item 7), since both touch how `TokenGroup` usage
+   should be interpreted/validated.
+10. **Unresolved: SUPERSEDED vs. a sibling already VIOLATED/EXPIRED
+    before group resolution.** Surfaced 2026-06-16 while drafting a
+    plain-language SUPERSEDED example (§5.1). P6b only flips siblings
+    that are PENDING or WAITING at the moment one member discharges — it
+    does not retroactively revisit a sibling that already independently
+    became VIOLATED or EXPIRED beforehand. `any_discharged` is still
+    satisfied either way, but whether an already-VIOLATED sibling's
+    record should be reinterpreted, left as-is, or flagged is undecided
+    and not addressed in either the design note or the implementation.
+    Not yet exercised by any existing scenario — worth a decision before
+    (or if) one does.
 
 ### 13.3 Other open items (carried forward, unchanged this session)
 
