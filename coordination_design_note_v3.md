@@ -1119,6 +1119,30 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
     needs to resolve role-fillers from the spec going forward, rather
     than continuing to hand-wire it per scenario.
 
+13. **No declared delegation from GPPracticeParty to GPClinician for
+    referralInitiationBurden / clinicalHandoverBurden.** Surfaced
+    2026-06-17 during world-count discrepancy investigation between
+    `build_kripke_from_runtime()` (152 worlds) and `build_kripke_model()`
+    (144 worlds) triggered by the `objective-reachable` endpoint.
+    The scenario grants both burdens to `GPClinician` at runtime via
+    explicit `token_from_spec(spec, "referralInitiationBurden", "GPClinician")`
+    in `_build_gp_referral_runtime()`, but the spec contains no `delegation`
+    element from `GPPracticeParty → GPClinician` for either burden.
+    Consequence: `build_kripke_model()` (which walks Commitment roots and
+    follows declared Delegation links) finds `GPPracticeParty` as the holder
+    for both; `build_kripke_from_runtime()` (which reads the actual runtime
+    token) finds `GPClinician`. The runtime code is asserting a delegation
+    relationship that the spec does not express. This is the same class of
+    gap as item 12 (role-filling declared only in toolchain code, not in
+    the EL spec) — and similarly does not corrupt any AF/EF result in
+    current tests (both actors are ACTIVE throughout), but it means the
+    spec is not self-describing with respect to who holds these two
+    burdens or why. The fix requires adding two `delegation` declarations
+    to the scenario: `from: GPPracticeParty to: GPClinician` for each
+    of `referralInitiationBurden` and `clinicalHandoverBurden`, with
+    appropriate obligation text matching the corresponding `commitment`
+    declarations at lines 395 and 413.
+
 ### 13.3 Other open items (carried forward, unchanged this session)
 
 - **EDOC26 31-vs-30-worlds discrepancy** — paper claims 31 worlds;
