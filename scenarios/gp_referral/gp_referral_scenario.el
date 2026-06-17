@@ -18,8 +18,8 @@
  * Federation:
  *   ReferralFederation = { GPPracticeCommunity, SpecialistCommunity }
  *   Federation objective: all_discharged(referralBurdenGroup)
- *   Specialist community objective: any_discharged(specialistBurdenGroup)
- *     → demonstrates both SatisfactionOp variants (AM-27)
+ *   Specialist community objective: all_discharged(specialistBurdenGroup)
+ *     (corrected from any_discharged per §13.1b fix — both groups now use all_discharged)
  *
  * Layer 4 verification questions (el_kripke.py):
  *   Q1: AF(discharged:referralInitiationBurden)?
@@ -32,8 +32,8 @@
  *       EF only (blocked by eventual referralResponseBurden).
  *       Requires strict on referralResponseBurden for AF to hold.
  *   Q4: objective_satisfied:SpecialistCommunity?
- *       EF — any_discharged(specialistBurdenGroup) satisfied when at least
- *       one specialist burden is discharged on some path.
+ *       EF — all_discharged(specialistBurdenGroup) satisfied when both
+ *       referralResponseBurden and assessmentSchedulingBurden are discharged.
  *
  * EF ≠ AF formal finding applies to cross-community delegation:
  *   delegation creates permission for the specialist to respond (EF),
