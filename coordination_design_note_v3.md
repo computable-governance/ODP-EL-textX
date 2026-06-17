@@ -1179,8 +1179,31 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
 - **CommunityObject** — Annex A concept, absent from grammar. Relevant
   to federation-membership-of-communities and "community-level original"
   token ownership (NOTE 6). Not needed for current scope.
-- **Agent-facing query surface** — three REST endpoints needed for
-  agents to query their own token state, permitted/obligated actions,
-  and community objective feasibility. Small-to-medium task (~1-2 days).
-  See `el_api.py` for existing REST bridge pattern. **Now unblocked** —
-  the GP-referral scenario is built and verified, so this can proceed.
+- **Agent-facing query surface** — three REST endpoints for agents to
+  query their own available actions, objective reachability, and
+  objective score. **In progress** — first two endpoints
+  (`available-actions`, `objective-reachable`) implemented and verified
+  2026-06-17, see §13.1c and the `objective-reachable` work later the
+  same night. Third endpoint (`objective-score`, wrapping
+  `utility_for_objective()`) remains for a follow-up session.
+- **Visual representation of live deontic-driven coordination progress**
+  — raised 2026-06-17, deliberately not designed yet, parked for after
+  the third endpoint exists (so there's real, live, queryable data to
+  visualize against rather than hand-picked example worlds). Worth
+  resisting the natural default of BPMN-style flowchart/swimlane
+  visualization, since that vocabulary assumes a fixed step sequence,
+  which this approach specifically does not have — visualizing it that
+  way would smuggle the workflow mental model back in through the
+  picture even after deliberately designing it out of the specification.
+  Candidate directions, none yet prototyped: (1) a state-over-time view
+  — each obligation's deontic state as a horizontal band against a
+  shared time axis, with the objective's `utility_for_objective` score
+  plotted as a continuously-updated line beneath the bands; (2) a
+  steppable/scrubbable view across the Kripke model's actual branching
+  reachable-worlds graph, rather than a single linear path; (3) a live
+  "objective health" dashboard — a single score/gauge for the objective
+  with contributing obligations broken out beneath it, closer to a
+  monitoring-dashboard metaphor than a process diagram. A good candidate
+  exercise once the third endpoint exists: point a visualization
+  directly at the live API and watch the objective score move as the
+  real scenario progresses.
