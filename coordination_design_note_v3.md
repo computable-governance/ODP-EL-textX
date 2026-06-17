@@ -806,7 +806,53 @@ The world-graph already exists; this is a ~50-100 line addition to
 Conclusion: Levels 1 and 2 are done and verified; Level 3 follows as a
 subsequent session once a scenario motivates it.
 
+**Parked idea (2026-06-18, not decided, raised in design discussion):**
+worth considering whether Level 3 (Bellman) should be architected as a
+genuinely separate "optimization engine" sitting back-to-back with the
+"deontic engine" (everything built so far — tokens, obligations, AF/EF,
+`utility_for_objective`), rather than simply a third query mode bolted
+onto the existing `KripkeModel` class. The motivating analogy is the
+separation already proven valuable elsewhere in this toolchain: Layer 3
+knows nothing about objectives or TokenGroups; Layer 4 knows nothing
+about live runtime state; each layer only knows what it strictly needs
+to. Under this framing, a deontic engine would produce the world-graph
+and utility scores as its output, and a separate optimization engine
+would consume that output to answer "which action sequence is optimal,"
+without itself needing any knowledge of burdens, permits, or
+satisfaction conditions. Not yet decided whether this warrants an actual
+architectural split (separate module/class) versus remaining a method on
+`KripkeModel` as currently sketched — worth revisiting once a real
+scenario motivates building Level 3 at all (per the existing
+"best deferred until a scenario concretely motivates" position above),
+since the right boundary may only become clear once there's a concrete
+implementation to draw it around.
+
 ## 13. Milestones
+
+### 13.1e Verification blind spot: Layer 4 reasoning does not catch Layer 3 linkage bugs (2026-06-16/17)
+
+Six `for_action` mismatches existed in the GP-referral scenario across
+2026-06-16/17 — a burden or permit's declared `for_action` string not
+matching the actual name of the action meant to discharge it — and none
+were ever caught by parsing, static validation, or the full Q1–Q4 Kripke
+verification suite. The reason is structural, not accidental: Layer 4
+(`el_kripke.py`) reasons abstractly over possible discharge transitions
+without ever invoking a named action through the real engine, so a
+`for_action` string can be completely wrong and Layer 4's AF/EF results
+remain entirely unaffected — they were never depending on that string
+resolving correctly in the first place. The bugs only became visible once
+the agent-facing API (§13.1c onward) started exercising the scenario
+through Layer 3 (`el_engine.py`'s actual action-matching step) for the
+first time.
+
+**General lesson:** passing Kripke-layer verification is not evidence
+that a scenario can actually be executed through the engine. The two
+layers test genuinely different things, and a scenario can be
+simultaneously "verified" at Layer 4 and broken at Layer 3. Any future
+scenario should be exercised through Layer 3 (e.g. via an API endpoint,
+or a direct `el_engine.py`/`el_runtime.py` smoke test) at least once,
+not solely through Kripke verification, before being treated as
+complete.
 
 ### 13.1d Agent-facing query API, third and final endpoint: `objective-score` (2026-06-18)
 
@@ -1243,11 +1289,9 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
   token ownership (NOTE 6). Not needed for current scope.
 - **Agent-facing query surface** — three REST endpoints for agents to
   query their own available actions, objective reachability, and
-  objective score. **In progress** — first two endpoints
-  (`available-actions`, `objective-reachable`) implemented and verified
-  2026-06-17, see §13.1c and the `objective-reachable` work later the
-  same night. Third endpoint (`objective-score`, wrapping
-  `utility_for_objective()`) remains for a follow-up session.
+  objective score. **Complete** — all three endpoints implemented and
+  verified: `available-actions` and `objective-reachable` (2026-06-17,
+  see §13.1c), `objective-score` (2026-06-18, see §13.1d).
 - **Visual representation of live deontic-driven coordination progress**
   — raised 2026-06-17, deliberately not designed yet, parked for after
   the third endpoint exists (so there's real, live, queryable data to
