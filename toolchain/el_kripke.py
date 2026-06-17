@@ -520,6 +520,68 @@ class KripkeModel:
         )
         return weighted_sum / total_weight
 
+    def utility_for_objective(self, community_name: str, world: World) -> float:
+        """
+        Level 2 — Kripke + scoped utility (coordination_design_note_v3.md §12.2).
+
+        Scores a world using only the members of `community_name`'s satisfaction
+        TokenGroup, rather than all tracked obligations globally. Differentiates
+        within the space of "objective satisfied" worlds — a world where the
+        high-priority burden is DISCHARGED and the low-priority one is PENDING
+        scores differently than the reverse.
+
+        SUPERSEDED members are excluded entirely (consistent with all_discharged
+        treating SUPERSEDED as a pass — see §5.1 of the design note). WAITING
+        members score 0.0 (neutral — trigger not yet fired, distinct from
+        PENDING's +0.3).
+
+        Returns 0.0 if community_name has no entry in satisfaction_conditions,
+        or if the referenced group has no members (defensive — should not happen
+        for a validly-built model). Returns +1.0 if every trackable member is
+        SUPERSEDED (objective achieved via group sibling discharge — the
+        maximally-good outcome for an any_discharged group).
+        """
+        outcome_scores = {
+            ObligationState.DISCHARGED: +1.0,
+            ObligationState.PENDING:    +0.3,
+            ObligationState.WAITING:     0.0,
+            ObligationState.EXPIRED:     0.0,
+            ObligationState.VIOLATED:   -1.0,
+            # SUPERSEDED intentionally absent — handled by exclusion below
+        }
+
+        cond = self.satisfaction_conditions.get(community_name)
+        if cond is None:
+            return 0.0
+        _operator, member_ids = cond  # (operator, [obligation_id, ...])
+        if not member_ids:
+            return 0.0
+
+        obl_dict = world.obligation_dict()
+        total_weight = 0.0
+        weighted_sum = 0.0
+        any_superseded = False
+
+        for oid in member_ids:
+            state = obl_dict.get(oid)
+            if state is None:
+                continue  # obligation not tracked in this world — skip
+            if state == ObligationState.SUPERSEDED:
+                any_superseded = True
+                continue  # excluded from scoring and denominator
+            desc = self.obligation_descriptors.get(oid)
+            weight = desc.priority_weight if desc else 0.5
+            weighted_sum += outcome_scores.get(state, 0.0) * weight
+            total_weight += weight
+
+        if total_weight == 0.0:
+            # Every trackable member was SUPERSEDED (objective achieved via
+            # group sibling discharge) — return +1.0. If no member was
+            # trackable at all (data gap), return 0.0.
+            return 1.0 if any_superseded else 0.0
+
+        return weighted_sum / total_weight
+
     def ranked_reachable(
         self,
         world: World,
