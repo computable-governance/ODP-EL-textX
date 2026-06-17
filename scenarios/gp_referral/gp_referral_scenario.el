@@ -101,7 +101,7 @@ artefact_object patientRecord
 
 // discharge_mode: strict — GP must initiate promptly; AF(discharged:referralInitiationBurden) holds.
 burden referralInitiationBurden {
-    for_action: "initiate_specialist_referral"
+    for_action: "initiateReferral"
     state: active
     deadline: "48 hours from clinical decision"
     discharge_mode: strict
@@ -112,7 +112,7 @@ burden referralInitiationBurden {
 // discharge_mode: eventual — GP may delay handover; AF does not hold for clinicalHandoverBurden.
 // Priority: normal — lower utility weight in Bellman planner (§C.3).
 burden clinicalHandoverBurden {
-    for_action: "provide_clinical_handover"
+    for_action: "provideHandover"
     state: active
     deadline: "referral episode"
     discharge_mode: eventual
