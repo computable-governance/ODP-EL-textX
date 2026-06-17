@@ -808,6 +808,68 @@ subsequent session once a scenario motivates it.
 
 ## 13. Milestones
 
+### 13.1d Agent-facing query API, third and final endpoint: `objective-score` (2026-06-18)
+
+**Implemented:** `GET /communities/{community_name}/objective-score` in
+`toolchain/el_api.py`, the third and final endpoint from
+`agent_query_api_spec.md`, completing the agent-facing query API.
+Builds a Kripke model anchored to the current Layer 3 runtime state
+(hybrid mode: `build_kripke_from_runtime`) and evaluates
+`utility_for_objective(community_name, km.initial)`, returning a
+weighted score in [-1.0, +1.0] reflecting obligation outcomes in the
+current world, plus a per-obligation breakdown (obligation name, deontic
+state, priority weight). Reuses the same `_runtime` and
+`build_kripke_from_runtime` pattern as `objective-reachable`; no new
+runtime wiring needed.
+
+**Key design decisions:**
+
+- **`null` score for communities with no satisfaction condition.**
+  `objective_score` is returned as `null` paired with
+  `has_satisfaction_condition: false` for communities absent from
+  `km.satisfaction_conditions` (e.g. `GPPracticeCommunity`), consistent
+  with the `objective-reachable` precedent. Returning `0.0` would be
+  ambiguous: indistinguishable from a community whose obligations are
+  precisely balanced between DISCHARGED and VIOLATED.
+
+- **SUPERSEDED obligations included in the breakdown for transparency.**
+  `utility_for_objective()` excludes SUPERSEDED members from the scoring
+  numerator and denominator (group sibling already discharged; the purpose
+  is fulfilled). They still appear in the breakdown with `state:
+  "SUPERSEDED"` so callers can see why the denominator is smaller than
+  the total member count.
+
+**Verified, real output against the GP-referral runtime (144 worlds,
+horizon 10):**
+
+- `SpecialistCommunity` — `objective_score: 0.3`. Breakdown:
+  `referralResponseBurden` (PENDING, weight 0.75),
+  `assessmentSchedulingBurden` (PENDING, weight 0.5). Arithmetic:
+  (0.3 × 0.75 + 0.3 × 0.5) / (0.75 + 0.5) = 0.375 / 1.25 = **0.3**.
+
+- `ReferralFederation` — `objective_score: 0.3`. Breakdown:
+  `referralInitiationBurden` (PENDING, weight 1.0),
+  `clinicalHandoverBurden` (PENDING, weight 0.5),
+  `referralResponseBurden` (PENDING, weight 0.75),
+  `assessmentSchedulingBurden` (PENDING, weight 0.5). Arithmetic:
+  (0.3 × 1.0 + 0.3 × 0.5 + 0.3 × 0.75 + 0.3 × 0.5) / (1.0 + 0.5 + 0.75 + 0.5)
+  = 0.825 / 2.75 = **0.3**.
+
+  Both communities returning 0.3 is a structural property, not a
+  coincidence. PENDING obligations score +0.3 regardless of weight.
+  When all group members share the same outcome state — which is
+  structurally guaranteed at t=0, when every obligation has just been
+  granted and none has yet been actioned — the weighted average collapses
+  to that state's score regardless of how weights are distributed. Weights
+  only differentiate the score when members are in *different* states
+  (e.g. one DISCHARGED, another VIOLATED). The 0.3 reading is therefore
+  correct: "everything is pending, nothing has gone wrong yet."
+
+- `GPPracticeCommunity` — `objective_score: null`,
+  `has_satisfaction_condition: false`, `breakdown: []`. Correct:
+  `GPPracticeCommunity` declares no `SatisfactionCondition` on its
+  objective.
+
 ### 13.1c Agent-facing query API, first endpoint: `available-actions` (2026-06-17)
 
 **Implemented:** `GET /actors/{actor_name}/available-actions` in the new
