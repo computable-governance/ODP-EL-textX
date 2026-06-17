@@ -1119,29 +1119,49 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
     needs to resolve role-fillers from the spec going forward, rather
     than continuing to hand-wire it per scenario.
 
-13. **No declared delegation from GPPracticeParty to GPClinician for
-    referralInitiationBurden / clinicalHandoverBurden.** Surfaced
-    2026-06-17 during world-count discrepancy investigation between
-    `build_kripke_from_runtime()` (152 worlds) and `build_kripke_model()`
-    (144 worlds) triggered by the `objective-reachable` endpoint.
-    The scenario grants both burdens to `GPClinician` at runtime via
-    explicit `token_from_spec(spec, "referralInitiationBurden", "GPClinician")`
-    in `_build_gp_referral_runtime()`, but the spec contains no `delegation`
-    element from `GPPracticeParty → GPClinician` for either burden.
-    Consequence: `build_kripke_model()` (which walks Commitment roots and
-    follows declared Delegation links) finds `GPPracticeParty` as the holder
-    for both; `build_kripke_from_runtime()` (which reads the actual runtime
-    token) finds `GPClinician`. The runtime code is asserting a delegation
-    relationship that the spec does not express. This is the same class of
-    gap as item 12 (role-filling declared only in toolchain code, not in
-    the EL spec) — and similarly does not corrupt any AF/EF result in
-    current tests (both actors are ACTIVE throughout), but it means the
-    spec is not self-describing with respect to who holds these two
-    burdens or why. The fix requires adding two `delegation` declarations
-    to the scenario: `from: GPPracticeParty to: GPClinician` for each
-    of `referralInitiationBurden` and `clinicalHandoverBurden`, with
-    appropriate obligation text matching the corresponding `commitment`
-    declarations at lines 395 and 413.
+13. **`_build_obligation_descriptors()` does not traverse EnterpriseObject
+    `holds`/`delegated_from` body attributes — toolchain fix pending.**
+    Surfaced 2026-06-17 during world-count discrepancy investigation
+    between `build_kripke_from_runtime()` (initially 152 worlds, fixed
+    to 144 by the deadline-default bug) and `build_kripke_model()` (144
+    worlds). Initial diagnosis was "the spec has no delegation from
+    GPPracticeParty to GPClinician" — that diagnosis is now corrected.
+
+    **What is now understood — no scenario fix needed.** The scenario
+    already correctly expresses the burden-holding relationship:
+
+        agent GPClinician {
+            holds referralInitiationBurden
+            holds clinicalHandoverBurden
+            delegated_from GPPracticeParty
+                duration: "referral episode"
+        }
+
+    `holds` declares GPClinician as the token holder; `delegated_from
+    GPPracticeParty` names the source of the delegation. This is the
+    intra-community principal→agent mechanism (§7.4/§7.10), semantically
+    distinct from the cross-community top-level `Delegation` element used
+    for `GPPracticeParty → SpecialistClinicianAgent`. The scenario is
+    self-describing for these two burdens; no delegation declarations
+    need to be added to it.
+
+    **What remains open — toolchain fix not yet implemented.**
+    `_build_obligation_descriptors()` in `el_kripke.py` walks top-level
+    `Delegation` elements from `Commitment` roots. It does not read
+    `holds` or `delegated_from` attributes from `EnterpriseObject`
+    bodies. When it finds the `Commitment` root at `GPPracticeParty` for
+    `referralInitiationBurden` and `clinicalHandoverBurden` and sees no
+    outgoing top-level `Delegation`, it stops and records
+    `GPPracticeParty` as the holder — missing the `holds`/`delegated_from`
+    path that names `GPClinician`. The fix is to extend
+    `_build_obligation_descriptors()` to fall through to EnterpriseObject
+    body attributes when the `Delegation` walk from a `Commitment` root
+    finds no outgoing link. Until that fix is in, `build_kripke_model()`
+    records the wrong accountability leaf for these two burdens;
+    `build_kripke_from_runtime()` is unaffected (it reads the runtime
+    token directly). No AF/EF result is currently corrupted — both
+    actors are ACTIVE throughout — but the pre-execution Kripke model
+    is answering obligation questions with the wrong holder.
 
 ### 13.3 Other open items (carried forward, unchanged this session)
 
