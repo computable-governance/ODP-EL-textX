@@ -124,7 +124,7 @@ burden clinicalHandoverBurden {
 // This is the key Kripke verification target for the cross-community delegation.
 // Change to discharge_mode: strict to restore AF(discharged:referralResponseBurden).
 burden referralResponseBurden {
-    for_action: "acknowledge_and_respond_to_referral"
+    for_action: "acknowledgeReferral"
     state: active
     deadline: "5 working days from referral receipt"
     discharge_mode: eventual
@@ -134,7 +134,7 @@ burden referralResponseBurden {
 
 // discharge_mode: eventual — scheduling follows acknowledgement; demonstrates EF ≠ AF for secondary obligation.
 burden assessmentSchedulingBurden {
-    for_action: "schedule_specialist_assessment"
+    for_action: "scheduleAssessment"
     state: active
     deadline: "14 days from referral receipt"
     discharge_mode: eventual
@@ -297,7 +297,7 @@ community SpecialistCommunity
     description: "Community governing specialist response, scheduling, and assessment of referred patients"
     {
         objective: "Process referral and schedule specialist assessment within the required timeframe"
-            satisfaction: any_discharged(specialistBurdenGroup)
+            satisfaction: all_discharged(specialistBurdenGroup)
             sub_objective acknowledgeReferralTask: "Acknowledge receipt of referral from GP practice"
                 assigned_to role specialistRole
             sub_objective scheduleAssessmentTask: "Schedule specialist assessment appointment for the patient"
