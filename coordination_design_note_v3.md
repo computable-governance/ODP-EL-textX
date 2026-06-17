@@ -588,6 +588,27 @@ consent obligation, AF=False/EF=True for reporting obligation).
 is silently absent from the world-state, which can make a satisfaction
 condition unsatisfiable with no direct diagnostic.
 
+**`el_api.py`** — Agent-facing query API (new, 2026-06-17)
+FastAPI application providing the first of three planned read-only
+coordination-query endpoints (see §13.1c, `agent_query_api_spec.md`).
+Did not exist prior to this session — the "FastAPI/uvicorn — REST bridge"
+referenced elsewhere in this document and in CLAUDE.md's "Tools &
+resources" was aspirational/planned, not actually built, until now.
+
+- `GET /actors/{actor_name}/available-actions`: implemented. Reads Layer 3
+  runtime state directly (no Kripke model) — synthesises an actor's
+  current obligated/permitted actions from active burdens and unembargoed
+  permits. 404 for an unenrolled actor name.
+- `GET /communities/{community_name}/objective-reachable`: planned, not
+  yet implemented.
+- `GET /communities/{community_name}/objective-score`: planned, not yet
+  implemented.
+
+Initializes a single global `Runtime` from the GP-referral scenario via
+explicit enrollment (not `build_from_federation()` — see §13.1c for why)
+with explicit `role_name` parameters, since the scenario has no static
+role-filling declaration (§13.2 item 12).
+
 ## 10. Boundary: transactional vs. dispositional norms
 
 The deontic web specifies the *transactional* layer completely —
@@ -787,9 +808,75 @@ subsequent session once a scenario motivates it.
 
 ## 13. Milestones
 
-### 13.1b Scenario correctness fix: `specialistBurdenGroup` operator and `for_action` linkage (2026-06-17)
+### 13.1c Agent-facing query API, first endpoint: `available-actions` (2026-06-17)
 
-Surfaced by a clinical-correctness question raised in design discussion,
+**Implemented:** `GET /actors/{actor_name}/available-actions` in the new
+`toolchain/el_api.py`, the first of three planned endpoints from
+`agent_query_api_spec.md`. Reads Layer 3 runtime state directly — no
+Kripke model involved, since "what's available right now" is a
+present-tense, deterministic question about current token holdings, not
+a question about possible futures. Synthesises an actor's currently
+available actions from their active burdens (tagged `"obligated"`) and
+unembargoed permits (tagged `"permitted"`), returning a 404 with a clear
+message for an actor not enrolled in the runtime.
+
+Runtime initialisation required explicit enrollment rather than
+`build_from_federation()` or `build_from_spec()`: `ReferralFederation`'s
+members are `Community`-typed, not `Domain`-typed, so the federation
+factory's actor-collection step (which only looks at `Domain` members)
+produces nothing for this scenario. Enrollment also required an explicit
+`role_name` parameter on `enroll()` for `GPClinician`
+(`role_name="gpClinicianRole"`) and `SpecialistClinicianAgent`
+(`role_name="specialistRole"`) — without it, `el_engine.py`'s
+effect-targeting (step 7b) falls back to treating the literal string
+`"specialistRole"` as a phantom actor name, since nothing in the scenario
+declares who actually *fills* either role (no `fills_role`/equivalent
+construct exists anywhere in the file — only `assignment_policy` and
+`on_join`/`on_leave` effects, which describe requirements and
+consequences of role-filling, not the act of filling itself). This is
+related to, but distinct from, the already-tracked `fill_role`/`leave_role`
+*dynamic* speech-act gap (§13.3): that gap is about changing role-fillers
+*at runtime*; this is the more basic absence of any *static* role-filling
+declaration at all.
+
+**Verified, real output against the GP-referral runtime:**
+`SpecialistClinicianAgent` — obligated to `acknowledgeReferral`, permitted
+`access_patient_clinical_records`. `GPClinician` — obligated to
+`initiateReferral` and `provideHandover`. `GPPracticeParty` — zero
+available actions (correct: a principal holding no tokens directly,
+distinct from the next case). A deliberately nonexistent name,
+`"UnknownActor"` — not an entity from the scenario, a synthetic negative
+test case used only to confirm the 404 path — correctly returns HTTP 404
+rather than an empty list, which matters: an empty list and "this actor
+doesn't exist" are different facts a caller needs to distinguish.
+
+**Two more `for_action` mismatches found and fixed, surfacing only
+because this was the first time the scenario was exercised through
+Layer 3 rather than just Layer 4:** `referralInitiationBurden.for_action`
+(`"initiate_specialist_referral"` → `"initiateReferral"`) and
+`clinicalHandoverBurden.for_action` (`"provide_clinical_handover"` →
+`"provideHandover"`) — same bug class as the two specialist-side fixes
+in §13.1b, bringing the total to **four** corrected `for_action` linkage
+bugs in this one scenario file. Re-verified after the fix: Q1–Q4 truth
+values and world count (144) unchanged, all `utility_for_objective`
+values unchanged — expected, since `for_action` linkage is a Layer 3
+concern the Kripke layer's results never depended on.
+
+**Two further gaps found during the full sweep, deliberately left
+unfixed this session:** `escalationNoticeBurden` and
+`patientRecordAccessPermit` both have a `for_action` value with *no*
+corresponding action declared anywhere in the file at all — not a wrong
+string, an absent one. Neither affects current results
+(`escalationNoticeBurden` only activates on violation, not part of the
+initial token grant; `patientRecordAccessPermit`'s missing action
+doesn't affect whether the API surfaces it as a permitted action). Open
+question, not yet resolved: is it legitimate for a token to exist purely
+as state with no consuming action ever declared, or does every token
+need a matching action body, making this a deeper instance of the same
+authoring-gap class as the four already-fixed mismatches? See §13.2 for
+tracking.
+
+
 not by any toolchain failure: does it make sense for the specialist side
 to satisfy its objective by *responding to* the referral without ever
 *scheduling* the assessment (or vice versa)? No — these are two genuinely
@@ -997,6 +1084,40 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
     and not addressed in either the design note or the implementation.
     Not yet exercised by any existing scenario — worth a decision before
     (or if) one does.
+11. **Unresolved: tokens with a `for_action` value but no corresponding
+    action declared anywhere in the scenario.** Surfaced 2026-06-17
+    during the full `for_action` sweep that found the two GP-side
+    mismatches (§13.1c). `escalationNoticeBurden` and
+    `patientRecordAccessPermit` both have this property — not a wrong
+    `for_action` string (the bug class already found and fixed four
+    times in this scenario), but a *missing* action body to match
+    against at all. Neither currently affects results
+    (`escalationNoticeBurden` only activates on violation, outside the
+    initial token grant; the permit's missing action doesn't affect
+    whether the API surfaces it). Open question: is a token legitimately
+    allowed to exist as pure state with no consuming action ever
+    declared, or should this be flagged the same way V-16 (item 7) would
+    flag an unbacked `TokenGroup` member — i.e. is this a fifth instance
+    of the authoring-gap class, just with a different symptom (absent
+    rather than mismatched)? Deliberately left unfixed pending this
+    decision.
+12. **No static role-filling declaration mechanism exists in the
+    grammar.** Surfaced 2026-06-17 while building the `available-actions`
+    endpoint's runtime initialisation. The GP-referral scenario declares
+    `assignment_policy` (requirements for who *may* fill a role) and
+    `on_join`/`on_leave` effects (consequences of filling/leaving a
+    role), but nothing that actually states *who fills* `specialistRole`
+    or `gpClinicianRole` — no `fills_role` construct or equivalent
+    exists anywhere in the grammar. This is distinct from the
+    already-tracked `fill_role`/`leave_role` *speech act* gap (next
+    item, carried forward from earlier sessions): that gap is about
+    changing role-fillers dynamically at runtime; this is the more basic
+    absence of any way to declare role-filling *statically* at all.
+    Worked around for this session via an explicit `role_name` parameter
+    on `enroll()` rather than reading it from the spec, since nothing in
+    the spec states it. Worth a grammar amendment if more of the toolchain
+    needs to resolve role-fillers from the spec going forward, rather
+    than continuing to hand-wire it per scenario.
 
 ### 13.3 Other open items (carried forward, unchanged this session)
 
