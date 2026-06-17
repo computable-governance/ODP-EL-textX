@@ -6,6 +6,7 @@ Agent-facing coordination query API (Layer 3/4 bridge).
 Endpoints implemented:
   GET /actors/{actor_name}/available-actions
   GET /communities/{community_name}/objective-reachable
+  GET /communities/{community_name}/objective-score
 
 Design reference: coordination_design_note_v3.md §9 (agent-facing query surface)
 Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, Annex C
@@ -125,6 +126,21 @@ class ObjectiveReachableResponse(BaseModel):
     horizon: int
 
 
+class ScoredObligation(BaseModel):
+    obligation: str
+    state: str           # DISCHARGED | PENDING | VIOLATED | EXPIRED | SUPERSEDED | WAITING
+    priority_weight: float
+
+
+class ObjectiveScoreResponse(BaseModel):
+    community: str
+    objective_score: Optional[float]  # null when has_satisfaction_condition=false
+    has_satisfaction_condition: bool
+    breakdown: List[ScoredObligation]
+    worlds_checked: int
+    horizon: int
+
+
 # ── Endpoint 1: GET /actors/{actor_name}/available-actions ────────────────────
 
 @app.get(
@@ -231,5 +247,75 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         worlds_checked=len(km.worlds),
         proposition=prop,
         modal_operator="EF",
+        horizon=_KRIPKE_HORIZON,
+    )
+
+
+# ── Endpoint 3: GET /communities/{community_name}/objective-score ─────────────
+
+@app.get(
+    "/communities/{community_name}/objective-score",
+    response_model=ObjectiveScoreResponse,
+    summary="Score a community's objective against the current runtime state",
+    description=(
+        "Builds a Kripke model anchored to the current Layer 3 runtime state "
+        "(hybrid mode: build_kripke_from_runtime) and evaluates "
+        "utility_for_objective(community_name, initial_world). Returns a "
+        "weighted score in [-1.0, +1.0] reflecting obligation outcomes in the "
+        "current world, plus a per-obligation breakdown showing each member's "
+        "state and priority weight. has_satisfaction_condition=false means the "
+        "spec declares no SatisfactionCondition for this community — "
+        "objective_score is null (not a failure; the objective is simply "
+        "unscored). 404 for an unknown community name."
+    ),
+)
+def get_objective_score(community_name: str) -> ObjectiveScoreResponse:
+    known_communities = {
+        el.name
+        for el in _runtime._spec.elements
+        if type(el).__name__ in ("Community", "Federation", "Domain")
+    }
+    if community_name not in known_communities:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Community '{community_name}' is not declared in the current spec.",
+        )
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    has_condition = community_name in km.satisfaction_conditions
+
+    if not has_condition:
+        return ObjectiveScoreResponse(
+            community=community_name,
+            objective_score=None,
+            has_satisfaction_condition=False,
+            breakdown=[],
+            worlds_checked=len(km.worlds),
+            horizon=_KRIPKE_HORIZON,
+        )
+
+    score = km.utility_for_objective(community_name, km.initial)
+    _operator, member_ids = km.satisfaction_conditions[community_name]
+    obl_dict = km.initial.obligation_dict()
+
+    breakdown: List[ScoredObligation] = []
+    for oid in member_ids:
+        state = obl_dict.get(oid)
+        if state is None:
+            continue  # obligation not tracked in the initial world
+        desc = km.obligation_descriptors.get(oid)
+        weight = desc.priority_weight if desc else 0.5
+        breakdown.append(ScoredObligation(
+            obligation=oid,
+            state=state.name,
+            priority_weight=weight,
+        ))
+
+    return ObjectiveScoreResponse(
+        community=community_name,
+        objective_score=score,
+        has_satisfaction_condition=True,
+        breakdown=breakdown,
+        worlds_checked=len(km.worlds),
         horizon=_KRIPKE_HORIZON,
     )
