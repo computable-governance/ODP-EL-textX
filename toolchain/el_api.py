@@ -1,0 +1,177 @@
+"""
+el_api.py
+=========
+Agent-facing coordination query API (Layer 3/4 bridge).
+
+Endpoint implemented in this pass:
+  GET /actors/{actor_name}/available-actions
+
+Design reference: coordination_design_note_v3.md §9 (agent-facing query surface)
+Standard reference: ISO/IEC 15414:2015 §6.4, §6.6
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+_HERE = Path(__file__).resolve().parent
+_REPO_ROOT = _HERE.parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_parser import parse
+from el_runtime import Runtime
+
+
+# ── Runtime initialisation ────────────────────────────────────────────────────
+
+_SCENARIO = _REPO_ROOT / "scenarios" / "gp_referral" / "gp_referral_scenario.el"
+
+
+def _build_gp_referral_runtime() -> Runtime:
+    """
+    Parse the GP-referral scenario and initialise a Runtime with actors enrolled
+    and tokens granted to their actual holders.
+
+    build_from_federation() is not used: ReferralFederation's members are
+    Community elements, not Domain elements, so its actor-collection step
+    produces nothing and no tokens are granted. build_from_spec() has a
+    documented gap for Commitment/Delegation-assigned tokens. We enrol
+    explicitly, matching the scenario's accountability structure.
+
+    Role assignments:
+      GPClinician fills gpClinicianRole (declared at GPPracticeCommunity line 250;
+        confirmed against the file — no explicit fills_role declaration exists,
+        only assignment_policy requirements and on_join/on_leave effects).
+      SpecialistClinicianAgent fills specialistRole (declared at SpecialistCommunity
+        line 319; same gap — no fills_role declaration, inferred from holds +
+        delegated_from + assignment_policy).
+      GPPracticeParty and SpecialistParty are parties (principals), not role-fillers.
+
+    Token grants:
+      GPClinician           — referralInitiationBurden, clinicalHandoverBurden
+      SpecialistParty       — assessmentSchedulingBurden
+      SpecialistClinicianAgent — referralResponseBurden, patientRecordAccessPermit
+    """
+    result = parse(_SCENARIO, validate=False)
+    if not result.ok:
+        raise RuntimeError(f"GP-referral parse failed: {result.errors}")
+
+    spec = result.model
+    state = initial_state()
+
+    state = enroll(state, "GPPracticeParty")
+    state = enroll(state, "GPClinician",              role_name="gpClinicianRole")
+    state = enroll(state, "SpecialistParty")
+    state = enroll(state, "SpecialistClinicianAgent",  role_name="specialistRole")
+
+    for token_name, holder in [
+        ("referralInitiationBurden",   "GPClinician"),
+        ("clinicalHandoverBurden",     "GPClinician"),
+        ("assessmentSchedulingBurden", "SpecialistParty"),
+        ("referralResponseBurden",     "SpecialistClinicianAgent"),
+        ("patientRecordAccessPermit",  "SpecialistClinicianAgent"),
+    ]:
+        state = grant_token(state, token_from_spec(spec, token_name, holder))
+
+    return Runtime(state, spec)
+
+
+_runtime = _build_gp_referral_runtime()
+
+
+# ── FastAPI application ───────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="ODP-EL Agent Coordination API",
+    description=(
+        "Read-only coordination query endpoints for agents operating under "
+        "ODP Enterprise Language governance (ISO/IEC 15414:2015)."
+    ),
+    version="0.1.0",
+)
+
+
+# ── Response models ───────────────────────────────────────────────────────────
+
+class AvailableAction(BaseModel):
+    action: str
+    reason: str            # "obligated" | "permitted"
+    token: str             # burden or permit name that makes this action available
+    deadline: Optional[str] = None
+
+
+class AvailableActionsResponse(BaseModel):
+    actor: str
+    available_actions: List[AvailableAction]
+
+
+# ── Endpoint 1: GET /actors/{actor_name}/available-actions ────────────────────
+
+@app.get(
+    "/actors/{actor_name}/available-actions",
+    response_model=AvailableActionsResponse,
+    summary="Return the actions an actor can take right now",
+    description=(
+        "Synthesises available actions from the actor's current permits, "
+        "embargoes, and active obligations. Each entry is tagged 'obligated' "
+        "(an active burden requires the action) or 'permitted' (a permit grants "
+        "it and no embargo blocks it). Reads directly from the current Layer 3 "
+        "runtime state — no Kripke model is needed for this endpoint."
+    ),
+)
+def get_available_actions(actor_name: str) -> AvailableActionsResponse:
+    state = _runtime.current_state()
+
+    # 404 if actor is not enrolled in the current runtime
+    enrolled = {a.actor_name for a in state.actors}
+    if actor_name not in enrolled:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Actor '{actor_name}' is not enrolled in the current runtime.",
+        )
+
+    # Collect the actor's active embargoes.
+    # for_action=None means the embargo blocks all actions; a named for_action
+    # blocks only that specific action (mirrors el_engine.py step 5 logic).
+    active_embargoes: set[Optional[str]] = set()
+    for tok in state.tokens:
+        if tok.holder == actor_name and tok.kind == "embargo" and tok.state == "active":
+            active_embargoes.add(tok.for_action)
+
+    def _is_embargoed(action_name: str) -> bool:
+        return None in active_embargoes or action_name in active_embargoes
+
+    actions: List[AvailableAction] = []
+
+    for tok in state.tokens:
+        if tok.holder != actor_name:
+            continue
+        if tok.state != "active":
+            continue
+        if not tok.for_action:
+            continue  # token carries no action association — nothing to surface
+
+        if tok.kind == "burden":
+            actions.append(AvailableAction(
+                action=tok.for_action,
+                reason="obligated",
+                token=tok.token_name,
+                deadline=tok.deadline,
+            ))
+        elif tok.kind == "permit":
+            if not _is_embargoed(tok.for_action):
+                actions.append(AvailableAction(
+                    action=tok.for_action,
+                    reason="permitted",
+                    token=tok.token_name,
+                    deadline=None,
+                ))
+
+    return AvailableActionsResponse(actor=actor_name, available_actions=actions)
