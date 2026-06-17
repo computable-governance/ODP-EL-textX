@@ -644,19 +644,48 @@ Binary existence query. "Will/can the community objective be reached?"
 check whether `objective_satisfied:<community>` inevitably or feasibly holds.
 Sufficient for yes/no compliance/feasibility questions.
 
-**Level 2 — Kripke + utility** (implemented and verified 2026-06-17 against
-the GP-referral scenario):
-A priority-weighted score per world, rather than a binary yes/no.
-`utility(world)` scores every active obligation
-globally (priority-weighted). `utility_for_objective(community_name, world)`
-scores only the members of that community's satisfaction `TokenGroup` —
-same priority-weighted average, but SUPERSEDED members excluded entirely
-and WAITING members scored 0.0 (neutral, distinct from PENDING's +0.3).
+**Level 2 — Kripke + utility, a.k.a. "scoped utility"** (implemented and
+verified 2026-06-17 against the GP-referral scenario):
+A priority-weighted score per world, rather than a binary yes/no, computed
+by the same formula either way: `Σ(score × priority weight) / Σ(priority
+weight)`, summed over some set of obligations. The two functions differ
+only in *which obligations get included in that sum* — nothing else
+changes.
+`utility(world)` ("global utility") sums over every obligation
+`_build_obligation_descriptors()` tracked when the model was built — for
+GP-referral, that's all four obligations across both communities, no
+matter which community's question is actually being asked.
+`utility_for_objective(community_name, world)` ("scoped utility") sums
+over a deliberately smaller set: just the obligation IDs listed in
+`community_name`'s own `satisfaction_conditions` entry — for
+`SpecialistCommunity`, that's only `referralResponseBurden` and
+`assessmentSchedulingBurden`, excluding the two obligations on the GP
+side entirely. "Scoped" names this — which obligations are summed over —
+not a different formula, weighting scheme, or per-obligation scoring
+rule, all of which stay identical between the two functions. SUPERSEDED
+members are excluded entirely from either sum, and WAITING members score
+0.0 (neutral, distinct from PENDING's +0.3).
 Implemented as a new method on `KripkeModel` in `el_kripke.py`; reads
 `self.satisfaction_conditions` (populated by `_build_satisfaction_conditions()`
 at build time, AM-27) directly for the member-ID list — no separate
 `group_index` lookup needed, since `satisfaction_conditions` already stores
 `(operator, [member_ids])` rather than `(operator, group_name)`.
+
+**"Global" does not mean "federation-only."** Worth stating immediately,
+since the word invites that assumption: `utility(world)` has no concept
+of communities or federations at all — it just sums over whatever flat
+set of obligations `_build_obligation_descriptors()` happened to track
+for the model in front of it. That set could be two obligations from a
+single-community spec with no federation involved whatsoever (the
+consent scenario — `seekConsentObligation` + `reportingObligation`, the
+source of the paper's worked `u=+0.60` example), or four obligations
+spanning two communities in a federation (GP-referral). Federation makes
+the global/scoped distinction more visible and more useful — since
+federating is exactly what bundles multiple communities' obligations
+into one model, creating the dilution risk scoped utility exists to
+avoid — but federation is not what *causes* the distinction to exist.
+The distinction exists the moment a model tracks more than one objective's
+worth of obligations, federation or not.
 
 **Verified values, GP-referral scenario, corrected 2026-06-17** (scenario
 fix applied same day, see §13.1b — `specialistBurdenGroup` now uses
@@ -687,11 +716,12 @@ that mechanism is scoped to `any_discharged` groups only (commit
   VIOLATED, `assessmentSchedulingBurden` WAITING:
   `utility_for_objective('SpecialistCommunity', w)` = **−0.6000**
   versus global `utility(w)` = **−0.1333** for the same world — unchanged
-  from the pre-fix run. The divergence is the concrete demonstration of
-  why the scoped version exists: the global figure is diluted toward
-  neutral by `referralInitiationBurden` (PENDING, weight 1.0) and
+  from the pre-fix run. This is the concrete illustration of the point
+  above: the global figure is diluted toward neutral by
+  `referralInitiationBurden` (PENDING, weight 1.0) and
   `clinicalHandoverBurden` (PENDING, weight 0.5) sitting alongside the two
-  specialist obligations in the same model.
+  specialist obligations in the same model — nothing to do with
+  federation per se, just two extra obligations being averaged in.
 - **Synthetic edge case** — both specialist burdens SUPERSEDED (a state
   that can no longer arise naturally for this group under `all_discharged`,
   but the method's logic is exercised here regardless via a hand-built
@@ -715,27 +745,6 @@ one. This is not a regression; it's confirmation the fix took effect.
 All values manually re-verified against the priority-weighted formula
 before being recorded here; see also `EDOC26_revision_notes.md` item 15/19
 for the confirmed PENDING=+0.3 scoring convention this method follows.
-
-**Scope clarification (2026-06-17): "global" does not mean "federation-only".**
-`utility(world)` scores every obligation in `self.obligation_descriptors` —
-i.e. the whole tracked model, meaning whatever set of obligations got
-collected when the current spec was parsed and the Kripke model built from
-it. That set could be two obligations from a single-community spec (the
-consent scenario — `seekConsentObligation` + `reportingObligation`, no
-federation involved, and the source of the paper's worked `u=+0.60`
-example) or four obligations spanning two communities in a federation
-(GP-referral). `utility()` has no concept of community boundaries either
-way — it just sums over whatever flat pool of tracked obligations exists
-in the model. What actually motivates `utility_for_objective()` is not
-"is there a federation" but "are there multiple objectives' worth of
-obligations being tracked in one model, such that a single blended number
-would obscure how any one of them is doing" — federations are the most
-common case where that arises (because federating is exactly what bundles
-multiple communities' objectives into one model), but it is the number of
-distinct objectives in play, not the presence of a federation per se, that
-makes the scoped version necessary. The step=2 synthetic-world figures
-above (−0.6 scoped vs. −0.1333 global) are the concrete illustration of
-exactly this point.
 
 **Note on per-state scores:** the EDOC26 paper's §4.4/Equation (1) text
 states PENDING=0, but the actual implementation
