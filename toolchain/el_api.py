@@ -3,11 +3,12 @@ el_api.py
 =========
 Agent-facing coordination query API (Layer 3/4 bridge).
 
-Endpoint implemented in this pass:
+Endpoints implemented:
   GET /actors/{actor_name}/available-actions
+  GET /communities/{community_name}/objective-reachable
 
 Design reference: coordination_design_note_v3.md §9 (agent-facing query surface)
-Standard reference: ISO/IEC 15414:2015 §6.4, §6.6
+Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, Annex C
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_kripke import build_kripke_from_runtime
 from el_parser import parse
 from el_runtime import Runtime
 
@@ -32,6 +34,7 @@ from el_runtime import Runtime
 # ── Runtime initialisation ────────────────────────────────────────────────────
 
 _SCENARIO = _REPO_ROOT / "scenarios" / "gp_referral" / "gp_referral_scenario.el"
+_KRIPKE_HORIZON = 10
 
 
 def _build_gp_referral_runtime() -> Runtime:
@@ -112,6 +115,16 @@ class AvailableActionsResponse(BaseModel):
     available_actions: List[AvailableAction]
 
 
+class ObjectiveReachableResponse(BaseModel):
+    community: str
+    objective_reachable: bool
+    has_satisfaction_condition: bool  # False means spec declares no condition; EF result is vacuously false
+    worlds_checked: int
+    proposition: str   # "objective_satisfied:<community_name>"
+    modal_operator: str  # always "EF"
+    horizon: int
+
+
 # ── Endpoint 1: GET /actors/{actor_name}/available-actions ────────────────────
 
 @app.get(
@@ -175,3 +188,48 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
                 ))
 
     return AvailableActionsResponse(actor=actor_name, available_actions=actions)
+
+
+# ── Endpoint 2: GET /communities/{community_name}/objective-reachable ─────────
+
+@app.get(
+    "/communities/{community_name}/objective-reachable",
+    response_model=ObjectiveReachableResponse,
+    summary="Check whether a community's objective is still reachable from current runtime state",
+    description=(
+        "Builds a Kripke model anchored to the current Layer 3 runtime state "
+        "(hybrid mode: build_kripke_from_runtime) and runs EF on "
+        "objective_satisfied:<community_name>. Returns whether the community's "
+        "declared satisfaction condition can still be met on at least one future "
+        "path from here. has_satisfaction_condition=false means the spec declares "
+        "no SatisfactionCondition for this community — the EF result is vacuously "
+        "false, not a reachability failure. 404 for an unknown community name."
+    ),
+)
+def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
+    # Collect all declared community-type elements for 404 check
+    known_communities = {
+        el.name
+        for el in _runtime._spec.elements
+        if type(el).__name__ in ("Community", "Federation", "Domain")
+    }
+    if community_name not in known_communities:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Community '{community_name}' is not declared in the current spec.",
+        )
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    prop = f"objective_satisfied:{community_name}"
+    has_condition = community_name in km.satisfaction_conditions
+    reachable = km.EF(km.initial, prop)
+
+    return ObjectiveReachableResponse(
+        community=community_name,
+        objective_reachable=reachable,
+        has_satisfaction_condition=has_condition,
+        worlds_checked=len(km.worlds),
+        proposition=prop,
+        modal_operator="EF",
+        horizon=_KRIPKE_HORIZON,
+    )
