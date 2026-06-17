@@ -644,17 +644,77 @@ Binary existence query. "Will/can the community objective be reached?"
 check whether `objective_satisfied:<community>` inevitably or feasibly holds.
 Sufficient for yes/no compliance/feasibility questions.
 
-**Level 2 — Kripke + utility** (partially implemented, small extension needed):
-Graded quality of a world. `utility(world)` currently scores all active
-obligations globally (priority-weighted). For community-objective reasoning,
-this needs scoping: `utility_for_objective(community_name, world)` =
-priority-weighted score over just the members of that community's
-satisfaction TokenGroup. This differentiates within the space of "objective
-satisfied" worlds — a world where the high-priority burden is DISCHARGED and
-the low-priority one is SUPERSEDED scores differently from the reverse. The
-`satisfaction_conditions` dict (P5) + `ObligationDescriptor` priority weights
-already provide everything needed; this is a small contained extension
-(~10-15 lines, new method on `KripkeModel`).
+**Level 2 — Kripke + utility** (implemented and verified 2026-06-17 against
+the GP-referral scenario):
+A priority-weighted score per world, rather than a binary yes/no.
+`utility(world)` scores every active obligation
+globally (priority-weighted). `utility_for_objective(community_name, world)`
+scores only the members of that community's satisfaction `TokenGroup` —
+same priority-weighted average, but SUPERSEDED members excluded entirely
+and WAITING members scored 0.0 (neutral, distinct from PENDING's +0.3).
+Implemented as a new method on `KripkeModel` in `el_kripke.py`; reads
+`self.satisfaction_conditions` (populated by `_build_satisfaction_conditions()`
+at build time, AM-27) directly for the member-ID list — no separate
+`group_index` lookup needed, since `satisfaction_conditions` already stores
+`(operator, [member_ids])` rather than `(operator, group_name)`.
+
+**Verified values, GP-referral scenario, corrected 2026-06-17** (scenario
+fix applied same day, see §13.1b — `specialistBurdenGroup` now uses
+`all_discharged`, not `any_discharged`; both burdens genuinely required,
+not interchangeable. Members: `referralResponseBurden` priority weight
+0.75, discharge_mode eventual; `assessmentSchedulingBurden` priority
+weight 0.5, discharge_mode eventual; model: 144 worlds — grew from 102
+once P6b SUPERSEDED suppression no longer applies to this group, since
+that mechanism is scoped to `any_discharged` groups only (commit
+`1802c70`) and both burdens now expand independently):
+
+- **Real world, step=9** — `referralResponseBurden` and
+  `assessmentSchedulingBurden` both DISCHARGED (the canonical satisfied
+  witness world for `all_discharged`, replacing the SUPERSEDED-based
+  witness that existed under the old, incorrect `any_discharged` operator):
+  `utility_for_objective('SpecialistCommunity', w)` = **+1.0000**
+  (both members DISCHARGED, both score +1.0, weighted average +1.0)
+- **Real world** — both `referralResponseBurden` and
+  `assessmentSchedulingBurden` PENDING:
+  `utility_for_objective('SpecialistCommunity', w)` = **+0.3000**
+  (both members score +0.3; when every scored member shares the same
+  per-state score, the weighted average collapses to that score
+  regardless of relative weights) — unchanged from the pre-fix run; the
+  scoring arithmetic doesn't depend on the group operator, only on which
+  worlds exist
+- **Synthetic world** (WAITING does not occur naturally in this scenario —
+  neither specialist burden has a `triggered_by`) — `referralResponseBurden`
+  VIOLATED, `assessmentSchedulingBurden` WAITING:
+  `utility_for_objective('SpecialistCommunity', w)` = **−0.6000**
+  versus global `utility(w)` = **−0.1333** for the same world — unchanged
+  from the pre-fix run. The divergence is the concrete demonstration of
+  why the scoped version exists: the global figure is diluted toward
+  neutral by `referralInitiationBurden` (PENDING, weight 1.0) and
+  `clinicalHandoverBurden` (PENDING, weight 0.5) sitting alongside the two
+  specialist obligations in the same model.
+- **Synthetic edge case** — both specialist burdens SUPERSEDED (a state
+  that can no longer arise naturally for this group under `all_discharged`,
+  but the method's logic is exercised here regardless via a hand-built
+  world, since the method itself doesn't know or care which operator a
+  group uses):
+  `utility_for_objective('SpecialistCommunity', w)` = **+1.0000**
+  (the `any_superseded` branch correctly distinguishes "every trackable
+  member resolved via sibling discharge — objective achieved" from "no
+  member was trackable at all," which the original spec sketch's
+  `any_member_seen` logic could not distinguish; caught and fixed during
+  implementation, not present in the original `utility_for_objective_spec.md`)
+- **Edge case** — unknown community name: **+0.0000** (defensive default)
+
+Note: the originally-reported "Example 1" (a real world with
+`assessmentSchedulingBurden`=DISCHARGED, `referralResponseBurden`=
+SUPERSEDED) no longer exists in the corrected model — expected and
+correct, since P6b's SUPERSEDED-suppression mechanism only fires for
+`any_discharged` groups (commit `1802c70`), and this group is no longer
+one. This is not a regression; it's confirmation the fix took effect.
+
+All values manually re-verified against the priority-weighted formula
+before being recorded here; see also `EDOC26_revision_notes.md` item 15/19
+for the confirmed PENDING=+0.3 scoring convention this method follows.
 
 **Scope clarification (2026-06-17): "global" does not mean "federation-only".**
 `utility(world)` scores every obligation in `self.obligation_descriptors` —
@@ -673,7 +733,9 @@ would obscure how any one of them is doing" — federations are the most
 common case where that arises (because federating is exactly what bundles
 multiple communities' objectives into one model), but it is the number of
 distinct objectives in play, not the presence of a federation per se, that
-makes the scoped version necessary.
+makes the scoped version necessary. The step=2 synthetic-world figures
+above (−0.6 scoped vs. −0.1333 global) are the concrete illustration of
+exactly this point.
 
 **Note on per-state scores:** the EDOC26 paper's §4.4/Equation (1) text
 states PENDING=0, but the actual implementation
@@ -681,9 +743,8 @@ states PENDING=0, but the actual implementation
 known paper/implementation discrepancy, already tracked in
 `EDOC26_revision_notes.md` item 15, with the implementation judged correct
 and the paper's stated table needing correction before submission.
-`utility_for_objective()` should use the same +0.3 value for consistency
-(see §13.2 item 7/9 area — also worth checking against the actual
-`utility_for_objective_spec.md` handoff, which already used +0.3 correctly).
+`utility_for_objective()` uses the same +0.3 value for consistency,
+confirmed in the verified values above.
 
 **Level 3 — Kripke + Bellman value iteration** (future work):
 Optimal path to the objective. Rather than just "is there a feasible path?"
@@ -703,20 +764,103 @@ The world-graph already exists; this is a ~50-100 line addition to
 - **Level 1** is implemented and now verified by the GP-referral scenario
   (EF: "is there a path where the referral objective is satisfied?", AF:
   "is it guaranteed given `discharge_mode: strict`?") — see §13.1.
-- **Level 2** (scoped utility) is small enough to add during further scenario
-  work, now that real priority-weighted TokenGroup members exist in the
-  GP-referral spec.
+- **Level 2** (scoped utility) is implemented and verified — see the
+  GP-referral values recorded above (§12.2). Real worlds from the model
+  show the scoped/global divergence directly (+1.0 on sibling discharge
+  via SUPERSEDED exclusion; the −0.6 vs. −0.1333 split demonstrating
+  dilution in the global figure).
 - **Level 3** (Bellman) is best deferred until a scenario concretely
   motivates "which role-filler action sequence maximises utility toward
   the referral objective?"
 
-Conclusion: Level 1 is done and verified; Level 2 follows naturally
-during further scenario work; Level 3 follows as a subsequent session
-once a scenario motivates it.
+Conclusion: Levels 1 and 2 are done and verified; Level 3 follows as a
+subsequent session once a scenario motivates it.
 
 ## 13. Milestones
 
+### 13.1b Scenario correctness fix: `specialistBurdenGroup` operator and `for_action` linkage (2026-06-17)
+
+Surfaced by a clinical-correctness question raised in design discussion,
+not by any toolchain failure: does it make sense for the specialist side
+to satisfy its objective by *responding to* the referral without ever
+*scheduling* the assessment (or vice versa)? No — these are two genuinely
+necessary steps toward the objective, not interchangeable ways of
+discharging one shared responsibility, unlike the three-equal-role-fillers
+collective-obligation case in §5.1. The scenario had used `any_discharged`
+for this pair, which is the wrong operator for this relationship.
+
+Checking the actual scenario file surfaced a second, independent issue:
+neither `referralResponseBurden` nor `assessmentSchedulingBurden` could
+actually be discharged via their associated actions at Layer 3 at all.
+`referralResponseBurden.for_action` was `"acknowledge_and_respond_to_referral"`
+but the action is named `acknowledgeReferral`; `assessmentSchedulingBurden.for_action`
+was `"schedule_specialist_assessment"` but the action is named
+`scheduleAssessment`. Neither string matched, so the engine's step-3b
+`for_action` discharge path would never fire for either burden — a
+defect entirely independent of the operator question, found only because
+the operator question prompted a closer read of the action declarations.
+(A claimed precondition — "Referral must be acknowledged" on
+`scheduleAssessment` — also turned out to be an unenforced prose string,
+not a token-state check; not fixed in this pass, noted for future
+attention.)
+
+Three fixes applied: both `for_action` strings corrected to match their
+actual action names; `specialistBurdenGroup`'s satisfaction operator
+changed from `any_discharged` to `all_discharged`. Re-verified in full
+(commit-pending; not yet committed to git as of this writing):
+
+- World count: 102 → 144. Removing P6b SUPERSEDED suppression from this
+  group (P6b only fires for `any_discharged` groups, commit `1802c70`)
+  means both specialist burdens now expand independently in the
+  branching tree, widening it.
+- Q1–Q3 unchanged (none of these depend on `specialistBurdenGroup`'s
+  operator specifically).
+- Q4 (`objective_satisfied:SpecialistCommunity`): AF still NO, EF still
+  YES — but EF now witnesses a strictly harder condition (*both* burdens
+  discharging on some path, not just one), and a witness still exists.
+  This is a meaningfully stronger result than before, not merely an
+  unchanged one.
+- `utility_for_objective` re-verified against the corrected model — see
+  §12.2 for full updated values. The previous SUPERSEDED-driven witness
+  example no longer exists (expected); a new canonical both-DISCHARGED
+  witness world (step=9, score +1.0) replaces it as the satisfied-objective
+  example.
+
+This is recorded as a finding, not swept past: the scenario was
+*mechanically verifiable* (Q1–Q4 ran, produced results, looked internally
+consistent) while modelling clinically incorrect semantics and having two
+non-functional action linkages, for some period of time, without either
+being caught by parsing, validation, or the verification script — all of
+which were checking that the *mechanism* worked, not that the *scenario
+content* was correct. Worth keeping in mind for any future scenario
+review: passing verification is not the same as being right.
+
+### 13.1a Level 2 (`utility_for_objective`) implemented and verified (2026-06-17)
+
+Implemented per the `utility_for_objective_spec.md` handoff, with two
+corrections caught during implementation rather than blindly following
+the spec sketch: (1) `satisfaction_conditions[community_name]` unpacks
+directly to `(operator, [member_ids])` — no separate `group_index` lookup
+needed, contrary to the spec's assumption; (2) the all-SUPERSEDED edge
+case needed an explicit `any_superseded` flag to distinguish "every
+trackable member resolved via sibling discharge" (→ +1.0) from "no member
+was trackable at all" (→ 0.0), which the spec's `any_member_seen` logic
+could not distinguish. Initially verified against five cases drawn from
+the real GP-referral Kripke model as it existed before the §13.1b fix
+(102 worlds); re-verified after §13.1b's correction (144 worlds) — see
+§12.2 for the current, corrected verified values. All values manually
+re-checked against the priority-weighted formula both times.
+
 ### 13.1 First end-to-end accountability chain resolution from a parsed spec, and GP-referral scenario verified (2026-06-15/16)
+
+**Note (2026-06-17): the Q4/any_discharged details below describe the
+scenario's state *as it existed at the time this milestone was first
+written* — kept as an accurate historical record of that session, not
+deleted. The `specialistBurdenGroup` operator was subsequently corrected
+from `any_discharged` to `all_discharged`, and two `for_action` linkage
+bugs were fixed — see §13.1b for the full account and §12.2 for the
+current, corrected verified values. The world count (102, below) is also
+historical; the corrected model has 144 worlds.**
 
 Prior to the AM-18 fix in `el_reasoner.py` (commit ebefde7, see §9 for
 the full list of seven stale class names and two structural fixes
