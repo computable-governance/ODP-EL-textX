@@ -1615,9 +1615,9 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         )
         dl = getattr(spec_tok, "deadline", None)
         try:
-            steps = int(dl) if dl else 3
+            steps = int(dl) if dl else 5
         except (ValueError, TypeError):
-            steps = _parse_deadline_steps(dl, default=3)
+            steps = _parse_deadline_steps(dl, default=5)
         chain = _delegation_chain_for_token(spec, tok.token_name, tok.holder)
         descriptors[tok.token_name] = ObligationDescriptor(
             obligation_id=tok.token_name, obligation_text=tok.token_name,
