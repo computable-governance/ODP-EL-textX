@@ -513,3 +513,26 @@ no standard grounding (see AM-11 — agreed to remove). The standard-compliant
 replacement requires explicit `ActionDecl` with `DeonticEffect` for role entry/exit.
 **Next action:** Defer until Layer 3 engine integration work resumes; then
 model as `Action` within a `Role` body with appropriate `DeonticEffect` entries.
+
+### 13.5 Agent-facing REST query surface — complete (2026-06-19)
+
+**What was built:** Four endpoints in `toolchain/el_api.py` (419 lines,
+commit d0dcab6) forming the agent-facing query surface over the Kripke
+model:
+
+- `GET /actors/{actor_name}/available-actions` — what can this agent do
+  right now given its current token state (Layer 2, EF reachability)
+- `GET /communities/{community_name}/objective-reachable` — is the
+  community objective still reachable from the current world (Layer 4,
+  EF query)
+- `GET /communities/{community_name}/objective-score` — priority-weighted
+  utility of the current world (Layer 4, §C.3 utility function)
+- `GET /communities/{community_name}/recommended-action` — Bellman-optimal
+  next action with Q-value and ranked alternatives (Layer 4, §C.4 Bellman
+  value iteration, single `bellman_values()` call, greedy argmax)
+
+All four share the same `_runtime` singleton and `build_kripke_from_runtime`
+pattern with `_KRIPKE_HORIZON = 10`.
+
+**Next action:** Live end-to-end test against the GP-referral scenario;
+then coordination UI widget (see coordination_design_note_v3.md §13.3).
