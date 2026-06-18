@@ -829,6 +829,43 @@ implementation to draw it around.
 
 ## 13. Milestones
 
+### 13.1g Agent-facing query API, fourth endpoint: `recommended-action` — first live result (2026-06-19)
+
+**Commit:** d0dcab6 (`toolchain/el_api.py`, 419 lines, 107 lines inserted)
+
+**Endpoint:** `GET /communities/{community_name}/recommended-action?gamma=0.9`
+
+Returns the Bellman-optimal first action from the current world, its
+Q-value, immediate reward, V*(successor), and all alternative first
+actions ranked by Q-value descending. Single `bellman_values()` call;
+greedy argmax over `km.successors(km.initial)`.
+
+**First live result against GP-referral scenario (144 worlds, 270 edges):**
+
+| Field | Value |
+|---|---|
+| Recommended action | `discharge:referralInitiationBurden by GPClinician` |
+| Q-value | 6.5591 |
+| Immediate reward | 0.5545 |
+| V*(successor) | 6.6718 |
+| Alternatives | 3 actions, ranked by Q descending |
+
+**Interpretation:** The planner independently identifies
+`referralInitiationBurden` as the highest-Q first action — the GP
+clinician initiating the referral unblocks the entire downstream
+obligation chain (specialist handover → assessment scheduling →
+referral response). V*(successor) > Q-value confirms the successor
+world has higher long-run value than the immediate reward alone, which
+is the expected Bellman behaviour for an obligation that creates
+downstream value. The Q-value range across four candidates gives the
+agent genuine discriminating power rather than a near-tie.
+
+**Completes the four-level coordination machinery:**
+- Level 1: EF reachability (`available-actions`, `objective-reachable`)
+- Level 2: Utility scoring (`objective-score`, `utility_for_objective`)
+- Level 3: Bellman optimal planning (`bellman_values`, `optimal_path`)
+- Level 4 (agent API): `recommended-action` wrapping all three levels
+
 ### 13.1f Level 3 (Bellman value iteration) implemented and verified (2026-06-18)
 
 **Implemented:** `bellman_values(gamma=0.9)`, `optimal_path()`, and
