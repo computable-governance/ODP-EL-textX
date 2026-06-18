@@ -467,29 +467,26 @@ domain-independent. Never let clinical or FHIR concepts leak into
 
 ---
 
-## 13. Open Items (as of 2026-06-14)
+## 13. Open Items (as of 2026-06-18)
 
 These are known gaps or deferred decisions. Address them before EDOC 2026
 submission or when the relevant scenario demands it.
 
-### 13.1 GP-referral scenario — not yet built
-**What:** A multi-party delegation scenario spanning primary care (GP practice)
-and specialist care, using a federation to model the cross-community structure.
-Intended to exercise:
-- `Federation` with two member communities (GPPracticeCommunity, SpecialistCommunity)
-- Cross-community `Delegation` for the referral obligation
-- `ViolationResponse` on the referral burden if the specialist does not respond
-- `TokenGroup` grouping the referral-related burdens and permits
-- `Objective.satisfaction` condition (`all_discharged` or `any_discharged`) on
-  the federation's objective, driving `objective_satisfied:<community>` propositions
-  in the Kripke verifier
-- WAITING / SUPERSEDED token state cascade across the delegation chain
-- Kripke EF query to confirm that at least one path discharges the referral
-  obligation, and AF query to test whether `discharge_mode: strict` is needed
-  to guarantee discharge across all futures
+### 13.1 GP-referral scenario — built and verified (2026-06-16)
 
-**Next action:** Build `scenarios/gp_referral/gp_referral_scenario.el` and run
-through parser + validator + Kripke verifier as the next session's primary task.
+**What:** Built and verified per coordination_design_note_v3.md §13.1.
+Spans GPPracticeCommunity and SpecialistCommunity via Federation,
+exercising cross-community Delegation (GPPracticeParty →
+SpecialistClinicianAgent), TokenGroup with both `all_discharged` and
+`any_discharged` satisfaction conditions, and Kripke EF/AF verification.
+Kripke model: 144 worlds, 270 edges. 7/7 PASS on the four verification
+questions (Q1-Q4), reached after fixing two scenario-authoring bugs
+(missing Commitment declarations for two TokenGroup members;
+any_discharged SUPERSEDED-suppression scoping — see design note §13.2
+items 7-9 for what those bugs surfaced).
+
+**Next action:** none outstanding for the scenario itself. See design
+note §13.4 for the TokenGroup/V-16 follow-on item this build surfaced.
 
 ### 13.2 EDOC 2026 — 31-vs-30-worlds Kripke discrepancy
 **What:** The paper states 31 Kripke worlds for the consent scenario under
