@@ -237,7 +237,7 @@ condition only enters the Kripke world-state if it *also* has a backing
 tracks burdens reachable via `Commitment.burden`. A `TokenGroup` member
 without one is silently untracked, and the satisfaction condition can
 become unsatisfiable without any obvious error. See §13.2, item 7 for
-the proposed validator fix.
+the proposed validator fix (see also §13.4 for a correction to this framing).
 
 ### 6.1 Provenance and scope of `TokenGroup` relative to `Objective` (revised 2026-06-17)
 
@@ -1227,6 +1227,7 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
    `Delegation` or `Authorization` rather than `Commitment` in some
    modelling patterns; needs checking against the grammar's full set of
    token-creating constructs before deciding rule severity.
+   See §13.4 for a correction to this framing and a revised, narrower scope for V-16.
 8. **World-count scaling data point.** The growth from 27 to 102 worlds
    when going from 2 to 4 tracked obligations is a concrete data point on
    how state-space size scales with concurrent obligation count — relevant
@@ -1386,3 +1387,78 @@ Full details: `SESSION_SUMMARY_2026_06_16.md`.
   exercise once the third endpoint exists: point a visualization
   directly at the live API and watch the objective score move as the
   real scenario progresses.
+
+### 13.4 TokenGroup standard-compliance clarification and revised V-16 scope (2026-06-18)
+
+**Correction: TokenGroup is a standard concept.** §6.4.2: "token group:
+A group of tokens named so that it can be referred to as a whole." NOTE
+— "A notation for expressing deontic rules will provide the means for
+declaring and naming groups of deontic tokens. Changes that result, for
+example, from the performance of speech acts can then be applied to
+complete groups of tokens without the need to reference all the group
+members individually." This is a real, if minimal, ISO/IEC 15414:2015
+primitive — an earlier session statement that TokenGroup "isn't an
+ISO/IEC 15414 concept at all" was wrong and is withdrawn. The definition
+does not reappear with further normative content elsewhere in clause 6
+or clause 7.
+
+The three-layer provenance already used elsewhere in this document is
+the accurate framing and should be preserved: the standard names the
+primitive (§6.4.2, one sentence plus a NOTE about bulk speech-act
+application); Linington & Milosevic 2011 add the collective-obligation
+refinement ("who acts, among several equally-capable role-fillers, and
+why not leave it to another?"); the toolchain implements that
+refinement as `any_discharged` + SUPERSEDED resolution.
+
+**Refinement: the 2011 lineage attaches to `any_discharged` only.**
+`all_discharged` is plain conjunction over distinct, individually
+necessary obligations — no substitutability, no "why not leave it to
+another" question, and therefore no dependency on the 2011 paper's
+semantics. It sits closer to the bare §6.4.2 use case (name a set of
+tokens, apply bulk operations to it) than to the collective-obligation
+refinement. Concrete instance: `ReferralCommunity`'s
+`all_discharged(ReferralObjectiveTokens)` over `{seekConsentObligation,
+aiAnalysisPermit, reportReturnedObligation}` — three distinct,
+non-substitutable obligations, exercised in the GP-referral scenario
+(§13.1, Q3). P6b (SUPERSEDED-suppression on sibling discharge) is
+correctly restricted to `any_discharged` groups only — applying it to
+`all_discharged` would be wrong, since every member of an `all_discharged`
+group is independently required.
+
+**New finding: delegation-transfer of token groups is named in the
+standard.** NOTE block preceding §7.8.8 (same neighbourhood as the
+§7.8.7 NOTE 6 community-role-token-cloning text already cited in §5):
+"the performance of a delegation speech act may transfer a group of
+tokens (for example, burdens and permits) to the object to which
+responsibility is delegated." This explicitly licenses delegation
+transfer as a named mechanism for populating a token group, not merely
+inferable from §6.4.7's general speech-act definition. Authorization is
+not given as a named example anywhere checked so far; only delegation is
+confirmed, and this should not be assumed to extend to Authorization
+without separate verification.
+
+**Resolution: grammar compliance vs. scenario-authoring freedom are
+separate questions.** Standard compliance is whether the grammar can
+*express* what the standard licenses: `creates_burden` (Commitment) and
+`transfers_token_group` (Delegation) are both already present. Which
+pathway a given scenario actually uses to populate a TokenGroup is then
+a scenario-authoring choice, not a compliance question — provided no
+grammar constraint is violated (e.g. V-NEW-10's mutual exclusion of
+`transfers_burden`/`transfers_token_group` on a single Delegation).
+
+**Revised scope for V-16.** The original framing — flag TokenGroup
+members lacking a backing Commitment — is withdrawn. The gap is not a
+standards-compliance defect, and V-16's standard reference should not
+cite §7.10.3. The actual gap is internal: `_build_obligation_descriptors()`
+in `el_kripke.py` only walks `Commitment.burden`, narrower than what the
+grammar already permits. Revised fix: (1) widen
+`_build_obligation_descriptors()` to also discover burdens reachable via
+`DelegationDecl.transfers_token_group` and `DelegationDecl.transfers_burden`;
+(2) V-16, if implemented, flags a TokenGroup member only if it traces to
+*neither* a Commitment *nor* a Delegation.
+
+**Open question carried forward.** Whether Authorization-created/
+transferred burdens (e.g. `creates_burden_on_authority`) should also be
+included in the widened discovery is unresolved — the standard does not
+name Authorization as a group-transfer example the way it names
+Delegation, so this needs separate justification before being added.
