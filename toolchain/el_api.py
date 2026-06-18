@@ -141,6 +141,24 @@ class ObjectiveScoreResponse(BaseModel):
     horizon: int
 
 
+class AlternativeAction(BaseModel):
+    action_label: str
+    q_value: float
+    immediate_reward: float
+    v_star_successor: float
+
+
+class RecommendedActionResponse(BaseModel):
+    community: str
+    current_world: dict
+    recommended_action: str
+    q_value: float
+    immediate_reward: float
+    v_star_successor: float
+    alternatives: List[AlternativeAction]
+    gamma: float
+
+
 # ── Endpoint 1: GET /actors/{actor_name}/available-actions ────────────────────
 
 @app.get(
@@ -318,4 +336,93 @@ def get_objective_score(community_name: str) -> ObjectiveScoreResponse:
         breakdown=breakdown,
         worlds_checked=len(km.worlds),
         horizon=_KRIPKE_HORIZON,
+    )
+
+
+# ── Endpoint 4: GET /communities/{community_name}/recommended-action ──────────
+
+@app.get(
+    "/communities/{community_name}/recommended-action",
+    response_model=RecommendedActionResponse,
+    summary="Return the Bellman-optimal recommended first action for a community",
+    description=(
+        "Builds a Kripke model anchored to the current Layer 3 runtime state "
+        "(hybrid mode: build_kripke_from_runtime) and runs Bellman value iteration "
+        "(§C.4, Level 3). Returns the greedy-optimal first action from the current "
+        "world, its Q-value, and all alternative first actions ranked by Q-value. "
+        "recommended_action='' means no actions are available from the current world "
+        "(terminal state). gamma is the discount factor applied per decision step. "
+        "404 for an unknown community name."
+    ),
+)
+def get_recommended_action(
+    community_name: str,
+    gamma: float = 0.9,
+) -> RecommendedActionResponse:
+    known_communities = {
+        el.name
+        for el in _runtime._spec.elements
+        if type(el).__name__ in ("Community", "Federation", "Domain")
+    }
+    if community_name not in known_communities:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Community '{community_name}' is not declared in the current spec.",
+        )
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+
+    current_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name
+            for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name
+            for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+
+    V = km.bellman_values(gamma=gamma)
+
+    candidates = []
+    for succ in km.successors(km.initial):
+        label = km.labels.get((km.initial, succ), "→")
+        imm = km.utility(succ)
+        v_s = V.get(succ, 0.0)
+        candidates.append((label, imm + gamma * v_s, imm, v_s))
+
+    if not candidates:
+        return RecommendedActionResponse(
+            community=community_name,
+            current_world=current_world,
+            recommended_action="",
+            q_value=0.0,
+            immediate_reward=0.0,
+            v_star_successor=0.0,
+            alternatives=[],
+            gamma=gamma,
+        )
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    recommended_label, q_val, imm_reward, v_star_succ = candidates[0]
+
+    alternatives = [
+        AlternativeAction(
+            action_label=c[0], q_value=c[1],
+            immediate_reward=c[2], v_star_successor=c[3],
+        )
+        for c in candidates[1:]
+    ]
+
+    return RecommendedActionResponse(
+        community=community_name,
+        current_world=current_world,
+        recommended_action=recommended_label,
+        q_value=q_val,
+        immediate_reward=imm_reward,
+        v_star_successor=v_star_succ,
+        alternatives=alternatives,
+        gamma=gamma,
     )
