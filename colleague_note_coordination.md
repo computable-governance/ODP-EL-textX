@@ -57,6 +57,21 @@ problem with a Normal one would. This is what lets the score reflect
 which obligations actually matter most, rather than treating every
 obligation as equally important.
 
+It's worth seeing the structural difference directly. A traditional
+process diagram would draw this as a fixed sequence — step 1, then step
+2, then step 3, and so on, each one blocking the next. That is not how
+this is actually modelled:
+
+![Workflow view versus coordination view of the same referral task](diagram_workflow_vs_coordination.svg)
+
+In the left-hand picture, if step 3 stalls, the diagram has nothing
+further to say. In the right-hand picture, all four obligations simply
+feed the same shared objective, with no order declared between them at
+all — which is also a more honest description of how a real referral
+actually proceeds in practice, and a more natural fit once one of the
+role-fillers is an AI agent acting on its own initiative rather than
+following a hand-coded sequence.
+
 The interesting design point about the last two: both have to happen —
 scheduling an assessment for a referral that was never acknowledged
 doesn't make clinical sense, and vice versa. (The model was initially
@@ -206,6 +221,81 @@ understand its internal decision-making. The same obligations, the same
 guarantees, and the same live coordination signal apply whether a role
 is filled by a person or a machine.
 
+## What's been added since: three things an agent can actually ask
+
+Everything above describes what's *computable* about this scenario. The
+next question is practical: how would an actual role-filler — a person
+checking a dashboard, or an AI agent acting on its own initiative —
+actually get at that information, in the moment, while the referral is
+in progress? Three small, focused questions turn out to cover this, and
+each is now something a system can be asked directly and answered
+immediately, rather than something a person would have to work out by
+hand.
+
+**"What am I actually free to do right now?"** Ask this about the
+specialist clinician at any point, and you get back a precise answer:
+which actions are currently required (an obligation demands it, with
+its deadline), and which are currently allowed (a permission grants it,
+nothing currently blocks it) — not a vague sense of "what's next," but
+an exact, checkable list grounded in the clinician's actual current
+holdings. Ask the same question about the GP practice itself — the
+organisation accountable for the referral overall, but not the one
+holding the day-to-day tokens — and you correctly get back an empty
+list: being accountable for an outcome and being the one who currently
+has something to do are different facts, and the system doesn't
+conflate them.
+
+**"Can the objective still be reached from here?"** This is a yes/no
+check, run fresh against wherever the process currently stands — not
+against where it started. It's a deliberately weaker question than "is
+it *guaranteed*" (that's the strict governance check from earlier in
+this note); this one just asks whether at least one path to success
+still exists. Asked of a community with no declared objective at all
+(the GP side of this scenario, as it happens, doesn't have one), the
+system is careful to say so explicitly, rather than quietly returning
+"no" and letting that be mistaken for "the objective failed."
+
+**"How well is it going, right now?"** This is the live score from
+earlier in this note, now available as something you can simply ask
+for, on demand, for any community in the scenario — not just computed
+once as an illustration. Early in the process it reads a modest +0.3;
+once both specialist obligations are genuinely discharged, it reads the
+maximum +1.0; and it correctly returns "not applicable" rather than a
+misleading zero for a community with nothing to score.
+
+## What's still missing: knowing *what to do first*
+
+All three of the above describe the *current* situation. None of them
+answer a fourth, different question: if a role-filler has more than one
+obligation open at once, *which one should they act on first* to make
+the best possible progress overall — not just right now, but accounting
+for everything that follows from the choice?
+
+This is where a more advanced piece of machinery, now also built and
+verified, comes in. Rather than scoring the present moment, it scores
+every possible next action by the best achievable outcome of *everything
+that action leads to*, with actions further in the future weighted
+slightly less than ones happening sooner — the same intuition behind
+preferring "good now" over "maybe good eventually." Run against this
+scenario, it correctly recommends: don't wait. With nothing currently
+blocking the GP clinician's or specialist's obligations, the optimal
+recommendation is to act on all of them immediately, since any deferral
+is calculated to be strictly worse than acting now. The one obligation
+genuinely outside either clinician's immediate control — scheduling the
+assessment, which depends on a separate availability check — correctly
+shows up as something the model has to wait out, not something it can
+optimise away.
+
+This piece is more involved to verify than the three questions above,
+and it surfaces a genuinely interesting technical subtlety worth
+mentioning even at this level: the same obligation can sometimes be
+discharged "instantly," without any time passing in the model, while
+other transitions genuinely represent the clock ticking forward. Working
+out how to fairly compare a path with several instant actions against a
+path that waits was a real design decision, made explicitly rather than
+left as an accident of the code — worth knowing this kind of judgment
+call exists, even without needing the technical detail behind it here.
+
 ---
 
 *A point worth flagging, though it's not central to the story above: the
@@ -230,3 +320,14 @@ delegation and organisational authority. That structure is real,
 implemented, and verified, but it's a governance/accountability question
 in its own right, fairly separate from the coordination story above. Ask
 if you'd like that side of it walked through as well.*
+
+*For internal reference only — not part of the story for a first read,
+and not yet refined into a presentation-ready model: the diagram below
+sketches the actual accountability wiring behind this scenario as it's
+currently built. It's included here mainly so this work isn't lost
+between sessions, and as a known-imperfect starting point for a more
+carefully designed version later, once a richer scenario is built
+specifically to demonstrate organisational structure to an architect
+audience.*
+
+![Internal: accountability structure of the GP referral scenario, as currently implemented](diagram_accountability_structure.svg)
