@@ -829,6 +829,79 @@ implementation to draw it around.
 
 ## 13. Milestones
 
+### 13.1f Level 3 (Bellman value iteration) implemented and verified (2026-06-18)
+
+**Implemented:** `bellman_values(gamma=0.9)`, `optimal_path()`, and
+`render_optimal_path()` added as new methods on `KripkeModel` in
+`el_kripke.py`, plus the `BellmanStep` dataclass (placed near
+`ActionRecommendation`). The four existing §C.4 methods
+(`ranked_reachable`, `expected_future_utility`, `recommend_action`,
+`walk_recommended_path`) are untouched — Bellman sits alongside them,
+not replacing them. Those methods implement a simpler mean-reachable-
+utility heuristic (no discount, no backward induction); Bellman computes
+the true optimal policy.
+
+**Same-step transitions and the topological-sort fix.** The initial
+implementation assumed the world-graph was a pure step→step+1 DAG and
+used reverse step-order processing. This was wrong: 200 of the 270
+edges in the GP-referral model are same-step (step N→N) action-discharge
+transitions — an obligation discharges within a time period without
+consuming a tick. The graph IS a DAG (deontic states are monotone;
+obligations only advance forward, so no cycles exist — confirmed by DFS),
+but step-order processing is insufficient because a world at step N may
+have a successor also at step N that has not yet been assigned V*.
+Fix: Kahn's BFS-based topological sort, giving the correct reverse-
+processing order regardless of step structure. Exact backward induction;
+no iterative convergence needed.
+
+**Uniform-vs-two-rate γ — explicitly deferred.** The same-step discovery
+raised a genuine modelling question: should γ apply to same-step action-
+discharge transitions, given that no calendar time passes? Two positions:
+- *Uniform γ (implemented):* γ discounts per decision point, not per
+  calendar time unit. Every edge is one decision; all edges pay the same
+  discount.
+- *Two-rate model:* γ_action=1.0 for same-step transitions (instantaneous
+  — no discount), γ_tick<1 for step-advancing tick transitions only.
+The uniform model was chosen because `self.labels` stores only action-
+label strings — no edge-type flag — so a two-rate model would require
+annotating edges at build time. Deferred pending a concrete scenario
+that motivates the distinction. The `bellman_values` docstring cites
+this decision as §13.1f.
+
+**V* is unbounded above — distinct from Levels 1 and 2.**
+`utility(w)` and `utility_for_objective()` are normalised to [-1, +1]
+per world. V*(w) is not: it accumulates discounted rewards across all
+steps from w to terminal worlds. With gamma=0.9 and per-step rewards
+up to +1.0, V* for the GP-referral initial world is +6.5591 — the
+discounted sum of rewards across ~14 steps to the all-DISCHARGED
+terminal. Callers must not compare V* directly to utility scores.
+
+**Verified, real output (144 worlds, 270 edges, horizon 10, gamma=0.9):**
+
+- V*(initial world): +6.5591. utility(initial): +0.3000.
+  EFU(initial) [existing heuristic]: +0.6506.
+- V* range across all 144 worlds: +0.2000 to +6.6718.
+- Optimal path from initial world: three same-step action discharges
+  at step=0 (`referralInitiationBurden`, `referralResponseBurden`,
+  `clinicalHandoverBurden`), then ticks through steps 1–9 while
+  `assessmentSchedulingBurden` (held by `SpecialistParty`) remains
+  PENDING, then final discharge at step=10 reaching the all-DISCHARGED
+  terminal world (utility=+1.0, V*=+1.0). Structurally correct: the
+  Bellman-optimal policy is "act immediately" — γ=0.9 makes deferring
+  any action strictly worse.
+
+**Cross-check against known Level 2 values.** Three step=9 worlds with
+both specialist burdens (`referralResponseBurden`,
+`assessmentSchedulingBurden`) PENDING were queried. All three return
+`utility_for_objective('SpecialistCommunity', w)` = +0.3000, matching
+the §12.2 verified value and tonight's `objective-score` API output
+exactly. Global `utility(w)` diverges (+0.6818, +0.5545, +0.3182) based
+on GP-side obligation states — the scoped/global dilution from §12.2
+illustrated at step 9. V* diverges more sharply: the third world has
+`clinicalHandoverBurden=VIOLATED` and is terminal (0 successors), so
+V*=utility=+0.3182; the other two have 5 and 7 outgoing transitions and
+V* of +3.1972 and +3.6229 respectively.
+
 ### 13.1e Verification blind spot: Layer 4 reasoning does not catch Layer 3 linkage bugs (2026-06-16/17)
 
 Six `for_action` mismatches existed in the GP-referral scenario across

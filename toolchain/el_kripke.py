@@ -708,6 +708,173 @@ class KripkeModel:
 
         return path
 
+    # ── §C.4 Level 3 — Bellman value iteration ────────────────────────────────
+
+    def bellman_values(self, gamma: float = 0.9) -> Dict[World, float]:
+        """
+        §C.4 Level 3: compute V*(w) for every world via backward induction.
+
+        The world-graph is a DAG (deontic states are monotone — obligations
+        only advance forward: PENDING→DISCHARGED/VIOLATED/etc — so no cycles
+        exist). However, same-step action-discharge transitions (step N→N)
+        co-exist with tick transitions (step N→N+1), so step-order processing
+        alone is insufficient. Kahn's topological sort gives the correct
+        reverse-processing order for exact backward induction.
+
+        γ is applied uniformly to all edges, including same-step transitions.
+        The rationale: γ discounts per decision point, not per calendar time
+        unit. Every edge — whether a same-step action discharge or a tick —
+        represents one decision. A two-rate model (γ_action=1.0, γ_tick<1)
+        would require annotating edges by type, which the current model does
+        not support, and is deferred pending a concrete scenario that motivates
+        it (design note §13.1f).
+
+        Reward per transition:
+          r(w → w') = utility(w')
+
+        Applied per-transition (not only at terminal worlds) so intermediate
+        bad states incur real cost — avoiding the perverse incentive of
+        endpoint-only rewards (design note §12.2).
+
+        Value equations:
+          V*(terminal w)     = utility(w)
+          V*(non-terminal w) = max over w' in successors(w) of
+                                 [utility(w') + γ · V*(w')]
+
+        Parameters
+        ----------
+        gamma : discount factor in (0, 1]. Default 0.9.
+
+        Returns
+        -------
+        Dict[World, float] — V* for every world in self.worlds.
+        """
+        # Kahn's algorithm: BFS-based topological sort.
+        in_degree: Dict[World, int] = {w: 0 for w in self.worlds}
+        for w in self.worlds:
+            for succ in self.successors(w):
+                in_degree[succ] += 1
+
+        queue: deque = deque(w for w in self.worlds if in_degree[w] == 0)
+        topo_order: List[World] = []
+        while queue:
+            w = queue.popleft()
+            topo_order.append(w)
+            for succ in self.successors(w):
+                in_degree[succ] -= 1
+                if in_degree[succ] == 0:
+                    queue.append(succ)
+
+        # Backward induction in reverse topological order.
+        V: Dict[World, float] = {}
+        for w in reversed(topo_order):
+            succs = self.successors(w)
+            if not succs:
+                V[w] = self.utility(w)
+            else:
+                V[w] = max(
+                    self.utility(w_prime) + gamma * V[w_prime]
+                    for w_prime in succs
+                )
+        return V
+
+    def optimal_path(
+        self,
+        world: Optional[World] = None,
+        gamma: float = 0.9,
+        max_steps: int = 20,
+    ) -> List["BellmanStep"]:
+        """
+        §C.4 Level 3: follow the Bellman-optimal path from world.
+
+        Computes V* via bellman_values(), then greedily follows
+        argmax_a Q(w, a) at each step:
+          Q(w, a) = utility(w') + γ · V*(w')  where w' = successor via a
+
+        Stops when a terminal world is reached, a cycle is detected,
+        or max_steps is exhausted. Returns one BellmanStep per step
+        taken (not including the starting world — mirrors
+        walk_recommended_path convention).
+        """
+        if world is None:
+            world = self.initial
+
+        V = self.bellman_values(gamma=gamma)
+
+        path: List[BellmanStep] = []
+        visited: Set[World] = {world}
+        current = world
+
+        for _ in range(max_steps):
+            succs = self.successors(current)
+            if not succs:
+                break
+            best = max(
+                succs,
+                key=lambda wp: self.utility(wp) + gamma * V.get(wp, 0.0),
+            )
+            imm = self.utility(best)
+            v_b = V.get(best, 0.0)
+            path.append(BellmanStep(
+                action_label=self.labels.get((current, best), "→"),
+                successor_world=best,
+                immediate_reward=imm,
+                v_star=v_b,
+                q_value=imm + gamma * v_b,
+            ))
+            if best in visited:
+                break
+            visited.add(best)
+            current = best
+
+        return path
+
+    def render_optimal_path(
+        self,
+        world: Optional[World] = None,
+        gamma: float = 0.9,
+    ) -> str:
+        """§C.4 Level 3: human-readable Bellman-optimal path report."""
+        if world is None:
+            world = self.initial
+
+        V = self.bellman_values(gamma=gamma)
+        path = self.optimal_path(world=world, gamma=gamma)
+
+        lines = [
+            "─" * 60,
+            f"§C.4 Level 3 — Bellman-Optimal Path  (γ={gamma})",
+            "─" * 60,
+            f"  Starting world : {world}",
+            f"  V*(start)      : {V.get(world, 0.0):+.4f}",
+            f"  utility(start) : {self.utility(world):+.4f}",
+            "",
+        ]
+        if not path:
+            lines.append("  (Terminal world — no actions available)")
+            return "\n".join(lines)
+
+        for i, step in enumerate(path, 1):
+            lines += [
+                f"  Step {i}:",
+                f"    Action : {step.action_label}",
+                f"    World  : {step.successor_world}",
+                f"    r      : {step.immediate_reward:+.4f}",
+                f"    V*(w') : {step.v_star:+.4f}",
+                f"    Q      : {step.q_value:+.4f}",
+                "",
+            ]
+
+        final = path[-1].successor_world
+        lines += [
+            f"  Final world   : {final}",
+            f"  Final utility : {self.utility(final):+.4f}",
+            f"  Final V*      : {V.get(final, 0.0):+.4f}",
+        ]
+        if not self.successors(final):
+            lines.append("  (Terminal — no further actions)")
+        return "\n".join(lines)
+
     def render_recommended_path(self, world: Optional[World] = None) -> str:
         """
         §C.4: Render the recommended action path as a human-readable report.
@@ -1479,6 +1646,26 @@ class ActionRecommendation:
             f"       immediate utility    : {self.immediate_utility:+.3f}\n"
             f"       expected future util : {self.expected_future_utility:+.3f}"
         )
+
+
+@dataclass
+class BellmanStep:
+    """
+    One step along the Bellman-optimal path (Level 3, §C.4).
+
+    Attributes
+    ----------
+    action_label     : transition label ("discharge:X by Y")
+    successor_world  : world reached by this action
+    immediate_reward : r(w → successor_world) = utility(successor_world)
+    v_star           : V*(successor_world) — Bellman-optimal value of successor
+    q_value          : Q(w, action) = immediate_reward + γ · V*(successor_world)
+    """
+    action_label: str
+    successor_world: World
+    immediate_reward: float
+    v_star: float
+    q_value: float
 
 
 # ══════════════════════════════════════════════════════════════════════════════
