@@ -531,8 +531,19 @@ model:
   next action with Q-value and ranked alternatives (Layer 4, §C.4 Bellman
   value iteration, single `bellman_values()` call, greedy argmax)
 
-All four share the same `_runtime` singleton and `build_kripke_from_runtime`
-pattern with `_KRIPKE_HORIZON = 10`.
+All four query endpoints share the same `_runtime` singleton and
+`build_kripke_from_runtime` pattern with `_KRIPKE_HORIZON = 10`.
 
-**Next action:** Live end-to-end test against the GP-referral scenario;
-then coordination UI widget (see coordination_design_note_v3.md §13.3).
+Two additional endpoints added (commit 7dcefcf):
+
+- `POST /actors/{actor_name}/execute-action` — advance runtime state
+  by executing an action; returns TransitionRecord fields plus updated
+  world state, new recommended action, new objective score, and EF
+  reachability. Uses `utility_for_objective` consistent with endpoint 3.
+  Blocked outcome returns reason string (fail-safe precondition guard, §7.3).
+- `POST /reset` — reloads `_build_gp_referral_runtime()` from scratch,
+  resetting all token states to initial PENDING.
+
+**Next action:** Coordination UI widget in computable-governance-ui
+(port 8001, GP-referral scenario, role-selector + recommended-action
+panel + execute button). See coordination_design_note_v3.md §13.3.
