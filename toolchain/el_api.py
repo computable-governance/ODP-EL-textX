@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 _HERE = Path(__file__).resolve().parent
@@ -99,6 +100,13 @@ app = FastAPI(
         "ODP Enterprise Language governance (ISO/IEC 15414:2015)."
     ),
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

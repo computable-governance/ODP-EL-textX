@@ -829,6 +829,74 @@ implementation to draw it around.
 
 ## 13. Milestones
 
+### 13.1h Coordination UI widget: built, debugged, and verified end-to-end (2026-06-19)
+
+**Commit:** be36919 (`computable-governance-ui/widgets/coordination/coordination-simulator.html`, 841 lines)
+
+Self-contained HTML/CSS/JS widget against the GP-referral scenario via
+the six `toolchain/el_api.py` endpoints on port 8001 (computable-governance-ui
+runs its own separate, stateless governance API on port 8000 — the two
+were kept deliberately distinct per the design discussion this session;
+see CLAUDE.md §13.5 for the endpoint list).
+
+**Two-column layout:** role selector + action cards (precondition
+checkboxes, recommended-action highlighting with Q-values, alternatives)
+on the left; objective score bar, reachability badge, obligations table,
+step counter on the right. Event log at bottom, reset button top-right.
+
+**Required server-side CORS fix.** Opening the widget via `file://`
+gives the page origin `null`; the browser blocked all `fetch()` calls
+to `localhost:8001` until `CORSMiddleware` was added to
+`toolchain/el_api.py` (`allow_origins=["*"]`, acceptable for a local
+dev server). Without this, every panel showed a generic "Load failed"
+error with no other diagnostic signal — worth remembering as the first
+thing to check if a future widget against this API shows the same
+symptom.
+
+**Field-name mismatches against actual API response shapes** (the
+widget was initially written from the design spec, not from observed
+responses): `objective_score` not `score`; `breakdown` not
+`obligations`, with items keyed `obligation`/`priority_weight` not
+`name`/`priority`; `objective_reachable` not `reachable`;
+`available_actions` an array of `{action, reason, token, deadline}`
+objects, not a flat string array; `outcome` (`"ok"`/`"blocked"`) not
+`status`/`blocked`. All fixed by checking live curl output against each
+endpoint before patching, rather than trusting the original design
+spec's assumed shapes.
+
+**Execute action facts-payload bug.** The click handler sent
+`{ precondition_text: true }` — a placeholder key name left over from
+an earlier ad-hoc curl test — instead of the actual precondition string
+as the key. `Runtime.advance()`'s facts dict is keyed by the literal
+precondition text (§7.3 fail-safe: absent key blocks rather than
+passes), so every precondition-gated action silently failed with
+`outcome: "blocked"` until fixed to `{ [precondition]: true }`
+(computed property key, using the string already held in scope from
+the action card's `meta.precondition`).
+
+**Verified end-to-end, full obligation chain, GP-referral scenario:**
+
+| Step | Actor | Action | Outcome | Score after |
+|---|---|---|---|---|
+| 1 | GPClinician | initiateReferral | ok | 0.555 |
+| 2 | GPClinician | provideHandover | ok | 0.682 |
+| 3 | SpecialistClinicianAgent | acknowledgeReferral | ok | 0.873 |
+| 4 | SpecialistClinicianAgent | scheduleAssessment | ok | 1.000 |
+
+All four obligations DISCHARGED, `OBJECTIVE REACHABLE ✓` held throughout.
+Confirmed via browser Network-panel inspection (request/response bodies),
+not just visual UI state, at each step.
+
+**Open item carried forward.** `SpecialistClinicianAgent`'s
+`available-actions` response includes `access_patient_clinical_records`
+(tied to `patientRecordAccessPermit`), which is not in the widget's
+hardcoded `ACTORS` lookup table — it renders without burden/deadline
+metadata. A duplicate `acknowledgeReferral` card was also observed in
+one `available-actions` response during testing; cause not yet
+diagnosed (possibly a genuine duplicate in the API response, possibly
+a transient render issue — worth checking the raw response before
+assuming either).
+
 ### 13.1g Agent-facing query API, fourth endpoint: `recommended-action` — first live result (2026-06-19)
 
 **Commit:** d0dcab6 (`toolchain/el_api.py`, 419 lines, 107 lines inserted)
