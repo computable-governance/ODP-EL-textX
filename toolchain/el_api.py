@@ -26,7 +26,7 @@ _REPO_ROOT = _HERE.parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_engine import enroll, grant_token, initial_state, token_from_spec, TransitionRecord
 from el_kripke import build_kripke_from_runtime
 from el_parser import parse
 from el_runtime import Runtime
@@ -157,6 +157,27 @@ class RecommendedActionResponse(BaseModel):
     v_star_successor: float
     alternatives: List[AlternativeAction]
     gamma: float
+
+
+class ExecuteActionRequest(BaseModel):
+    action_name: str
+    facts: dict = {}
+
+
+class ExecuteActionResponse(BaseModel):
+    tick: int
+    actor_name: str
+    action_name: str
+    outcome: str
+    discharged: List[str]
+    effects: List[str]
+    violations: List[str]
+    reason: Optional[str]
+    updated_world: dict
+    new_recommended_action: str
+    new_q_value: float
+    new_objective_score: float
+    objective_reachable: bool
 
 
 # ── Endpoint 1: GET /actors/{actor_name}/available-actions ────────────────────
@@ -426,3 +447,89 @@ def get_recommended_action(
         alternatives=alternatives,
         gamma=gamma,
     )
+
+
+# ── Endpoint 5: POST /actors/{actor_name}/execute-action ──────────────────────
+
+@app.post(
+    "/actors/{actor_name}/execute-action",
+    response_model=ExecuteActionResponse,
+    summary="Execute an action for an actor and advance the runtime state",
+    description=(
+        "Calls Runtime.advance(action_name, actor_name, facts) to mutate "
+        "the singleton runtime state, then re-queries the Kripke model to "
+        "return the updated world state, new recommended action, new "
+        "objective score, and whether the objective is still reachable. "
+        "outcome is 'ok', 'blocked', or 'violation'."
+    ),
+)
+def execute_action(
+    actor_name: str,
+    body: ExecuteActionRequest,
+) -> ExecuteActionResponse:
+    tr = _runtime.advance(body.action_name, actor_name, body.facts or {})
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name
+            for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name
+            for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+
+    V = km.bellman_values(gamma=0.9)
+    candidates = []
+    for succ in km.successors(km.initial):
+        label = km.labels.get((km.initial, succ), "→")
+        imm = km.utility(succ)
+        v_s = V.get(succ, 0.0)
+        candidates.append((label, imm + 0.9 * v_s, imm, v_s))
+
+    if candidates:
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        new_rec = candidates[0][0]
+        new_q = candidates[0][1]
+    else:
+        new_rec = ""
+        new_q = 0.0
+
+    score = km.utility_for_objective("ReferralFederation", km.initial)
+
+    prop = "objective_satisfied:ReferralFederation"
+    reachable = km.EF(km.initial, prop)
+
+    return ExecuteActionResponse(
+        tick=tr.tick,
+        actor_name=tr.actor_name,
+        action_name=tr.action_name,
+        outcome=tr.outcome,
+        discharged=list(tr.discharged),
+        effects=list(tr.effects),
+        violations=list(tr.violations),
+        reason=tr.reason,
+        updated_world=updated_world,
+        new_recommended_action=new_rec,
+        new_q_value=round(new_q, 4),
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint 6: POST /reset ───────────────────────────────────────────────────
+
+@app.post(
+    "/reset",
+    summary="Reset the runtime to the initial GP-referral scenario state",
+    description="Re-parses the GP-referral scenario and re-enrols all "
+                "actors, returning the runtime to its initial state.",
+)
+def reset_runtime() -> dict:
+    global _runtime
+    _runtime = _build_gp_referral_runtime()
+    return {"status": "reset", "message": "Runtime reset to initial GP-referral state"}
