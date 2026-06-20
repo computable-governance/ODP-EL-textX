@@ -1589,3 +1589,30 @@ validator rule should check that `embargo`/`permit` tokens declare or infer
 an authorization domain explicitly, while `burden` tokens are validated
 against their community's rule set instead — i.e. two different scoping
 mechanisms, not one. Currently neither is enforced.
+
+### §13.6 Federation membership is role-filling, not flat participation (2026-06-20)
+
+Confirms and sharpens SESSION_SUMMARY_2026_06_04.md §24.2 decision #2
+("Federation has its own roles — gap"). ISO/IEC 15414 §7.5.2 describes
+federation participants informally as "members", but Figure A.2 (standard's
+own UML) and Linington's commentary make the formal mechanism explicit:
+a member community is abstracted as a CommunityObject, which fills a
+CommunityRole within the federation — the same role/role-filler pattern
+used everywhere else in ODP-EL (CommunityRole isa Role), just with a
+community standing in as the filler instead of an individual enterprise
+object.
+
+Implication for the toolchain: the current grammar's MemberRef
+('member' ':' community=[Community]) is a flat reference with no
+CommunityRole construct — no name, no description, no ability to attach
+federation-level tokens or behaviour to a specific member's participation.
+This is the precise form AM-12/the June 4 federation design brief should
+take when implemented: not "add roles to Federation" in the abstract, but
+specifically add a CommunityRole construct (isa Role, filled by a
+CommunityObject abstraction of a member Community) and update MemberRef
+(or replace it) to reference a CommunityRole rather than a bare Community.
+
+Relevant for the next scenario (GPPracticeDomain/SpecialistPracticeDomain +
+ReferralEpisodeCommunity): this is the concrete grammar change needed
+before ReferralEpisodeCommunity can correctly become a federation of the
+two domains, as flagged in the Forum paper's Limitations section.
