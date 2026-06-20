@@ -1567,3 +1567,25 @@ transferred burdens (e.g. `creates_burden_on_authority`) should also be
 included in the widened discovery is unresolved — the standard does not
 name Authorization as a group-transfer example the way it names
 Delegation, so this needs separate justification before being added.
+
+### §13.5 Deontic scoping asymmetry: permission/prohibition vs. obligation (2026-06-20)
+
+ISO/IEC 15414 §7.8.8.2–§7.8.8.3 define permission (permit) and prohibition
+(embargo) as always prescribed by an *authorization domain*. §7.8.8.1
+defines obligation (burden) as prescribed by "a set of rules" — no
+authorization domain named. This is an asymmetry in the standard itself,
+not an implementation gap.
+
+Implication for the toolchain: a `burden`'s governing context (whatever
+"set of rules" backs it — e.g. a community's objective/invariants) need
+not coincide with the `domain` boundary that scopes a co-located `permit`
+or `embargo`. The current grammar doesn't model this distinction at all —
+`domain` only carries `controlling_object`/`controlled_object`, with no
+explicit linkage to which tokens are "subject to" it per §7.8.8.2–§7.8.8.3.
+
+Relevant for the next scenario (GPPractice/SpecialistPractice domain +
+ReferralEpisodeCommunity model): worth deciding whether V-16 or a future
+validator rule should check that `embargo`/`permit` tokens declare or infer
+an authorization domain explicitly, while `burden` tokens are validated
+against their community's rule set instead — i.e. two different scoping
+mechanisms, not one. Currently neither is enforced.
