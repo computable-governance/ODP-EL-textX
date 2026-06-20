@@ -445,6 +445,7 @@ domain-independent. Never let clinical or FHIR concepts leak into
 - Do not modify `grammar/v1/` — it is frozen.
 - Do not let domain-specific concerns propagate into Layers 2–4 modules.
 - Do not apply V-01 to Domain elements (grammar has no objective on Domain).
+- Deontic scoping asymmetry: burden is scoped differently from permit/embargo (see coordination_design_note_v3.md §13.5). Don't assume a burden's governing context matches its co-located domain boundary.
 
 ---
 
