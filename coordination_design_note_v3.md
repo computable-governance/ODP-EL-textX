@@ -1,4 +1,4 @@
-# Coordination field of application — design note (v3)
+# Governance and coordination: two readings of one specification — design note (v3)
 
 **Status:** working design note, reflecting implementation state as of
 commits 894afdb (P1-P6), a87720c (AM-27 log), 2913d48 (validator fixes),
@@ -9,17 +9,18 @@ ebefde7 (el_reasoner.py AM-18 fix + GP-referral scenario, initial build),
 GP-referral scenario is now built and verified — see §13.1 (Milestones)
 for results.
 
-## 1. Framing: a second field of application
+## 1. Framing: a second interpretive reading
 
-ISO/IEC 15414:2015 §6.1.2/§8.3 define *field of application* as the
-properties the environment of a specification's use shall have for that
-specification to be applicable — framed around reuse: "is this
-specification for me?" (see `field_of_application_note.md` for the full
-terminological discussion).
+ISO/IEC 15414:2015 §8.3 defines *field of application* as the properties
+the deployment environment must have for a specification to be applicable —
+a precondition checked once at adoption time, framed around reuse: "is this
+specification for me?" Governance and coordination are not two "fields of
+application" in this sense: they share the same deployment environment; what
+differs is only the CTL query posed (see §13.7).
 
 The same DSL-EL specification fragment (community/role structure, deontic
 tokens, accountability chains, the four-layer toolchain) admits at least
-two fields of application:
+two interpretive readings:
 
 - **Governance** — environment: regulated deployments (e.g. clinical AI
   under consent/accountability requirements). Audience: governance
@@ -47,8 +48,8 @@ Same `el_kripke.py`, same Kripke model M = (W, R, V, w₀) — different
 CTL formulas, different consumers, different temporal direction (design-time
 vs. run-time).
 
-The *choice of query* — AF or EF — is what determines the field of
-application, not the specification itself. Governance asks AF because its
+The *choice of query* — AF or EF — is what distinguishes the two readings,
+not the specification itself. Governance asks AF because its
 purpose is to certify a property holds unconditionally across all possible
 futures (enabling enforcement and audit); coordination asks EF because its
 purpose is to navigate toward an objective at runtime, where the existence
@@ -405,7 +406,7 @@ action-by-action at runtime; Layer 4 models it as world-transitions for
 reasoning. They must stay consistent — any `triggered_by` semantics added
 to the grammar must be reflected in both.
 
-## 8. The ledger — field-of-application-agnostic Layer 3 infrastructure
+## 8. The ledger — reading-agnostic Layer 3 infrastructure
 
 `el_runtime.py`'s append-only ledger was designed as part of the
 governance architecture — recording speech acts and action submissions
@@ -413,14 +414,13 @@ as the audit trail for Layer 3 compliance checking, and as the state anchor
 for Layer 4 Kripke reasoning via `build_kripke_from_runtime()` (which reads
 the ledger to establish the current w₀).
 
-The ledger carries through to the coordination field of application
-*unchanged*: it records what happened; which CTL query (AF/governance
-or EF/coordination) is run against that record determines what the
-recording *means* for the current purpose. No redesign was needed — the
-ledger is stable Layer 3 infrastructure used transparently by both fields
-of application.
+The ledger carries through to the coordination reading *unchanged*: it
+records what happened; which CTL query (AF/governance or EF/coordination)
+is run against that record determines what the recording *means* for the
+current purpose. No redesign was needed — the ledger is stable Layer 3
+infrastructure used transparently by both readings.
 
-The ledger is field-of-application-agnostic because it records speech acts
+The ledger is reading-agnostic because it records speech acts
 and their token-state consequences — facts that are the same regardless of
 whether the purpose of querying them is "prove compliance" (governance)
 or "navigate toward the objective" (coordination).
@@ -1616,3 +1616,42 @@ Relevant for the next scenario (GPPracticeDomain/SpecialistPracticeDomain +
 ReferralEpisodeCommunity): this is the concrete grammar change needed
 before ReferralEpisodeCommunity can correctly become a federation of the
 two domains, as flagged in the Forum paper's Limitations section.
+
+### §13.7 Terminology correction: "field of application" was misapplied (2026-06-21)
+
+**Error.** This document used "field of application" as a label for two
+different purposes of querying the same DSL-EL specification — governance
+and coordination. This imports ISO/IEC 15414:2015 §8.3 into a usage the
+standard does not sanction.
+
+**What §8.3 actually defines.** ISO/IEC 15414:2015 §8.3 defines *field of
+application* as the properties the *deployment environment* must have for a
+specification to be applicable — a precondition checked once at adoption
+time, framed around reuse: "is this specification for me?" A deployment
+environment that lacks the required properties is outside the field of
+application; the specification simply does not apply there.
+
+**Why governance and coordination are not two "fields of application."**
+Both queries operate on the same DSL-EL specification in the same deployment
+environment. They do not differ in what deployment-environment properties
+are required — the same token structure, community contract, and Kripke
+model M = (W, R, V, w₀) serve both. What differs is only the CTL formula
+applied to that model: AF ("across all paths, will the objective be
+satisfied?") for governance; EF ("does there exist a path to the
+objective?") for coordination. This is an *interpretive* distinction — two
+readings of the same specification — not an *applicability* distinction in
+§8.3's sense.
+
+**The formal axis is a toolchain invention, not an ISO concept.**
+`discharge_mode` (AF/EF) was introduced as AM-13 — an implementation choice
+in this toolchain's Kripke layer. No equivalent concept appears in
+ISO/IEC 15414:2015. The AF/EF axis is real and consequential (same Kripke
+model, different CTL formulas, different consumers, different temporal
+direction), but it is not what §8.3 calls a "field of application."
+
+**Correction applied in this document.** All occurrences of "field of
+application" and `field_of_application` in the non-standard-citation sense
+have been replaced with "reading" or "interpretive reading." The reference
+to `field_of_application_note.md` (which was never written) is removed; this
+§13.7 entry is its replacement. The substantive governance/coordination
+distinction and the AF/EF formal axis are preserved unchanged throughout.
