@@ -66,6 +66,16 @@ relationships between them:
   Party carries legal/accountability weight (buck stops here); Agent
   is an ActiveEO (human or AI) acting on behalf of a principal.
   Determines where accountability lands when an agent acts.
+  **Note (EOKind/Party-Agent overlap, Forum paper §3.1, 2026-06-20):**
+  The grammar's flat `EOKind` enum (`party | agent | active_object |
+  artefact_object | resource_object`) does not flatten away ISO/IEC 15414's
+  overlapping Party/Agent structure (§6.6.8 Note 1: an agent may itself be
+  a party). The overlap is captured compositionally: `kind` gives primary
+  classification; `delegated_from`/`principal_of` independently express the
+  agent-relationship regardless of `kind`. A `party`-kind object with
+  `delegated_from` set is functioning as both party and agent simultaneously,
+  matching the standard. No grammar change needed — this was a paper-prose
+  clarity issue, not an implementation gap.
 - **Controlling-controlled** (domain structure) — determines who has
   authority to grant/revoke permits. The controlling-controlled
   relationship in an organisational domain is essentially an implicit
