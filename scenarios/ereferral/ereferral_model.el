@@ -188,3 +188,23 @@ community ReferralEpisodeCommunity
             }
         }
     }
+
+// ── Violation Responses ────────────────────────────────────────────────────
+// Only detectable (eventual) burdens have violation responses.
+// referralBurden (strict) has no ViolationResponse -- violation is
+// unreachable by construction; declaring one would be misleading.
+
+violation_response examinationViolation {
+    on_violation_of: examinationBurden
+    obligates: SpecialistPractice
+    response_kind: escalate
+    escalate_to: GPPractice
+    description: "If specialist clinician fails to complete examination, SpecialistPractice must escalate to GPPractice"
+}
+
+violation_response aiExaminationViolation {
+    on_violation_of: aiExaminationBurden
+    obligates: SpecialistClinician
+    response_kind: remediate
+    description: "If AI agent fails to conduct examination, SpecialistClinician as principal must remediate"
+}
