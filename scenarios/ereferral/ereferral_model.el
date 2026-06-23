@@ -56,6 +56,29 @@ burden aiExaminationBurden {
     description: "Obligation on aiExaminationRole; EF holds, AF may not"
 }
 
+// ── Permit and Artefact ────────────────────────────────────────────────────
+// patientRecordAccessPermit: granted to aiExaminationRole on_join (§7.8.7).
+// discharge_mode does not apply to permits (AM-13 applies to burdens only).
+
+permit patientRecordAccessPermit {
+    for_action: "access_patient_clinical_records"
+    state: active
+    description: "Permission for AI agent to access patient records for examination"
+}
+
+artefact_object patientRecord
+    description: "Patient clinical record — referenced by referral and examination actions"
+
+// ── Token Group ────────────────────────────────────────────────────────────
+// Groups all three episode burdens for objective satisfaction checking.
+// all_discharged: episode objective met only when every burden is discharged.
+
+token_group episodeBurdenGroup {
+    member: referralBurden
+    member: examinationBurden
+    member: aiExaminationBurden
+}
+
 // ── Organisational Domains (Introduction-style, durable) ───────────────────
 // Per §7.5: domain is a lightweight community expressing structural
 // accountability boundary only -- no objective, role, or lifecycle.
@@ -84,15 +107,28 @@ community ReferralEpisodeCommunity
     description: "Creation-style community; instantiated by the referral commitment; scopes all principal-agent relationships for this episode only; dissolved on objective achievement"
     {
         objective: "Complete specialist examination for the referred patient"
+            satisfaction: all_discharged(episodeBurdenGroup)
 
         invariant episodeScopedAccountability:
             "principal_of and delegated_from relationships established here -- including SpecialistClinician's delegation to SpecialistAIAgent -- are dissolved when this community terminates"
+
+        on_join aiExaminationRole transfer patientRecordAccessPermit
+        on_leave aiExaminationRole revert patientRecordAccessPermit
 
         role referringClinicianRole
             description: "GPClinician, principal for this episode"
             {
                 holds referralBurden
                 // AF(discharged) holds -- discharge_mode: strict on referralBurden
+
+                action submitReferral {
+                    description: "GP clinician submits referral to specialist practice; Creation act that instantiates the episode"
+                    actor: referringClinicianRole
+                    artefact: patientRecord
+                    precondition: "Patient must have active episode of care and clinical indication for referral"
+                    favoured_by_burden referralBurden
+                    effect activate examinationBurden
+                }
             }
 
         role referredToSpecialistRole
@@ -100,13 +136,45 @@ community ReferralEpisodeCommunity
             {
                 holds examinationBurden
                 // EF(discharged) holds -- discharge_mode: eventual on examinationBurden
+
+                action acknowledgeReferral {
+                    description: "Specialist clinician acknowledges receipt of referral and confirms clinical review"
+                    actor: referredToSpecialistRole
+                    artefact: patientRecord
+                    precondition: "Referral must have been submitted by referring clinician"
+                    favoured_by_burden examinationBurden
+                }
+
+                action scheduleAssessment {
+                    description: "Specialist clinician schedules patient assessment; discharges examination burden and activates AI examination burden"
+                    actor: referredToSpecialistRole
+                    precondition: "Referral must be acknowledged"
+                    favoured_by_burden examinationBurden
+                    effect activate aiExaminationBurden
+                }
             }
 
         role aiExaminationRole
             description: "SpecialistAIAgent, agent of SpecialistClinician for this episode only; not a standing relationship under SpecialistPractice"
             {
                 holds aiExaminationBurden
+                holds patientRecordAccessPermit
                 // EF(discharged) holds -- discharge_mode: eventual on aiExaminationBurden
+
+                action access_patient_clinical_records {
+                    description: "AI agent accesses patient clinical records; requires permit granted on episode join"
+                    actor: aiExaminationRole
+                    artefact: patientRecord
+                    requires_permit patientRecordAccessPermit for aiExaminationRole
+                }
+
+                action conductAIExamination {
+                    description: "AI agent conducts diagnostic examination of patient record"
+                    actor: aiExaminationRole
+                    artefact: patientRecord
+                    requires_permit patientRecordAccessPermit for aiExaminationRole
+                    favoured_by_burden aiExaminationBurden
+                }
             }
 
         lifecycle {
