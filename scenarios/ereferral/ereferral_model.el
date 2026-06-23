@@ -125,7 +125,6 @@ community ReferralEpisodeCommunity
                     description: "GP clinician submits referral to specialist practice; Creation act that instantiates the episode"
                     actor: referringClinicianRole
                     artefact: patientRecord
-                    precondition: "Patient must have active episode of care and clinical indication for referral"
                     favoured_by_burden referralBurden
                     effect activate examinationBurden
                 }
@@ -141,14 +140,12 @@ community ReferralEpisodeCommunity
                     description: "Specialist clinician acknowledges receipt of referral and confirms clinical review"
                     actor: referredToSpecialistRole
                     artefact: patientRecord
-                    precondition: "Referral must have been submitted by referring clinician"
                     favoured_by_burden examinationBurden
                 }
 
                 action scheduleAssessment {
                     description: "Specialist clinician schedules patient assessment; discharges examination burden and activates AI examination burden"
                     actor: referredToSpecialistRole
-                    precondition: "Referral must be acknowledged"
                     favoured_by_burden examinationBurden
                     effect activate aiExaminationBurden
                 }
