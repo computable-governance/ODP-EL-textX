@@ -140,7 +140,6 @@ community ReferralEpisodeCommunity
                     description: "Specialist clinician acknowledges receipt of referral and confirms clinical review"
                     actor: referredToSpecialistRole
                     artefact: patientRecord
-                    favoured_by_burden examinationBurden
                 }
 
                 action scheduleAssessment {
