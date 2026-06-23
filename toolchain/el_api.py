@@ -88,6 +88,59 @@ def _build_gp_referral_runtime() -> Runtime:
     return Runtime(state, spec)
 
 
+_EREFERRAL_SCENARIO = _REPO_ROOT / "scenarios" / "ereferral" / "ereferral_model.el"
+
+
+def _build_ereferral_runtime() -> Runtime:
+    """
+    Parse the eReferral scenario and initialise a Runtime with actors enrolled
+    and tokens granted to their actual holders.
+
+    Role assignments:
+      GPClinician fills referringClinicianRole
+      SpecialistClinician fills referredToSpecialistRole
+      SpecialistAIAgent fills aiExaminationRole
+
+    Token grants:
+      GPClinician         — referralBurden (strict)
+      SpecialistClinician — examinationBurden (eventual)
+      SpecialistAIAgent   — aiExaminationBurden (eventual),
+                            patientRecordAccessPermit
+    """
+    result = parse(_EREFERRAL_SCENARIO, validate=False)
+    if not result.ok:
+        raise RuntimeError(f"eReferral parse failed: {result.errors}")
+
+    spec = result.model
+    state = initial_state()
+
+    state = enroll(state, "GPPractice")
+    state = enroll(state, "GPClinician",         role_name="referringClinicianRole")
+    state = enroll(state, "SpecialistPractice")
+    state = enroll(state, "SpecialistClinician",  role_name="referredToSpecialistRole")
+    state = enroll(state, "SpecialistAIAgent",    role_name="aiExaminationRole")
+
+    for token_name, holder in [
+        ("referralBurden",            "GPClinician"),
+        ("examinationBurden",         "SpecialistClinician"),
+        ("aiExaminationBurden",       "SpecialistAIAgent"),
+        ("patientRecordAccessPermit", "SpecialistAIAgent"),
+    ]:
+        state = grant_token(state, token_from_spec(spec, token_name, holder))
+
+    return Runtime(state, spec)
+
+
+# Scenario registry — maps scenario name to its builder function
+_SCENARIO_BUILDERS = {
+    "gp_referral": _build_gp_referral_runtime,
+    "ereferral":   _build_ereferral_runtime,
+}
+
+# Active scenario name and community name for objective queries
+_active_scenario: str = "gp_referral"
+_active_community: str = "ReferralFederation"
+
 _runtime = _build_gp_referral_runtime()
 
 
@@ -186,6 +239,18 @@ class ExecuteActionResponse(BaseModel):
     new_q_value: float
     new_objective_score: float
     objective_reachable: bool
+
+
+class ScenarioSwitchResponse(BaseModel):
+    active_scenario: str
+    community: str
+    message: str
+
+
+class ScenarioListResponse(BaseModel):
+    available_scenarios: List[str]
+    active_scenario: str
+    active_community: str
 
 
 # ── Endpoint 1: GET /actors/{actor_name}/available-actions ────────────────────
@@ -507,9 +572,9 @@ def execute_action(
         new_rec = ""
         new_q = 0.0
 
-    score = km.utility_for_objective("ReferralFederation", km.initial)
+    score = km.utility_for_objective(_active_community, km.initial)
 
-    prop = "objective_satisfied:ReferralFederation"
+    prop = f"objective_satisfied:{_active_community}"
     reachable = km.EF(km.initial, prop)
 
     return ExecuteActionResponse(
@@ -539,5 +604,59 @@ def execute_action(
 )
 def reset_runtime() -> dict:
     global _runtime
-    _runtime = _build_gp_referral_runtime()
-    return {"status": "reset", "message": "Runtime reset to initial GP-referral state"}
+    _runtime = _SCENARIO_BUILDERS[_active_scenario]()
+    return {
+        "status": "reset",
+        "message": f"Runtime reset to initial '{_active_scenario}' state",
+    }
+
+
+# ── Endpoint 7: GET /scenarios ────────────────────────────────────────────────
+
+@app.get(
+    "/scenarios",
+    response_model=ScenarioListResponse,
+    summary="List available scenarios and the currently active one",
+)
+def list_scenarios() -> ScenarioListResponse:
+    return ScenarioListResponse(
+        available_scenarios=list(_SCENARIO_BUILDERS.keys()),
+        active_scenario=_active_scenario,
+        active_community=_active_community,
+    )
+
+
+# ── Endpoint 8: POST /scenario/{scenario_name} ────────────────────────────────
+
+_COMMUNITY_FOR_SCENARIO = {
+    "gp_referral": "ReferralFederation",
+    "ereferral":   "ReferralEpisodeCommunity",
+}
+
+
+@app.post(
+    "/scenario/{scenario_name}",
+    response_model=ScenarioSwitchResponse,
+    summary="Switch the active scenario and reset the runtime",
+    description=(
+        "Rebuilds the singleton runtime from the named scenario's builder. "
+        "Known scenarios: gp_referral, ereferral. "
+        "Returns 404 for an unknown scenario name."
+    ),
+)
+def switch_scenario(scenario_name: str) -> ScenarioSwitchResponse:
+    global _runtime, _active_scenario, _active_community
+    if scenario_name not in _SCENARIO_BUILDERS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown scenario '{scenario_name}'. "
+                   f"Available: {list(_SCENARIO_BUILDERS.keys())}",
+        )
+    _runtime = _SCENARIO_BUILDERS[scenario_name]()
+    _active_scenario = scenario_name
+    _active_community = _COMMUNITY_FOR_SCENARIO[scenario_name]
+    return ScenarioSwitchResponse(
+        active_scenario=_active_scenario,
+        community=_active_community,
+        message=f"Runtime switched to '{scenario_name}' scenario.",
+    )
