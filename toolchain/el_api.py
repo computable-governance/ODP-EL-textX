@@ -634,6 +634,22 @@ _COMMUNITY_FOR_SCENARIO = {
 }
 
 
+# ── Debug: GET /debug/tokens ──────────────────────────────────────────────────
+
+@app.get("/debug/tokens", summary="Return all current runtime token states")
+def debug_tokens():
+    return [
+        {
+            "holder": t.holder,
+            "kind": t.kind,
+            "token_name": t.token_name,
+            "state": t.state,
+            "for_action": t.for_action,
+        }
+        for t in _runtime.current_state().tokens
+    ]
+
+
 @app.post(
     "/scenario/{scenario_name}",
     response_model=ScenarioSwitchResponse,
