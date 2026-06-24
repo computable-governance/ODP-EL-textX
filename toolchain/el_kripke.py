@@ -242,6 +242,10 @@ class ObligationDescriptor:
     # Event name (from DeonticToken.discharged_by) emitted when this obligation
     # is discharged. Bidirectional convention: discharging this obligation fires
     # this event, which may cascade to trigger other WAITING obligations (P6).
+    for_action: Optional[str] = None
+    # Name of the Action (within a community Role body) whose ConditionalAction
+    # has this obligation as a favoured_by_burden entry. Resolved by
+    # _find_action_for_burden() when not set directly on the DeonticToken.
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1113,6 +1117,40 @@ def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
     return default
 
 
+def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
+    """
+    Search community Role bodies for the Action that carries burden_name as a
+    ConditionalAction.favoured_by_burden entry.
+
+    Traversal path:
+      model.elements
+        → Community | Domain | Federation
+          → el.roles (Role list)
+            → role.items (RoleBodyItem list)
+              → item where _cls(item) == "Action"
+                → item.items (ActionBodyItem list)
+                  → body_item where _cls(body_item) == "ConditionalAction"
+                    → body_item.favoured_by_burden (burden ref list)
+                      → if _obj_name(burden_ref) == burden_name → return item.name
+
+    Returns the Action name, or None if no match is found.
+    """
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for item in getattr(role, "items", []):
+                if _cls(item) != "Action":
+                    continue
+                for body_item in getattr(item, "items", []):
+                    if _cls(body_item) != "ConditionalAction":
+                        continue
+                    for burden_ref in getattr(body_item, "favoured_by_burden", []):
+                        if _obj_name(burden_ref) == burden_name:
+                            return item.name
+    return None
+
+
 def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]:
     """
     Extract ObligationDescriptor for each burden that appears in at least
@@ -1199,6 +1237,12 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
         # that the holder's action emits). Used by T1 cascade to activate WAITING
         # obligations whose triggered_by matches this event name.
 
+        # Tier 1: explicit for_action on the DeonticToken grammar attribute
+        # Tier 2: structural search through community Role → Action → ConditionalAction
+        for_action = getattr(burden, "for_action", None) or None
+        if for_action is None:
+            for_action = _find_action_for_burden(model, burden_name)
+
         descriptors[burden_name] = ObligationDescriptor(
             obligation_id=burden_name,
             obligation_text=obl_text,
@@ -1211,7 +1255,45 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
             priority_weight=_priority_weight(getattr(burden, "priority", None)),
             triggered_by=triggered_by,
             fires_event=fires_event,
+            for_action=for_action,
         )
+
+    # Second pass: Delegation elements that transfer a token_group (§7.8.7 NOTE).
+    # These obligations are held by the delegate but may not have a Commitment.
+    for d in _collect(model, "Delegation"):
+        group_ref = getattr(d, "token_group", None)
+        if group_ref is None:
+            continue
+        delegate_name = _obj_name(getattr(d, "delegate", None))
+        if not delegate_name:
+            continue
+        for tok_ref in getattr(group_ref, "tokens", []):
+            burden_name = _obj_name(tok_ref)
+            if not burden_name or burden_name in descriptors:
+                continue
+            burden = burdens.get(burden_name)
+            if burden is None:
+                continue
+            triggered_by = _obj_name(getattr(burden, "triggered_by", None))
+            fires_event  = _obj_name(getattr(burden, "discharged_by", None))
+            for_action = getattr(burden, "for_action", None) or None
+            if for_action is None:
+                for_action = _find_action_for_burden(model, burden_name)
+            deadline_str = getattr(burden, "deadline", None)
+            descriptors[burden_name] = ObligationDescriptor(
+                obligation_id=burden_name,
+                obligation_text=burden_name,
+                deadline_steps=_parse_deadline_steps(deadline_str),
+                holder=delegate_name,
+                chain=[delegate_name],
+                revocable=getattr(d, "revocable", False),
+                sub_delegation_allowed=getattr(d, "sub_delegation_allowed", False),
+                discharge_mode=getattr(burden, "discharge_mode", "") or "eventual",
+                priority_weight=_priority_weight(getattr(burden, "priority", None)),
+                triggered_by=triggered_by,
+                fires_event=fires_event,
+                for_action=for_action,
+            )
 
     return descriptors
 
