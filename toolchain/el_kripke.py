@@ -1138,6 +1138,9 @@ def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
             continue
         for role in getattr(el, "roles", []):
             for action in getattr(role, "actions", []):
+                for burden_ref in getattr(action, "favoured_by", []):
+                    if _obj_name(burden_ref) == burden_name:
+                        return action.name
                 for ca in getattr(action, "conditional_actions", []):
                     for burden_ref in getattr(ca, "favoured_by", []):
                         if _obj_name(burden_ref) == burden_name:

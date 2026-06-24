@@ -137,6 +137,8 @@ def process_action(action):
             action.deontic_requirements.append(item)
         elif cls == 'DeonticEffect':
             action.deontic_effects.append(item)
+        elif cls == 'FavouredByItem':
+            action.favoured_by.append(item.token)
         elif cls == 'EmitsDecl':
             # AM-22: last EmitsDecl wins if multiple appear (grammar allows only one)
             action.emits = item.event
