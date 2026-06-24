@@ -122,6 +122,7 @@ def _build_ereferral_runtime() -> Runtime:
 
     for token_name, holder in [
         ("referralBurden",            "GPClinician"),
+        ("acknowledgementBurden",     "SpecialistClinician"),
         ("examinationBurden",         "SpecialistClinician"),
         ("aiExaminationBurden",       "SpecialistAIAgent"),
         ("patientRecordAccessPermit", "SpecialistAIAgent"),

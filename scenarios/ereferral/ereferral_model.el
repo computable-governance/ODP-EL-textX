@@ -55,6 +55,12 @@ burden aiExaminationBurden {
     description: "Obligation on aiExaminationRole; EF holds, AF may not"
 }
 
+burden acknowledgementBurden {
+    state: pending
+    discharge_mode: eventual
+    description: "Obligation on referredToSpecialistRole to acknowledge receipt of referral; detectable -- violation triggers escalation to GP Practice"
+}
+
 // ── Permit and Artefact ────────────────────────────────────────────────────
 // patientRecordAccessPermit: granted to aiExaminationRole on_join (§7.8.7).
 // discharge_mode does not apply to permits (AM-13 applies to burdens only).
@@ -125,13 +131,14 @@ community ReferralEpisodeCommunity
                     actor: referringClinicianRole
                     artefact: patientRecord
                     favoured_by_burden referralBurden
-                    effect activate examinationBurden
+                    effect activate acknowledgementBurden
                 }
             }
 
         role referredToSpecialistRole
             description: "SpecialistClinician, agent of GPClinician for this episode; principal of SpecialistAIAgent for this episode only"
             {
+                holds acknowledgementBurden
                 holds examinationBurden
                 // EF(discharged) holds -- discharge_mode: eventual on examinationBurden
 
@@ -139,6 +146,8 @@ community ReferralEpisodeCommunity
                     description: "Specialist clinician acknowledges receipt of referral and confirms clinical review"
                     actor: referredToSpecialistRole
                     artefact: patientRecord
+                    favoured_by_burden acknowledgementBurden
+                    effect activate examinationBurden
                 }
 
                 action scheduleAssessment {
@@ -202,4 +211,12 @@ violation_response aiExaminationViolation {
     obligates: SpecialistClinician
     response_kind: remediate
     description: "If AI agent fails to conduct examination, SpecialistClinician as principal must remediate"
+}
+
+violation_response acknowledgementViolation {
+    on_violation_of: acknowledgementBurden
+    obligates: SpecialistPractice
+    response_kind: escalate
+    escalate_to: GPPractice
+    description: "If specialist clinician fails to acknowledge referral, SpecialistPractice must escalate to GPPractice"
 }
