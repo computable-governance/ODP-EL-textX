@@ -24,7 +24,7 @@ Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, §7.8, §7.10
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 
 # ── Runtime types ─────────────────────────────────────────────────────────────
@@ -414,6 +414,42 @@ def grant_token(state: WorldState, token: TokenInstance) -> WorldState:
     return state.with_tokens(list(state.tokens) + [token])
 
 
+def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
+    """
+    Search community Role bodies for the Action that carries burden_name as a
+    ConditionalAction.favoured_by_burden entry.
+
+    Mirrors the identical helper in el_kripke.py. Duplicated here to avoid
+    a circular import (el_engine ← el_kripke would create a cycle).
+
+    Traversal path:
+      model.elements
+        → Community | Domain | Federation
+          → el.roles (Role list)
+            → role.items (RoleBodyItem list)
+              → item where type is Action
+                → item.items (ActionBodyItem list)
+                  → body_item where type is ConditionalAction
+                    → body_item.favoured_by_burden (burden ref list)
+                      → if name matches → return item.name
+    Returns the Action name, or None if no match is found.
+    """
+    for el in model.elements:
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for item in getattr(role, "items", []):
+                if type(item).__name__ != "Action":
+                    continue
+                for body_item in getattr(item, "items", []):
+                    if type(body_item).__name__ != "ConditionalAction":
+                        continue
+                    for burden_ref in getattr(body_item, "favoured_by_burden", []):
+                        if getattr(burden_ref, "name", None) == burden_name:
+                            return item.name
+    return None
+
+
 def token_from_spec(spec, token_name: str, holder: str) -> TokenInstance:
     """
     Construct a TokenInstance from a top-level DeonticToken in the spec.
@@ -430,7 +466,10 @@ def token_from_spec(spec, token_name: str, holder: str) -> TokenInstance:
                 discharge_mode=el.discharge_mode or "eventual",
                 priority=el.priority or "normal",
                 deadline=getattr(el, "deadline", None),
-                for_action=getattr(el, "for_action", None),
+                for_action=(
+                    getattr(el, "for_action", None)
+                    or _find_action_for_burden(spec, el.name)
+                ),
             )
     raise KeyError(f"DeonticToken '{token_name}' not found in spec")
 
