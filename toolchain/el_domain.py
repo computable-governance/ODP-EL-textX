@@ -754,6 +754,7 @@ class Action(_ELParentable):
     deontic_requirements: List = field(default_factory=list)  # List[DeonticRequirement]
     deontic_effects:      List = field(default_factory=list)  # List[DeonticEffect]
     emits:                Optional[object] = None  # AM-22: → EventDecl ref; P4 from EmitsDecl
+    favoured_by:          List = field(default_factory=list)  # List[DeonticToken]; P4 from FavouredByItem
 
 
 @dataclass
