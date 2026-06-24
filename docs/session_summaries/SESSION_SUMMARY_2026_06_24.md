@@ -62,3 +62,43 @@ OK; HTML valid.
 - **UI verification** — eReferral simulator end-to-end check with workarounds
   removed: confirm burden cards show correct action names from structural scan
   rather than fallback display (planned next)
+
+## Addendum — Morning session (2026-06-25)
+
+### Additional fixes from UI verification
+
+| Commit | File | Change |
+|--------|------|--------|
+| 89a3a5b | `el_engine.py`, `el_kripke.py` | `_find_action_for_burden()` updated to use post-P3/P4/P5 attributes: `role.actions`, `action.conditional_actions`, `ca.favoured_by` |
+| 604e0b0 | `el_domain.py` | `Action.favoured_by: List` field added — P4 FavouredByItem handler had no target attribute |
+| 0157223 | `el_parser.py`, `el_engine.py`, `el_kripke.py` | P4 `process_action()` FavouredByItem handler added; `_find_action_for_burden()` checks `action.favoured_by` before `conditional_actions` |
+| 5144fb7 | `grammar/v2/el_grammar.tx`, `docs/el_grammar_amendments.md` | AM-25: `FavouredByItem` added to `ActionBodyItem` alternation before `DeonticRequirement` (root cause — grammar was parsing `favoured_by_burden` in plain Action body as `DeonticRequirement`, discarding it) |
+
+### Root cause chain
+
+The `for_action` resolution failure for `acknowledgementBurden` and
+`examinationBurden` traced through four layers:
+
+1. **Grammar (AM-25):** `favoured_by_burden` in plain `Action` body matched
+   `DeonticRequirement` (ordered choice) — `FavouredByItem` only in
+   `CondActionBodyItem`. Fixed by adding `FavouredByItem` to `ActionBodyItem`
+   before `DeonticRequirement`.
+2. **Domain:** `Action.favoured_by` field missing — P4 handler had no target.
+   Fixed by adding field to `Action` dataclass.
+3. **Parser (P4):** No `FavouredByItem` handler in `process_action()`.
+   Fixed by adding handler mirroring P5 pattern.
+4. **Engine/Kripke:** `_find_action_for_burden()` used pre-dissolution
+   attributes (`role.items`, `action.items`, `ca.favoured_by_burden`).
+   Fixed to use post-P3/P4/P5 attributes; also added direct `action.favoured_by`
+   check before `conditional_actions`.
+
+### UI verification — full cascade confirmed
+
+eReferral simulator end-to-end sequence verified:
+1. `submitReferral` (GP Clinician) → activates `acknowledgementBurden`
+2. `acknowledgeReferral` (Specialist Clinician) → discharges `acknowledgementBurden`,
+   activates `examinationBurden`
+3. `scheduleAssessment` (Specialist Clinician) → discharges `examinationBurden`,
+   activates `aiExaminationBurden`
+4. `conductAIExamination` (AI Diagnostic Agent) → discharges `aiExaminationBurden`
+5. Episode complete — all obligations discharged, Worlds checked: 1
