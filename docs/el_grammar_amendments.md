@@ -1894,3 +1894,24 @@ Federation only.
 **Standard reference:** §7.5, §7.5.1, §7.5.2, §7.7
 
 **Status:** CONFIRMED
+
+## AM-25 — Add FavouredByItem to ActionBodyItem
+
+**Status:** Implemented
+**Date:** 2026-06-25
+**File:** grammar/v2/el_grammar.tx
+
+**Problem:** `favoured_by_burden` declared directly in an `Action` body was
+parsed as a `DeonticRequirement` (generic keyword match) rather than as a
+`FavouredByItem`. `FavouredByItem` only appeared in `CondActionBodyItem`
+(ConditionalAction body), not in `ActionBodyItem` (plain Action body).
+
+**Fix:** Add `FavouredByItem` to `ActionBodyItem` alternation, before
+`DeonticRequirement` (ordered choice — must precede or DeonticRequirement
+consumes the keyword first).
+
+**Companion changes:**
+- `el_domain.py`: `Action.favoured_by: List` field added (commit 604e0b0)
+- `el_parser.py`: P4 `process_action()` FavouredByItem handler added (commit 0157223)
+- `el_engine.py` + `el_kripke.py`: `_find_action_for_burden()` checks
+  `action.favoured_by` directly before `conditional_actions` (commit 0157223)

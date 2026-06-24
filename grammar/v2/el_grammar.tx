@@ -519,7 +519,7 @@ Action:
 
 ActionBodyItem:
     ActorRef | ArtefactRef | ResourceRef
-    | PreconditionDecl | DeonticRequirement | DeonticEffect
+    | PreconditionDecl | FavouredByItem | DeonticRequirement | DeonticEffect
     | EmitsDecl
 ;
 
