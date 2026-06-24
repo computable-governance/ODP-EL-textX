@@ -83,13 +83,19 @@ class TransitionRecord:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _find_action(spec, action_name):
-    """Return (Action, Role) matching action_name across all communities, or (None, None)."""
+    """Return (Action, Role) matching action_name across all communities, or (None, None).
+
+    Object processor P3 dissolves role.items into role.actions (and empties
+    role.items), so role.actions is the correct post-parse attribute.
+    Also searches Domain and Federation elements in addition to Community.
+    """
     for el in spec.elements:
-        if type(el).__name__ == "Community":
-            for role in el.roles:
-                for action in role.actions:
-                    if action.name == action_name:
-                        return action, role
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                if action.name == action_name:
+                    return action, role
     return None, None
 
 
