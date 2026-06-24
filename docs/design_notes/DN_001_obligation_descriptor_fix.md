@@ -1,68 +1,58 @@
 # Design Note DN-001: _build_obligation_descriptors() Fix (el_kripke.py)
 
-**Status:** Deferred — workaround in place  
-**Priority:** Medium  
-**Date:** 2026-06-24  
+**Status:** Implemented — commit d7f98b8
+**Priority:** Medium
+**Date:** 2026-06-24
 **Relates to:** el_kripke.py `_build_obligation_descriptors()`, DSL_DESIGN_NOTES.md
 
 ## Problem
 
-The Kripke engine synthesises action labels from burden names by convention
-(e.g. `examinationBurden` → `conductExamination`) rather than reading declared
-action names from the spec. This causes two symptoms:
-
-1. The wrong action name appears in the widget's available-actions panel
-2. The wrong `for_action` value gets stored on the token, so the
-   available-actions API endpoint surfaces the wrong action name
+The Kripke engine had no `for_action` field on `ObligationDescriptor`, and
+did not discover burdens introduced exclusively via
+`DelegationDecl.transfers_token_group` (only `Commitment`-backed burdens
+were registered).
 
 Discovered during eReferral scenario implementation (June 2026).
 
-## Current Workaround
+## Implementation (d7f98b8)
 
-Two-part patch applied during eReferral implementation session:
-- `examinationBurden.for_action` set to `scheduleAssessment` (the actual
-  discharging action) in `scenarios/ereferral/ereferral_model.el`
-- `ACTION_LABELS` aliases added to the widget for any remaining synthesised
-  labels (`conductExamination`, `discharge:examinationBurden`,
-  `discharge:aiExaminationBurden`)
+Four changes to `toolchain/el_kripke.py`:
 
-## Proper Fix
+**Change A** — `for_action: Optional[str] = None` added as final field of
+`ObligationDescriptor`.
 
-In `el_kripke.py`, `_build_obligation_descriptors()` should traverse the
-spec's `Action` declarations and look for `Action.favoured_by_burden`
-references to discover the correct action name for each burden descriptor,
-rather than synthesising it from the burden name.
+**Change B** — `_find_action_for_burden(model, burden_name)` helper added.
+Traverses `Community`/`Domain`/`Federation` → `roles` → `items` (Action) →
+`items` (ConditionalAction) → `favoured_by_burden` to discover the Action
+name that is favoured by the named burden.
 
-Pseudocode:
+**Change C** — Tier 1/2 resolution in the Commitment loop:
+- Tier 1: `DeonticToken.for_action` STRING (if set directly on the token)
+- Tier 2: `_find_action_for_burden()` structural scan
+- Tier 3: `None` — standing obligation, no named discharging action
 
-```python
-# Current (synthesised from burden name — incorrect):
-for_action = "conduct" + burden_name[0].upper() + burden_name[1:]
+**Change D** — Second pass over `Delegation` elements with
+`transfers_token_group` set, registering descriptors for group member burdens
+not captured via the Commitment path (ISO/IEC 15414 §7.8.7 NOTE).
 
-# Correct (discovered from spec Action declarations):
-for burden in spec_burdens:
-    for action in spec_actions:
-        if burden in action.favoured_by_burden:
-            descriptor.for_action = action.name
-            break
-```
+## Workaround (now superseded)
+
+The workaround `for_action: "scheduleAssessment"` on `examinationBurden` in
+`scenarios/ereferral/ereferral_model.el` and `ACTION_LABELS` aliases in the
+eReferral widget remain in place. They can be removed once `el_engine.py`
+gains the same Tier 2 structural scan for `token_from_spec()` — that is a
+separate task.
 
 ## Related Gap
 
 `_build_obligation_descriptors()` should also discover burdens via
 `DelegationDecl.transfers_token_group` (per ISO/IEC 15414 §7.8.7 NOTE)
-in addition to `Commitment.burden`. Both gaps can be addressed in the
-same pass.
-
-## When to Address
-
-Next implementation session after paper submission. Low risk of breaking
-the existing GP-referral scenario since that scenario's burden names and
-action names are already aligned by convention.
+in addition to `Commitment.burden`. Both gaps addressed in commit d7f98b8.
 
 ## Affected Files
 
-- `toolchain/el_kripke.py` — `_build_obligation_descriptors()` function
-- `scenarios/ereferral/ereferral_model.el` — workaround `for_action` values
+- `toolchain/el_kripke.py` — all four changes (commit d7f98b8)
+- `scenarios/ereferral/ereferral_model.el` — workaround `for_action` value
+  (still present; remove when `el_engine.py` gains Tier 2 scan)
 - `computable-governance-ui/widgets/ereferral/ereferral-simulator.html`
-  — workaround `ACTION_LABELS` aliases
+  — workaround `ACTION_LABELS` aliases (still present; remove together with above)
