@@ -423,36 +423,30 @@ def grant_token(state: WorldState, token: TokenInstance) -> WorldState:
 def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
     """
     Search community Role bodies for the Action that carries burden_name as a
-    ConditionalAction.favoured_by_burden entry.
+    ConditionalAction.favoured_by entry.
 
     Mirrors the identical helper in el_kripke.py. Duplicated here to avoid
     a circular import (el_engine ← el_kripke would create a cycle).
 
-    Traversal path:
+    Traversal path (post-dissolution attributes):
       model.elements
         → Community | Domain | Federation
-          → el.roles (Role list)
-            → role.items (RoleBodyItem list)
-              → item where type is Action
-                → item.items (ActionBodyItem list)
-                  → body_item where type is ConditionalAction
-                    → body_item.favoured_by_burden (burden ref list)
-                      → if name matches → return item.name
+          → el.roles (post-P3)
+            → role.actions (post-P3, not role.items)
+              → action.conditional_actions (post-P4, not action.items)
+                → ca.favoured_by (post-P5, not ca.favoured_by_burden)
+                  → if name matches → return action.name
     Returns the Action name, or None if no match is found.
     """
     for el in model.elements:
         if type(el).__name__ not in ("Community", "Domain", "Federation"):
             continue
         for role in getattr(el, "roles", []):
-            for item in getattr(role, "items", []):
-                if type(item).__name__ != "Action":
-                    continue
-                for body_item in getattr(item, "items", []):
-                    if type(body_item).__name__ != "ConditionalAction":
-                        continue
-                    for burden_ref in getattr(body_item, "favoured_by_burden", []):
+            for action in getattr(role, "actions", []):
+                for ca in getattr(action, "conditional_actions", []):
+                    for burden_ref in getattr(ca, "favoured_by", []):
                         if getattr(burden_ref, "name", None) == burden_name:
-                            return item.name
+                            return action.name
     return None
 
 
