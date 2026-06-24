@@ -43,7 +43,6 @@ burden referralBurden {
 }
 
 burden examinationBurden {
-    for_action: "scheduleAssessment"
     state: pending
     discharge_mode: eventual
     description: "Obligation on referredToSpecialistRole; EF holds, AF may not"
