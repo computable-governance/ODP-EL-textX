@@ -488,7 +488,7 @@ The following amendments are logged as tentative and require verification agains
 
 ---
 
-## 4. Amendment Summary
+## Amendment Summary
 
 | ID | Type | Description |
 |---|---|---|
@@ -525,10 +525,6 @@ The following amendments are logged as tentative and require verification agains
 | DOC-02 | Documentation | `DomainDecl` as community type design decision |
 
 ---
-
-_End of DSL-EL Design Notes v1.0_
-_Produced during grammar walkthrough session, May 2026_
-
 ---
 
 ## 4. Object Processor Pipeline (Px)
@@ -638,3 +634,178 @@ After parsing, always use the **post-Px attributes**, never `obj.items`
 This has been the source of several bugs (see commit history: 89a3a5b,
 0157223, 5144fb7, ab22c87) where code used pre-Px attributes and silently
 found empty lists.
+
+---
+
+## 5. Standard-Grounded vs Extended Constructs
+
+This section documents the relationship between V2 grammar constructs and
+ISO/IEC 15414:2015, distinguishing constructs that are directly standardised
+from those that extend or go beyond the standard. This distinction matters
+for academic claims, standards submissions, and future standard revisions.
+
+---
+
+### 5.1 Constructs directly in ISO/IEC 15414:2015
+
+| Construct | Standard clause | Notes |
+|-----------|----------------|-------|
+| `community` | §7.3, §7.4 | Community IS a contract (ODP Part 2 §11.2.1) |
+| `domain` | §7.5.1 | <X>-domain community type |
+| `federation` | §7.5.2 | <X>-federation community type |
+| `role` | §6.3.5, §7.8.2 | Abstract position filled by active EO |
+| `interface role` | §6.3.5, §7.8.3 | Cross-community interaction behaviour |
+| `action` | §6.3.1, §7.8.4 | Atomic enterprise behaviour |
+| `conditional_action` | §6.4.6 | Action conditioned on deontic token state |
+| `process` | §6.3.6, §7.8.5 | Ordered collection of steps |
+| `step` | §6.3.7 | Abstraction of an action within a process |
+| `burden` | §6.4.1, §6.4.3 | Deontic token: obligation |
+| `permit` | §6.4.1, §6.4.2 | Deontic token: permission |
+| `embargo` | §6.4.1, §6.4.4 | Deontic token: prohibition |
+| `token_group` | §6.4.2 | Named group of deontic tokens |
+| `commitment` | §6.6.2, §7.10.3 | Speech act creating obligation |
+| `delegation` | §7.10 | Speech act transferring obligation to agent |
+| `authorization` | §6.6.4, §7.10.2 | Speech act granting permission |
+| `prescription` | §6.6.3, §7.10.5 | Speech act establishing a rule |
+| `declaration` | §6.6.5, §7.10.6 | Speech act establishing a state of affairs |
+| `evaluation` | §7.10.7 | Speech act assessing compliance |
+| `policy` | §6.5, §7.9 | Parameterisable constraint with value/envelope/setting behaviour |
+| `objective` | §7.8.1 | Community purpose |
+| `invariant` | §7.8.1 NOTE 4 | Constraint holding throughout community lifetime |
+| `assignment_policy` | §7.8.2 | Rules governing object assignment to roles |
+| `community_object` | §6.2.2, §7.8.3 | Active EO abstracting a community; fills roles in other communities |
+| `violation` | §6.3.8, §7.8.6 | Behaviour contrary to a rule |
+| `party` | §6.6.1 | Enterprise object with legal/normative standing |
+| `agent` | §6.6.8 | Object acting on behalf of a principal |
+| `principal` | §6.6.7 | Party accountable for an agent's actions |
+
+---
+
+### 5.2 Constructs in the standard that V2 currently implements incompletely
+
+**`policy` — missing `PolicySettingBehaviour` (AM-27 pending)**
+ISO/IEC 15414 §6.5 defines policy as including "behaviour for changing the
+policy" as a mandatory component. V2 AM-23 restored typed values and envelopes
+but dropped `PolicySettingBehaviour`. V1 odppolicy.tx had `policy setting by
+<role>` — this needs restoring. Without it, policies are statically valued
+rather than genuinely parameterisable. See AM-27.
+
+**`community_object` — not yet in grammar (AM-26 pending)**
+§6.2.2 defines CommunityObject as an active EO abstracting a community.
+§7.8.3 uses it as the mechanism for cross-community interaction in federations.
+Currently absent from grammar and domain classes. Required for correct
+federation modelling. See AM-26.
+
+**`federation roles` — FederationDecl has no roles (AM-26 pending)**
+§7.5.2 and Linington et al. (2011) are explicit: partner communities fill
+roles in the federation community via their CommunityObjects. The current
+FederationDecl has no roles body item. See AM-26.
+
+---
+
+### 5.3 Constructs that extend the standard for computability
+
+**`discharge_mode: strict | eventual`**
+Grounding: ISO/IEC 15414 Annex C (informative) Kripke semantics.
+Not in the standard. `strict` operationalises AF (all paths discharge);
+`eventual` operationalises EF (some path discharges). Central contribution
+of the EDOC 2026 Forum paper.
+
+**`priority` on DeonticToken**
+Grounding: Bellman planner utility function (Annex C §C.3/C.4).
+No standard basis. Added to weight the Bellman utility function for
+obligation scheduling.
+
+**`triggered_by` / `discharged_by` on DeonticToken**
+Grounding: ODP Part 2 §8.4 (events) and ISO/IEC 15414 §7.8.7.
+The standard describes token lifecycle and event concepts but does not
+define named event references as token attributes in DSL form. AM-22
+operationalised event-driven token lifecycle.
+
+**`ViolationResponse`**
+Grounding: ISO/IEC 15414 §6.3.8, §7.8.6 (violation, compensating
+behaviour). The standard acknowledges violation detection and recovery
+but does not define a structured violation_response declaration with
+on_violation_of / escalate_to / remediate_by fields. Our operationalisation
+for regulated-domain escalation chains.
+
+**`CorrespondenceDecl`**
+Grounding: ODP five-viewpoint architecture (ODP Part 3, §4). Not in
+ISO/IEC 15414 (enterprise viewpoint only). Added to support the
+five-viewpoint DSL suite (Linington and Milosevic, 2026 position note).
+
+---
+
+### 5.4 Constructs that are pure DSL usability additions
+
+**`InlineToken` (AM-24)**
+A shorthand for declaring deontic tokens directly in role bodies without
+a top-level DeonticToken declaration. No standard basis. Validator rule
+V-NEW-18 prevents inline tokens from being referenced in speech acts,
+preserving semantic correctness.
+
+---
+
+### 5.5 Proposed extension: NormativePolicy (AM-28, planned)
+
+**Status:** Designed, not yet implemented.
+
+**Standard grounding:** Specialises §6.5 Policy. All §6.5 attributes apply
+— value, envelope, setting behaviour — but setting behaviour refers to an
+external process (legislative amendment, standards review) rather than an
+internal community role. IS-A Policy in the standard sense.
+
+**Rationale:** The standard Policy concept is abstract about the source of
+normative authority. In regulated domains, governance specifications must
+reference external instruments — legislation, standards, guidelines — as
+the grounding authority for policy values. NormativePolicy makes this
+explicit and machine-traceable.
+
+**Placement rule:** Valid only in Domain and Federation body items. Individual
+communities do not originate legislation — they recognise it. Domain hierarchy
+normative authority flows down via §7.9.2 policy inheritance.
+
+**Key additional attributes:**
+- normative_source: STRING — citation of the grounding instrument
+- kind: legislation | regulation | standard | guideline | contractual
+- review_cycle: Duration — external authority review cadence
+
+**Cross-border significance — International Patient Summary:**
+The IPS (HL7 FHIR IPS IG, recognised across Australia, US, EU, Canada)
+is a cross-jurisdictional normative instrument. In ODP-EL terms, an
+international health data federation would reference IPS as a
+NormativePolicy at federation level, alongside jurisdiction-specific
+instruments at each member domain level. The §7.9.2 conflict resolution
+mechanism then governs how IPS requirements interact with national
+legislation. This is a compelling real-world demonstration of the
+federation model — one specification capturing the normative architecture
+of international health data governance.
+
+---
+
+### 5.6 Summary table
+
+| Construct | Status | Standard grounding |
+|-----------|--------|-------------------|
+| Core community/domain/federation/role/action/token/speech-act | Standard | ISO/IEC 15414 directly |
+| `token_group` | Standard | §6.4.2 |
+| `community_object` | Standard (grammar gap — AM-26) | §6.2.2, §7.8.3 |
+| `policy` (core) | Standard (incomplete — AM-27) | §6.5, §7.9 |
+| `discharge_mode` | Extension | Annex C Kripke semantics |
+| `priority` on token | Extension | Bellman planner (Annex C) |
+| `triggered_by`/`discharged_by` | Extension | ODP Part 2 §8.4 |
+| `ViolationResponse` | Extension | §6.3.8, §7.8.6 (operationalised) |
+| `CorrespondenceDecl` | Extension | ODP five-viewpoint (not in 15414) |
+| `InlineToken` | Usability addition | No standard basis |
+| `NormativePolicy` (planned) | Extension IS-A Policy | §6.5 specialisation |
+
+---
+_Section added 2026-06-25._
+_See AM-26 (CommunityObject + federation roles), AM-27 (PolicySettingBehaviour restore),_
+_AM-28 (NormativePolicy) for planned implementations._
+
+---
+
+_End of DSL-EL Design Notes v1.1_
+_v1.0 produced during grammar walkthrough session, May 2026_
+_v1.1 added 2026-06-25: §4 Px object processor pipeline; §5 standard-grounded vs extended constructs_
