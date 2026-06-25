@@ -528,3 +528,113 @@ The following amendments are logged as tentative and require verification agains
 
 _End of DSL-EL Design Notes v1.0_
 _Produced during grammar walkthrough session, May 2026_
+
+---
+
+## 4. Object Processor Pipeline (Px)
+
+### 4.1 What object processors are
+
+textX object processors are post-parse hooks registered via
+`mm.register_obj_processors()` in `el_parser.py`. They are called
+automatically by textX after each grammar rule is instantiated from
+the parse tree — before application code sees the model.
+
+The registration call maps grammar rule names to Python callables:
+
+```python
+mm.register_obj_processors({
+    'Community':          process_community,           # P2
+    'Role':               process_role,                # P3
+    'Action':             process_action,              # P4
+    'ConditionalAction':  process_conditional_action,  # P5
+    ...
+})
+```
+
+### 4.2 Why they exist
+
+textX parses everything into flat heterogeneous `items` lists (see §2.2
+on unified alternation). Application code — the validator, engine, Kripke
+model — needs typed sublists, unwrapped strings, and resolved references.
+The Px processors bridge that gap for each grammar construct.
+
+The pattern is consistent across all processors:
+1. Iterate `obj.items`
+2. Dispatch by `type(item).__name__`
+3. Append to the appropriate typed sublist on the domain object
+4. Set `obj.items = []` to signal that raw items have been consumed
+
+### 4.3 Current processors
+
+| Processor | Grammar rule | Key transformations |
+|-----------|-------------|---------------------|
+| P1 | `DescriptionAttr` (all elements) | Unwraps quoted string values |
+| P2 | `Community` | Dissolves body into `roles`, `processes`, `policy_refs`, `lifecycle`, etc. |
+| P3 | `Role` | Dissolves `role.items` → `role.actions`, `role.holds_tokens`, `role.conditional_actions`, etc. |
+| P4 | `Action` | Dissolves `action.items` → `action.actors`, `action.artefacts`, `action.deontic_effects`, `action.favoured_by`, `action.emits`, etc. |
+| P5 | `ConditionalAction` | Dissolves `ca.items` → `ca.favoured_by`, `ca.requires_permits`, `ca.inhibited_by`, `ca.deontic_effects`, etc. |
+| P6 | `Step` | Dissolves step body items into typed sublists |
+| P7 | `Process` | Unwraps `SatisfiesObjective` wrappers |
+
+### 4.4 Bottom-up execution guarantee
+
+textX calls processors **bottom-up** through the object graph. For a
+`ConditionalAction` nested inside an `Action` inside a `Role`, the
+execution order is:
+
+P5 (ConditionalAction) → P4 (Action) → P3 (Role)
+
+This means:
+- When P4 runs on an `Action`, P5 has already populated `ca.favoured_by`
+  on all nested `ConditionalAction` objects
+- When P3 runs on a `Role`, P4 has already populated `action.favoured_by`
+  on all nested `Action` objects
+
+Application code can always depend on child processors having run before
+parent processors. This makes the pipeline reliable for multi-level
+transformations.
+
+### 4.5 The ordered-choice pitfall (AM-25 lesson)
+
+A subtle interaction exists between textX grammar ordered-choice semantics
+and the Px pipeline. In a grammar alternation like:
+
+```
+ActionBodyItem:
+    ActorRef | ArtefactRef | ResourceRef
+  | PreconditionDecl | FavouredByItem | DeonticRequirement | DeonticEffect
+  | EmitsDecl
+;
+```
+
+**Order matters.** textX tries each alternative left-to-right and takes
+the first match. If a broad rule (`DeonticRequirement`) precedes a specific
+one (`FavouredByItem`), and both can match the same keyword
+(`favoured_by_burden`), the broad rule wins and the specific rule is never
+tried — silently.
+
+AM-25 fixed exactly this: `FavouredByItem` was missing from `ActionBodyItem`
+entirely, so `favoured_by_burden` in a plain `Action` body was consumed by
+`DeonticRequirement` and discarded by P4 (which had no handler for
+`DeonticRequirement` entries that were actually favour declarations).
+
+**Rule:** when adding a new specific construct to an existing alternation,
+always place it *before* any broader catch-all rule that could match the
+same keyword. textX does not warn about shadowing.
+
+### 4.6 Post-parse attribute names — always use Px output
+
+After parsing, always use the **post-Px attributes**, never `obj.items`
+(which is emptied by each processor). Key reminders:
+
+| Raw (pre-Px, always empty post-parse) | Correct post-Px attribute |
+|---------------------------------------|--------------------------|
+| `role.items` | `role.actions`, `role.holds_tokens`, etc. |
+| `action.items` | `action.deontic_effects`, `action.favoured_by`, etc. |
+| `ca.items` | `ca.favoured_by`, `ca.requires_permits`, etc. |
+| `ca.favoured_by_burden` | `ca.favoured_by` (P5 renames) |
+
+This has been the source of several bugs (see commit history: 89a3a5b,
+0157223, 5144fb7, ab22c87) where code used pre-Px attributes and silently
+found empty lists.
