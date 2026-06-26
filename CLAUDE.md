@@ -298,6 +298,14 @@ Object processors (post-parse hooks, P1–P10) handle post-parse work:
 dissolving body wrappers, splitting unified item lists into typed sublists,
 injecting enum defaults, unwrapping thin grammar artefacts.
 
+**P3 process_role() dissolves HoldsToken wrappers**
+After P3 runs, `role.holds_tokens` contains `DeonticToken` objects directly,
+not `HoldsToken` wrapper objects. Code that traverses role token membership
+must use `_obj_name(ht)` directly on each item — not `_obj_name(getattr(ht,
+'token', None))`. The wrapper is dissolved at parse time; the `.token`
+attribute is None on all items after processing.
+Discovered during V-16a implementation (commit 3aae4be).
+
 ### 6.4 Implementation roadmap — all steps complete as of 2026-06-06
 
 | Step | Status | Task |
