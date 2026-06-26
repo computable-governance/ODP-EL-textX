@@ -138,7 +138,9 @@ class Runtime:
         for el in spec.elements:
             if type(el).__name__ != "Federation":
                 continue
-            for member in getattr(el, "members", []):
+            for member_ref in getattr(el, "members", []):
+                # AM-26: members is List[MemberRef]; dereference to the community
+                member = getattr(member_ref, "community", member_ref)
                 if type(member).__name__ != "Domain":
                     continue
                 for actor_name, domain_name in _collect_domain_actors(member):

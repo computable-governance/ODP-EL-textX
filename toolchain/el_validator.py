@@ -34,6 +34,8 @@ Rules implemented
   V-15  DelegationDecl.obligation text must match the obligation
         of a CommitmentDecl or a prior DelegationDecl (chain
         continuity check).                                       §7.10.1
+  V-NEW-19  CommunityObject.abstracts must reference a declared
+        Community or Domain.                                     §6.2.2, §7.8.3
 
 Usage
 -----
@@ -138,6 +140,9 @@ def validate_spec(model) -> List[str]:
 
     # V-15 — delegation obligation chain continuity
     errors.extend(_validate_obligation_chain(commitments, delegations))
+
+    # V-NEW-19 — CommunityObject.abstracts must resolve (AM-26)
+    errors.extend(_validate_community_objects(model, all_communities))
 
     return errors
 
@@ -329,13 +334,34 @@ def _validate_prescription(p, all_objects: Dict[str, Any]) -> List[str]:
 def _validate_federation(fed, all_communities: Dict[str, Any]) -> List[str]:
     """V-12: Federation members must reference declared communities. (§7.5.2)"""
     errors: List[str] = []
+    # AM-26: members is now List[MemberRef]; dereference .community for name check
     for member in getattr(fed, "members", []):
-        member_name = getattr(member, "name", None)
+        community = getattr(member, "community", None)
+        member_name = getattr(community, "name", None)
         if member_name and member_name not in all_communities:
             errors.append(
                 f"[V-12] Federation '{fed.name}': member '{member_name}' "
                 f"is not a declared community. (§7.5.2)"
             )
+    return errors
+
+
+def _validate_community_objects(model, all_communities: Dict[str, Any]) -> List[str]:
+    """V-NEW-19: CommunityObject.abstracts must reference a declared community. (§6.2.2, §7.8.3)"""
+    errors: List[str] = []
+    for co in _collect(model, "CommunityObject"):
+        if co.abstracts is None:
+            errors.append(
+                f"[V-NEW-19] CommunityObject '{co.name}' must declare 'abstracts' "
+                f"referencing a Community or Domain. (§6.2.2, §7.8.3)"
+            )
+        else:
+            abstracted_name = getattr(co.abstracts, "name", None)
+            if abstracted_name and abstracted_name not in all_communities:
+                errors.append(
+                    f"[V-NEW-19] CommunityObject '{co.name}': 'abstracts' references "
+                    f"'{abstracted_name}' which is not a declared community. (§7.8.3)"
+                )
     return errors
 
 

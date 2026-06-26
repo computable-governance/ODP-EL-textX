@@ -43,7 +43,7 @@ Class inventory (mirrors STEP1_grammar_audit.md):
                RequiresPermitItem, InhibitedByItem, FavouredByItem
     Group G  — Lifecycle, Establishing, EmbeddedCommitment, Changes,
                Terminating
-    Group H  — Domain, DomainControllingObj, DomainControlledObj,
+    Group H  — CommunityObject, Domain, DomainControllingObj, DomainControlledObj,
                Federation, FedSharedObjective, MemberRef,
                WithdrawalBehaviour, ConflictResolution
     Group I  — Commitment, Delegation, Authorization, Prescription,
@@ -917,6 +917,21 @@ class DomainControlledObj(_ELParentable):
 
 
 @dataclass
+class CommunityObject(_ELParentable):
+    """§6.2.2, §7.8.3 — active EO abstracting a community.
+
+    A CommunityObject represents a community as a whole in another
+    community's context. It fills roles in federations and other
+    communities on behalf of the community it abstracts.
+    Object processor P2 does not apply — CommunityObject is a
+    SpecElement, not a community body item.
+    """
+    name:        str            = ""
+    description: Optional[str] = None
+    abstracts:   Optional[object] = None   # → Community/Domain/Federation ref
+
+
+@dataclass
 class Domain(Community):
     """§7.5.1 — <X>-domain community type.
 
@@ -942,8 +957,15 @@ class FedSharedObjective(_ELParentable):
 
 @dataclass
 class MemberRef(_ELParentable):
-    """Grammar rule: MemberRef — wrapper dissolved by P9."""
-    community: Optional[object] = None   # → Community ref
+    """Federation member reference — §7.5.2.
+
+    Links a community to the federation, optionally specifying
+    which CommunityObject represents it and which federation role it fills.
+    P9 stores MemberRef objects directly in Federation.members (not dissolved).
+    """
+    community:      Optional[object] = None   # → Community/Domain ref
+    represented_by: Optional[object] = None   # → CommunityObject (AM-26)
+    fills:          Optional[object] = None   # → Role (federation role, AM-26)
 
 @dataclass
 class WithdrawalBehaviour(_ELParentable):
@@ -977,8 +999,9 @@ class Federation(_ELParentable):
     body_items:  List           = field(default_factory=list)  # raw; P9 splits
 
     # Populated by object processor P9:
+    roles:                List = field(default_factory=list)  # List[Role] (AM-26)
     shared_objectives:    List = field(default_factory=list)  # List[str]
-    members:              List = field(default_factory=list)  # List[Community|Domain]
+    members:              List = field(default_factory=list)  # List[MemberRef] (AM-26)
     policy_refs:          List = field(default_factory=list)  # List[PolicyRef]
     invariants:           List = field(default_factory=list)  # List[Invariant]
     events:               List = field(default_factory=list)  # AM-25: List[EventDecl]
@@ -1170,6 +1193,7 @@ DOMAIN_CLASSES = [
     # G
     Lifecycle, Establishing, EmbeddedCommitment, Changes, Terminating,
     # H
+    CommunityObject,
     Domain, DomainControllingObj, DomainControlledObj,
     Federation, FedSharedObjective, MemberRef, WithdrawalBehaviour,
     ConflictResolution,

@@ -55,7 +55,8 @@ EnterpriseSpec:
  * must precede more-general ones where keywords overlap.
  */
 SpecElement:
-    Domain
+    CommunityObject
+    | Domain
     | Federation
     | Community
     | EnterpriseObject
@@ -721,6 +722,7 @@ Federation:
 FedBodyItem:
     FedSharedObjective
     | EventDecl
+    | Role
     | MemberRef
     | PolicyRef
     | Invariant
@@ -734,6 +736,8 @@ FedSharedObjective:
 
 MemberRef:
     'member' ':' community=[Community]
+    ('represented_by' represented_by=[CommunityObject])?
+    ('fills' fills=[Role])?
 ;
 
 WithdrawalBehaviour:
@@ -750,6 +754,26 @@ ConflictResolutionKind:
     | 'runtime_prevention'
     | 'runtime_resolution'
     | 'failure_handling'
+;
+
+
+// ================================================================
+// §6.2.2, §7.8.3  — COMMUNITY OBJECT
+// ================================================================
+
+/*
+ * CommunityObject — §6.2.2, §7.8.3
+ * An active enterprise object that abstracts a community.
+ * Used to fill roles in federations and other communities
+ * on behalf of the community it represents.
+ * Declared at top level (SpecElement); referenced in MemberRef.
+ */
+CommunityObject:
+    'community_object' name=ID
+    ('description' ':' description=STRING)?
+    '{'
+        'abstracts' ':' abstracts=[Community]
+    '}'
 ;
 
 

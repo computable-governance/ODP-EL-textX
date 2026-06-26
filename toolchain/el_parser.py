@@ -218,13 +218,17 @@ def process_federation(fed):
 
     AM-25: objective is set directly by textX (direct grammar attribute, not in
     body_items). EventDecl items are now collected into fed.events.
+    AM-26: Role items collected into fed.roles; MemberRef stored whole (not
+    dissolved) so represented_by and fills attributes are preserved.
     """
     for item in fed.body_items:
         cls = type(item).__name__
         if cls == 'FedSharedObjective':
             fed.shared_objectives.append(item.description)
-        elif cls == 'MemberRef':
-            fed.members.append(item.community)
+        elif cls == 'Role':                   # AM-26: federation role
+            fed.roles.append(item)
+        elif cls == 'MemberRef':              # AM-26: store whole ref, not item.community
+            fed.members.append(item)
         elif cls == 'PolicyRef':
             fed.policy_refs.append(item)
         elif cls == 'Invariant':
