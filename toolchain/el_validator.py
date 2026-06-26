@@ -38,6 +38,8 @@ Rules implemented
         Community or Domain.                                     §6.2.2, §7.8.3
   V-NEW-20  NormativePolicy only referenced from Domain or
         Federation body items, not plain Community.              AM-28
+  V-16a  Every TokenGroup member must have a backing Commitment or
+        Delegation — static check for missing obligation descriptor. §6.4.2
   V-16b  SatisfactionCondition with a single member has no
         collective semantics — warn (not error).                 AM-29
 
@@ -56,6 +58,10 @@ from typing import Any, Dict, List, Optional, Set
 
 def _cls(obj) -> str:
     return type(obj).__name__
+
+
+def _obj_name(obj) -> str:
+    return getattr(obj, "name", None) or ""
 
 
 def _collect(model, cls_name: str) -> List[Any]:
@@ -150,6 +156,9 @@ def validate_spec(model) -> List[str]:
 
     # V-NEW-20 — NormativePolicy only in Domain/Federation (AM-28)
     errors.extend(_validate_normative_policy_placement(model))
+
+    # V-16a — TokenGroup member provenance check (§6.4.2)
+    errors.extend(_validate_token_group_provenance(model))
 
     # V-16b — singleton SatisfactionCondition warning (AM-29)
     errors.extend(_validate_satisfaction_singleton(model))
@@ -410,6 +419,63 @@ def _validate_policy_refs(community) -> List[str]:
                 f"unknown process '{ref_name}'. (§7.9.1)"
             )
 
+    return errors
+
+
+def _validate_token_group_provenance(model) -> List[str]:
+    """V-16a: every TokenGroup member must have a backing obligation descriptor.
+
+    A member is 'backed' if it appears as:
+      (a) the burden of a top-level CommitmentDecl,
+      (b) a token within a Delegation.transfers_token_group group, or
+      (c) a token held via 'holds' in any role body within a community,
+          federation, or domain.
+
+    Path (c) covers scenarios that declare burdens through role membership
+    (holds: tokenName) rather than top-level Commitment declarations —
+    both are valid ODP-EL modelling styles.
+
+    Without any of the above, _build_obligation_descriptors() at runtime
+    will silently produce no descriptor for the token, making it invisible
+    to the engine. Catching this at static validation time closes the gap.
+    ISO basis: §6.4.2 (TokenGroup as named collection of deontic tokens).
+    """
+    errors: List[str] = []
+    backed_by_commitment = {
+        _obj_name(getattr(c, "burden", None))
+        for c in _collect(model, "Commitment")
+        if _obj_name(getattr(c, "burden", None))
+    }
+    backed_by_delegation: Set[str] = set()
+    for d in _collect(model, "Delegation"):
+        group_ref = getattr(d, "token_group", None)
+        if group_ref is None:
+            continue
+        for tok in getattr(group_ref, "tokens", []):
+            name = _obj_name(tok)
+            if name:
+                backed_by_delegation.add(name)
+    backed_by_role_holds: Set[str] = set()
+    for el in model.elements:
+        if type(el).__name__ not in ("Community", "Federation", "Domain"):
+            continue
+        for role in getattr(el, "roles", []):
+            for ht in getattr(role, "holds_tokens", []):
+                # P3 process_role() dissolves HoldsToken wrappers; the list
+                # contains DeonticToken objects directly after processing.
+                name = _obj_name(ht)
+                if name:
+                    backed_by_role_holds.add(name)
+    backed = backed_by_commitment | backed_by_delegation | backed_by_role_holds
+    for tg in _collect(model, "TokenGroup"):
+        for tok in getattr(tg, "tokens", []):
+            name = _obj_name(tok)
+            if name and name not in backed:
+                errors.append(
+                    f"[E-16a] TokenGroup '{tg.name}' member '{name}' has no "
+                    f"backing Commitment or Delegation — obligation descriptor "
+                    f"will be missing at runtime"
+                )
     return errors
 
 
