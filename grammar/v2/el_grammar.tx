@@ -276,7 +276,7 @@ AffectedScope : 'role' | 'community' | 'process' | 'action' | 'object' ;
 SettingBehaviour:
     'setting_behaviour' '{'
         ('description'         ':' description=STRING)?
-        ('who_can_change'      ':' who_can_change=ID)?
+        ('who_can_change'      ':' who_can_change=STRING)?
         ('negotiation_required' ':' negotiation_required?='true')?
     '}'
 ;
