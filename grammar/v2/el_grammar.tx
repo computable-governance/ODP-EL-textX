@@ -347,6 +347,11 @@ NormativePolicyRef:
 // §6.2, §7.3  — COMMUNITY
 // ================================================================
 
+/* contract?='contract' — optional explicit assertion that this community
+   is formally constituted as a contract under ODP Part 2 §11.2.1.
+   All communities are contracts by definition; this keyword makes the
+   intent explicit in the specification text. No operational semantics
+   in the toolchain — no validator rule enforces or depends on it. */
 Community:
     (contract?='contract')? 'community' name=ID
     ('isa' type_ref=[Community])?
@@ -767,6 +772,10 @@ DomainControlledObj:
  *       conflict_resolution runtime_prevention
  *   }
  */
+/* contract?='contract' — optional explicit assertion that this federation
+   is formally constituted as a contract. Federations are a community type
+   (§7.5.2) and therefore also contracts under §11.2.1. Same documentation
+   intent as on Community — no operational semantics in the toolchain. */
 Federation:
     (contract?='contract')? 'federation' name=ID
     ('description' ':' description=STRING)?

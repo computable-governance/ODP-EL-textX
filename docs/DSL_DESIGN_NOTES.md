@@ -783,7 +783,29 @@ of international health data governance.
 
 ---
 
-### 5.6 Summary table
+### 5.6 `contract` keyword on Community and Federation
+
+Both `Community` and `Federation` accept an optional `contract` keyword prefix
+(`contract?='contract'` in the grammar). This is a documentation marker, not
+an operational construct.
+
+All communities are contracts by definition under ODP Part 2 §11.2.1.
+Federations are a community type (§7.5.2) and therefore also contracts.
+The `contract` keyword allows a scenario author to make this explicit:
+
+```
+contract community ReferralEpisodeCommunity { ... }
+contract federation ReferralNetworkFederation { ... }
+```
+
+The toolchain assigns no operational semantics to the flag — no validator
+rule enforces or depends on it. Its sole purpose is authorial intent:
+"I am asserting this community/federation is formally constituted as a
+contract in the ODP §11.2.1 sense."
+
+---
+
+### 5.7 Summary table
 
 | Construct | Status | Standard grounding |
 |-----------|--------|-------------------|
