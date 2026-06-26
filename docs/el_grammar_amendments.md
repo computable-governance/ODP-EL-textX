@@ -1915,3 +1915,95 @@ consumes the keyword first).
 - `el_parser.py`: P4 `process_action()` FavouredByItem handler added (commit 0157223)
 - `el_engine.py` + `el_kripke.py`: `_find_action_for_burden()` checks
   `action.favoured_by` directly before `conditional_actions` (commit 0157223)
+
+---
+
+## AM-29 — `SatisfactionCondition` extended to accept direct `DeonticToken` references
+
+**Standard references:** ISO 15414 §6.2, §7.7, §7.5.1
+
+**Rationale:**
+The existing `SatisfactionCondition` rule (AM-27) required a `TokenGroup`
+cross-reference as its sole argument.  This forced scenario authors to declare
+a named `token_group` wrapper even when the set of tokens was obvious from
+the community context.  Multi-role, multi-burden objectives could not express
+their satisfaction condition directly.
+
+The AM-27 design used a typed cross-reference `[TokenGroup]` which is
+expressive but rigid.  A comma-separated inline list of `DeonticToken` names
+is equally expressive and more ergonomic for two-to-three token conditions
+that don't need a reusable name.
+
+**Grammar changes (`grammar/v2/el_grammar.tx`):**
+```
+// Before (AM-27):
+SatisfactionCondition:
+    operator=SatisfactionOp '(' group=[TokenGroup] ')'
+;
+
+// After (AM-29):
+SatisfactionCondition:
+    operator=SatisfactionOp '('
+        raw_args+=SatisfactionArg[',']
+    ')'
+;
+
+SatisfactionArg:
+    name=ID
+;
+```
+
+The alternation `(group=[TokenGroup] | members+=[DeonticToken][','])` was
+considered but rejected: arpeggio does not backtrack after consuming an ID
+as a cross-reference, making ordered alternation on two cross-reference
+rules unreliable (see CLAUDE.md §5.3, Key Invariant #4).  The `SatisfactionArg`
+wrapper uses a plain `name=ID` attribute; resolution of which form is in use
+(TokenGroup vs inline DeonticToken list) happens in Python code at model
+analysis time.
+
+**Resolution rule (Python code):**
+- If `raw_args` contains exactly one name that matches a declared `TokenGroup`
+  element: AM-27 form — expand via `_build_group_index()`.
+- Otherwise: AM-29 inline form — each arg name is treated as a `DeonticToken` name.
+
+**Usage in `.el` files (both forms remain valid):**
+```
+// AM-27 form (unchanged):
+token_group ConsentGroup {
+  member: seekConsentObligation
+  member: informPatientObligation
+}
+community ConsentCommunity {
+  objective: "Obtain patient consent"
+    satisfaction: all_discharged(ConsentGroup)
+}
+
+// AM-29 inline form (new):
+community ReferralCommunity {
+  objective: "Complete referral episode"
+    satisfaction: all_discharged(referralBurden, acknowledgementBurden)
+}
+```
+
+**Domain class changes (`toolchain/el_domain.py`):**
+- Removed `group: Optional[object]` and `members: List` from `SatisfactionCondition`.
+- Added `raw_args: List` to `SatisfactionCondition` (→ `List[SatisfactionArg]`).
+- Added new `SatisfactionArg` dataclass with `name: str`.
+- Added `SatisfactionArg` to `DOMAIN_CLASSES`.
+
+**Kripke verifier changes (`toolchain/el_kripke.py`):**
+- Added `_resolve_sat_member_ids(sat, group_index)` helper: applies the
+  resolution rule above; returns `[member_token_id, ...]`.
+- Rewrote `_build_satisfaction_conditions()` to use `_resolve_sat_member_ids()`.
+- Rewrote `_build_any_discharged_groups()` to use `raw_args` directly; for
+  AM-29 inline `any_discharged` conditions the community name is used as the
+  index key (no named group exists).
+
+**Validator changes (`toolchain/el_validator.py`):**
+- Added `_validate_satisfaction_singleton()` implementing V-16b:
+  warns (`[W-16b]`) when a `SatisfactionCondition` has exactly one effective
+  member (either a TokenGroup with one token, or a single inline arg).
+  A singleton condition has no collective semantics and may indicate a
+  modelling error.
+
+**Status:** CONFIRMED

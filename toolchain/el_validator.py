@@ -38,6 +38,8 @@ Rules implemented
         Community or Domain.                                     §6.2.2, §7.8.3
   V-NEW-20  NormativePolicy only referenced from Domain or
         Federation body items, not plain Community.              AM-28
+  V-16b  SatisfactionCondition with a single member has no
+        collective semantics — warn (not error).                 AM-29
 
 Usage
 -----
@@ -148,6 +150,9 @@ def validate_spec(model) -> List[str]:
 
     # V-NEW-20 — NormativePolicy only in Domain/Federation (AM-28)
     errors.extend(_validate_normative_policy_placement(model))
+
+    # V-16b — singleton SatisfactionCondition warning (AM-29)
+    errors.extend(_validate_satisfaction_singleton(model))
 
     return errors
 
@@ -406,6 +411,56 @@ def _validate_policy_refs(community) -> List[str]:
             )
 
     return errors
+
+
+def _validate_satisfaction_singleton(model) -> List[str]:
+    """V-16b: SatisfactionCondition with a single member has no collective semantics.
+
+    Warns (prefix [W-16b]) in both forms:
+      - AM-27 TokenGroup form: group has exactly one member token
+      - AM-29 inline form: raw_args list contains exactly one entry
+
+    A single-member condition is functionally equivalent to checking one
+    token individually and does not benefit from the group construct.
+    """
+    warnings: List[str] = []
+    tg_names = {e.name for e in model.elements if _cls(e) == "TokenGroup"}
+    tg_tokens: Dict[str, List] = {}
+    for el in model.elements:
+        if _cls(el) == "TokenGroup":
+            tg_tokens[el.name] = getattr(el, "tokens", [])
+
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Federation", "Domain"):
+            continue
+        obj = getattr(el, "objective", None)
+        if obj is None:
+            continue
+        sat = getattr(obj, "satisfaction", None)
+        if sat is None:
+            continue
+        raw_args = getattr(sat, "raw_args", [])
+        arg_names = [a.name for a in raw_args if getattr(a, "name", None)]
+        if not arg_names:
+            continue
+        # AM-27 form: single arg that names a TokenGroup with one member
+        if len(arg_names) == 1 and arg_names[0] in tg_names:
+            members = tg_tokens.get(arg_names[0], [])
+            if len(members) == 1:
+                warnings.append(
+                    f"[W-16b] Community '{el.name}': SatisfactionCondition "
+                    f"references TokenGroup '{arg_names[0]}' which has only one "
+                    f"member — no collective semantics. Consider whether a "
+                    f"TokenGroup is needed. (AM-29)"
+                )
+        # AM-29 form: inline list with only one entry
+        elif len(arg_names) == 1:
+            warnings.append(
+                f"[W-16b] Community '{el.name}': SatisfactionCondition "
+                f"has a single inline member '{arg_names[0]}' — no collective "
+                f"semantics. Consider whether a TokenGroup is needed. (AM-29)"
+            )
+    return warnings
 
 
 def _validate_normative_policy_placement(model) -> List[str]:

@@ -402,8 +402,24 @@ Objective:
     (sub_objectives+=SubObjective)*
 ;
 
+/*
+ * AM-29: raw_args accepts either a single TokenGroup name or a
+ * comma-separated list of DeonticToken names.  Resolution of which
+ * form is in use happens in Python (el_kripke.py, el_validator.py)
+ * by checking arg names against declared TokenGroup elements.
+ * The alternation (group=[TokenGroup] | members+=[DeonticToken][','])
+ * was rejected: arpeggio does not backtrack after consuming an ID
+ * as a cross-reference, making ordered alternation on cross-references
+ * unreliable (see §5.3 of CLAUDE.md).
+ */
 SatisfactionCondition:
-    operator=SatisfactionOp '(' group=[TokenGroup] ')'
+    operator=SatisfactionOp '('
+        raw_args+=SatisfactionArg[',']
+    ')'
+;
+
+SatisfactionArg:
+    name=ID
 ;
 
 SatisfactionOp: 'all_discharged' | 'any_discharged' ;

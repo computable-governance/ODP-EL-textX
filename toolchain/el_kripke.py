@@ -1323,17 +1323,48 @@ def _build_group_index(model: Any) -> Dict[str, List[str]]:
     return index
 
 
+def _resolve_sat_member_ids(
+    sat: Any,
+    group_index: Dict[str, List[str]],
+) -> List[str]:
+    """
+    Resolve a SatisfactionCondition's raw_args to a flat list of DeonticToken
+    names (AM-29).
+
+    Resolution rule:
+      - If raw_args contains exactly one name and that name is a key in
+        group_index, the arg is a TokenGroup reference (AM-27 form): expand
+        to the group's member token names.
+      - Otherwise treat every arg name as a direct DeonticToken name (AM-29
+        inline form).
+    """
+    raw_args = getattr(sat, "raw_args", [])
+    arg_names = [a.name for a in raw_args if getattr(a, "name", None)]
+    if not arg_names:
+        return []
+    if len(arg_names) == 1 and arg_names[0] in group_index:
+        return group_index[arg_names[0]]
+    return arg_names
+
+
 def _build_any_discharged_groups(model: Any) -> Set[str]:
     """
-    Return the set of TokenGroup names whose satisfaction operator is
+    Return the set of logical group identifiers whose satisfaction operator is
     'any_discharged' in at least one Community/Federation objective.
 
+    For AM-27 (TokenGroup ref): the identifier is the TokenGroup name.
+    For AM-29 (inline tokens): the identifier is the community name, because
+    there is no named group to index by; the sibling-suppression logic in P6b
+    uses this set to decide whether SUPERSEDED propagation applies.
+
     P6b (SUPERSEDED sibling suppression) is semantically correct only for
-    these groups: when one member discharges, the group's purpose is fulfilled
-    and siblings are no longer needed.  For 'all_discharged' groups every
-    member must independently discharge; applying SUPERSEDED there would
-    incorrectly prevent siblings from being evaluated.
+    'any_discharged' conditions: when one member discharges, the group's
+    purpose is fulfilled and siblings are no longer needed.  For
+    'all_discharged' conditions every member must independently discharge;
+    applying SUPERSEDED there would incorrectly prevent siblings from
+    being evaluated.
     """
+    group_index = _build_group_index(model)
     result: Set[str] = set()
     for el in model.elements:
         if type(el).__name__ not in ("Community", "Federation", "Domain"):
@@ -1344,12 +1375,16 @@ def _build_any_discharged_groups(model: Any) -> Set[str]:
         sat = getattr(obj, "satisfaction", None)
         if sat is None:
             continue
-        if getattr(sat, "operator", None) == "any_discharged":
-            group = getattr(sat, "group", None)
-            if group is not None:
-                gname = _obj_name(group)
-                if gname:
-                    result.add(gname)
+        if getattr(sat, "operator", None) != "any_discharged":
+            continue
+        raw_args = getattr(sat, "raw_args", [])
+        arg_names = [a.name for a in raw_args if getattr(a, "name", None)]
+        if len(arg_names) == 1 and arg_names[0] in group_index:
+            # AM-27 form: index by the TokenGroup name (P6b uses group name)
+            result.add(arg_names[0])
+        elif arg_names:
+            # AM-29 inline form: no TokenGroup name; index by community name
+            result.add(el.name)
     return result
 
 
@@ -1358,15 +1393,20 @@ def _build_satisfaction_conditions(
 ) -> Dict[str, Tuple[str, List[str]]]:
     """
     Extract objective satisfaction conditions from Community/Federation/Domain
-    declarations that carry a SatisfactionCondition on their objective (AM-27).
+    declarations that carry a SatisfactionCondition on their objective.
 
     Returns {community_name: (operator, [member_ids])} where:
       operator   — 'all_discharged' or 'any_discharged'
-      member_ids — names of the DeonticToken members of the referenced TokenGroup
+      member_ids — names of the DeonticToken members
+
+    Supports both forms (AM-27 / AM-29):
+      AM-27: single TokenGroup name → expands via group_index
+      AM-29: comma-separated DeonticToken names → used directly
 
     Used by _build_propositions() to emit objective_satisfied:<community_name>
     when the condition holds in a given world.
     """
+    group_index = _build_group_index(model)
     conditions: Dict[str, Tuple[str, List[str]]] = {}
     for el in model.elements:
         if type(el).__name__ not in ("Community", "Federation", "Domain"):
@@ -1377,14 +1417,7 @@ def _build_satisfaction_conditions(
         sat = getattr(obj, "satisfaction", None)
         if sat is None:
             continue
-        group = getattr(sat, "group", None)
-        if group is None:
-            continue
-        member_ids = [
-            _obj_name(tok)
-            for tok in getattr(group, "tokens", [])
-            if _obj_name(tok)
-        ]
+        member_ids = _resolve_sat_member_ids(sat, group_index)
         if member_ids:
             conditions[el.name] = (sat.operator, member_ids)
     return conditions

@@ -558,15 +558,30 @@ class InlineToken(_ELParentable):
 
 
 @dataclass
+class SatisfactionArg(_ELParentable):
+    """AM-29 — thin wrapper for a single SatisfactionCondition argument.
+
+    Grammar rule: SatisfactionArg
+    Holds a plain ID string (not a typed cross-reference) so that
+    el_kripke.py can resolve it as either a TokenGroup name or a
+    DeonticToken name after the full model is available.
+    """
+    name: str = ""
+
+
+@dataclass
 class SatisfactionCondition(_ELParentable):
-    """AM-27 — machine-checkable objective satisfaction condition.
+    """AM-27/AM-29 — machine-checkable objective satisfaction condition.
 
     Grammar rule: SatisfactionCondition
-    Expresses whether the community objective is satisfied by checking
-    the states of all members of a named TokenGroup.
+    raw_args holds SatisfactionArg objects parsed from the grammar.
+    The resolution of whether each arg is a TokenGroup reference
+    (AM-27, single arg matching a declared TokenGroup) or a direct
+    DeonticToken name (AM-29, one or more token names) happens in
+    el_kripke.py _build_satisfaction_conditions() and el_validator.py.
     """
-    operator: str            = ""    # SatisfactionOp: 'all_discharged' | 'any_discharged'
-    group:    Optional[object] = None  # → TokenGroup ref
+    operator: str = ""
+    raw_args: List = field(default_factory=list)  # List[SatisfactionArg]
 
 
 @dataclass
@@ -1223,7 +1238,7 @@ DOMAIN_CLASSES = [
     NormativePolicy, NormativePolicyRef,  # AM-28
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
     # E
-    Community, EventDecl, SatisfactionCondition, Objective, SubObjective, SubObjectiveRef, Invariant,
+    Community, EventDecl, SatisfactionCondition, SatisfactionArg, Objective, SubObjective, SubObjectiveRef, Invariant,
     AssignmentPolicy, RequiresCapabilityRule, ExcludesRoleRule,
     RequiresTokenRule, RequiresRelationRule,
     JoinLeaveEffect, CommunityInteraction,
