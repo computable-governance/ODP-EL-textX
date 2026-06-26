@@ -63,6 +63,7 @@ SpecElement:
     | DeonticToken
     | TokenGroup
     | Policy
+    | NormativePolicy
     | Commitment
     | Delegation
     | Authorization
@@ -299,6 +300,46 @@ EnforcementMode : 'optimistic' | 'pessimistic' ;
 PolicyRef:
     'applies' policy=[Policy]
     ('to' scope=AffectedScope ref_name=ID)?
+;
+
+
+// ================================================================
+// AM-28 — NORMATIVE POLICY (DSL extension, §6.5 specialisation)
+// ================================================================
+
+/*
+ * NormativePolicy — AM-28, DSL extension (not in ISO/IEC 15414)
+ * Specialises §6.5 Policy for externally-grounded normative instruments:
+ * legislation, regulation, standards, guidelines, contractual frameworks.
+ *
+ * IS-A Policy in the standard's sense — has value, envelope, setting
+ * behaviour — but the setting behaviour refers to an external process
+ * (Parliamentary amendment, standards review) not an internal role.
+ *
+ * Valid placement: Domain and Federation body items only.
+ * Validator rule V-NEW-20 enforces this.
+ *
+ * Standard grounding: §6.5 (Policy concept), §7.9.2 (policies for
+ * federation), §7.5.1 (domain policies bind all controlled objects).
+ */
+NormativePolicy:
+    'normative_policy' name=ID '{'
+        ('description'       ':' description=STRING)?
+        'source'             ':' source=STRING
+        'kind'               ':' kind=NormativePolicyKind
+        ('type'              ':' policy_type=PolicyType)?
+        ('initial_value'     ':' initial_value=PolicyValue)?
+        ('review_cycle'      ':' review_cycle=Duration)?
+        ('policy_setting_behaviour' ':' setting_behaviour=STRING)?
+    '}'
+;
+
+NormativePolicyKind:
+    'legislation' | 'regulation' | 'standard' | 'guideline' | 'contractual'
+;
+
+NormativePolicyRef:
+    'normative_policy' ':' policy=[NormativePolicy]
 ;
 
 
@@ -669,7 +710,7 @@ Domain:
 ;
 
 DomainBodyItem:
-    DomainControllingObj | DomainControlledObj | PolicyRef
+    DomainControllingObj | DomainControlledObj | PolicyRef | NormativePolicyRef
 ;
 
 DomainControllingObj:
@@ -725,6 +766,7 @@ FedBodyItem:
     | Role
     | MemberRef
     | PolicyRef
+    | NormativePolicyRef
     | Invariant
     | WithdrawalBehaviour
     | ConflictResolution

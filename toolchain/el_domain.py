@@ -32,7 +32,8 @@ Class inventory (mirrors STEP1_grammar_audit.md):
     Group C  — DeonticToken, TokenGroup
     Group D  — Policy, PolicyRule, AffectedElement, SettingBehaviour,
                Enforcement, Duration, NumberInterval,
-               PolicyEnvelope, EnvelopeRule
+               PolicyEnvelope, EnvelopeRule,
+               NormativePolicy, NormativePolicyRef (AM-28)
     Group E  — Community, EventDecl, Objective, SubObjective, Invariant,
                AssignmentPolicy, AssignmentRule subtypes, JoinLeaveEffect,
                CommunityInteraction
@@ -473,6 +474,45 @@ class Policy(_ELParentable):
     affected_elements: List           = field(default_factory=list)  # List[AffectedElement]
     setting_behaviour: Optional[SettingBehaviour] = None
     enforcement:       Optional[Enforcement]       = None
+
+
+# ---------------------------------------------------------------------------
+# AM-28 — NormativePolicy (DSL extension, §6.5 specialisation)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NormativePolicy(_ELParentable):
+    """AM-28 — DSL extension specialising §6.5 Policy for externally-
+    grounded normative instruments.
+
+    IS-A Policy in the standard sense: has value, envelope, and setting
+    behaviour. The setting_behaviour refers to an external process
+    (legislative amendment, standards review cycle) not an internal role.
+
+    Valid only in Domain and Federation body items (V-NEW-20).
+
+    kind values: legislation | regulation | standard | guideline | contractual
+    """
+    name:              str            = ""
+    description:       Optional[str] = None
+    source:            str            = ""     # citation — mandatory
+    kind:              str            = ""     # NormativePolicyKind — mandatory
+    policy_type:       Optional[str] = None
+    initial_value:     Optional[object] = None
+    review_cycle:      Optional[object] = None  # Duration
+    setting_behaviour: Optional[str] = None     # prose — external process
+
+
+@dataclass
+class NormativePolicyRef(_ELParentable):
+    """AM-28 — reference to a top-level NormativePolicy from a Domain
+    or Federation body item.
+
+    Grammar rule: NormativePolicyRef
+    Object processors dissolve this into domain.normative_policies /
+    federation.normative_policies.
+    """
+    policy: Optional[object] = None   # → NormativePolicy ref
 
 
 # ---------------------------------------------------------------------------
@@ -946,8 +986,9 @@ class Domain(Community):
     # Domain-specific fields only — Community fields inherited above
     relationship:        Optional[str] = None   # characterized_by
     body_items:          List = field(default_factory=list)  # raw; P8 splits
-    controlling_objects: List = field(default_factory=list)  # List[EnterpriseObject]
-    controlled_objects:  List = field(default_factory=list)  # List[EnterpriseObject]
+    controlling_objects:  List = field(default_factory=list)  # List[EnterpriseObject]
+    controlled_objects:   List = field(default_factory=list)  # List[EnterpriseObject]
+    normative_policies:   List = field(default_factory=list)  # List[NormativePolicy] (AM-28)
 
 
 @dataclass
@@ -1005,6 +1046,7 @@ class Federation(_ELParentable):
     policy_refs:          List = field(default_factory=list)  # List[PolicyRef]
     invariants:           List = field(default_factory=list)  # List[Invariant]
     events:               List = field(default_factory=list)  # AM-25: List[EventDecl]
+    normative_policies:   List = field(default_factory=list)  # List[NormativePolicy] (AM-28)
     withdrawal_behaviour: Optional[str] = None
     conflict_resolution:  Optional[ConflictResolution] = None
 
@@ -1178,6 +1220,7 @@ DOMAIN_CLASSES = [
     # D
     Policy, PolicyRule, AffectedElement, SettingBehaviour, Enforcement,
     PolicyRef,
+    NormativePolicy, NormativePolicyRef,  # AM-28
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
     # E
     Community, EventDecl, SatisfactionCondition, Objective, SubObjective, SubObjectiveRef, Invariant,

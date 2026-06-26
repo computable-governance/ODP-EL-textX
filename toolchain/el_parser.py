@@ -202,6 +202,8 @@ def process_domain(domain):
             domain.controlled_objects.append(item.obj)
         elif cls == 'PolicyRef':
             domain.policy_refs.append(item)
+        elif cls == 'NormativePolicyRef':     # AM-28
+            domain.normative_policies.append(item.policy)
     domain.body_items = []
 
 
@@ -239,6 +241,8 @@ def process_federation(fed):
             fed.conflict_resolution = item
         elif cls == 'EventDecl':              # AM-25
             fed.events.append(item)
+        elif cls == 'NormativePolicyRef':     # AM-28
+            fed.normative_policies.append(item.policy)
     fed.body_items = []
 
 
