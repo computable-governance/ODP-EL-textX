@@ -104,6 +104,69 @@ domain SpecialistPracticeDomain
         controlled_object:  SpecialistClinician
     }
 
+// ── CommunityObjects — §6.2.2, §7.8.3 ──────────────────────────────────────
+
+community_object GPPracticeObj
+    description: "Community object representing GPPracticeDomain in the referral federation"
+{
+    abstracts: GPPracticeDomain
+}
+
+community_object SpecialistPracticeObj
+    description: "Community object representing SpecialistPracticeDomain in the referral federation"
+{
+    abstracts: SpecialistPracticeDomain
+}
+
+// ── Normative policies — AM-28 ───────────────────────────────────────────────
+
+normative_policy MyHealthRecordsAct {
+    description: "Governs access to and use of My Health Record data"
+    source: "My Health Records Act 2012 (Cth)"
+    kind: legislation
+    type: string
+    initial_value: "2012 provisions as amended to 2026"
+    policy_setting_behaviour: "Parliamentary amendment"
+}
+
+normative_policy NationalClinicalGovernance {
+    description: "Australian clinical governance framework"
+    source: "National Model for Clinical Governance 2026, ACSQHC"
+    kind: guideline
+    type: string
+    initial_value: "2026 edition"
+    policy_setting_behaviour: "ACSQHC governance review process"
+}
+
+// ── Referral Network Federation — §7.5.2 ────────────────────────────────────
+
+contract federation ReferralNetworkFederation
+    description: "Durable referral network governance contract between GP and Specialist practices"
+{
+    objective: "ensure governed eReferral between GP Practice and Specialist Practice"
+
+    normative_policy: MyHealthRecordsAct
+    normative_policy: NationalClinicalGovernance
+
+    interface role gpPracticeRole
+        description: "GP practice role in the referral federation"
+    {}
+
+    interface role specialistPracticeRole
+        description: "Specialist practice role in the referral federation"
+    {}
+
+    member: GPPracticeDomain
+        represented_by GPPracticeObj
+        fills gpPracticeRole
+
+    member: SpecialistPracticeDomain
+        represented_by SpecialistPracticeObj
+        fills specialistPracticeRole
+
+    conflict_resolution specification_time_assurance
+}
+
 // ── Referral Episode Community (Creation-style, transient) ─────────────────
 // Per X.902 §9.18: Creation -- instantiated by an action of objects
 // in the model (the referral commitment by GPClinician).
