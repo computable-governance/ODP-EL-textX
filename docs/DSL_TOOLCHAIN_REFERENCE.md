@@ -231,8 +231,8 @@ Layer 2 — THIS TOOLCHAIN (el_grammar.tx + el_validator.py + el_reasoner.py)
 Layer 3 — Sepanosian runtime engine
           Operational execution: WorldState, transitions, ledger
           Q: What happened, and was each step permitted?
-          Repos: github.com/Thomas-mp4/ODP-EL-textX
-                 github.com/Thomas-mp4/ODP-EL-Toolchain
+          Repo: github.com/thomas-sepanosian/pyodpel
+          (Thomas Sepanosian, MSc thesis, University of Twente, 2026)
 
 Layer 4 — el_kripke.py (implemented May 2026)
           Kripke semantics (Annex C of ISO/IEC 15414:2015)
