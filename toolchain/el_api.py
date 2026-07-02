@@ -54,15 +54,29 @@ def _build_gp_referral_runtime() -> Runtime:
       GPClinician fills gpClinicianRole (declared at GPPracticeCommunity line 250;
         confirmed against the file — no explicit fills_role declaration exists,
         only assignment_policy requirements and on_join/on_leave effects).
-      SpecialistClinicianAgent fills specialistRole (declared at SpecialistCommunity
+      SpecialistClinician fills specialistRole (declared at SpecialistCommunity
         line 319; same gap — no fills_role declaration, inferred from holds +
         delegated_from + assignment_policy).
+      SpecialistAIAgent does not fill a community role; it is delegated_from
+        SpecialistClinician (AM-30b) and receives patientRecordAccessPermit
+        directly, matching patientDataAuthorization.to_agent in the scenario.
       GPPracticeParty and SpecialistParty are parties (principals), not role-fillers.
 
     Token grants:
-      GPClinician           — referralInitiationBurden, clinicalHandoverBurden
-      SpecialistParty       — assessmentSchedulingBurden
-      SpecialistClinicianAgent — referralResponseBurden, patientRecordAccessPermit
+      GPClinician         — referralInitiationBurden, clinicalHandoverBurden
+      SpecialistParty     — assessmentSchedulingBurden
+      SpecialistClinician — referralResponseBurden
+      SpecialistAIAgent   — patientRecordAccessPermit
+
+    NOTE: the actor name string literals below are hardcoded, not resolved
+    against `spec` — they must be kept in sync by hand with
+    scenarios/gp_referral/gp_referral_scenario.el whenever its party/agent
+    declarations change. This is the model/runtime drift CLAUDE.md §6.1
+    warns against ("two parallel representations of the standard that have
+    to be kept in sync manually"). AM-30b (2026-07-02) is the first time
+    this drift actually occurred, when SpecialistClinicianAgent was renamed
+    to SpecialistClinician in the scenario file without this builder being
+    updated at the same time.
     """
     result = parse(_SCENARIO, validate=False)
     if not result.ok:
@@ -72,16 +86,17 @@ def _build_gp_referral_runtime() -> Runtime:
     state = initial_state()
 
     state = enroll(state, "GPPracticeParty")
-    state = enroll(state, "GPClinician",              role_name="gpClinicianRole")
+    state = enroll(state, "GPClinician",         role_name="gpClinicianRole")
     state = enroll(state, "SpecialistParty")
-    state = enroll(state, "SpecialistClinicianAgent",  role_name="specialistRole")
+    state = enroll(state, "SpecialistClinician",  role_name="specialistRole")
+    state = enroll(state, "SpecialistAIAgent")
 
     for token_name, holder in [
         ("referralInitiationBurden",   "GPClinician"),
         ("clinicalHandoverBurden",     "GPClinician"),
         ("assessmentSchedulingBurden", "SpecialistParty"),
-        ("referralResponseBurden",     "SpecialistClinicianAgent"),
-        ("patientRecordAccessPermit",  "SpecialistClinicianAgent"),
+        ("referralResponseBurden",     "SpecialistClinician"),
+        ("patientRecordAccessPermit",  "SpecialistAIAgent"),
     ]:
         state = grant_token(state, token_from_spec(spec, token_name, holder))
 
