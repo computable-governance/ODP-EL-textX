@@ -88,6 +88,39 @@ the grammar currently treats authorization as a generic keyword, not a
 typed construct with full field validation.
 
 4. Proposed Grammar Construct
+
+4.0 to_role vs to_agent — design decision
+
+AuthorizationDecl must support both targeting modes:
+
+**to_role** — grants permit to whoever fills the named role. General,
+role-based. Appropriate for human clinician access where role membership
+is the authorization basis. Consistent with on_join role transfer permit
+pattern already in the grammar.
+
+**to_agent** — grants permit explicitly to a named agent. Specific,
+agent-targeted. Appropriate for AI agent access where explicit consent
+is required and must be separately revocable from human access.
+
+Why both matter in the eReferral scenario:
+- SpecialistClinician accesses patient records via role membership
+  (on_join specialistRole transfer patientRecordAccessPermit) —
+  role-based, implicit authorization via domain membership
+- SpecialistAIAgent accesses patient records via explicit authorization
+  (to_agent: SpecialistAIAgent) — agent-targeted, explicitly consented,
+  separately revocable under MyHealthRecordsAct
+
+This distinction is the formal basis for governance of AI agent access
+being separate from human clinician access. A single to_role authorization
+cannot capture this — it would grant AI agent access implicitly via role
+membership, which is insufficient for clinical AI consent governance.
+
+Grammar implication: AuthorizationDecl should allow either:
+  to_role: [RoleDecl]     // role-based authorization
+  to_agent: [AgentDecl]   // agent-targeted authorization (AI consent case)
+with a validator rule (AM-31-V5) that exactly one of to_role or
+to_agent must be present, not both.
+
 4.1 AuthorizationDecl — standalone and community-scoped
 AuthorizationDecl should be valid in two contexts:
 
@@ -150,6 +183,10 @@ V-NEW-xx (AM-31-V4): No active embargo on authorization grant
 At authorization time, if an embargo exists for the same action as the
 granted permit, the validator should warn that the authorization may be
 ineffective (the embargo takes precedence).
+V-NEW-xx (AM-31-V5): Exactly one of to_role or to_agent must be present
+AuthorizationDecl must have either to_role or to_agent, not both and
+not neither. A grant with no target is semantically void; a grant to
+both a role and an agent simultaneously is ambiguous.
 
 6. Impact on Existing Models
 gp_referral_scenario.el — minimal impact. The existing authorization
