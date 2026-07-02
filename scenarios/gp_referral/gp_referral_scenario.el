@@ -8,7 +8,7 @@
  *
  * Delegation chain (cross-community):
  *   GPPracticeParty ──[delegates referralResponseBurden]──► SpecialistClinician
- *   GPPracticeParty ──[authorizes patient data access]──► SpecialistAIAgent
+ *   PatientParty ──[authorizes patient data access]──► SpecialistAIAgent
  *
  * Token groups:
  *   referralBurdenGroup   = { referralInitiationBurden, clinicalHandoverBurden,
@@ -93,6 +93,9 @@ agent SpecialistAIAgent
             duration: "referral episode"
     }
 
+party PatientParty
+    description: "Patient — data subject; consents to and may revoke authorization for specialist AI agent access to their clinical records. Authorizing SpecialistAIAgent directly (AM-31b) does not make PatientParty a co-principal of it — see AM-31 design note §4.0b; SpecialistClinician remains sole principal via the separate delegated_from relationship above."
+
 artefact_object patientRecord
     description: "Patient clinical record — referenced by referral initiation and clinical handover actions"
 
@@ -155,19 +158,24 @@ burden escalationNoticeBurden {
     description: "Obligation on specialist party to notify GP practice of failure to respond to referral"
 }
 
-// NOTE: This permit is transferred via two distinct mechanisms:
-// (1) Role-based: on_join specialistRole transfers this permit
-//     to SpecialistClinician (human clinician) — implicit,
-//     role-membership-based access.
-// (2) Agent-targeted: patientDataAuthorization (AM-31) grants
-//     this permit explicitly to SpecialistAIAgent — requires
-//     patient consent; revocable; activates embargo on withdrawal.
-// AM-31b will separate these into distinct permits to eliminate
-// the architectural ambiguity. See AM-31 design note §4.0.
-permit patientRecordAccessPermit {
+// AM-31b: two permits, reflecting two distinct ODP-EL grant mechanisms
+// (role transfer vs. AuthorizationDecl, §6.6.4) — not two levels of trust,
+// and not a delegation (§6.6.6) in either case. See AM-31 design note §4.0/§4.0b.
+// (1) patientRecordAccessPermitByRole — transferred by on_join/on_leave
+//     specialistRole. Tracks role occupancy, not the individual holder.
+// (2) patientRecordAccessPermitByAuthorization — granted by patientDataAuthorization
+//     (AuthorizationDecl, to_agent). Tracks the named grant to SpecialistAIAgent;
+//     separately revocable; does not make PatientParty a co-principal of the agent.
+permit patientRecordAccessPermitByRole {
     for_action: "access_patient_clinical_records"
     state: active
-    description: "Permission for specialist clinician to access patient records for referral assessment"
+    description: "Permission for specialist clinician to access patient records for referral assessment, via specialistRole membership"
+}
+
+permit patientRecordAccessPermitByAuthorization {
+    for_action: "access_patient_clinical_records"
+    state: active
+    description: "Permission for specialist AI diagnostic agent to access patient records for referral assessment, via explicit patient authorization"
 }
 
 // AM-31: activated on revocation of patientDataAuthorization — supersedes the
@@ -180,7 +188,7 @@ permit patientRecordAccessPermit {
 embargo patientRecordAccessEmbargo {
     for_action: "access_patient_clinical_records"
     state: pending
-    description: "Blocks specialist clinician access to patient records after GP practice revokes patientDataAuthorization"
+    description: "Blocks specialist AI agent access to patient records after patient revokes patientDataAuthorization"
 }
 
 
@@ -334,22 +342,22 @@ community SpecialistCommunity
 
         assignment_policy for specialistRole {
             requires_capability: "Must hold current specialist registration in the relevant clinical area"
-            requires_token permit: "Must hold patientRecordAccessPermit"
+            requires_token permit: "Must hold patientRecordAccessPermitByRole"
         }
 
-        on_join specialistRole transfer patientRecordAccessPermit
-        on_leave specialistRole revert patientRecordAccessPermit
+        on_join specialistRole transfer patientRecordAccessPermitByRole
+        on_leave specialistRole revert patientRecordAccessPermitByRole
 
         role specialistRole
             description: "Specialist clinician role — responds to referrals and schedules assessments"
             {
-                holds patientRecordAccessPermit
+                holds patientRecordAccessPermitByRole
 
                 action acknowledgeReferral {
                     description: "Specialist clinician acknowledges receipt of GP referral and initiates clinical review"
                     actor: specialistRole
                     artefact: patientRecord
-                    requires_permit patientRecordAccessPermit for specialistRole
+                    requires_permit patientRecordAccessPermitByRole for specialistRole
                     favoured_by_burden referralResponseBurden
                 }
 
@@ -357,7 +365,7 @@ community SpecialistCommunity
                     description: "Specialist clinician schedules patient assessment appointment"
                     actor: specialistRole
                     precondition: "Referral must be acknowledged and patient availability confirmed"
-                    requires_permit patientRecordAccessPermit for specialistRole
+                    requires_permit patientRecordAccessPermitByRole for specialistRole
                     favoured_by_burden assessmentSchedulingBurden
                 }
             }
@@ -469,18 +477,21 @@ delegation gpToSpecialistDelegation {
     description: "GP practice delegates referral response and scheduling obligations to specialist clinician across community boundary"
 }
 
-// Authorization — GPPracticeParty grants patient data access to SpecialistAIAgent.
+// Authorization — PatientParty grants patient data access to SpecialistAIAgent.
 // §7.10.2: empowerment that enables the AI diagnostic agent to access records for the delegated obligation.
+// AM-31b: authority changed from GPPracticeParty to PatientParty — this is an
+// authorization (§6.6.4), not a delegation (§6.6.6); it does not make PatientParty
+// a co-principal of SpecialistAIAgent (see AM-31 design note §4.0b).
 authorization patientDataAuthorization {
-    authority: GPPracticeParty
+    authority: PatientParty
     to_agent: SpecialistAIAgent
-    grants_permit: patientRecordAccessPermit
+    grants_permit: patientRecordAccessPermitByAuthorization
     duration: "referral episode"
     conditions: "Active GP referral and patient data sharing consent on file"
     revocable: true
     on_revocation: activate patientRecordAccessEmbargo
     domain_scope: "PatientDataDomain"
-    description: "GP practice authorizes specialist clinician to access patient records for referral assessment"
+    description: "Patient authorizes specialist AI diagnostic agent to access their clinical records for referral assessment; consent may be withdrawn by the patient at any time"
 }
 
 
@@ -522,7 +533,7 @@ prescription referralResponseStandard {
 declaration referralAccepted {
     by: SpecialistClinician
     state_of_affairs: "Specialist referral has been accepted and is under clinical review"
-    requires_permit: patientRecordAccessPermit
+    requires_permit: patientRecordAccessPermitByRole
     effective_on_interaction: true
     description: "Specialist clinician declares referral acceptance; effective on interaction with GP practice"
 }
@@ -548,6 +559,7 @@ correspondence ReferralFederation          to computational : ReferralFederation
 correspondence GPPracticeCommunity         to computational : GPPracticeService
 correspondence SpecialistCommunity         to computational : SpecialistService
 correspondence GPPracticeParty             to computational : GPPracticeClientObject
+correspondence PatientParty                to computational : PatientClientObject
 correspondence SpecialistParty             to computational : SpecialistServerObject
 correspondence GPClinician                 to engineering   : GPClinicianNode
 correspondence SpecialistClinician         to engineering   : SpecialistClinicianNode
@@ -556,5 +568,6 @@ correspondence patientRecord               to information   : PatientClinicalRec
 correspondence referralInitiationBurden    to information   : ReferralInitiationRecord
 correspondence referralResponseBurden      to information   : ReferralResponseRecord
 correspondence clinicalHandoverBurden      to information   : ClinicalHandoverRecord
-correspondence patientRecordAccessPermit   to information   : DataAccessGrantRecord
+correspondence patientRecordAccessPermitByRole          to information : DataAccessGrantRecordRole
+correspondence patientRecordAccessPermitByAuthorization to information : DataAccessGrantRecordAuthorization
 correspondence referralBurdenGroup         to information   : ReferralBurdenGroupRecord

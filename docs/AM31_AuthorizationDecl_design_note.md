@@ -121,6 +121,33 @@ Grammar implication: AuthorizationDecl should allow either:
 with a validator rule (AM-31-V5) that exactly one of to_role or
 to_agent must be present, not both.
 
+4.0b — Authorization does not imply delegation
+
+`AuthorizationDecl` (§6.6.4) is an empowerment: issuing a permit plus a
+burden on the authority to facilitate. It does not, by itself, establish
+a §6.6.9 principal/agent relationship — that requires a `DelegationDecl`
+act (§6.6.6, §7.10.1), which is what makes the authorized object an agent
+and the authorizer its principal, with attendant accountability (§6.6.9:
+"a principal is responsible for the acts of an object acting as its
+agent").
+
+Where the authorized object already has an independent
+`agent { delegated_from ... }` declaration (as `SpecialistAIAgent` does,
+principal `SpecialistClinician`), an authorization it separately receives
+from a different party does not make that party a co-principal. In
+`gp_referral_scenario.el`, `PatientParty` authorizes `SpecialistAIAgent`
+directly via `patientDataAuthorization`; this runs parallel to, not
+through, the existing `SpecialistClinician → SpecialistAIAgent` delegation
+chain, and does not shift or share `SpecialistClinician`'s accountability
+for the agent's conduct.
+
+Modelling patient consent as a `DelegationDecl` instead would have been
+the wrong choice: it would incorrectly make `PatientParty` jointly
+responsible for the AI agent's actions under §6.6.9, which conflicts with
+the accountability line the scenario is built to keep sharp (FTI Pillar 6
+traceability: the clinician, not the patient, is accountable for what the
+AI agent does with the access it's granted).
+
 4.1 AuthorizationDecl — standalone and community-scoped
 AuthorizationDecl should be valid in two contexts:
 

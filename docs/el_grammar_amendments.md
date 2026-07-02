@@ -2127,6 +2127,63 @@ validation failure for now, analogous to the pre-existing
 
 ---
 
+## AM-31b (2026-07-02) — Split patientRecordAccessPermit into role-based and authorization-based permits
+
+**Status:** CONFIRMED
+
+**Triggered by:** AM-31 design note §4.0 (to_role vs to_agent), and follow-up
+review of `patientDataAuthorization`'s consent authority — `patientRecordAccessPermit`
+was transferred via two distinct mechanisms (role-based `on_join`/`on_leave`, and
+agent-targeted `AuthorizationDecl`) under a single permit name, which the AM-31
+entry above flagged as an architectural ambiguity to be resolved separately.
+
+**Consent authority change:** `patientDataAuthorization.authority` changed from
+`GPPracticeParty` to `PatientParty` (new `party` declaration). Reflects that
+patient consent, not GP practice authorization, is the correct empowerment
+basis for AI agent access to clinical records under `MyHealthRecordsAct`.
+
+**Permit split (`scenarios/gp_referral/gp_referral_scenario.el`):**
+`patientRecordAccessPermit` replaced with two permits, sharing the same
+`for_action` (`"access_patient_clinical_records"`) but distinct grant mechanisms:
+- `patientRecordAccessPermitByRole` — transferred via `on_join`/`on_leave
+  specialistRole`; tracks role occupancy, held by `SpecialistClinician`.
+- `patientRecordAccessPermitByAuthorization` — granted via
+  `patientDataAuthorization` (`AuthorizationDecl`, `to_agent`); tracks the named
+  grant to `SpecialistAIAgent`; separately revocable via the existing AM-31
+  `on_revocation: activate patientRecordAccessEmbargo` mechanism.
+
+**Design clarification (§4.0b, added to `AM31_AuthorizationDecl_design_note.md`):**
+`AuthorizationDecl` (§6.6.4) does not, by itself, establish §6.6.9 principal/agent
+accountability — that requires a `DelegationDecl` act (§6.6.6, §7.10.1).
+`PatientParty` authorizing `SpecialistAIAgent` directly does not make `PatientParty`
+a co-principal of it; `SpecialistClinician` remains sole principal via the existing
+`agent SpecialistAIAgent { delegated_from SpecialistClinician }` declaration.
+Modelling patient consent as a `DelegationDecl` instead would have incorrectly
+shared that accountability with the patient.
+
+**Naming note:** `ByRole` / `ByAuthorization` chosen over `Role`/`Agent` —
+the grammar's `to_agent` keyword accepts any `EnterpriseObject`, not only
+§6.6.8-agent-kind objects (no validator rule restricts it), so naming the
+permits after the ODP-EL construct that grants them (`RoleDecl` transfer vs.
+`AuthorizationDecl`) avoids implying a principal/delegate relationship the
+grant itself doesn't establish.
+
+**No grammar, validator, domain, or runtime changes** — AM-31b is scenario-only,
+built entirely on AM-31's existing `to_agent`/`to_role` grammar and AM-31-V1
+through V5 validator rules. `PatientParty` satisfies AM-31-V1 (authority must
+be a declared `party`).
+
+**Verification:** `scenarios/gp_referral/verify_gp_referral.py` — Parse OK, 0
+validation errors, 7/7 PASS (Q1–Q4 Layer 4 Kripke checks unchanged from
+pre-AM-31b baseline, as expected — the permit split does not touch the
+burden/delegation chain those questions verify).
+
+**Files changed:** `scenarios/gp_referral/gp_referral_scenario.el`,
+`docs/AM31_AuthorizationDecl_design_note.md` (§4.0b addendum),
+`docs/el_grammar_amendments.md` (this entry).
+
+---
+
 ## AM-32 (candidate, not yet implemented) — `inactive` TokenState for untriggered embargoes
 
 **Status:** CANDIDATE — logged only, no grammar change made
@@ -2156,6 +2213,7 @@ review). Would require updating `toolchain/el_domain.py`'s `TokenState`
 enum and any code that pattern-matches on the two-value enum.
 
 **Next action:** none scheduled. Revisit if a second scenario needs the
-same "declared but not yet triggered" embargo pattern, or when AM-31b
-(splitting `patientRecordAccessPermit` into role-based and
-agent-targeted permits, per the design note §4.0) is implemented.
+same "declared but not yet triggered" embargo pattern. (AM-31b —
+splitting `patientRecordAccessPermit` into
+`patientRecordAccessPermitByRole`/`ByAuthorization` — implemented
+2026-07-02; did not require this TokenState.)
