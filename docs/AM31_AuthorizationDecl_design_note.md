@@ -221,6 +221,48 @@ This is the difference between consent as a record and consent as an
 architectural constraint — directly relevant to OAIC Privacy Act obligations,
 MyHealthRecordsAct §70 (withdrawal of consent), and FTI Pillar 4.
 
+8b. The superseded State — Materialisation Note
+
+AM-31 introduced superseded as a new runtime token state in
+el_engine.py. This is worth documenting explicitly because it
+represents a semantic shift.
+
+Before AM-31:
+ObligationState.SUPERSEDED existed only in the Kripke verification
+layer (el_kripke.py) as a formal reasoning concept — an obligation
+overtaken by another or made moot by delegation. It was never
+materialised in the actual runtime token vocabulary. Runtime tokens
+could only be:
+active | pending | discharged | violated
+
+After AM-31:
+superseded is now a concrete runtime state in TokenInstance.state.
+When Runtime.revoke_authorization() is called:
+1. The granted permit transitions to superseded — distinct from
+   discharged (obligation met) and violated (obligation failed);
+   means "validly in force but formally withdrawn by the granting
+   authority"
+2. The on_revocation embargo transitions to active
+3. Both events are recorded as a TransitionRecord in the ledger
+
+Why this matters:
+- discharged would be semantically wrong — the permit wasn't
+  fulfilled, it was revoked
+- violated would be semantically wrong — no one failed, the
+  authority exercised their right to withdraw
+- superseded is the correct term — the token's lifecycle ended
+  through revocation, not through obligation discharge or failure
+
+Audit trail significance (FTI Pillar 6):
+The revocation of consent is now a formally recorded,
+machine-verifiable event in the governance ledger. A board can prove
+exactly when consent was withdrawn and that the AI agent's access was
+terminated at that precise moment — not just that a flag was set in a
+database, but that a governance speech act occurred and was recorded
+with full provenance. This is the difference between consent as a
+documented process and consent as an architectural constraint with
+traceable enforcement.
+
 9. Next Steps
 
 DONE — AM-30: verified complete in gp_referral_scenario.el
