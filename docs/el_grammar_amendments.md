@@ -2007,3 +2007,27 @@ community ReferralCommunity {
   modelling error.
 
 **Status:** CONFIRMED
+
+---
+
+## AM-30 (2026-07-02) — Deadline and action coverage verified
+
+**Status:** CONFIRMED — no grammar changes required
+
+**Triggered by:** LLM-to-DSL mapping exercise, 2 July 2026
+
+**Finding:** Mapping exercise against gp_referral_scenario.el confirmed
+that the scenario already contains:
+- deadline fields on referralResponseBurden ("5 working days from
+  referral receipt") and assessmentSchedulingBurden ("14 days from
+  referral receipt")
+- scheduleAssessment action covering specialist response obligation
+- authorization patientDataAuthorization covering patient data access
+  empowerment (speech act level)
+
+**Note:** Mapping exercise was initially conducted against an earlier
+draft (gp_referral.el) that does not match the current repo version
+(gp_referral_scenario.el). All gaps identified in the earlier draft
+are already addressed in the current scenario file.
+
+**Files changed:** docs/el_grammar_amendments.md (this entry only)
