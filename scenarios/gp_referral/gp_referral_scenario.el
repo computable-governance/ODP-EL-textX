@@ -162,6 +162,14 @@ permit patientRecordAccessPermit {
     description: "Permission for specialist clinician to access patient records for referral assessment"
 }
 
+// AM-31: activated on revocation of patientDataAuthorization — supersedes the
+// permit above and blocks further record access for the same action.
+embargo patientRecordAccessEmbargo {
+    for_action: "access_patient_clinical_records"
+    state: pending
+    description: "Blocks specialist clinician access to patient records after GP practice revokes patientDataAuthorization"
+}
+
 
 // ================================================================
 // §6.4.2, AM-26 — TOKEN GROUPS
@@ -457,6 +465,7 @@ authorization patientDataAuthorization {
     duration: "referral episode"
     conditions: "Active GP referral and patient data sharing consent on file"
     revocable: true
+    on_revocation: activate patientRecordAccessEmbargo
     domain_scope: "PatientDataDomain"
     description: "GP practice authorizes specialist clinician to access patient records for referral assessment"
 }

@@ -2031,3 +2031,96 @@ draft (gp_referral.el) that does not match the current repo version
 are already addressed in the current scenario file.
 
 **Files changed:** docs/el_grammar_amendments.md (this entry only)
+
+---
+
+## AM-31 (2026-07-02) — AuthorizationDecl: to_role, on_revocation, normative_basis
+
+**Status:** CONFIRMED
+
+**Triggered by:** `docs/AM31_AuthorizationDecl_design_note.md` (drafted
+2026-07-02) — LLM-to-DSL mapping exercise identified that
+`AuthorizationDecl` parsed only as a generic keyword construct with no
+typed field validation and no revocation semantics.
+
+**Grammar changes (`grammar/v2/el_grammar.tx`, `Authorization` rule):**
+- `to_agent` changed from required to optional.
+- Added `('to_role' ':' authorized_role=ID)?` as an alternative to
+  `to_agent`. Mutual exclusion (exactly one of the two) is enforced by
+  the validator (AM-31-V3), not the grammar — both are grammar-optional.
+- Added `('on_revocation' ':' 'activate' on_revocation_embargo=ID)?`.
+- Added `('normative_basis' ':' normative_basis=[NormativePolicy])?`
+  (note: the design note's draft sketch named this type
+  `NormativePolicyDecl`; the actual grammar rule is `NormativePolicy` —
+  corrected during implementation).
+- `authorized_role` and `on_revocation_embargo` are plain `ID` fields
+  (known design smell per §5.4), not typed cross-references — roles are
+  nested inside community `Role` bodies and are not independently
+  addressable at the top level, and validators resolve `on_revocation_embargo`
+  by scanning declared `DeonticToken` names with `kind == "embargo"`.
+
+**Domain class changes (`toolchain/el_domain.py`, `Authorization`):**
+- Added `authorized_role: Optional[str]`, `on_revocation_embargo:
+  Optional[str]`, `normative_basis: Optional[object]` fields, matching
+  the grammar exactly (custom-classes architecture, §6.1).
+
+**Validator changes (`toolchain/el_validator.py`):** new
+`_validate_authorization()`, called for every top-level `Authorization`:
+- **AM-31-V1** — `authority` must be a declared object of kind `party`
+  (§6.6.4); agents cannot grant authorizations.
+- **AM-31-V2** — `revocable: true` requires a non-empty
+  `on_revocation_embargo`.
+- **AM-31-V3** — exactly one of `to_agent` / `to_role` must be present
+  (not both, not neither).
+- **AM-31-V4** — `grants_permit` must reference a `DeonticToken` with
+  `kind == "permit"`.
+- **AM-31-V5** — `on_revocation_embargo`, if set, must resolve to a
+  declared `DeonticToken` with `kind == "embargo"`.
+
+Note on numbering: the design note's draft (§5) proposed V3 = "community-
+scoped authorization permit scope" and V4 = "no active embargo on
+authorization grant" as additional rules, with the to_role/to_agent
+exclusivity check numbered V5. The rules actually implemented (per
+direct implementation instructions, 2026-07-02) renumber
+to_role/to_agent exclusivity as V3, and add permit-kind/embargo-kind
+resolution checks as V4/V5 instead. The design note's original V3
+(community-scoped permit scope) and V4 (no-active-embargo warning) are
+**not yet implemented** — deferred, no AM number assigned yet.
+
+**Runtime changes (Layer 3):** `el_domain.py` has no runtime state or
+ledger machinery (it is the static, parse-time domain model), so
+revocation processing was implemented in the actual runtime layer
+instead:
+- `toolchain/el_engine.py`: new `revoke_authorization(state, spec,
+  authorization_name)` stateless transition — supersedes the granted
+  permit `TokenInstance`(s), activates the named embargo (transitioning
+  it if already granted, else instantiating and granting it fresh to
+  the permit's former holder), and returns a `TransitionRecord`.
+  `TokenInstance.state` vocabulary extended with a new `'superseded'`
+  value (previously `'active'|'pending'|'discharged'|'violated'`).
+- `toolchain/el_runtime.py`: new `Runtime.revoke_authorization()` method,
+  mirroring the existing `advance()` pattern — mutates `self._state` and
+  appends the `TransitionRecord` to `self._ledger`.
+
+**Scenario changes (`scenarios/gp_referral/gp_referral_scenario.el`):**
+- Added `embargo patientRecordAccessEmbargo` (state: pending, same
+  `for_action` as `patientRecordAccessPermit`).
+- Added `on_revocation: activate patientRecordAccessEmbargo` to
+  `patientDataAuthorization`, which was `revocable: true` with no
+  revocation consequence (would otherwise now fail AM-31-V2).
+
+**Known gap (deferred, not fixed in this pass):**
+`scenarios/fhir/generated_governance.el` (output of
+`toolchain/fhir_mapper.py`) also declares a `revocable: true`
+authorization (`ConsentAiDiagnostic001Auth`) with no `on_revocation`
+embargo, and now fails AM-31-V2. `fhir_mapper.py`'s `ELAuthorization` /
+`_render_authorization()` do not yet emit `on_revocation` or a
+corresponding embargo token. Fixing this requires either a new FHIR
+mapping rule (R23?) or a follow-up amendment; left as a known
+validation failure for now, analogous to the pre-existing
+`ecommerce_scenario.el` syntax error (§9 of CLAUDE.md).
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_validator.py`, `toolchain/el_engine.py`,
+`toolchain/el_runtime.py`, `scenarios/gp_referral/gp_referral_scenario.el`,
+`docs/el_grammar_amendments.md` (this entry).

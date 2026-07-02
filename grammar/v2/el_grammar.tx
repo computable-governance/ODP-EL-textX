@@ -961,13 +961,16 @@ Delegation:
 Authorization:
     'authorization' name=ID '{'
         'authority'                ':' authority=[EnterpriseObject]
-        'to_agent'                 ':' authorized_agent=[EnterpriseObject]
+        ('to_agent'                ':' authorized_agent=[EnterpriseObject])?
+        ('to_role'                 ':' authorized_role=ID)?
         'grants_permit'            ':' permit=[DeonticToken]
         ('creates_burden_on_authority' ':' auth_burden=[DeonticToken])?
         ('duration'                ':' duration=STRING)?
         ('conditions'              ':' conditions=STRING)?
         ('sub_delegation_allowed'  ':' sub_delegation_allowed?='true')?
         ('revocable'               ':' revocable?='true')?
+        ('on_revocation'           ':' 'activate' on_revocation_embargo=ID)?
+        ('normative_basis'         ':' normative_basis=[NormativePolicy])?
         ('domain_scope'            ':' domain_scope=STRING)?
         ('description'             ':' description=STRING)?
     '}'

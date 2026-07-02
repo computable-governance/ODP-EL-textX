@@ -42,6 +42,15 @@ Rules implemented
         Delegation — static check for missing obligation descriptor. §6.4.2
   V-16b  SatisfactionCondition with a single member has no
         collective semantics — warn (not error).                 AM-29
+  AM-31-V1  Authorization authority must be a party.               §6.6.4
+  AM-31-V2  Revocable authorization must name an on_revocation
+        embargo.                                                   AM-31
+  AM-31-V3  Authorization must specify exactly one of to_agent
+        or to_role.                                                AM-31 §4.0
+  AM-31-V4  Authorization grants_permit must reference a
+        permit-kind token.                                         §6.4.5
+  AM-31-V5  Authorization on_revocation must reference a
+        declared embargo-kind token.                                §6.4.4
 
 Usage
 -----
@@ -124,6 +133,10 @@ def validate_spec(model) -> List[str]:
 
     # V-07, V-08 — delegation structural rules
     errors.extend(_validate_delegations(delegations, commitments, all_objects))
+
+    # AM-31-V1..V5 — authorization structural rules
+    for a in _collect(model, "Authorization"):
+        errors.extend(_validate_authorization(a, all_objects, all_tokens))
 
     # V-09 — single holder per token
     errors.extend(_validate_token_holders(model, all_tokens))
@@ -295,6 +308,60 @@ def _find_parent_delegation(delegations: List[Any], agent_name: Optional[str]) -
         if getattr(d.delegate, "name", None) == agent_name:
             return d
     return None
+
+
+def _validate_authorization(a, all_objects: Dict[str, Any], all_tokens: Dict[str, Any]) -> List[str]:
+    """AM-31: Authorization must be a well-formed empowerment. (§6.6.4, §7.10.2)"""
+    errors: List[str] = []
+    aname = a.name
+
+    # AM-31-V1: authority must be a party — agents cannot grant authorizations
+    authority_obj = all_objects.get(getattr(a.authority, "name", None))
+    if authority_obj and authority_obj.kind != "party":
+        errors.append(
+            f"[AM-31-V1] Authorization '{aname}': authority must be a party "
+            f"(§6.6.4); agents cannot grant authorizations "
+            f"(found '{authority_obj.kind}')."
+        )
+
+    # AM-31-V2: revocable authorization must name an on_revocation embargo
+    # (on_revocation_embargo is a plain ID: absent → "" per textX default, not None)
+    if getattr(a, "revocable", False) and not getattr(a, "on_revocation_embargo", ""):
+        errors.append(
+            f"[AM-31-V2] Authorization '{aname}' is revocable but declares "
+            f"no on_revocation embargo; withdrawal has no architectural effect."
+        )
+
+    # AM-31-V3: exactly one of to_agent / to_role
+    # (authorized_role is a plain ID: absent → "" per textX default, not None)
+    has_agent = getattr(a, "authorized_agent", None) is not None
+    has_role = bool(getattr(a, "authorized_role", ""))
+    if has_agent == has_role:
+        errors.append(
+            f"[AM-31-V3] Authorization '{aname}' must specify exactly one of "
+            f"to_agent or to_role (AM-31 §4.0)."
+        )
+
+    # AM-31-V4: grants_permit must reference a permit-kind token
+    permit_tok = getattr(a, "permit", None)
+    if permit_tok is not None and getattr(permit_tok, "kind", None) != "permit":
+        errors.append(
+            f"[AM-31-V4] Authorization '{aname}' grants_permit must reference "
+            f"a permit token (found kind '{getattr(permit_tok, 'kind', None)}')."
+        )
+
+    # AM-31-V5: on_revocation embargo must resolve to a declared embargo token
+    # (on_revocation_embargo is a plain ID: absent → "" per textX default, not None)
+    embargo_name = getattr(a, "on_revocation_embargo", "")
+    if embargo_name:
+        embargo_tok = all_tokens.get(embargo_name)
+        if embargo_tok is None or getattr(embargo_tok, "kind", None) != "embargo":
+            errors.append(
+                f"[AM-31-V5] Authorization '{aname}' on_revocation references "
+                f"'{embargo_name}' which is not a declared embargo."
+            )
+
+    return errors
 
 
 def _validate_token_holders(model, all_tokens: Dict[str, Any]) -> List[str]:

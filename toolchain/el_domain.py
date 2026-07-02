@@ -1119,12 +1119,15 @@ class Authorization(_ELParentable):
     name:                  str            = ""
     authority:             Optional[object] = None   # → EnterpriseObject
     authorized_agent:      Optional[object] = None   # → EnterpriseObject
+    authorized_role:       Optional[str]   = None    # AM-31: plain ID, alt. to authorized_agent
     permit:                Optional[object] = None   # → DeonticToken (permit)
     auth_burden:           Optional[object] = None   # → DeonticToken (burden)
     duration:              Optional[str]   = None
     conditions:            Optional[str]   = None
     sub_delegation_allowed: bool           = False
     revocable:             bool            = False
+    on_revocation_embargo: Optional[str]   = None    # AM-31: plain ID → DeonticToken (embargo)
+    normative_basis:       Optional[object] = None   # AM-31: → NormativePolicy
     domain_scope:          Optional[str]   = None
     description:           Optional[str]   = None
 

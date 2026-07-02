@@ -18,6 +18,7 @@ from el_engine import (
     enroll,
     grant_token,
     initial_state,
+    revoke_authorization as _engine_revoke_authorization,
     token_from_spec,
 )
 
@@ -205,6 +206,15 @@ class Runtime:
         """Execute one governed action step and append the record to the ledger."""
         new_state, record = _engine_advance(
             self._state, action_name, self._spec, actor_name, facts
+        )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def revoke_authorization(self, authorization_name: str) -> TransitionRecord:
+        """Withdraw a revocable Authorization and append the event to the ledger. (AM-31)"""
+        new_state, record = _engine_revoke_authorization(
+            self._state, self._spec, authorization_name
         )
         self._state = new_state
         self._ledger.append(record)

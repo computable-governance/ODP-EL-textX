@@ -35,7 +35,7 @@ class TokenInstance:
     token_name: str
     kind: str                       # 'burden' | 'permit' | 'embargo'
     holder: str                     # actor name
-    state: str                      # 'active' | 'pending' | 'discharged' | 'violated'
+    state: str                      # 'active' | 'pending' | 'discharged' | 'violated' | 'superseded'
     discharge_mode: str             # 'eventual' | 'strict'
     priority: str                   # 'critical' | 'high' | 'normal' | 'low'
     deadline: Optional[str] = None
@@ -475,6 +475,76 @@ def token_from_spec(spec, token_name: str, holder: str) -> TokenInstance:
                 ),
             )
     raise KeyError(f"DeonticToken '{token_name}' not found in spec")
+
+
+def revoke_authorization(
+    state: WorldState, spec, authorization_name: str
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    AM-31: Withdraw a revocable Authorization at runtime.
+
+    1. Transitions the granted permit's TokenInstance(s) to 'superseded'.
+    2. Activates the on_revocation embargo — transitions it if already
+       granted, otherwise instantiates and grants it fresh to the permit's
+       former holder.
+    3. Returns a TransitionRecord documenting the revocation for the ledger.
+
+    Raises KeyError if authorization_name is not declared, or has no
+    on_revocation embargo (AM-31-V2 catches this at spec-validation time;
+    this is a runtime defensive check).
+    """
+    auth = None
+    for el in spec.elements:
+        if type(el).__name__ == "Authorization" and el.name == authorization_name:
+            auth = el
+            break
+    if auth is None:
+        raise KeyError(f"Authorization '{authorization_name}' not found in spec")
+
+    permit_name = auth.permit.name
+    # on_revocation_embargo is a plain ID: absent → "" per textX default, not None
+    embargo_name = getattr(auth, "on_revocation_embargo", "")
+    if not embargo_name:
+        raise KeyError(f"Authorization '{authorization_name}' has no on_revocation embargo")
+
+    tick = state.tick
+    effects_log: list[str] = []
+
+    # 1 — supersede the granted permit(s)
+    holders = [
+        t.holder for t in state.tokens
+        if t.token_name == permit_name and t.kind == "permit"
+    ]
+    tokens = [
+        _transition(t, "superseded")
+        if t.token_name == permit_name and t.kind == "permit"
+        else t
+        for t in state.tokens
+    ]
+    effects_log.append(f"superseded permit '{permit_name}'")
+
+    # 2 — activate the on_revocation embargo
+    if any(t.token_name == embargo_name for t in tokens):
+        tokens = [
+            _transition(t, "active") if t.token_name == embargo_name else t
+            for t in tokens
+        ]
+    else:
+        target = holders[0] if holders else auth.authority.name
+        tokens.append(_transition(token_from_spec(spec, embargo_name, target), "active"))
+    effects_log.append(f"activated embargo '{embargo_name}'")
+
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=auth.authority.name,
+        action_name=f"revoke:{authorization_name}",
+        outcome="ok",
+        discharged=(),
+        effects=tuple(effects_log),
+        violations=(),
+    )
+    return new_state, record
 
 
 # ── CLI / test ────────────────────────────────────────────────────────────────
