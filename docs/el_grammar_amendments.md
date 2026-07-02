@@ -2124,3 +2124,38 @@ validation failure for now, analogous to the pre-existing
 `toolchain/el_validator.py`, `toolchain/el_engine.py`,
 `toolchain/el_runtime.py`, `scenarios/gp_referral/gp_referral_scenario.el`,
 `docs/el_grammar_amendments.md` (this entry).
+
+---
+
+## AM-32 (candidate, not yet implemented) — `inactive` TokenState for untriggered embargoes
+
+**Status:** CANDIDATE — logged only, no grammar change made
+
+**Triggered by:** AM-31 follow-up review, 2026-07-02. `patientRecordAccessEmbargo`
+in `gp_referral_scenario.el` is declared before `patientDataAuthorization`
+has ever been revoked — i.e. it has never been triggered. Neither
+existing `TokenState` value fits cleanly: `active` would mean the
+embargo is already blocking the action (wrong — nothing has been
+revoked yet), and `pending` is documented elsewhere (§7.8.7, CLAUDE.md
+§2) as "masked/suspended," which is obligation-flavoured language that
+doesn't describe an embargo that simply hasn't fired yet.
+
+**Current workaround:** `patientRecordAccessEmbargo` keeps
+`state: pending` (the nearest of the two valid values) with an inline
+comment explaining the rationale. This is safe in practice because
+`el_engine.py`'s `revoke_authorization()` (AM-31) forces
+`state="active"` on the embargo at activation time regardless of its
+declared initial state — the declared value is only descriptive
+pre-activation, never read as an activation precondition.
+
+**Candidate change:** extend `grammar/v2/el_grammar.tx:166`'s
+`TokenState` rule from `'active' | 'pending'` to
+`'active' | 'pending' | 'inactive'`, restricted to embargo-kind tokens
+(a burden/permit declared `inactive` would need separate semantics
+review). Would require updating `toolchain/el_domain.py`'s `TokenState`
+enum and any code that pattern-matches on the two-value enum.
+
+**Next action:** none scheduled. Revisit if a second scenario needs the
+same "declared but not yet triggered" embargo pattern, or when AM-31b
+(splitting `patientRecordAccessPermit` into role-based and
+agent-targeted permits, per the design note §4.0) is implemented.

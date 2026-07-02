@@ -155,7 +155,15 @@ burden escalationNoticeBurden {
     description: "Obligation on specialist party to notify GP practice of failure to respond to referral"
 }
 
-// Granted by GPPracticeParty via Authorization (§7.10.2); accessed by SpecialistAIAgent, held by specialistRole.
+// NOTE: This permit is transferred via two distinct mechanisms:
+// (1) Role-based: on_join specialistRole transfers this permit
+//     to SpecialistClinician (human clinician) — implicit,
+//     role-membership-based access.
+// (2) Agent-targeted: patientDataAuthorization (AM-31) grants
+//     this permit explicitly to SpecialistAIAgent — requires
+//     patient consent; revocable; activates embargo on withdrawal.
+// AM-31b will separate these into distinct permits to eliminate
+// the architectural ambiguity. See AM-31 design note §4.0.
 permit patientRecordAccessPermit {
     for_action: "access_patient_clinical_records"
     state: active
@@ -164,6 +172,11 @@ permit patientRecordAccessPermit {
 
 // AM-31: activated on revocation of patientDataAuthorization — supersedes the
 // permit above and blocks further record access for the same action.
+// state: pending — nearest valid grammar value for an embargo not yet
+// triggered (TokenState is 'active'|'pending' only, §7.8.7); runtime
+// revoke_authorization() forces state=active on activation regardless
+// of this declared initial state. AM-32 may add 'inactive' as a valid
+// TokenState for untriggered embargo tokens.
 embargo patientRecordAccessEmbargo {
     for_action: "access_patient_clinical_records"
     state: pending
