@@ -7,8 +7,8 @@
  * autonomous healthcare communities.
  *
  * Delegation chain (cross-community):
- *   GPPracticeParty ──[delegates referralResponseBurden]──► SpecialistClinicianAgent
- *   GPPracticeParty ──[authorizes patient data access]──► SpecialistClinicianAgent
+ *   GPPracticeParty ──[delegates referralResponseBurden]──► SpecialistClinician
+ *   GPPracticeParty ──[authorizes patient data access]──► SpecialistAIAgent
  *
  * Token groups:
  *   referralBurdenGroup   = { referralInitiationBurden, clinicalHandoverBurden,
@@ -80,14 +80,16 @@ agent GPClinician
 party SpecialistParty
     description: "Specialist practice — autonomous community party; accountable for referral response"
     {
-        principal_of SpecialistClinicianAgent
+        principal_of SpecialistClinician
     }
 
-agent SpecialistClinicianAgent
-    description: "Specialist clinician agent — receives cross-community delegation; responds to and processes referral"
+party SpecialistClinician
+    description: "Specialist clinician — HPI-I registered; accountable party in own right; organisationally controlled by SpecialistParty; fills specialistRole in SpecialistCommunity"
+
+agent SpecialistAIAgent
+    description: "AI diagnostic assistant — active object; agent of SpecialistClinician for referral episode only; not a standing relationship under SpecialistParty"
     {
-        holds patientRecordAccessPermit
-        delegated_from SpecialistParty
+        delegated_from SpecialistClinician
             duration: "referral episode"
     }
 
@@ -153,7 +155,7 @@ burden escalationNoticeBurden {
     description: "Obligation on specialist party to notify GP practice of failure to respond to referral"
 }
 
-// Granted by GPPracticeParty to SpecialistClinicianAgent via Authorization (§7.10.2).
+// Granted by GPPracticeParty via Authorization (§7.10.2); accessed by SpecialistAIAgent, held by specialistRole.
 permit patientRecordAccessPermit {
     for_action: "access_patient_clinical_records"
     state: active
@@ -215,7 +217,8 @@ domain PatientDataDomain
     {
         controlling_object: GPPracticeParty
         controlled_object: GPClinician
-        controlled_object: SpecialistClinicianAgent
+        controlled_object: SpecialistClinician
+        controlled_object: SpecialistAIAgent
     }
 
 
@@ -402,7 +405,7 @@ commitment referralCommitment {
 
 // Second commitment root — GPPracticeParty is also accountable for ensuring the referral is responded to.
 // This roots the cross-community delegation chain: GP bears ultimate accountability
-// even though the burden is transferred to SpecialistClinicianAgent.
+// even though the burden is transferred to SpecialistClinician.
 commitment referralResponseCommitment {
     by: GPPracticeParty
     obligation: "Respond to the specialist referral within the agreed timeframe and schedule assessment"
@@ -427,13 +430,13 @@ commitment assessmentSchedulingCommitment {
 }
 
 // Cross-community delegation — GP practice delegates referral response to specialist clinician.
-// §7.10.1: SpecialistClinicianAgent becomes accountable for referralResponseBurden;
+// §7.10.1: SpecialistClinician becomes accountable for referralResponseBurden;
 // GPPracticeParty retains ultimate accountability for the referral outcome.
 // This is the cross-community delegation that makes EF(discharged:referralResponseBurden) hold;
 // AF does not hold because discharge_mode: eventual allows the specialist to delay.
 delegation gpToSpecialistDelegation {
     from: GPPracticeParty
-    to: SpecialistClinicianAgent
+    to: SpecialistClinician
     obligation: "Respond to the specialist referral within the agreed timeframe and schedule assessment"
     transfers_burden: referralResponseBurden
     transfers_token_group: referralBurdenGroup
@@ -445,11 +448,11 @@ delegation gpToSpecialistDelegation {
     description: "GP practice delegates referral response and scheduling obligations to specialist clinician across community boundary"
 }
 
-// Authorization — GPPracticeParty grants patient data access to SpecialistClinicianAgent.
-// §7.10.2: empowerment that enables the specialist to fulfill the delegated obligation.
+// Authorization — GPPracticeParty grants patient data access to SpecialistAIAgent.
+// §7.10.2: empowerment that enables the AI diagnostic agent to access records for the delegated obligation.
 authorization patientDataAuthorization {
     authority: GPPracticeParty
-    to_agent: SpecialistClinicianAgent
+    to_agent: SpecialistAIAgent
     grants_permit: patientRecordAccessPermit
     duration: "referral episode"
     conditions: "Active GP referral and patient data sharing consent on file"
@@ -464,7 +467,7 @@ authorization patientDataAuthorization {
 // ================================================================
 
 // If specialist does not respond to referral within deadline:
-// SpecialistParty (as principal of SpecialistClinicianAgent) is obligated to
+// SpecialistParty (as principal of SpecialistClinician) is obligated to
 // escalate and notify GPPracticeParty; escalationNoticeBurden is created.
 violation_response referralNoResponseViolation {
     on_violation_of: referralResponseBurden
@@ -495,7 +498,7 @@ prescription referralResponseStandard {
 // Specialist declares referral acceptance; effective upon interaction with GP practice.
 // requires_permit enforces that declaration is only valid when the specialist holds the permit.
 declaration referralAccepted {
-    by: SpecialistClinicianAgent
+    by: SpecialistClinician
     state_of_affairs: "Specialist referral has been accepted and is under clinical review"
     requires_permit: patientRecordAccessPermit
     effective_on_interaction: true
@@ -525,7 +528,8 @@ correspondence SpecialistCommunity         to computational : SpecialistService
 correspondence GPPracticeParty             to computational : GPPracticeClientObject
 correspondence SpecialistParty             to computational : SpecialistServerObject
 correspondence GPClinician                 to engineering   : GPClinicianNode
-correspondence SpecialistClinicianAgent    to engineering   : SpecialistAgentNode
+correspondence SpecialistClinician         to engineering   : SpecialistClinicianNode
+correspondence SpecialistAIAgent           to engineering   : SpecialistAIAgentNode
 correspondence patientRecord               to information   : PatientClinicalRecord
 correspondence referralInitiationBurden    to information   : ReferralInitiationRecord
 correspondence referralResponseBurden      to information   : ReferralResponseRecord
