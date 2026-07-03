@@ -58,15 +58,18 @@ def _build_gp_referral_runtime() -> Runtime:
         line 319; same gap — no fills_role declaration, inferred from holds +
         delegated_from + assignment_policy).
       SpecialistAIAgent does not fill a community role; it is delegated_from
-        SpecialistClinician (AM-30b) and receives patientRecordAccessPermit
-        directly, matching patientDataAuthorization.to_agent in the scenario.
+        SpecialistClinician (AM-30b) and receives
+        patientRecordAccessPermitByAuthorization directly, matching
+        patientDataAuthorization.to_agent in the scenario (AM-31b split the
+        permit; SpecialistClinician separately receives
+        patientRecordAccessPermitByRole below).
       GPPracticeParty and SpecialistParty are parties (principals), not role-fillers.
 
     Token grants:
       GPClinician         — referralInitiationBurden, clinicalHandoverBurden
       SpecialistParty     — assessmentSchedulingBurden
-      SpecialistClinician — referralResponseBurden
-      SpecialistAIAgent   — patientRecordAccessPermit
+      SpecialistClinician — referralResponseBurden, patientRecordAccessPermitByRole
+      SpecialistAIAgent   — patientRecordAccessPermitByAuthorization
 
     NOTE: the actor name string literals below are hardcoded, not resolved
     against `spec` — they must be kept in sync by hand with
@@ -95,8 +98,9 @@ def _build_gp_referral_runtime() -> Runtime:
         ("referralInitiationBurden",   "GPClinician"),
         ("clinicalHandoverBurden",     "GPClinician"),
         ("assessmentSchedulingBurden", "SpecialistParty"),
-        ("referralResponseBurden",     "SpecialistClinician"),
-        ("patientRecordAccessPermit",  "SpecialistAIAgent"),
+        ("referralResponseBurden",              "SpecialistClinician"),
+        ("patientRecordAccessPermitByRole",     "SpecialistClinician"),
+        ("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent"),
     ]:
         state = grant_token(state, token_from_spec(spec, token_name, holder))
 
