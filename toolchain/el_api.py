@@ -8,6 +8,7 @@ Endpoints implemented:
   GET /communities/{community_name}/objective-reachable
   GET /communities/{community_name}/objective-score
   GET /obligations/{token_name}/status
+  POST /authorizations/{authorization_name}/revoke
 
 Design reference: coordination_design_note_v3.md §9 (agent-facing query surface)
 Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, Annex C
@@ -291,6 +292,17 @@ class ExecuteActionResponse(BaseModel):
     updated_world: dict
     new_recommended_action: str
     new_q_value: float
+    new_objective_score: float
+    objective_reachable: bool
+
+
+class RevokeAuthorizationResponse(BaseModel):
+    tick: int
+    authority: str                 # the party that revoked (auth.authority.name)
+    authorization_name: str
+    outcome: str
+    effects: List[str]             # e.g. ["superseded permit 'X'", "activated embargo 'Y'"]
+    updated_world: dict
     new_objective_score: float
     objective_reachable: bool
 
@@ -696,6 +708,72 @@ def execute_action(
         updated_world=updated_world,
         new_recommended_action=new_rec,
         new_q_value=round(new_q, 4),
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint: POST /authorizations/{authorization_name}/revoke ────────────────
+
+@app.post(
+    "/authorizations/{authorization_name}/revoke",
+    response_model=RevokeAuthorizationResponse,
+    summary="Revoke a revocable authorization and advance the runtime state",
+    description=(
+        "Calls Runtime.revoke_authorization(authorization_name) to withdraw a "
+        "revocable authorization: supersedes the permit it granted, and "
+        "activates its on_revocation embargo, blocking further use of the "
+        "permitted action by its former holder. Then re-queries the Kripke "
+        "model for the updated world state, objective score, and reachability. "
+        "This is the runtime enactment of patient consent withdrawal in the "
+        "GP-referral scenario (PatientParty revoking patientDataAuthorization). "
+        "404 if the authorization is not declared; 400 if it has no "
+        "on_revocation embargo (i.e. is not meaningfully revocable)."
+    ),
+)
+def revoke_authorization_endpoint(authorization_name: str) -> RevokeAuthorizationResponse:
+    # 404 check: authorization must be declared in the current spec
+    known_auths = {
+        el.name
+        for el in _runtime._spec.elements
+        if type(el).__name__ == "Authorization"
+    }
+    if authorization_name not in known_auths:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Authorization '{authorization_name}' is not declared in the current spec.",
+        )
+
+    try:
+        tr = _runtime.revoke_authorization(authorization_name)
+    except KeyError as e:
+        # revoke_authorization raises KeyError if there's no on_revocation embargo
+        raise HTTPException(
+            status_code=400,
+            detail=f"Authorization '{authorization_name}' is not revocable: {e}",
+        )
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return RevokeAuthorizationResponse(
+        tick=tr.tick,
+        authority=tr.actor_name,   # revoke_authorization sets actor_name = auth.authority.name
+        authorization_name=authorization_name,
+        outcome=tr.outcome,
+        effects=list(tr.effects),
+        updated_world=updated_world,
         new_objective_score=round(score, 4),
         objective_reachable=reachable,
     )
