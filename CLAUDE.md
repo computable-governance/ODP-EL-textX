@@ -181,6 +181,10 @@ untouched rather than patched — run the test suite as `pytest -c pytest.ini`
 delete the dead section, or properly fix `setup.py`'s missing `odpel`
 package. Worth accounting for in any future CI configuration.
 
+**Testing:** the automated test suite lives in `tests/`. See
+`tests/README.md` for the layered testing strategy and how to run the
+suite (note: use `pytest -c pytest.ini`, per the issue above).
+
 **v1 grammar** (`grammar/v1/`) covers approximately 60–70% of ISO/IEC 15414
 concepts, using a partitioned two-file design (`odpel.tx` + `odppolicy.tx`).
 It is stable — do not modify it. It is the grammar described in the SoSyM 2025
