@@ -3,3 +3,6 @@ PRIVATE_NOTES.md
 .claude/
 memory/
 toolchain/__pycache__/
+__pycache__/
+*.pyc
+.pytest_cache/
