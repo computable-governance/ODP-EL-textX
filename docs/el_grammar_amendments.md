@@ -2109,16 +2109,7 @@ instead:
   `patientDataAuthorization`, which was `revocable: true` with no
   revocation consequence (would otherwise now fail AM-31-V2).
 
-**Known gap (deferred, not fixed in this pass):**
-`scenarios/fhir/generated_governance.el` (output of
-`toolchain/fhir_mapper.py`) also declares a `revocable: true`
-authorization (`ConsentAiDiagnostic001Auth`) with no `on_revocation`
-embargo, and now fails AM-31-V2. `fhir_mapper.py`'s `ELAuthorization` /
-`_render_authorization()` do not yet emit `on_revocation` or a
-corresponding embargo token. Fixing this requires either a new FHIR
-mapping rule (R23?) or a follow-up amendment; left as a known
-validation failure for now, analogous to the pre-existing
-`ecommerce_scenario.el` syntax error (§9 of CLAUDE.md).
+**Known gap — resolved 2026-07-03 (see AM-31c below).**
 
 **Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
 `toolchain/el_validator.py`, `toolchain/el_engine.py`,
@@ -2180,6 +2171,59 @@ burden/delegation chain those questions verify).
 
 **Files changed:** `scenarios/gp_referral/gp_referral_scenario.el`,
 `docs/AM31_AuthorizationDecl_design_note.md` (§4.0b addendum),
+`docs/el_grammar_amendments.md` (this entry).
+
+---
+
+## AM-31c (2026-07-03) — fhir_mapper.py: link on_revocation embargo; fix stray contract{} wrapper
+
+**Status:** CONFIRMED
+
+**Triggered by:** AM-31's own "Known gap" note — `scenarios/fhir/generated_governance.el`'s
+`ConsentAiDiagnostic001Auth` was `revocable: true` with no `on_revocation`
+embargo, failing AM-31-V2. `fhir_mapper.py`'s `ELAuthorization` /
+`_render_authorization()` did not emit `on_revocation`, and no mapping logic
+linked the R17 deny-provision embargo to the R18 authorization.
+
+**Fix (`toolchain/fhir_mapper.py`):**
+- `ELAuthorization` gains an `on_revocation: str = ""` field; emitted by
+  `_render_authorization()` as `on_revocation: activate <embargo_id>`.
+- `_map_consent()` now links the most recent deny-type sub-provision embargo
+  (R17) as the `on_revocation` target for the consent's authorization (R18).
+  `revocable` is now only set `True` when such an embargo exists — an
+  authorization can't be meaningfully revocable with no architectural
+  consequence to revoke into.
+- `_render_token()`: an embargo not yet triggered now renders `state: pending`
+  rather than `state: active`, matching the AM-31 convention already
+  established in `gp_referral_scenario.el`.
+
+**Known limitation (not fixed, not currently exercised):** if a Consent has
+more than one deny sub-provision, only the last is linked as `on_revocation`
+— the grammar allows an `AuthorizationDecl` to reference exactly one embargo
+(§7.10.2). A multi-embargo Consent would need either a `TokenGroup` or a
+design decision on which embargo governs withdrawal. No test bundle currently
+has more than one deny sub-provision per consent.
+
+**Also fixed, unrelated to AM-31-V2:** `_render_community()` was emitting a
+hardcoded `contract { ... }` wrapper around `invariant`/`assignment_policy`
+body items with no basis in the grammar — `contract` is a boolean qualifier
+on the community/federation declaration itself (`(contract?='contract')?`),
+not a nested block. This meant `fhir_mapper.py` could not regenerate any
+valid `.el` file from scratch, independent of AM-31-V2; the checked-in
+`generated_governance.el` predated whoever introduced the regression.
+Removed the wrapper; `invariant`/`assignment_policy` are now emitted as
+direct community body items, matching the grammar.
+
+**No grammar or validator changes** — both fixes are entirely within
+`fhir_mapper.py`'s generation logic.
+
+**Verification:** regenerated `scenarios/fhir/generated_governance.el` from
+`toolchain/ai_diagnostic_bundle.json` via `fhir_mapper.py`; parsed and
+validated via `el_parser.parse(..., validate=True)` — 0 errors, confirmed
+locally with `/Users/zoki/miniforge3/bin/python`.
+
+**Files changed:** `toolchain/fhir_mapper.py`,
+`scenarios/fhir/generated_governance.el`,
 `docs/el_grammar_amendments.md` (this entry).
 
 ---
