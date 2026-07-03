@@ -58,7 +58,7 @@ permit ConsentAiDiagnostic001Permit {
 
 embargo ConsentAiDiagnostic001SubProv2Embargo {
     for_action: "disclose"
-    state: active
+    state: pending
     description: "[R17] Sub-provision from Consent/consent-ai-diagnostic-001"
 }
 
@@ -70,14 +70,14 @@ community AiDiagnosticGovernanceBundle001Community
 
         invariant consentBeforeAnalysis:
             "AI diagnostic analysis must not proceed without documented patient consent"
-        assignment_policy for specialistDrOkonkwoRole {
-            requires_capability: "Must hold delegated obligation"
-            requires_token burden: "Must hold ReferralSr001Obligation"
-        }
-        assignment_policy for aiDiagnosticAgent001Role {
-            requires_capability: "Must hold delegated obligation"
-            requires_token burden: "Must hold ReferralSr001Obligation"
-        }
+            assignment_policy for specialistDrOkonkwoRole {
+                requires_capability: "Must hold delegated obligation"
+                requires_token burden: "Must hold ReferralSr001Obligation"
+            }
+            assignment_policy for aiDiagnosticAgent001Role {
+                requires_capability: "Must hold delegated obligation"
+                requires_token burden: "Must hold ReferralSr001Obligation"
+            }
         role specialistDrOkonkwoRole
             description: "Role for SpecialistDrOkonkwo"
             {}
@@ -125,6 +125,7 @@ authorization ConsentAiDiagnostic001Auth {
     grants_permit: ConsentAiDiagnostic001Permit
     duration: "by 2026-05-20"
     revocable: true
+    on_revocation: activate ConsentAiDiagnostic001SubProv2Embargo
     description: "[R18] Authorization from Consent/consent-ai-diagnostic-001"
 }
 

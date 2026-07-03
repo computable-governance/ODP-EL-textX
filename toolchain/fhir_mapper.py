@@ -155,6 +155,7 @@ class ELAuthorization:
     grants_permit: str           # el_id of permit token
     duration: str = ""
     revocable: bool = True
+    on_revocation: str = ""      # el_id of embargo token (AM-31-V2 fix)
     description: str = ""
     fhir_ref: str = ""
 
@@ -635,16 +636,30 @@ class FHIRConsentMapper:
             )
             spec.tokens.append(sub_token)
             spec.log("R17" if sub_type == "deny" else "R16", fhir_ref, sub_id)
+            # AM-31-V2 fix: link the most recent deny sub-provision as the
+            # on_revocation target. Known limitation: if a Consent has more
+            # than one deny sub-provision, only the last is linked — a single
+            # AuthorizationDecl can only reference one on_revocation embargo
+            # (grammar §7.10.2), so a multi-embargo Consent would need either
+            # a TokenGroup or a design decision on which embargo governs
+            # withdrawal. Not currently exercised by any test bundle.
+            if sub_type == "deny":
+                embargo_id = sub_id
 
         # R18 — authorization speech act
         if authority and to_agent and permit_id:                      # R18
+            has_embargo = embargo_id is not None
             auth = ELAuthorization(
                 el_id=f"{el_id}Auth",
                 authority=authority,
                 to_agent=to_agent,
                 grants_permit=permit_id,
                 duration=deadline,
-                revocable=True,
+                # AM-31-V2: only mark revocable when an embargo exists to
+                # activate on revocation — an authorization can't be
+                # meaningfully "revocable" with no architectural consequence.
+                revocable=has_embargo,
+                on_revocation=embargo_id if has_embargo else "",
                 description=f"[R18] Authorization from Consent/{consent_id}",
                 fhir_ref=fhir_ref,
             )
@@ -782,7 +797,10 @@ class FHIRConsentMapper:
         lines = [f"{tok.kind} {tok.el_id} {{"]
         if tok.for_action:
             lines.append(f'    for_action: "{tok.for_action}"')
-        lines.append("    state: active")
+        # AM-31 convention: an embargo not yet triggered by an on_revocation
+        # clause has no valid "not yet active" state in the current grammar;
+        # 'pending' is used as the nearest fit (see AM-31, gp_referral_scenario.el).
+        lines.append(f'    state: {"pending" if tok.kind == "embargo" else "active"}')
         if tok.deadline:
             lines.append(f'    deadline: "{tok.deadline}"')
         if tok.kind == "burden":
@@ -812,9 +830,8 @@ class FHIRConsentMapper:
             "    {",
             f'        objective: "{objective[:120]}"',
             "",
-            "        contract {",
-            '            invariant consentBeforeAnalysis:',
-            '                "AI diagnostic analysis must not proceed without documented patient consent"',
+            '        invariant consentBeforeAnalysis:',
+            '            "AI diagnostic analysis must not proceed without documented patient consent"',
         ]
 
         # Assignment policies for agents holding burdens
@@ -830,7 +847,6 @@ class FHIRConsentMapper:
                         f'                requires_token burden: "Must hold {burden_ids[0]}"'
                     )
                 lines.append("            }")
-        lines.append("        }")
 
         # Roles for each agent
         for obj in spec.objects:
@@ -888,6 +904,8 @@ class FHIRConsentMapper:
             lines.append(f'    duration: "{a.duration}"')
         if a.revocable:
             lines.append("    revocable: true")
+        if a.on_revocation:
+            lines.append(f"    on_revocation: activate {a.on_revocation}")
         if a.description:
             lines.append(f'    description: "{a.description}"')
         lines.append("}")
