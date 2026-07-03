@@ -7,6 +7,7 @@ Endpoints implemented:
   GET /actors/{actor_name}/available-actions
   GET /communities/{community_name}/objective-reachable
   GET /communities/{community_name}/objective-score
+  GET /obligations/{token_name}/status
 
 Design reference: coordination_design_note_v3.md §9 (agent-facing query surface)
 Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, Annex C
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,6 +38,20 @@ from el_runtime import Runtime
 
 _SCENARIO = _REPO_ROOT / "scenarios" / "gp_referral" / "gp_referral_scenario.el"
 _KRIPKE_HORIZON = 10
+
+
+def _serialize_path(path: Optional[list]) -> Optional[List[PathStep]]:
+    if not path:
+        return None
+    return [
+        PathStep(
+            step=world.step,
+            label=label,
+            obligation_states={k: v.name for k, v in world.obligation_dict().items()},
+            actor_states={k: v.name for k, v in world.actor_dict().items()},
+        )
+        for world, label in path
+    ]
 
 
 def _build_gp_referral_runtime() -> Runtime:
@@ -205,6 +220,25 @@ class ObjectiveReachableResponse(BaseModel):
     proposition: str   # "objective_satisfied:<community_name>"
     modal_operator: str  # always "EF"
     horizon: int
+
+
+class PathStep(BaseModel):
+    step: int
+    label: str
+    obligation_states: Dict[str, str]
+    actor_states: Dict[str, str]
+
+
+class ObligationStatusResponse(BaseModel):
+    token_name: str
+    holder: str
+    chain: List[str]
+    obligation_text: str
+    compelled: bool               # AF satisfied — architecturally guaranteed
+    detectable: bool              # EF satisfied — possible on at least one path
+    worlds_checked: int
+    counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
+    witness_path: Optional[List[PathStep]] = None          # present iff detectable
 
 
 class ScoredObligation(BaseModel):
@@ -380,6 +414,59 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         proposition=prop,
         modal_operator="EF",
         horizon=_KRIPKE_HORIZON,
+    )
+
+
+# ── Endpoint: GET /obligations/{token_name}/status ────────────────────────────
+
+@app.get(
+    "/obligations/{token_name}/status",
+    response_model=ObligationStatusResponse,
+    summary="Check whether an obligation is compelled (AF) or merely detectable (EF)",
+    description=(
+        "Builds a Kripke model anchored to the current Layer 3 runtime state "
+        "and runs both check_obligation (AF) and check_permission (EF) on the "
+        "named burden token. 'compelled' means the obligation is guaranteed to "
+        "discharge on every possible future path — architecturally enforced, "
+        "violation unreachable. 'detectable' means it can discharge on at "
+        "least one path, but is not guaranteed — the system will observe "
+        "failure if it happens, but cannot by itself prevent it. Only applies "
+        "to burden-kind tokens (obligations); 400 for permit/embargo tokens, "
+        "404 for an unknown token name."
+    ),
+)
+def get_obligation_status(token_name: str) -> ObligationStatusResponse:
+    tokens = _runtime.current_state().tokens
+    matching = [t for t in tokens if t.token_name == token_name]
+    if not matching:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Token '{token_name}' is not present in the current runtime state.",
+        )
+    tok = matching[0]
+    if tok.kind != "burden":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Token '{token_name}' is a {tok.kind}, not a burden — "
+                "compelled/detectable status only applies to obligations."
+            ),
+        )
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    af_verdict = km.check_obligation(token_name)
+    ef_verdict = km.check_permission(token_name)
+
+    return ObligationStatusResponse(
+        token_name=token_name,
+        holder=af_verdict.holder,
+        chain=af_verdict.chain,
+        obligation_text=af_verdict.obligation_text,
+        compelled=af_verdict.satisfied,
+        detectable=ef_verdict.satisfied,
+        worlds_checked=af_verdict.worlds_checked,
+        counterexample_path=_serialize_path(af_verdict.counterexample_path) if not af_verdict.satisfied else None,
+        witness_path=_serialize_path(ef_verdict.witness_path) if ef_verdict.satisfied else None,
     )
 
 
