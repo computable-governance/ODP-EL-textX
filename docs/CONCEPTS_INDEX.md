@@ -16,11 +16,12 @@ maturity status).
 | Concept | Status |
 |---|---|
 | Community | Implemented |
-| Domain (community type) | Implemented, reduced form — under review |
+| Domain (community type) | Settled 2026-07-06: retired for organizational structure; reserved for cross-cutting characterizing relationships |
 | Federation (community type) | Implemented |
 | CommunityObject | Implemented (AM-26) |
 | Objective rules | Implemented |
 | Policy / policy envelope | Grammar exists — deliberately excluded from reference scenarios |
+| NormativePolicy scope | Implemented (AM-28), restriction under review — proposed widening to any Community (2026-07-06) |
 | Establishing behaviour | Partial — no structured trigger |
 | Creation-style / episodic community | Not formally expressible |
 | Implicit creation / standing communities | Implemented |
@@ -75,11 +76,20 @@ than the standard's domain-as-community.
   domains for cross-cutting characterizing relationships (security,
   naming, audit, policy-setting) — not for org units.
 
-**Open:** Enrich `DomainDecl` to full community machinery (roles,
-assignment policy), or drop bare `domain` and express practices as
-communities with controlling/controlled roles, using `domain` (if at all)
-only for cross-cutting relationships as in Annex B.1.5.9? Under review
-2026-07-06 — leaning toward the latter, not yet settled.
+**Settled (2026-07-06):** Retiring bare `domain` for organizational
+structure. `GPPracticeDomain`/`SpecialistPracticeDomain` are organizational
+units (practices) — per Annex B.1.5.9's own test, a domain is not an
+organizational unit but a single controlling relationship that CUTS
+ACROSS community boundaries regardless of org structure (e.g. the
+standard's securityDomain spans objects from two different communities,
+purchasingCommunity and shippingCommunity). The practices will be modelled
+as communities, represented by CommunityObjects for federation
+participation (AM-26) — domain, as currently implemented, cannot
+participate in that hierarchy at all, which directly unlocks the
+Federation entry's open question. `domain` is reserved for genuine
+future cross-cutting cases (e.g. a data-governance authority spanning
+both practices' record-handling objects, regardless of practice
+membership) — not used in the unified referral scenario.
 
 ---
 
@@ -190,6 +200,66 @@ objective achievable.
   falsifies this has left the envelope by definition. Checkable with
   existing Kripke machinery. Candidate paper contribution; explicitly not
   a scenario/widget feature per the scoping decision above.
+- 2026-07-06 — Clarification: this exclusion covers the full policy
+  envelope/value/setting-behaviour machinery only. NormativePolicy (see
+  next entry) is a separate, much lighter-weight concept — a named
+  citation of an external legal/regulatory source — and is NOT covered
+  by this exclusion. It is kept, and is the substance behind the board
+  UI's "regulatory anchor" content.
+
+---
+
+## NormativePolicy scope
+
+**Definition:** NormativePolicy (AM-28) models externally-sourced norms
+(legislation, regulation, standard, guideline, contractual) as a named,
+citable policy object — distinct from the full policy envelope/value
+machinery (§7.9), which is deliberately excluded from reference scenarios
+(see Policy / policy envelope entry above). This is deliberately
+lightweight: a source, a kind, and a description — not a dynamic,
+evolvable policy value.
+
+**Standard:** §6.5; §7.5.1 ("domain policies bind all controlled
+objects" — cited as V-NEW-20's original justification); §7.3.1 (a plain
+community's contract "governs... and constrains the behaviour of its
+enterprise object members" — the same universal-binding property);
+Annex B.1.5.3 (e-commerceCommunity's contract "refers to a legal
+agreement between e.com and its customers" — a plain Community, not a
+Domain or Federation, citing an external source directly)
+
+**Toolchain status:** Implemented (AM-28), but restricted by validator
+rule V-NEW-20 to Domain and Federation body items only — not permitted on
+plain Community.
+
+**Demonstrated in:** `ereferral_model.el` — `MyHealthRecordsAct`,
+`NationalClinicalGovernance`, both referenced from `ReferralNetworkFederation`
+(a Federation), not from either Domain block. Checked directly 2026-07-06:
+neither `GPPracticeDomain` nor `SpecialistPracticeDomain` references
+NormativePolicy in the current file — current usage is Federation-only in
+practice, even though the validator also permits Domain.
+
+**Decisions:**
+- 2026-07-06 — V-NEW-20's Domain/Federation-only restriction rests on
+  "domain policies bind all controlled objects" as its stated
+  justification — but §7.3.1 gives an ordinary Community's contract the
+  same universal-binding property over its members. Once Domain IS a
+  Community (settled 2026-06-04), the distinction V-NEW-20 draws does not
+  survive scrutiny — this looks like a gap from before that insight was
+  fully internalized, not a deliberate, defensible semantic boundary.
+  Annex B.1.5.3 independently shows the standard's own e-commerce example
+  citing an external legal agreement directly from a plain Community's
+  contract, with no Domain or Federation involved.
+- 2026-07-06 (Zoran) — Motivated directly by the Domain-retirement
+  decision above: once GPPracticeCommunity/SpecialistPracticeCommunity
+  are plain communities (not domains), either should be able to cite a
+  practice-specific regulation (e.g. an accreditation standard binding
+  only one practice) without requiring federation-wide scope, which a
+  Federation-only restriction would prevent.
+
+**Open:** AM candidate — relax V-NEW-20 to permit NormativePolicy on any
+Community. (Domain and Federation already qualify, as Community
+subclasses — this removes a special-case restriction rather than adding
+a new capability.) Not yet drafted or implemented.
 
 ---
 
@@ -425,17 +495,22 @@ material.
 
 ## Scenario maturity language
 
-**Definition:** A three-tier vocabulary for what a scenario file is for:
-**probe** (disposable, validates one construct or decision), **reference
-scenario** (settled, maintained, carries tests), **demo** (audience-
-packaged, derived from a reference scenario, may simplify but must not
-contradict it).
+**Definition:** A vocabulary for what a scenario file is for: **probe**
+(disposable, validates one construct or decision), **candidate reference
+scenario** (under active construction, not yet verified/promoted),
+**reference scenario** (settled, maintained, carries tests), **demo**
+(audience-packaged, derived from a reference scenario, may simplify but
+must not contradict it), **superseded** (was reference/probe, replaced,
+kept for record).
 
 **Standard:** n/a — house convention.
 
-**Toolchain status:** Proposed, not yet applied to the scenario catalog.
+**Toolchain status:** Proposed 2026-07-06; extended 2026-07-06 with
+candidate/superseded tiers. Applied in `scenarios/README.md`.
 
-**Demonstrated in:** n/a — applied in `scenarios/README.md`.
+**Demonstrated in:** `scenarios/README.md`.
 
 **Decisions:** Proposed 2026-07-06, motivated directly by the confusion
-around `federation_consent_scenario.el`'s unratified status.
+around `federation_consent_scenario.el`'s unratified status. Extended the
+same day when naming the not-yet-built unified referral scenario exposed
+a missing tier between "probe" and "reference scenario."

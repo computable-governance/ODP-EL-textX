@@ -9,6 +9,12 @@ docs/CONCEPTS_INDEX.md (which tracks concepts; this tracks scenario files).
   disposable by design. Success means its lesson gets absorbed into the
   grammar/reference scenario, after which the probe is not expected to be
   touched again.
+- **Candidate reference scenario** — under active construction, not yet
+  verified against its own test suite or the full set of settled
+  modelling decisions in docs/CONCEPTS_INDEX.md; intended to become a
+  reference scenario once promoted. Promotion criteria: passes its own
+  test suite (built following tests/README.md's Layer 4/5/6 pattern) and
+  correctly applies every settled decision current in the concept index.
 - **Reference scenario** — the settled, maintained embodiment of current
   modelling decisions. Carries tests. Changes go through the AM discipline.
   There should be few of these.
@@ -17,20 +23,24 @@ docs/CONCEPTS_INDEX.md (which tracks concepts; this tracks scenario files).
   the reference scenario it derives from.
 - **Historical** — predates the current grammar/design generation; kept
   for record, not actively used.
+- **Superseded** — was a reference scenario or probe, replaced by a newer
+  one; kept for record/history, not actively extended.
 
 | File | Tier | Grammar | First / last commit | Purpose |
 |---|---|---|---|---|
 | `consent/consent.odpl` | Historical | v1 | 2024-08-26 | Generic Grantor/Grantee consent pattern. Predates v2 grammar entirely. |
 | `consent/consent_scenario.el` | Reference | v2 | 2026-06-01 → AM-21–24 | Clinical AI consent chain (GPPracticeParty → SpecialistAgent → AIDiagnosticAgent), `discharge_mode: strict` AF/EF demonstration. EDOC 2026 primary demonstration (per CLAUDE.md §9). |
 | `ecommerce/ecommerce_scenario.el` | Historical | v2 | 2026-06-01 (single commit) | ISO/IEC 15414 Annex B e-commerce validation case, non-clinical. Known pre-existing syntax error at line 57 (unfixed). Never iterated on. |
-| `consent/federation_consent_scenario.el` | Probe → **status under review** | v2 | 2026-06-06 (single commit) | Proved AM-25's federation grammar extension. Contains the domain/federation/party pattern (both clinicians as `party`) later forgotten and re-derived 2026-07-05. See CONCEPTS_INDEX.md "Party vs agent for clinicians". Zoran to decide whether to formally ratify its patterns into the unified scenario or retire it once absorbed. |
-| `gp_referral/gp_referral_scenario.el` | Reference | v2 | 2026-06-16 → 2026-07-05 (AM-18 through AM-31b/c + drift fixes) | Most actively maintained scenario. GP↔specialist referral, patient consent (AM-31b), revocation (verified live). Standing communities + federation, no episodic community. Backend for the board-facing UI. Carries tests (Layers 4/5/6, tests/). |
-| `ereferral/ereferral_model.el` | Probe | v2 | 2026-06-23 → 2026-06-26 | Explored `CommunityObject` (AM-26) and Creation-style community (`ReferralEpisodeCommunity`, prose-only trigger). Predates AM-31 series — no patient authorization/revocation, no permit split. Superseded in maturity by `gp_referral_scenario.el` but structurally ahead of it on community hierarchy and episodic modelling. |
+| `consent/federation_consent_scenario.el` | Probe | v2 | 2026-06-06 (single commit) | Proved AM-25's federation grammar extension. Contained the domain/federation/party pattern (both clinicians as `party`) later forgotten and re-derived 2026-07-05. Patterns absorbed into `referral/referral_scenario.el` (see below); this file itself is not expected to be touched again. |
+| `gp_referral/gp_referral_scenario.el` | Reference — **pending supersession** | v2 | 2026-06-16 → 2026-07-05 (AM-18 through AM-31b/c + drift fixes) | Currently the most actively maintained scenario and the board-facing UI's backend. Standing communities + federation, no episodic community, GPClinician modelled as agent not party. To be superseded by `referral/referral_scenario.el` once that reaches Reference status; not modified further in the meantime except for critical fixes. |
+| `ereferral/ereferral_model.el` | Probe | v2 | 2026-06-23 → 2026-06-26 | Explored `CommunityObject` (AM-26) and Creation-style community (`ReferralEpisodeCommunity`, prose-only trigger). Predates AM-31 series — no patient authorization/revocation, no permit split. Patterns feed into `referral/referral_scenario.el`. |
+| `referral/referral_scenario.el` | **Candidate reference scenario — not yet created** | v2 (target) | proposed 2026-07-06 | Unified referral model, intended to supersede both `gp_referral_scenario.el` and `ereferral_model.el`. Applies settled decisions from docs/CONCEPTS_INDEX.md: GP/specialist practices modelled as communities (not domains) with CommunityObject representation; both clinicians as party (HPI-I); patient authorization/revocation and permit split carried forward from `gp_referral_scenario.el`; episode modelled as Creation-style community or created federation (open, see CONCEPTS_INDEX.md). Will carry its own test suite (Layers 4/5/6 pattern) before promotion to Reference status. |
 | `fhir/generated_governance.el` | Generated (not hand-maintained) | v2 | Regenerated by `toolchain/fhir_mapper.py` | Machine-generated from `ai_diagnostic_bundle.json`. Golden-file tested (tests/test_fhir_mapper_golden.py). Do not edit manually. |
 
 **Open reconciliation:** `gp_referral_scenario.el` and `ereferral_model.el`
-independently explore overlapping territory (referral governance) with
-divergent structure — see CONCEPTS_INDEX.md for the specific concepts
-each one got right that the other lacks. The planned unified scenario
-(design in progress, 2026-07-06 onward) is intended to supersede both as
-the single reference scenario for referral governance.
+independently explored overlapping territory (referral governance) with
+divergent structure. `referral/referral_scenario.el` (candidate, proposed
+2026-07-06) is intended to supersede both as the single reference scenario
+for referral governance, once built and promoted — see
+docs/CONCEPTS_INDEX.md for the specific concepts each predecessor got
+right that will be carried forward.
