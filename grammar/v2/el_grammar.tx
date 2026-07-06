@@ -731,7 +731,7 @@ Domain:
 ;
 
 DomainBodyItem:
-    DomainControllingObj | DomainControlledObj | PolicyRef | NormativePolicyRef
+    DomainControllingObj | DomainControlledObj | PolicyRef | NormativePolicyRef | Lifecycle
 ;
 
 DomainControllingObj:
@@ -795,6 +795,7 @@ FedBodyItem:
     | Invariant
     | WithdrawalBehaviour
     | ConflictResolution
+    | Lifecycle
 ;
 
 FedSharedObjective:
@@ -864,6 +865,7 @@ Lifecycle:
 Establishing:
     'establishing' '{'
         ('implicit' ':' implicit?='true')?
+        ('established_by' ':' established_by=[EventDecl])?
         ('description' ':' description=STRING)?
         (commitments+=EmbeddedCommitment)*
     '}'

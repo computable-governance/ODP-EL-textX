@@ -2261,3 +2261,85 @@ same "declared but not yet triggered" embargo pattern. (AM-31b —
 splitting `patientRecordAccessPermit` into
 `patientRecordAccessPermitByRole`/`ByAuthorization` — implemented
 2026-07-02; did not require this TokenState.)
+
+---
+
+## AM-33 (2026-07-06) — established_by trigger for community/federation/domain establishment; Federation and Domain gain Lifecycle support
+
+**Status:** CONFIRMED
+
+**Triggered by:** `docs/CONCEPTS_INDEX.md`'s "Establishing behaviour" and
+"Federation" entries — `Establishing` (§7.6.1) had no structured trigger,
+asymmetric with `Terminating`'s `on_objective_achieved`; and `Federation`/
+`Domain` had no `Lifecycle` support at all (`FedBodyItem`/`DomainBodyItem`
+never included it), despite both being community types (§7.5) that should
+inherit community lifecycle per the standard. Motivated concretely by the
+decision to model the referral episode as a created Federation over two
+pre-existing practice communities (Annex B library Case 5 pattern).
+
+**Mechanism chosen:** `established_by: [EventDecl]`, mirroring
+`DeonticToken.triggered_by`/`discharged_by` (AM-22) and `Action.emits`.
+Considered and rejected `[Action]` (unprecedented — `for_action` on tokens
+is deliberately a plain string, not a cross-reference) and `[Step]`
+(unprecedented — `Process`/`Step` has zero usage anywhere in any scenario
+or in the runtime). `EventDecl` was chosen as the only option with a real,
+implemented precedent, even though — corrected after initial drafting —
+that precedent itself has zero usage in any scenario to date; it is
+implemented-but-unexercised, the same status as `Process`/`Step`, not
+"actively exercised" as first claimed in the concept index (corrected).
+
+**Grammar (`grammar/v2/el_grammar.tx`):**
+- `Establishing` gains `established_by: [EventDecl]` (optional), alongside
+  the existing `implicit`/`description`/`commitments`.
+- `FedBodyItem` gains `| Lifecycle`.
+- `DomainBodyItem` gains `| Lifecycle`.
+
+**Domain classes (`toolchain/el_domain.py`):**
+- `Establishing` dataclass gains `established_by: Optional[object] = None`.
+- `Federation` dataclass gains `lifecycle: Optional[object] = None`
+  (`Domain` already had this field via inheritance from `Community` —
+  only `Federation` needed a new field).
+
+**Object processors (`toolchain/el_parser.py`):**
+- `process_federation` (P9) gains an `elif cls == 'Lifecycle': fed.lifecycle
+  = item` branch — without it, a parsed `Lifecycle` body item was silently
+  dropped when `body_items` is cleared, with no error raised.
+- `process_domain` (P8) gains the same branch for `domain.lifecycle`.
+
+**Known limitation:** `established_by`'s cross-reference uses textX's
+default global name-based resolution (confirmed: no custom scope provider
+is registered for `EventDecl` anywhere in the toolchain) — an event name
+must be unique across the entire model, not just within its declaring
+community. Not currently a problem (no scenario has more than a handful
+of events), but worth remembering if event-name collisions ever become
+plausible across a larger federation of communities.
+
+**Verification:**
+- Existing scenario regression: `gp_referral_scenario.el` re-parsed and
+  re-validated clean (0 errors) after all edits — confirms no regression
+  for scenarios that don't use the new fields.
+- Full pytest suite (Layers 4/5/6, 7 tests) re-run clean after all edits.
+- Positive end-to-end test (throwaway, not committed): a `Federation`
+  with `lifecycle { establishing { established_by: <event> } }`, referencing
+  an event emitted by an action inside a pre-existing member `Community`,
+  parsed and validated with 0 errors, and
+  `fed.lifecycle.establishing.established_by.name` correctly resolved to
+  the event's name — confirming the full chain (grammar → parse →
+  validator → object processor → custom-class field → cross-reference
+  resolution), not merely successful parsing.
+
+**Not yet implemented (deferred, tracked in `docs/CONCEPTS_INDEX.md`):**
+- Kripke/runtime awareness of community/federation *existence* as a
+  modelled world-state dimension (`community_states`) — `established_by`
+  is now expressible in the grammar, but nothing in `el_kripke.py` yet
+  treats a community as not-existing before its establishing event fires.
+- The unified `referral_scenario.el` itself does not yet use this
+  mechanism — this AM only adds the capability.
+- V-NEW-20 widening (NormativePolicy on any Community) — separate,
+  still-open AM candidate, not part of this amendment.
+- `Community`/`Domain`/`Federation` grammar-level syntax unification —
+  consciously deferred structural refactor, not part of this amendment
+  (see `docs/CONCEPTS_INDEX.md`).
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_parser.py`, `docs/el_grammar_amendments.md` (this entry).

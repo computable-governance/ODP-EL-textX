@@ -323,10 +323,13 @@ prose-only trigger).
   `[Step]` (also unprecedented — `Process`/`Step` has zero usage anywhere
   in any scenario and zero handling in `el_engine.py`/`el_kripke.py`/
   `el_runtime.py`; see the new Process/Step entry), or `[EventDecl]`
-  (already proven: `DeonticToken.triggered_by`/`discharged_by` (AM-22)
-  and `Action.emits` establish exactly this pattern — "state changes
-  when a named event fires" — and it is actively exercised in the
-  current toolchain). **Chosen: `established_by: [EventDecl]`**,
+  (the only option with a real, implemented precedent:
+  `DeonticToken.triggered_by`/`discharged_by` (AM-22) and `Action.emits`
+  establish exactly this pattern — "state changes when a named event
+  fires" — though checked directly 2026-07-06 and confirmed to have
+  zero actual usage in any scenario, the same implemented-but-unexercised
+  status as Process/Step below, not "actively exercised" as first
+  assessed). **Chosen: `established_by: [EventDecl]`**,
   mirroring `DeonticToken.triggered_by` exactly. The full chain: an
   Action `emits` an event → `Establishing.established_by` references
   that same event → the community/federation comes into existence.

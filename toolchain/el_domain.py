@@ -917,6 +917,7 @@ class Establishing(_ELParentable):
     Grammar rule: EstablishingDecl
     """
     implicit:    bool = False
+    established_by: Optional[object] = None  # AM-33: → EventDecl ref
     description: Optional[str] = None
     commitments: List = field(default_factory=list)  # List[EmbeddedCommitment]
 
@@ -1064,6 +1065,7 @@ class Federation(_ELParentable):
     normative_policies:   List = field(default_factory=list)  # List[NormativePolicy] (AM-28)
     withdrawal_behaviour: Optional[str] = None
     conflict_resolution:  Optional[ConflictResolution] = None
+    lifecycle:            Optional[object] = None              # AM-33: → Lifecycle
 
 
 # ---------------------------------------------------------------------------

@@ -193,7 +193,11 @@ def process_process(proc):
 
 
 def process_domain(domain):
-    """P8: split body_items into typed sublists."""
+    """P8: split body_items into typed sublists.
+
+    AM-33: Lifecycle item (if present) assigned to domain.lifecycle
+    (field itself inherited from Community).
+    """
     for item in domain.body_items:
         cls = type(item).__name__
         if cls == 'DomainControllingObj':
@@ -204,6 +208,8 @@ def process_domain(domain):
             domain.policy_refs.append(item)
         elif cls == 'NormativePolicyRef':     # AM-28
             domain.normative_policies.append(item.policy)
+        elif cls == 'Lifecycle':              # AM-33
+            domain.lifecycle = item
     domain.body_items = []
 
 
@@ -222,6 +228,7 @@ def process_federation(fed):
     body_items). EventDecl items are now collected into fed.events.
     AM-26: Role items collected into fed.roles; MemberRef stored whole (not
     dissolved) so represented_by and fills attributes are preserved.
+    AM-33: Lifecycle item (if present) assigned to fed.lifecycle.
     """
     for item in fed.body_items:
         cls = type(item).__name__
@@ -243,6 +250,8 @@ def process_federation(fed):
             fed.events.append(item)
         elif cls == 'NormativePolicyRef':     # AM-28
             fed.normative_policies.append(item.policy)
+        elif cls == 'Lifecycle':              # AM-33
+            fed.lifecycle = item
     fed.body_items = []
 
 
