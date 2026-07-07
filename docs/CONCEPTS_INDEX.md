@@ -22,14 +22,17 @@ maturity status).
 | Objective rules | Implemented |
 | Policy / policy envelope | Grammar exists — deliberately excluded from reference scenarios |
 | NormativePolicy scope | Implemented (AM-28), restriction under review — proposed widening to any Community (2026-07-06) |
-| Establishing behaviour | Mechanism decided 2026-07-06 (established_by: [EventDecl]) — amendment not yet implemented |
-| Creation-style / episodic community | Settled 2026-07-06: created federation, not plain community |
+| Establishing behaviour | Implemented (AM-33) — demonstrated in `referral_scenario.el` |
+| Creation-style / episodic community | Settled 2026-07-07: created COMMUNITY, not federation (corrected from a 2026-07-06 conclusion) — demonstrated in `referral_scenario.el` |
 | Implicit creation / standing communities | Implemented |
-| Party vs agent for clinicians | Inconsistent across scenarios |
+| Party vs agent for clinicians | Fixed in `referral_scenario.el` (2026-07-07); `gp_referral_scenario.el` asymmetry remains until superseded |
 | Authorization ≠ delegation | Implemented + documented |
 | Permit split by grant mechanism | Implemented (AM-31b) |
 | Accountability chain composition | Insight captured, no formal treatment |
 | Compelled vs detectable (AF/EF) | Implemented + API-exposed |
+| Standing accountability: principal_of/delegated_from vs. Domain | Both implemented; documented as deliberate choice |
+| Traceability between standing federation and episodic instances | Open question, deliberately not resolved |
+| Naming conventions (Annex B precedent) | Settled 2026-07-07 |
 | Kripke/runtime impact of community lifecycle | Not implemented — deferred, most consequential and least-tested planned work |
 | Process / Step (behaviour structuring) | Grammar exists, zero usage — deliberate architectural alternative, not an oversight |
 | Community/Domain/Federation grammar sharing | Not implemented — consciously deferred structural refactor |
@@ -70,7 +73,14 @@ objective, contract) by inheritance from community.
 lifecycle, no objective. Substantially narrower than the standard's
 domain-as-community.
 
-**Demonstrated in:** `federation_consent_scenario.el` (probe, 2026-06-06).
+**Demonstrated in:** `federation_consent_scenario.el` (probe, 2026-06-06),
+for the now-retired organizational-structure usage.
+`referral_scenario.el`'s `PatientDataDomain` (2026-07-07) is the first
+demonstration of the genuine cross-cutting case this entry reserves
+`domain` for — one controlling authority (`GPPractice`) reaching across
+three controlled objects (`GPClinician`, `SpecialistClinician`,
+`SpecialistAIAgent`) for data-governance purposes specifically, cutting
+across both practice communities and the episode alike.
 
 **Decisions:**
 - 2026-06-04 — Domain IS a community; `DomainDecl` not resolvable as
@@ -156,10 +166,31 @@ having no way to create one).
   Decision: add `(lifecycle=Lifecycle)?` to `FedBodyItem`, reusing the
   existing `Lifecycle` rule rather than inventing a parallel mechanism.
   Applied the same fix to Domain for consistency (see that entry).
+- **2026-07-07 — CORRECTION to the 2026-07-06 "created federation" entry
+  above.** Checking `ereferral_model.el`'s actual worked design (not just
+  the abstract library annex example) showed its episode-equivalent
+  (`ReferralEpisodeCommunity`) has roles filled by INDIVIDUAL clinicians/
+  agents, not whole communities — by the modelling test above, that is a
+  plain community, not a federation. Confirmed as a hard grammar
+  constraint, not just a style choice: `MemberRef` is typed
+  `community=[Community]` (grammar/v2/el_grammar.tx) — individual parties/
+  agents cannot be federation members at all. Directly confirmed against
+  the standard itself (§7.5.2: "a community of a number of pre-existing
+  communities") — not merely an artifact of this toolchain's grammar.
+  `ReferralNetworkFederation` (standing, never created — the durable
+  inter-practice relationship) and `ReferralEpisodeCommunity` (created,
+  per-referral, a plain community — see Creation-style entry) are
+  therefore two separate constructs, not one. `Federation`'s new
+  `Lifecycle` support (this entry, above) remains implemented but
+  unexercised in any real scenario — `referral_scenario.el`'s
+  `ReferralNetworkFederation` has no lifecycle block at all (standing,
+  implicit existence); only `Domain`'s `Lifecycle` support and
+  `Establishing.established_by` are actually exercised there (see those
+  entries).
 
-**Open:** None — mechanism settled. Awaiting implementation (see
-Establishing behaviour entry for the trigger mechanism, and the pragmatic
-amendment now being drafted).
+**Open:** Federation's `Lifecycle` support (this entry) is implemented
+and verified (throwaway test, AM-33) but not yet exercised in any real
+scenario. Nothing currently blocking; simply hasn't come up.
 
 ---
 
@@ -341,8 +372,14 @@ prose-only trigger).
   `established_by` anywhere else in the model, with no nesting
   requirement. No scoping blocker for the amendment.
 
-**Open:** Amendment not yet drafted in `el_grammar_amendments.md` /
-implemented in `el_grammar.tx`. Next concrete step.
+**Open:** None. Implemented as AM-33 (`el_grammar_amendments.md`,
+`el_grammar.tx`, `el_domain.py`, `el_parser.py`), verified end-to-end via
+a throwaway test (2026-07-06), and now genuinely exercised in a real
+scenario — `referral_scenario.el`'s `ReferralEpisodeCommunity` (a plain
+Community, not the Federation first assumed — see Creation-style entry
+correction below) uses `established_by: referralSubmitted`, resolved
+against an event emitted by `GPPracticeCommunity`'s `initiateReferral`
+action.
 
 ---
 
@@ -374,17 +411,35 @@ a plain community — see below for why the unified scenario will differ).
 - 2026-07-06 — Creation behaviour lives in the *creating* community's
   specification, not the created community's own establishing block
   (confirmed by the Annex B pattern).
-- **2026-07-06 (Zoran) — SETTLED: the referral episode is a created
-  federation**, not a plain community. See the Federation entry for the
-  full modelling test (members-are-communities vs. members-are-objects)
-  and rationale. This was Option B from 2026-06-24, now activated rather
-  than deferred, because Federation's lifecycle gap is being fixed as
-  part of the same amendment (see Federation entry).
+- 2026-07-06 (Zoran) — Initially concluded: the referral episode is a
+  created federation, not a plain community — reasoning from the
+  library annex example alone (Federation entry, above).
+- **2026-07-07 — CORRECTED.** Checking `ereferral_model.el`'s own actual
+  worked design (rather than reasoning from the abstract annex example
+  alone) showed its `ReferralEpisodeCommunity` has roles filled by
+  INDIVIDUAL clinicians/agents, not whole communities — by the
+  Federation entry's own modelling test, that makes it a plain
+  community, not a federation. Confirmed as a hard grammar constraint
+  (`MemberRef` typed to `[Community]`; individuals cannot be federation
+  members at all — §7.5.2) and independently confirmed against the
+  standard directly, not merely this toolchain's grammar.
+- 2026-07-07 — Circularity found and fixed while building
+  `referral_scenario.el`: the action that creates the episode
+  (`initiateReferral`, emitting the trigger event) cannot live inside
+  the episode community it creates. Moved to `GPPracticeCommunity` (the
+  *creating* community) — matching the Annex B pattern ("creation
+  behaviour lives in the creating community's specification") concretely
+  for the first time, not just as a stated principle.
+- 2026-07-07 (Zoran) — **SETTLED: the referral episode is a created
+  plain COMMUNITY** (`ReferralEpisodeCommunity`), separate from the
+  standing `ReferralNetworkFederation` (which federates the two
+  pre-existing practice communities and never itself gets created). Two
+  constructs, not one — see Federation entry.
 
-**Open:** None on the modelling question — settled as created federation.
-Remaining: implement the `established_by`/`FedBodyItem` amendment (see
-Establishing and Federation entries); Kripke/runtime impact remains
-separately deferred (see next entry).
+**Open:** None on the modelling question — settled as created community,
+demonstrated in `referral_scenario.el` (parse/validate verified,
+2026-07-07). Kripke/runtime impact remains separately deferred (see next
+entry).
 
 ---
 
@@ -469,7 +524,15 @@ enterprise object — party-hood and role-filling are not exclusive)
   it was not consulted when `gp_referral_scenario.el` was built ten days
   later, producing the asymmetry.
 
-**Open:** Fix `GPClinician` agent→party in the unified scenario.
+**Open:** None. Fixed in `referral_scenario.el` (2026-07-07) —
+`GPClinician` is now `party`, matching `SpecialistClinician`. Extended
+further than originally scoped: the accountability chain itself was also
+corrected to clinician-to-clinician (`GPClinician` → `SpecialistClinician`,
+"Option B"), not practice-to-practice, with layered `principal_of`/
+`delegated_from` distinguishing standing organisational affiliation from
+genuine episode-scoped delegation — see "Standing accountability" and
+"Accountability chain composition" entries. `gp_referral_scenario.el`'s
+asymmetry remains as-is until it is superseded.
 
 ---
 
@@ -531,8 +594,20 @@ items 17-18.
 - 2026-07-06 — §7.10's five rule-sets proposed as the organizing frame
   for a formal accountability treatment (likely a paper section or
   design-note chapter, not new grammar).
+- 2026-07-07 — Concrete modelling realization in `referral_scenario.el`:
+  a genuine two-hop delegation chain (`GPClinician` → `SpecialistClinician`
+  → `SpecialistAIAgent`, "Option B", clinician-to-clinician not
+  practice-to-practice) with a principled distinction now applied
+  consistently — `principal_of` ALONE marks standing organisational
+  affiliation of an independently-accountable party; `principal_of`
+  PAIRED WITH a reciprocal `delegated_from` marks genuine, if
+  episode-scoped, delegated principal-agent accountability. See
+  "Standing accountability" entry. This resolves the `principal_of`
+  semantic-looseness concern more precisely than the caveat-comment
+  originally proposed for it.
 
-**Open:** Not started as a written treatment.
+**Open:** Formal written treatment (paper/design-note) not started;
+concrete modelling pattern now exists and is demonstrated.
 
 ---
 
@@ -647,6 +722,139 @@ variations of one shared rule.
 pragmatic fix (adding `lifecycle=Lifecycle` directly to `FedBodyItem` and
 `DomainBodyItem`) proceeds in the meantime as the additive, low-risk
 option.
+
+---
+
+## Standing accountability: principal_of/delegated_from vs. Domain
+
+**Definition:** Two structurally distinct grammar mechanisms can both
+express the same underlying fact of standing internal accountability —
+one object being accountable for/controlling another. `principal_of`/
+`delegated_from` (ObjectBody, on Party/Agent declarations) is local and
+lightweight, declared inline where the relationship lives. `Domain`
+(§7.5.1, controlling_object/controlled_object) is a separate top-level
+community-type element, naturally suited to one controlling authority
+reaching across several controlled objects at once.
+
+A further, more precise distinction found while building
+`referral_scenario.el`: `principal_of` ALONE (no reciprocal
+`delegated_from`) marks standing organisational affiliation of an
+independently-accountable party (`GPPractice`↔`GPClinician`,
+`SpecialistPractice`↔`SpecialistClinician` — deliberately not full
+subordinate agency). `principal_of` PAIRED WITH a reciprocal
+`delegated_from` marks a genuine, if possibly episode-scoped, delegated
+principal-agent relationship (`GPClinician`↔`SpecialistClinician`,
+`SpecialistClinician`↔`SpecialistAIAgent`). The same construct, used two
+different ways depending on whether it's paired.
+
+**Standard:** §7.5.1; §6.6.8-9
+
+**Toolchain status:** Both implemented; neither supersedes the other.
+
+**Demonstrated in:** `referral_scenario.el` uses principal_of/delegated_from
+(asymmetric form) for `GPPractice`↔`GPClinician` and
+`SpecialistPractice`↔`SpecialistClinician` (single practice-clinician
+pairs, standing); the paired form for the two genuine delegation hops;
+and the same file's `PatientDataDomain` uses the Domain form for a
+genuinely multi-object controlling relationship (see Domain entry).
+
+**Decisions:** 2026-07-07 (Zoran) — noted as a deliberate choice for this
+scenario (economy of expression for single pairs), not a semantic
+necessity — either mechanism could express either relationship. The
+asymmetric-vs-paired distinction for `principal_of` specifically was
+identified the same day, resolving the earlier-flagged semantic
+looseness (see "Party vs agent for clinicians" entry) more precisely
+than the caveat-comment first proposed.
+
+---
+
+## Traceability between standing federation and episodic instances
+
+**Definition:** `ReferralNetworkFederation` (standing, pre-existing) and
+`ReferralEpisodeCommunity` (created, per-referral) are connected only
+indirectly in `referral_scenario.el` — through `GPPracticeCommunity`, a
+federation member whose own action emits the event that triggers the
+episode's establishment. Nothing in either declaration references the
+other directly.
+
+**Open question (Zoran, 2026-07-07):** federated networks of this kind
+exist to reflect digital health business and regulatory arrangements
+between providers — but there may need to be explicit traceability and
+provenance between that static, standing arrangement and each dynamic,
+episodic instance of it. A further question this raises: should an
+episodic community be required to comply with the rules (invariants,
+normative policies) of the standing federation — or even a single
+standing community — it traces back to? Likely yes, but not certain, and
+not something to force an answer to now. Zoran separately asked whether
+this same question arises for a single pre-existing community (not a
+federation) creating an episodic community — i.e., does
+`justInTimeCommunity` need to comply with `e-commerceCommunity`'s own
+rules?
+
+**Standard:** Partial evidence, not a direct answer. §7.9.2 ("Policies
+for federation") explicitly requires layered compliance for the
+federation/domain case: "An enterprise object in the `<X>` federation
+community shall conform both to the policies of the `<X>` domain
+community to which it belongs and to the policies of the `<X>` federation
+community" — and NOTE 1 there confirms standing and episodic layers can
+run on separate lifecycles ("the policies for each domain community and
+for the federation community may have separate life cycles"). This is
+suggestive support for the general principle, but it is NOT stated for
+the narrower single-community-creates-community case Zoran also asked
+about — neither §7.3.2 nor the `justInTimeCommunity`/open-registry annex
+examples (B.1.5.6-8) state whether the created community must comply
+with its creator's own rules. Not found, not asserted by stretching
+§7.9.2 to cover it.
+
+**Toolchain status:** No mechanism exists for this today, structurally
+or in the grammar, for either the federation case or the single-community
+case.
+
+**Decisions:** Logged for future consideration, deliberately not
+resolved or built now — 2026-07-07.
+
+---
+
+## Naming conventions (Annex B precedent)
+
+**Definition:** Both Annex B worked examples (e-commerce, library) follow
+one consistent naming pattern, with no exceptions found: enterprise
+objects/parties get plain, natural names (`e.com`, `e-system`, `customer`,
+`supplier`); every community, without exception, carries a distinguishing
+community-word (`e-commerceCommunity`, `purchasingCommunity`,
+`shippingCommunity`, `warehouseCommunity`, `justInTimeCommunity`,
+`ratingServiceCommunity`). Role names describe the FUNCTION a role plays,
+not the class of thing filling it (`customer`, `supplier`, `auditor`,
+`manager`, `catalogueServer`, `orderTaker` — never something like
+"customerPersonRole").
+
+**Standard:** Annex B.1.5.1-9 (e-commerce example); library example
+(Case 5 and surrounding text).
+
+**Toolchain status:** Adopted as house convention, 2026-07-07.
+
+**Demonstrated in:** `referral_scenario.el` — three separate naming
+decisions this session, each independently confirmed against this
+precedent before being applied: (1) dropping the `Party` suffix
+(`GPPracticeParty`→`GPPractice`, `SpecialistParty`→`SpecialistPractice`,
+`PatientParty`→`Patient`) — matching the standard's own bare-object-name
+convention; (2) keeping/adding the `Community` suffix consistently
+(`GPPracticeCommunity`, `SpecialistPracticeCommunity` — the latter
+corrected from `SpecialistCommunity` for symmetry) — matching the
+standard's universal community-suffix convention; (3) shortening
+`referringClinicianRole`/`referredToSpecialistRole` to `referringRole`/
+`referredToRole` — matching the standard's function-not-filler role
+naming. Note (2) required care: `GPPractice`/`SpecialistPractice` (party,
+bare per rule 1) and `GPPracticeCommunity`/`SpecialistPracticeCommunity`
+(community, suffixed per rule 2) necessarily have different names for
+the same real-world organisation, since the grammar cannot merge a
+`Community` and a `[EnterpriseObject]`-typed party into one declaration —
+confirmed as a genuine, not cosmetic, naming collision avoided by the
+convention, not created by it.
+
+**Decisions:** Settled 2026-07-07, checked against the standard directly
+rather than decided by feel — see the underlying discussion for each of
+the three specific renames.
 
 ---
 
