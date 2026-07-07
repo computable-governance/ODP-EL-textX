@@ -895,6 +895,7 @@ def list_scenarios() -> ScenarioListResponse:
 _COMMUNITY_FOR_SCENARIO = {
     "gp_referral": "ReferralFederation",
     "ereferral":   "ReferralEpisodeCommunity",
+    "referral":    "ReferralEpisodeCommunity",
 }
 
 

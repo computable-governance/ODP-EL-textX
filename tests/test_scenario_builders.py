@@ -29,3 +29,18 @@ def test_scenario_builder_constructs_without_error(scenario_name):
     builder = _SCENARIO_BUILDERS[scenario_name]
     runtime = builder()
     assert runtime is not None
+
+
+def test_every_scenario_builder_has_a_community_mapping():
+    """
+    _SCENARIO_BUILDERS and _COMMUNITY_FOR_SCENARIO must be registered
+    together — switch_scenario() does _COMMUNITY_FOR_SCENARIO[scenario_name]
+    unconditionally, with no guard, so a scenario present in one dict but
+    missing from the other raises KeyError at switch time, not at
+    collection/import time. Found live 2026-07-07: "referral" was added to
+    _SCENARIO_BUILDERS (registering the new referral_scenario.el) without
+    the matching _COMMUNITY_FOR_SCENARIO entry, when the runtime builder
+    was added but nothing exercised switch_scenario() against it.
+    """
+    from el_api import _SCENARIO_BUILDERS, _COMMUNITY_FOR_SCENARIO
+    assert set(_SCENARIO_BUILDERS.keys()) == set(_COMMUNITY_FOR_SCENARIO.keys())
