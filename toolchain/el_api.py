@@ -253,10 +253,10 @@ _SCENARIO_BUILDERS = {
 }
 
 # Active scenario name and community name for objective queries
-_active_scenario: str = "gp_referral"
-_active_community: str = "ReferralFederation"
+_active_scenario: str = "referral"
+_active_community: str = "ReferralEpisodeCommunity"
 
-_runtime = _build_gp_referral_runtime()
+_runtime = _build_referral_runtime()
 
 
 # ── FastAPI application ───────────────────────────────────────────────────────
@@ -862,9 +862,10 @@ def revoke_authorization_endpoint(authorization_name: str) -> RevokeAuthorizatio
 
 @app.post(
     "/reset",
-    summary="Reset the runtime to the initial GP-referral scenario state",
-    description="Re-parses the GP-referral scenario and re-enrols all "
-                "actors, returning the runtime to its initial state.",
+    summary="Reset the runtime to the initial state of the active scenario",
+    description="Re-parses the currently active scenario (see _SCENARIO_BUILDERS"
+                "[_active_scenario]) and re-enrols all actors, returning the "
+                "runtime to its initial state.",
 )
 def reset_runtime() -> dict:
     global _runtime
@@ -921,7 +922,7 @@ def debug_tokens():
     summary="Switch the active scenario and reset the runtime",
     description=(
         "Rebuilds the singleton runtime from the named scenario's builder. "
-        "Known scenarios: gp_referral, ereferral. "
+        "Known scenarios: gp_referral, ereferral, referral. "
         "Returns 404 for an unknown scenario name."
     ),
 )

@@ -15,7 +15,12 @@ standing role access — a regression here would be clinically wrong, not
 just a test failure.
 
 Each test re-imports the API module fresh (the _runtime singleton is rebuilt
-at import), so each starts from pristine initial GP-referral state.
+at import), so each starts from pristine initial default-scenario state.
+Tests that assert on scenario-specific data (party/agent names, authority)
+pin the runtime explicitly to the scenario they target via
+api._SCENARIO_BUILDERS[...], rather than relying on whichever scenario
+happens to be the module's default — the default is expected to change
+over time as scenarios are promoted (see el_api.py's _active_scenario).
 """
 import importlib
 
@@ -40,6 +45,10 @@ def _permit_states(runtime):
 
 
 def test_revocation_supersedes_only_authorization_permit(api):
+    # Pinned to gp_referral explicitly: this test asserts on gp_referral's
+    # party name ("PatientParty"), which is not portable across scenarios.
+    api._runtime = api._SCENARIO_BUILDERS["gp_referral"]()
+
     before = _permit_states(api._runtime)
     # Sanity: both permits active before revocation
     assert before[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "active"
@@ -54,6 +63,35 @@ def test_revocation_supersedes_only_authorization_permit(api):
     assert after[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "superseded"
     # Clinician's role-based permit is UNTOUCHED — the core AM-31b guarantee
     assert after[("patientRecordAccessPermitByRole", "SpecialistClinician")] == "active"
+
+
+def test_revocation_supersedes_only_authorization_permit_referral_scenario(api):
+    # Parallel to the gp_referral test above, but against referral_scenario.el
+    # (promoted to Reference status, commit fadc237), whose patient party is
+    # named "Patient" rather than gp_referral's "PatientParty".
+    api._runtime = api._SCENARIO_BUILDERS["referral"]()
+
+    before = _permit_states(api._runtime)
+    # Sanity: both permits active before revocation
+    assert before[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "active"
+    assert before[("patientRecordAccessPermitByRole", "SpecialistClinician")] == "active"
+
+    resp = api.revoke_authorization_endpoint("patientDataAuthorization")
+    assert resp.outcome == "ok"
+    assert resp.authority == "Patient"
+
+    after = _permit_states(api._runtime)
+    # AI agent's authorization-based permit is superseded
+    assert after[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "superseded"
+    # Clinician's role-based permit is UNTOUCHED — the core AM-31b guarantee
+    assert after[("patientRecordAccessPermitByRole", "SpecialistClinician")] == "active"
+
+    embargo = [
+        t for t in api._runtime.current_state().tokens
+        if t.token_name == "patientRecordAccessEmbargo"
+    ]
+    assert embargo, "embargo should exist after revocation"
+    assert embargo[0].state == "active"
 
 
 def test_revocation_activates_embargo(api):
