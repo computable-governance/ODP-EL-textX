@@ -47,6 +47,23 @@ def test_ai_examination_is_detectable_not_compelled(runtime):
     assert km.check_permission("aiExaminationBurden").satisfied is True
 
 
+def test_clinical_handover_is_detectable_not_compelled(runtime):
+    """discharge_mode: eventual -> AF fails, EF holds."""
+    km = build_kripke_from_runtime(runtime, horizon=10)
+    assert km.check_obligation("clinicalHandoverBurden").satisfied is False
+    assert km.check_permission("clinicalHandoverBurden").satisfied is True
+
+
+def test_assessment_scheduling_is_detectable_not_compelled(runtime):
+    """discharge_mode: eventual -> AF fails, EF holds. Completes AF/EF
+    verification for all five members of referralBurdenGroup — the other
+    three (referralInitiationBurden, referralResponseBurden,
+    aiExaminationBurden) were verified in the tests above."""
+    km = build_kripke_from_runtime(runtime, horizon=10)
+    assert km.check_obligation("assessmentSchedulingBurden").satisfied is False
+    assert km.check_permission("assessmentSchedulingBurden").satisfied is True
+
+
 def test_patient_data_domain_structure():
     """PatientDataDomain: genuine cross-cutting characterizing
     relationship, one controlling authority reaching across three
