@@ -167,10 +167,89 @@ def _build_ereferral_runtime() -> Runtime:
     return Runtime(state, spec)
 
 
+_REFERRAL_SCENARIO = _REPO_ROOT / "scenarios" / "referral" / "referral_scenario.el"
+
+
+def _build_referral_runtime() -> Runtime:
+    """
+    Parse the unified referral scenario (candidate reference scenario,
+    scenarios/README.md) and initialise a Runtime with actors enrolled and
+    tokens granted to their actual holders.
+
+    Two actors fill TWO roles each, in different communities simultaneously
+    (GPClinician: standing gpClinicianRole in GPPracticeCommunity + episode
+    referringRole in ReferralEpisodeCommunity; SpecialistClinician: standing
+    specialistRole in SpecialistPracticeCommunity + episode referredToRole).
+    Patient fills THREE roles concurrently (patientRole in both standing
+    communities, episodePatientRole in the episode) — confirmed safe:
+    get_available_actions() below works purely off token.holder, never
+    role_name, so multiple ActorState entries per actor_name do not
+    interfere with any existing endpoint.
+
+    Role assignments:
+      GPClinician         fills gpClinicianRole (GPPracticeCommunity, standing)
+                          and referringRole (ReferralEpisodeCommunity, episode)
+      SpecialistClinician fills specialistRole (SpecialistPracticeCommunity,
+                          standing) and referredToRole (ReferralEpisodeCommunity,
+                          episode)
+      SpecialistAIAgent   fills aiExaminationRole (ReferralEpisodeCommunity)
+      Patient             fills patientRole in BOTH standing communities and
+                          episodePatientRole (ReferralEpisodeCommunity)
+      GPPractice, SpecialistPractice are parties (principals), not role-fillers.
+
+    Token grants:
+      GPClinician         — referralInitiationBurden, clinicalHandoverBurden
+      SpecialistClinician — referralResponseBurden, assessmentSchedulingBurden,
+                            patientRecordAccessPermitByRole
+      SpecialistAIAgent   — patientRecordAccessPermitByAuthorization,
+                            aiExaminationBurden
+
+    NOTE: same drift risk as the other two builders (CLAUDE.md §6.1) — these
+    actor/token name string literals must be kept in sync by hand with
+    scenarios/referral/referral_scenario.el. Covered by
+    tests/test_scenario_builders.py once registered below.
+
+    NOTE: ReferralNetworkFederation (the standing federation) has no
+    satisfaction condition declared — objective-reachable will correctly
+    report has_satisfaction_condition=False for it, not a failure.
+    ReferralEpisodeCommunity does have one (all_discharged(referralBurdenGroup)).
+    """
+    result = parse(_REFERRAL_SCENARIO, validate=False)
+    if not result.ok:
+        raise RuntimeError(f"Referral scenario parse failed: {result.errors}")
+
+    spec = result.model
+    state = initial_state()
+
+    state = enroll(state, "GPPractice")
+    state = enroll(state, "GPClinician",         role_name="gpClinicianRole")
+    state = enroll(state, "GPClinician",         role_name="referringRole")
+    state = enroll(state, "SpecialistPractice")
+    state = enroll(state, "SpecialistClinician", role_name="specialistRole")
+    state = enroll(state, "SpecialistClinician", role_name="referredToRole")
+    state = enroll(state, "SpecialistAIAgent",   role_name="aiExaminationRole")
+    state = enroll(state, "Patient",             role_name="patientRole")
+    state = enroll(state, "Patient",             role_name="episodePatientRole")
+
+    for token_name, holder in [
+        ("referralInitiationBurden",   "GPClinician"),
+        ("clinicalHandoverBurden",     "GPClinician"),
+        ("referralResponseBurden",     "SpecialistClinician"),
+        ("assessmentSchedulingBurden", "SpecialistClinician"),
+        ("patientRecordAccessPermitByRole",          "SpecialistClinician"),
+        ("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent"),
+        ("aiExaminationBurden",        "SpecialistAIAgent"),
+    ]:
+        state = grant_token(state, token_from_spec(spec, token_name, holder))
+
+    return Runtime(state, spec)
+
+
 # Scenario registry — maps scenario name to its builder function
 _SCENARIO_BUILDERS = {
     "gp_referral": _build_gp_referral_runtime,
     "ereferral":   _build_ereferral_runtime,
+    "referral":    _build_referral_runtime,
 }
 
 # Active scenario name and community name for objective queries
