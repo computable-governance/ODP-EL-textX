@@ -9,6 +9,7 @@ Endpoints implemented:
   GET /communities/{community_name}/objective-score
   GET /obligations/{token_name}/status
   POST /authorizations/{authorization_name}/revoke
+  POST /fhir/consent-events
 
 Design reference: coordination_design_note_v3.md §9 (agent-facing query surface)
 Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, Annex C
@@ -33,6 +34,7 @@ from el_engine import enroll, grant_token, initial_state, token_from_spec, Trans
 from el_kripke import build_kripke_from_runtime
 from el_parser import parse
 from el_runtime import Runtime
+from fhir_event_handler import handle_consent_event, PATIENT_DATA_AUTHORIZATION
 
 
 # ── Runtime initialisation ────────────────────────────────────────────────────
@@ -384,6 +386,23 @@ class RevokeAuthorizationResponse(BaseModel):
     updated_world: dict
     new_objective_score: float
     objective_reachable: bool
+
+
+class ConsentEventResponse(BaseModel):
+    fhir_consent_id: str
+    fhir_status: str
+    fhir_provenance: str
+    action_taken: str              # "revoked" | "no_op"
+    message: str
+    # populated only when action_taken == "revoked" (mirrors RevokeAuthorizationResponse)
+    tick: Optional[int] = None
+    authority: Optional[str] = None
+    authorization_name: Optional[str] = None
+    outcome: Optional[str] = None
+    effects: Optional[List[str]] = None
+    updated_world: Optional[dict] = None
+    new_objective_score: Optional[float] = None
+    objective_reachable: Optional[bool] = None
 
 
 class ScenarioSwitchResponse(BaseModel):
@@ -850,6 +869,92 @@ def revoke_authorization_endpoint(authorization_name: str) -> RevokeAuthorizatio
         tick=tr.tick,
         authority=tr.actor_name,   # revoke_authorization sets actor_name = auth.authority.name
         authorization_name=authorization_name,
+        outcome=tr.outcome,
+        effects=list(tr.effects),
+        updated_world=updated_world,
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint: POST /fhir/consent-events ────────────────────────────────────
+
+@app.post(
+    "/fhir/consent-events",
+    response_model=ConsentEventResponse,
+    summary="Ingest a FHIR Consent resource event (R30/R31)",
+    description=(
+        "Accepts a FHIR R4 Consent resource. status='inactive' (R31) revokes "
+        "patientDataAuthorization via Runtime.revoke_authorization() — the same "
+        "engine path as POST /authorizations/{name}/revoke — and stamps the "
+        "Consent.id as fhir_provenance on the result. status='active' (R30) is "
+        "a bootstrap-only no-op post-construction; see fhir_event_handler.py's "
+        "module docstring (AM-34). 400 if the Consent resource is missing "
+        "id/status, or the target authorization has no on_revocation embargo. "
+        "404 if the target authorization is not declared in the active spec at all."
+    ),
+)
+def consent_event(consent: dict) -> ConsentEventResponse:
+    # 404 check: mirrors revoke_authorization_endpoint's known_auths check —
+    # the FHIR bridge is wired to a single fixed authorization name; if it
+    # isn't declared in the active spec at all, that's "not found," not
+    # "declared but not revocable" (which stays a 400 below).
+    known_auths = {
+        el.name
+        for el in _runtime._spec.elements
+        if type(el).__name__ == "Authorization"
+    }
+    if PATIENT_DATA_AUTHORIZATION not in known_auths:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Authorization '{PATIENT_DATA_AUTHORIZATION}' is not declared in the current spec.",
+        )
+
+    try:
+        result = handle_consent_event(consent, _runtime)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        # handle_consent_event raises KeyError if the authorization has no
+        # on_revocation embargo (declared but not meaningfully revocable).
+        raise HTTPException(
+            status_code=400,
+            detail=f"Consent event could not be applied: {e}",
+        )
+
+    if result.action_taken != "revoked":
+        return ConsentEventResponse(
+            fhir_consent_id=result.fhir_consent_id,
+            fhir_status=result.fhir_status,
+            fhir_provenance=result.fhir_provenance,
+            action_taken=result.action_taken,
+            message=result.message,
+        )
+
+    tr = result.transition
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return ConsentEventResponse(
+        fhir_consent_id=result.fhir_consent_id,
+        fhir_status=result.fhir_status,
+        fhir_provenance=result.fhir_provenance,
+        action_taken=result.action_taken,
+        message=result.message,
+        tick=tr.tick,
+        authority=tr.actor_name,
+        authorization_name=result.authorization_name,
         outcome=tr.outcome,
         effects=list(tr.effects),
         updated_world=updated_world,
