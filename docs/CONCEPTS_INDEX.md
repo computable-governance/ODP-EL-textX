@@ -194,6 +194,43 @@ scenario. Nothing currently blocking; simply hasn't come up.
 
 ---
 
+### AIVendor — regulatory-overlay gap (identified 2026-07-09, not yet modelled)
+
+**Status:** Deliberately deferred. Not present in any scenario, including `referral_scenario.el` (Reference).
+
+**The gap:** The scenario currently conflates "the AI vendor" with "the deployed AI agent" —
+only `SpecialistAIAgent` exists as a party/agent. Privacy and AI regulation treats these as
+legally distinct: EU AI Act's provider/deployer split, GDPR's controller/processor split,
+HIPAA's covered-entity/business-associate split all separate "the company that built/supplies
+the system" from "the system as deployed/operated."
+
+**Proposed shape, if modelled** (requires a probe scenario, not a Reference-scenario edit):
+- **Peer layer** — `AIVendor` ↔ `GPPractice`, a negotiated standing relationship: `contract
+  federation` (or `contract community`), same pattern as `ReferralNetworkFederation`. Carries
+  the *pre-deployment* provider duty (conformance/risk documentation).
+- **Subordination layer** — `AIVendor` (or `SpecialistAIAgent` as its deployed instance)
+  as a `controlled_object` under `GPPractice`'s `controlling_object` authority: plain `domain`,
+  same pattern as `PatientDataDomain`. Carries the *in-use* processor duty (safe operation
+  under the practice's instructions).
+- These are two different ODP constructs because the obligations are legally different in
+  kind (pre-deployment vs. in-use), not just different lifecycle stages of one relationship.
+
+**Correction on record:** there is no standalone `Contract` construct in the grammar —
+`contract` is only an optional keyword modifier on `community`/`federation`
+(`(contract?='contract')? 'community' name=ID`). Modelling `AIVendor`'s peer relationship
+therefore requires a full community/federation declaration with roles and an assignment
+policy — comparable weight to `GPPracticeCommunity` — not a lightweight bolt-on.
+
+**Why deferred:** not required for R23–R31 FHIR mapping work (which targets structures
+already in the Reference scenario); genuinely new design, candidate/probe-tier work per
+`scenarios/README.md`'s maturity model, not a Reference-scenario edit.
+
+**Next step, when prioritised:** a probe scenario (e.g. `vendor/ai_vendor_probe.el`)
+validating the two-construct shape in isolation, following the same lifecycle
+`federation_consent_scenario.el` and `ereferral_model.el` took before absorption.
+
+---
+
 ## CommunityObject
 
 **Definition:** A community represented as an object, able to fulfil a
