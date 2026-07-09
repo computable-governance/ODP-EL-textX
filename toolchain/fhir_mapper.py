@@ -32,7 +32,7 @@ Mapping coverage (22 rules):
   R22  Consent.status=inactive  → DeclarationDecl (withdrawal)
 
 Deferred (later sessions):
-  R23  AuditEvent               → governance ledger entry
+  R32  AuditEvent               → governance ledger entry
   Bidirectional mapping (DSL speech act → FHIR update)
 
 Usage
