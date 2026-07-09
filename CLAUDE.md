@@ -575,3 +575,13 @@ Two additional endpoints added (commit 7dcefcf):
 **Next action:** Coordination UI widget in computable-governance-ui
 (port 8001, GP-referral scenario, role-selector + recommended-action
 panel + execute button). See coordination_design_note_v3.md §13.3.
+
+## Commit Conventions
+
+Never add Co-Authored-By lines to commit messages. Commits must show
+only zoranm as author. Do not include Claude attribution in any git
+metadata, commit messages, or comments.
+
+Correct format: "AM-XX: brief description of change"
+
+Never add lines like: "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
