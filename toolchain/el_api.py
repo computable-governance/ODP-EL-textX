@@ -260,6 +260,14 @@ _active_community: str = "ReferralEpisodeCommunity"
 
 _runtime = _build_referral_runtime()
 
+# Board-display side-store (AM-34 follow-up): fhir_provenance is stamped onto
+# ConsentEventResponse per-call but never persisted on WorldState/TokenInstance
+# (TokenInstance is a fixed-field frozen dataclass — see el_engine.py). Keyed
+# by embargo token_name so GET /debug/tokens can surface which revocation, if
+# any, was FHIR-triggered. Reset alongside _runtime in reset_runtime() /
+# switch_scenario().
+_fhir_provenance_by_token: Dict[str, str] = {}
+
 
 # ── FastAPI application ───────────────────────────────────────────────────────
 
@@ -931,6 +939,18 @@ def consent_event(consent: dict) -> ConsentEventResponse:
             message=result.message,
         )
 
+    # Stash fhir_provenance against the embargo token so GET /debug/tokens can
+    # surface it later — the plain POST /authorizations/{name}/revoke path
+    # never writes here, so a non-FHIR revoke shows no provenance (by design).
+    auth_el = next(
+        (el for el in _runtime._spec.elements
+         if type(el).__name__ == "Authorization" and el.name == result.authorization_name),
+        None,
+    )
+    embargo_name = getattr(auth_el, "on_revocation_embargo", "") if auth_el else ""
+    if embargo_name:
+        _fhir_provenance_by_token[embargo_name] = result.fhir_provenance
+
     tr = result.transition
     km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
     updated_world = {
@@ -975,6 +995,7 @@ def consent_event(consent: dict) -> ConsentEventResponse:
 def reset_runtime() -> dict:
     global _runtime
     _runtime = _SCENARIO_BUILDERS[_active_scenario]()
+    _fhir_provenance_by_token.clear()
     return {
         "status": "reset",
         "message": f"Runtime reset to initial '{_active_scenario}' state",
@@ -1016,6 +1037,7 @@ def debug_tokens():
             "token_name": t.token_name,
             "state": t.state,
             "for_action": t.for_action,
+            "fhir_provenance": _fhir_provenance_by_token.get(t.token_name),
         }
         for t in _runtime.current_state().tokens
     ]
@@ -1042,6 +1064,7 @@ def switch_scenario(scenario_name: str) -> ScenarioSwitchResponse:
     _runtime = _SCENARIO_BUILDERS[scenario_name]()
     _active_scenario = scenario_name
     _active_community = _COMMUNITY_FOR_SCENARIO[scenario_name]
+    _fhir_provenance_by_token.clear()
     return ScenarioSwitchResponse(
         active_scenario=_active_scenario,
         community=_active_community,
