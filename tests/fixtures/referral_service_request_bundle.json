@@ -1,0 +1,103 @@
+{
+  "resourceType": "Bundle",
+  "id": "referral-service-request-bundle-001",
+  "type": "collection",
+  "timestamp": "2026-07-10T09:00:00Z",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/gp-practice-referral-001",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "gp-practice-referral-001",
+        "name": "Riverside GP Clinic",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/patient-alex-taylor",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-alex-taylor",
+        "name": [{"family": "Taylor", "given": ["Alex"]}],
+        "birthDate": "1990-11-02"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/gp-dr-patel",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "gp-dr-patel",
+        "name": [{"family": "Patel", "given": ["Anjali"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "62247001", "display": "General practitioner"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/role-dr-patel",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "role-dr-patel",
+        "practitioner": {"reference": "Practitioner/gp-dr-patel"},
+        "organization": {"reference": "Organization/gp-practice-referral-001"}
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/gp-dr-nguyen",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "gp-dr-nguyen",
+        "name": [{"family": "Nguyen", "given": ["Minh"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "62247001", "display": "General practitioner"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/referral-sr-002",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "referral-sr-002",
+        "status": "active",
+        "intent": "order",
+        "subject": {"reference": "Patient/patient-alex-taylor"},
+        "requester": {"reference": "Practitioner/gp-dr-patel"},
+        "priority": "urgent",
+        "code": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "306207001", "display": "Referral to specialist"}],
+          "text": "Referral to specialist"
+        },
+        "note": [{"text": "GP must initiate referral promptly following clinical decision"}],
+        "occurrenceDateTime": "2026-07-20",
+        "reasonCode": [{"text": "Suspected condition requiring specialist assessment"}]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/referral-sr-003",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "referral-sr-003",
+        "status": "active",
+        "intent": "order",
+        "subject": {"reference": "Patient/patient-alex-taylor"},
+        "requester": {"reference": "Practitioner/gp-dr-nguyen"},
+        "priority": "routine",
+        "code": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "363679005", "display": "Imaging"}],
+          "text": "AI-assisted diagnostic imaging analysis"
+        },
+        "note": [{"text": "Seek patient consent before imaging referral proceeds"}],
+        "occurrenceDateTime": "2026-08-01",
+        "reasonCode": [{"text": "Baseline imaging for referral workup"}]
+      }
+    }
+
+  ]
+}

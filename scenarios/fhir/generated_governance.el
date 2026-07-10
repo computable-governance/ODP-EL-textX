@@ -43,10 +43,9 @@ agent AiDiagnosticAgent001
 burden ReferralSr001Obligation {
     for_action: "imaging"
     state: active
-    deadline: "2026-05-20"
     discharge_mode: strict
     priority: critical
-    description: "[R07] Obligation arising from ServiceRequest/referral-sr-001"
+    description: "[R07] strict: consent-related — Obligation arising from ServiceRequest/referral-sr-001 [R07] UNRESOLVED for_action — no DSL action mapping, verify manually"
 }
 
 permit ConsentAiDiagnostic001Permit {

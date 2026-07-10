@@ -106,6 +106,25 @@ MAPPING_RULES = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# R07 — ServiceRequest.code → DSL action identifier
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Explicit mapping from a FHIR coding (system, code) to the DSL action
+# identifier it must resolve to for favoured_by_burden linkage to work
+# (the burden token's for_action must name a real action{} block in the
+# target scenario — a clinical coding display string will not match one
+# by accident). Seeded from scenarios/referral/referral_scenario.el;
+# extend as new scenarios introduce new ServiceRequest-triggered actions.
+# No entry → for_action falls back to the sanitised code_display/code_text
+# and the generated description is flagged UNRESOLVED (see
+# _map_service_request) rather than silently guessing.
+SERVICE_REQUEST_ACTION_MAP: Dict[Tuple[str, str], str] = {
+    # (coding.system, coding.code) → DSL action identifier
+    ("http://snomed.info/sct", "306207001"): "initiateReferral",  # "Referral to specialist"
+}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Internal representation — intermediate between FHIR and .el text
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -256,6 +275,83 @@ def _coding_display(coding_list: Optional[list]) -> str:
     return first.get("display", first.get("code", ""))
 
 
+def _resolve_commitment_accountable_party(
+    requester: Optional[dict],
+    by_ref: Dict[str, dict],
+) -> Tuple[str, Optional[str]]:
+    """
+    [R06] Resolve ServiceRequest.requester to the party accountable for
+    the resulting commitment.
+
+    ServiceRequest.requester in a real-world bundle typically resolves to
+    the referring Practitioner (the individual clinician), but ODP-EL
+    accountability convention (see referral_scenario.el's principal_of
+    discipline) puts commitment.by at the organisational/practice level —
+    the clinician's standing employer, not the individual.
+
+    Resolution:
+      1. requester does not reference a Practitioner (already an
+         Organization, or some other resource type) — return its el_id
+         unchanged. No resolution needed.
+      2. requester references a Practitioner — look for a
+         PractitionerRole resource in the bundle whose
+         .practitioner.reference matches that Practitioner and whose
+         .organization.reference is set. Return that organisation's
+         el_id.
+      3. No such PractitionerRole exists (or none carries an
+         organization) — fall back to the practitioner's own el_id
+         unchanged, and return a warning string. Never fabricate an
+         organisational affiliation that isn't in the bundle.
+
+    Returns (el_id, warning). warning is None on a clean resolution
+    (cases 1, 2); a human-readable string on the case-3 fallback, meant
+    to be surfaced in the generated commitment's description rather than
+    silently misattributing accountability.
+    """
+    ref = (requester or {}).get("reference", "")
+    if not ref.startswith("Practitioner/"):
+        return _ref_id(requester), None
+
+    for res in by_ref.values():
+        if res.get("resourceType") != "PractitionerRole":
+            continue
+        if res.get("practitioner", {}).get("reference", "") != ref:
+            continue
+        org_ref = res.get("organization", {}).get("reference", "")
+        if org_ref:
+            return _ref_id({"reference": org_ref}), None
+
+    return _ref_id(requester), (
+        f"[R06] UNRESOLVED organisational affiliation for {ref} — no "
+        f"PractitionerRole.organization found in bundle; commitment.by "
+        f"falls back to the practitioner directly. Verify accountability "
+        f"manually."
+    )
+
+
+def _is_time_critical(sr: dict, text: str) -> bool:
+    """
+    [R07] True if ServiceRequest signals a time-critical discharge SLA:
+    FHIR priority of urgent/stat, or note/code text carrying an explicit
+    promptness cue. Independent of _is_consent_related — the two signals
+    OR together to decide discharge_mode, but are surfaced separately in
+    the generated description so the reasoning stays legible.
+    """
+    priority = (sr.get("priority") or "").lower()
+    if priority in ("urgent", "stat"):
+        return True
+    return any(kw in text for kw in ["promptly", "urgent", "immediately", "asap"])
+
+
+def _is_consent_related(text: str) -> bool:
+    """
+    [R07] True if ServiceRequest code/note text signals a consent-related
+    obligation. Independent of _is_time_critical — see that function's
+    docstring for how the two combine.
+    """
+    return any(kw in text for kw in ["consent", "inform", "seek"])
+
+
 def _period_to_deadline(period: Optional[dict]) -> str:
     """Convert a FHIR Period to a deadline string."""
     if not period:
@@ -401,7 +497,7 @@ class FHIRConsentMapper:
 
         # 2 — ServiceRequest → commitment + burden
         for sr in by_type.get("ServiceRequest", []):
-            self._map_service_request(sr, spec)     # R05–R08
+            self._map_service_request(sr, spec, by_ref)  # R05–R08
 
         # 3 — Tasks → delegation chain
         # Sort: parent tasks (no partOf) first, then sub-tasks
@@ -500,13 +596,15 @@ class FHIRConsentMapper:
 
     # ── R05–R08 — ServiceRequest → CommitmentDecl + burden token ──────────────
 
-    def _map_service_request(self, sr: dict, spec: ELSpec) -> None:
+    def _map_service_request(self, sr: dict, spec: ELSpec, by_ref: Dict[str, dict]) -> None:
         sr_id       = sr.get("id", "sr")
         el_id       = _sanitize_id(f"ServiceRequest/{sr_id}")
         fhir_ref    = f"ServiceRequest/{sr_id}"
 
-        # R06 — requester
-        requester_el = _ref_id(sr.get("requester"))                  # R06
+        # R06 — requester, resolved to organisational accountability
+        requester_el, requester_warning = _resolve_commitment_accountable_party(
+            sr.get("requester"), by_ref
+        )
 
         # R07 — obligation text from code + note
         code_text    = sr.get("code", {}).get("text", "")
@@ -517,35 +615,83 @@ class FHIRConsentMapper:
 
         # R07 — burden token
         burden_id = f"{el_id}Obligation"
-        action    = code_display or code_text or "perform_service"
-        deadline  = sr.get("occurrenceDateTime", "")                 # R08
 
-        # Annotate notes: if the obligation mentions "consent", make strict+critical
-        consent_related = any(
-            kw in (note_text + code_text).lower()
-            for kw in ["consent", "inform", "seek"]
+        # R08 — deadline: FHIR R4 ServiceRequest has no field expressing an
+        # SLA-style relative discharge deadline (e.g. "48 hours from
+        # clinical decision"). occurrenceDateTime/occurrencePeriod is a
+        # scheduling field (when the referred service should happen), not
+        # a governance discharge SLA — mapping it to deadline previously
+        # conflated the two. Left blank pending an extension-based
+        # approach; no FHIR-side field exists for this today (same framing
+        # as the R25 "no FHIR-side interface exists at all" gap).
+        deadline = ""                                                 # R08 — known gap, see comment above
+
+        # R07 for_action — resolve via the explicit FHIR-code → DSL-action
+        # mapping table; a clinical coding display string has no reason to
+        # match a real action{} identifier, so never derive it from
+        # code_display/code_text without flagging the guess.
+        code_codings  = sr.get("code", {}).get("coding", [{}])
+        first_coding  = code_codings[0] if code_codings else {}
+        mapped_action = SERVICE_REQUEST_ACTION_MAP.get(
+            (first_coding.get("system", ""), first_coding.get("code", ""))
         )
+        if mapped_action:
+            action = mapped_action
+            for_action_unresolved = False
+        else:
+            action = (code_display or code_text or "perform_service").lower().replace(" ", "_")
+            for_action_unresolved = True
+
+        # R07 discharge_mode — two independent signals, OR'd together:
+        # time-criticality and consent-relatedness are different *reasons*
+        # for the same strict outcome, kept as separate named checks so the
+        # reasoning stays legible in the generated description.
+        combined_text = (note_text + " " + code_text).lower()
+        time_critical    = _is_time_critical(sr, combined_text)
+        consent_related  = _is_consent_related(combined_text)
+
+        strict_reasons = []
+        if time_critical:
+            strict_reasons.append("time-critical")
+        if consent_related:
+            strict_reasons.append("consent-related")
+
+        if strict_reasons:
+            discharge_mode = "strict"
+            priority       = "critical"
+            reason_tag     = "strict: " + ", ".join(strict_reasons)
+        else:
+            discharge_mode = "eventual"
+            priority       = "normal"
+            reason_tag     = "eventual: no strict signal"
+
+        token_description = f"[R07] {reason_tag} — Obligation arising from ServiceRequest/{sr_id}"
+        if for_action_unresolved:
+            token_description += " [R07] UNRESOLVED for_action — no DSL action mapping, verify manually"
 
         token = ELToken(
             el_id=burden_id,
             kind="burden",
-            for_action=action.lower().replace(" ", "_"),
+            for_action=action,
             deadline=deadline,
-            discharge_mode="strict" if consent_related else "eventual",
-            priority="critical" if consent_related else "normal",
-            description=f"[R07] Obligation arising from ServiceRequest/{sr_id}",
+            discharge_mode=discharge_mode,
+            priority=priority,
+            description=token_description,
             fhir_ref=fhir_ref,
         )
         spec.tokens.append(token)
         spec.log("R07", fhir_ref, burden_id)
 
         # R05 — commitment
+        commitment_description = f"[R05] Commitment from ServiceRequest/{sr_id}"
+        if requester_warning:
+            commitment_description += f" — {requester_warning}"
         commitment = ELCommitment(
             el_id=f"{el_id}Commitment",
             by=requester_el,
             obligation=obligation,
             creates_burden=burden_id,
-            description=f"[R05] Commitment from ServiceRequest/{sr_id}",
+            description=commitment_description,
             fhir_ref=fhir_ref,
         )
         spec.commitments.append(commitment)
