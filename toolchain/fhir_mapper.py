@@ -31,6 +31,15 @@ Mapping coverage (22 rules):
   R21  Consent.provision.period → deadline on token
   R22  Consent.status=inactive  → DeclarationDecl (withdrawal)
 
+Also (separate entry point, not part of FHIRConsentMapper.map_bundle —
+see extract_federation_from_contract() below):
+  R23+R24  Contract.signer/.term → FederationDecl membership + normative_policy refs
+           EXTRACTION direction (FHIR → ODP-EL), standing/static structure,
+           not wired into el_api.py. See
+           FHIR_ODP_EL_Positioning_Notes_2026-06-26.md §2 for the full
+           rationale (supersedes the earlier OrganizationAffiliation- and
+           Consent.policyRule-based R23/R24 proposals).
+
 Deferred (later sessions):
   R32  AuditEvent               → governance ledger entry
   Bidirectional mapping (DSL speech act → FHIR update)
@@ -92,6 +101,7 @@ MAPPING_RULES = {
     "R20": ("Consent.organization",      "authorization.authority"),
     "R21": ("Consent.provision.period",  "deadline on token"),
     "R22": ("Consent.status=inactive",   "DeclarationDecl (withdrawal)"),
+    "R23+R24": ("Contract.signer/.term", "FederationDecl membership + normative_policy refs"),
 }
 
 
@@ -257,6 +267,66 @@ def _period_to_deadline(period: Optional[dict]) -> str:
     if start:
         return f"from {start}"
     return ""
+
+
+_VALID_TEXTX_ID_RE = re.compile(r"^[^\d\W]\w*$")
+
+
+def _preserve_or_sanitize(raw: str) -> str:
+    """
+    [R23+R24] Return raw unchanged if it is already a valid textX identifier;
+    otherwise fall back to _sanitize_id's lossy hyphen/space-splitting
+    sanitiser.
+
+    Used where the FHIR source value (an Organization.name or a coding.code)
+    is expected to already carry DSL-EL naming convention by construction —
+    e.g. a governance-oriented bundle authored to name an organisation
+    "GPPractice" to match its DSL-EL community counterpart directly.
+    _sanitize_id alone cannot reproduce that casing: its capitalize()-based
+    splitter lowercases everything after each segment's first letter, so
+    "GPPractice" would come back as "Gppractice".
+    """
+    if raw and _VALID_TEXTX_ID_RE.match(raw):
+        return raw
+    return _sanitize_id(raw)
+
+
+def _role_id_from_coding(coding_list: Optional[list]) -> str:
+    """
+    [R23+R24] Derive an interface role identifier from a FHIR coding.
+
+    Prefers coding.code, trusted to already be a camelCase role name by
+    convention (e.g. "gpPracticeRole") and used verbatim when it is already
+    a valid identifier. Falls back to coding.display, sanitised and then
+    lower-camel-cased, only when code is absent or not already valid.
+    """
+    if not coding_list:
+        return ""
+    first = coding_list[0]
+    raw = first.get("code") or first.get("display") or ""
+    if not raw:
+        return ""
+    if _VALID_TEXTX_ID_RE.match(raw):
+        return raw
+    base = _sanitize_id(raw)
+    return (base[0].lower() + base[1:]) if base else ""
+
+
+def _legally_binding_source(contract: dict, by_ref: Dict[str, dict]) -> str:
+    """
+    [R23+R24] Resolve Contract.legallyBindingReference (if present) to a
+    human-readable source citation, by looking at the referenced resource's
+    'description' then 'title' field. Returns "" if there is no reference,
+    it doesn't resolve within the bundle, or the resolved resource carries
+    neither field — never fabricates a citation.
+    """
+    ref = contract.get("legallyBindingReference", {}).get("reference", "")
+    if not ref:
+        return ""
+    target = by_ref.get(ref)
+    if not target:
+        return ""
+    return target.get("description", "") or target.get("title", "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -932,6 +1002,240 @@ class FHIRConsentMapper:
             lines.append(f" * [{rule}] {fhir_ref:45s} → {el_id}  ({rule_desc})")
         lines.append(" */")
         return lines
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R23+R24 — Contract → contract federation (extraction, standalone entry point)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_federation_from_contract(bundle: dict) -> str:
+    """
+    [R23+R24] FHIR Contract → ODP-EL contract federation block (extraction).
+
+    Maps a single FHIR R4 Contract resource — .signer, .term, and (read-only,
+    provenance-only) .rule — to a standing ODP-EL federation structure, per
+    FHIR_ODP_EL_Positioning_Notes_2026-06-26.md §2 (the R23+R24 merged rule,
+    superseding the earlier OrganizationAffiliation- and
+    Consent.policyRule-based R23/R24 proposals).
+
+    Direction: EXTRACTION (FHIR → ODP-EL), same as R01-R22 in
+    FHIRConsentMapper above — federation membership is standing/static
+    structure (established once), not a runtime event stream, so this is a
+    standalone function, not wired into el_api.py.
+
+    Mapping
+    -------
+    Contract.signer[]  → one 'member:' declaration per entry:
+        signer.party → resolved to an Organization in the same bundle;
+            the Organization's name (preferred verbatim if already a valid
+            identifier, else sanitised) names the member community
+            ("<Org>Community") and its representing community_object
+            ("<Org>Obj").
+        signer.type  → coding.code (preferred, assumed already camelCase by
+            convention) or coding.display (sanitised fallback) names the
+            interface role the member fills.
+    Contract.term[]     → normative_policy references. Each term's type
+        coding names the referenced NormativePolicy. Where a source
+        citation is independently derivable (Contract.term.text, else
+        Contract.legallyBindingReference resolved to a description/title
+        in-bundle), a *commented-out* normative_policy stub is also emitted
+        with that citation pre-filled — see "What is NOT emitted" below for
+        why 'kind' can never be filled in automatically.
+    Contract.rule        → read for provenance only (logged in a trailing
+        comment); does not affect the generated structure.
+
+    What is NOT emitted (and why)
+    ------------------------------
+    - The member 'community' declarations themselves — Contract carries no
+      data for a community's objective/roles/etc; fabricating one would
+      misrepresent the source data.
+    - Live 'normative_policy' declarations — 'source' (a real citation) can
+      sometimes be recovered from the bundle (see above), but 'kind'
+      (legislation | regulation | standard | guideline | contractual) is a
+      DSL-specific classification with no FHIR field or coding system
+      behind it. Grammar requires both 'source' and 'kind' on every
+      NormativePolicy (grammar/v2/el_grammar.tx NormativePolicy rule) —
+      there is no syntax for "kind: unknown" that still parses — so this
+      function never emits a live normative_policy block. When a source
+      citation is recoverable, a *commented-out* stub is emitted with
+      'source' filled in and 'kind' marked for the caller to complete; the
+      rest of the output remains genuinely parseable regardless.
+
+    The returned text therefore references member communities and
+    normative policies by name and assumes both are declared elsewhere in
+    the target specification — exactly the arrangement in
+    referral_scenario.el, where GPPracticeCommunity/SpecialistPracticeCommunity
+    and MyHealthRecordsAct/NationalClinicalGovernance/AIMedicalDeviceRegulation
+    are separate top-level elements alongside ReferralNetworkFederation.
+
+    Error handling
+    --------------
+    - No Contract resource anywhere in the bundle → ValueError. A missing
+      Contract means there is no federation to extract; returning an empty
+      or partial string would silently produce ungoverned output.
+    - A signer.party reference that does not resolve to an Organization in
+      the bundle → ValueError (not skipped). A federation member that
+      cannot be identified is a governance-integrity gap, not a
+      recoverable/optional detail — unlike e.g. an unpaired Task in
+      FHIRConsentMapper._map_task, which has legitimate reasons to be
+      incomplete.
+
+    Returns
+    -------
+    str — one 'community_object' declaration per signer, followed by a
+    single 'contract federation { ... }' block, followed by any commented
+    normative_policy stubs and a Contract.rule provenance comment. Not a
+    full enterprise specification — concatenate into a spec that already
+    declares the referenced Community and NormativePolicy elements.
+    """
+    entries = bundle.get("entry", [])
+    resources = [e.get("resource", {}) for e in entries]
+
+    contracts = [r for r in resources if r.get("resourceType") == "Contract"]
+    if not contracts:
+        raise ValueError(
+            "extract_federation_from_contract: bundle contains no Contract "
+            "resource — nothing to extract a federation from."
+        )
+    contract = contracts[0]
+    contract_id = contract.get("id", "contract")
+
+    by_ref: Dict[str, dict] = {
+        f"{r.get('resourceType', '')}/{r.get('id', '')}": r for r in resources
+    }
+
+    # Federation name: prefer Contract.title (sanitised), suffixed with
+    # "Federation" unless already present; fall back to Contract/<id>.
+    if contract.get("title"):
+        base_name = _sanitize_id(contract["title"])
+    else:
+        base_name = _sanitize_id(f"Contract/{contract_id}")
+    fed_el_id = base_name if base_name.endswith("Federation") else f"{base_name}Federation"
+
+    fed_description = contract.get("title") or f"Federation extracted from Contract/{contract_id}"
+    objective = contract.get("title") or (
+        "Ensure governed cooperation among federation member communities"
+    )
+
+    # ── signer[] → member communities + interface roles ────────────────────
+    members: List[dict] = []
+    for signer in contract.get("signer", []):
+        party_ref = signer.get("party", {}).get("reference", "")
+        org = by_ref.get(party_ref)
+        if org is None or org.get("resourceType") != "Organization":
+            raise ValueError(
+                f"extract_federation_from_contract: Contract/{contract_id} "
+                f"signer.party '{party_ref}' does not resolve to an "
+                f"Organization resource in this bundle."
+            )
+
+        org_base = _preserve_or_sanitize(
+            org.get("name") or f"Organization/{org.get('id', '')}"
+        )
+        community_id = f"{org_base}Community"
+        object_id = f"{org_base}Obj"
+
+        role_id = _role_id_from_coding(signer.get("type", {}).get("coding", []))
+        if not role_id:
+            role_id = f"{org_base[0].lower()}{org_base[1:]}Role"
+
+        members.append({
+            "community_id": community_id,
+            "object_id": object_id,
+            "role_id": role_id,
+            "org_name": org.get("name", org_base),
+        })
+
+    # ── term[] → normative_policy references (+ stub where source found) ──
+    policies: List[dict] = []
+    for term in contract.get("term", []):
+        codings = term.get("type", {}).get("coding", [])
+        raw = codings[0].get("code") or codings[0].get("display") if codings else ""
+        name = _preserve_or_sanitize(raw) if raw else ""
+        if not name:
+            continue
+        source = term.get("text", "") or _legally_binding_source(contract, by_ref)
+        policies.append({"name": name, "source": source})
+
+    # ── rule[] → provenance only, never drives output ──────────────────────
+    rule_refs = [
+        r.get("contentReference", {}).get("reference", "")
+        for r in contract.get("rule", [])
+        if r.get("contentReference", {}).get("reference", "")
+    ]
+
+    lines: List[str] = []
+
+    # community_object declarations — one per signer
+    for m in members:
+        lines.append(f"community_object {m['object_id']}")
+        lines.append(
+            f'    description: "[R23+R24] Community object representing '
+            f'{m["community_id"]} in {fed_el_id}"'
+        )
+        lines.append("    {")
+        lines.append(f"        abstracts: {m['community_id']}")
+        lines.append("    }")
+        lines.append("")
+
+    # contract federation block
+    lines.append(f"contract federation {fed_el_id}")
+    lines.append(f'    description: "[R23+R24] {fed_description}"')
+    lines.append("    {")
+    lines.append(f'        objective: "{objective}"')
+    lines.append("")
+
+    for p in policies:
+        lines.append(f"        normative_policy: {p['name']}")
+    if policies:
+        lines.append("")
+
+    for m in members:
+        lines.append(f"        interface role {m['role_id']}")
+        lines.append(
+            f'            description: "[R23+R24] {m["org_name"]} interface '
+            f'role in {fed_el_id}"'
+        )
+        lines.append("            {}")
+        lines.append("")
+
+    for m in members:
+        lines.append(f"        member: {m['community_id']}")
+        lines.append(f"            represented_by {m['object_id']}")
+        lines.append(f"            fills {m['role_id']}")
+        lines.append("")
+
+    lines.append("    }")
+
+    # commented normative_policy stubs — only where a real source citation
+    # was recoverable; 'kind' can never be filled in automatically (see
+    # docstring "What is NOT emitted")
+    stubs = [p for p in policies if p["source"]]
+    if stubs:
+        lines.append("")
+        lines.append(
+            "// [R23+R24] normative_policy stub(s) — 'source' derived from "
+            "FHIR Contract; 'kind' requires human classification (no FHIR "
+            "field or coding system backs this DSL taxonomy). Uncomment and "
+            "complete before the target spec will parse."
+        )
+        for p in stubs:
+            lines.append(f"// normative_policy {p['name']} {{")
+            lines.append(f'//     source: "{p["source"]}"')
+            lines.append(
+                "//     kind: <FILL IN — legislation | regulation | standard "
+                "| guideline | contractual>"
+            )
+            lines.append("// }")
+
+    if rule_refs:
+        lines.append("")
+        lines.append(
+            f"// [R23+R24 provenance] Contract/{contract_id}.rule → "
+            f"{', '.join(rule_refs)} (traceability only; not rendered)"
+        )
+
+    return "\n".join(lines)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
