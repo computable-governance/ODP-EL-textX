@@ -1,0 +1,158 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Organization",
+        "id": "gp-practice",
+        "name": "GP Practice"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Organization",
+        "id": "specialist-practice",
+        "name": "Specialist Practice"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "gp-clinician",
+        "name": [{"text": "GP Clinician"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "gp-clinician-role",
+        "practitioner": {"reference": "Practitioner/gp-clinician"},
+        "organization": {"reference": "Organization/gp-practice"}
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "specialist-clinician",
+        "name": [{"text": "Specialist Clinician"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "specialist-clinician-role",
+        "practitioner": {"reference": "Practitioner/specialist-clinician"},
+        "organization": {"reference": "Organization/specialist-practice"}
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient",
+        "name": [{"text": "Patient"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Device",
+        "id": "specialist-ai-agent",
+        "deviceName": [{"name": "Specialist AI Agent", "type": "user-friendly-name"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "referral-sr",
+        "status": "active",
+        "intent": "order",
+        "priority": "routine",
+        "subject": {"reference": "Patient/patient"},
+        "requester": {"reference": "Practitioner/gp-clinician"},
+        "code": {
+          "coding": [{
+            "system": "http://snomed.info/sct",
+            "code": "306207001",
+            "display": "Referral to specialist"
+          }]
+        },
+        "note": [{
+          "text": "Referral to specialist for assessment; requires patient consent for AI-assisted diagnostic review of clinical records"
+        }]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Consent",
+        "id": "patient-consent",
+        "status": "active",
+        "scope": {
+          "coding": [{"system": "http://terminology.hl7.org/CodeSystem/consentscope", "code": "patient-privacy"}]
+        },
+        "category": [{
+          "coding": [{"system": "http://loinc.org", "code": "59284-0"}]
+        }],
+        "patient": {"reference": "Patient/patient"},
+        "organization": [{"reference": "Organization/gp-practice"}],
+        "performer": [{"reference": "Device/specialist-ai-agent"}],
+        "provision": {
+          "type": "permit"
+        }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Contract",
+        "id": "referral-network-contract",
+        "status": "executed",
+        "title": "Referral Network Federation",
+        "signer": [
+          {
+            "party": {"reference": "Organization/gp-practice"},
+            "type": {
+              "coding": [{"system": "http://example.org/federation-roles", "code": "gpPracticeRole"}]
+            }
+          },
+          {
+            "party": {"reference": "Organization/specialist-practice"},
+            "type": {
+              "coding": [{"system": "http://example.org/federation-roles", "code": "specialistPracticeRole"}]
+            }
+          }
+        ],
+        "term": [
+          {
+            "type": {
+              "coding": [{"system": "http://example.org/normative-policy", "code": "MyHealthRecordsAct"}]
+            },
+            "text": "My Health Records Act 2012 (Cth)"
+          },
+          {
+            "type": {
+              "coding": [{"system": "http://example.org/normative-policy", "code": "NationalClinicalGovernance"}]
+            },
+            "text": "National Model Clinical Governance Framework 2026"
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "referral-encounter",
+        "status": "finished",
+        "class": {"code": "AMB", "display": "ambulatory"},
+        "participant": [
+          {
+            "type": [{
+              "coding": [{"system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType", "code": "ATND"}]
+            }],
+            "individual": {"reference": "Practitioner/gp-clinician"}
+          }
+        ],
+        "serviceProvider": {"reference": "Organization/gp-practice"},
+        "episodeOfCare": [{"reference": "EpisodeOfCare/ep-001"}]
+      }
+    }
+  ]
+}
