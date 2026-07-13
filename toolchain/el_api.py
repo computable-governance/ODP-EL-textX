@@ -35,6 +35,7 @@ from el_kripke import build_kripke_from_runtime
 from el_parser import parse
 from el_runtime import Runtime
 from fhir_event_handler import handle_consent_event, PATIENT_DATA_AUTHORIZATION
+from fhir_mapper import EncounterContext
 
 
 # ── Runtime initialisation ────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ def _build_ereferral_runtime() -> Runtime:
 _REFERRAL_SCENARIO = _REPO_ROOT / "scenarios" / "referral" / "referral_scenario.el"
 
 
-def _build_referral_runtime() -> Runtime:
+def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None) -> Runtime:
     """
     Parse the unified referral scenario (candidate reference scenario,
     scenarios/README.md) and initialise a Runtime with actors enrolled and
@@ -215,6 +216,14 @@ def _build_referral_runtime() -> Runtime:
     satisfaction condition declared — objective-reachable will correctly
     report has_satisfaction_condition=False for it, not a failure.
     ReferralEpisodeCommunity does have one (all_discharged(referralBurdenGroup)).
+
+    encounter_context: optional [R26-R29] grounding from a FHIR Encounter
+    (see fhir_mapper.extract_encounter_context). When provided,
+    referring_practitioner/gp_practice below are taken from it instead of
+    the "GPClinician"/"GPPractice" scenario defaults — grounding the GP
+    side of the referral only; SpecialistClinician, SpecialistAIAgent,
+    SpecialistPractice, and Patient are unaffected (Encounter scopes the
+    referring/GP side per R26-R29, not the specialist side).
     """
     result = parse(_REFERRAL_SCENARIO, validate=False)
     if not result.ok:
@@ -223,9 +232,18 @@ def _build_referral_runtime() -> Runtime:
     spec = result.model
     state = initial_state()
 
-    state = enroll(state, "GPPractice")
-    state = enroll(state, "GPClinician",         role_name="gpClinicianRole")
-    state = enroll(state, "GPClinician",         role_name="referringRole")
+    referring_practitioner = (
+        encounter_context.referring_practitioner if encounter_context
+        else "GPClinician"
+    )
+    gp_practice = (
+        encounter_context.gp_practice if encounter_context
+        else "GPPractice"
+    )
+
+    state = enroll(state, gp_practice)
+    state = enroll(state, referring_practitioner, role_name="gpClinicianRole")
+    state = enroll(state, referring_practitioner, role_name="referringRole")
     state = enroll(state, "SpecialistPractice")
     state = enroll(state, "SpecialistClinician", role_name="specialistRole")
     state = enroll(state, "SpecialistClinician", role_name="referredToRole")
@@ -234,8 +252,8 @@ def _build_referral_runtime() -> Runtime:
     state = enroll(state, "Patient",             role_name="episodePatientRole")
 
     for token_name, holder in [
-        ("referralInitiationBurden",   "GPClinician"),
-        ("clinicalHandoverBurden",     "GPClinician"),
+        ("referralInitiationBurden",   referring_practitioner),
+        ("clinicalHandoverBurden",     referring_practitioner),
         ("referralResponseBurden",     "SpecialistClinician"),
         ("assessmentSchedulingBurden", "SpecialistClinician"),
         ("patientRecordAccessPermitByRole",          "SpecialistClinician"),

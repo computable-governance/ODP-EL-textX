@@ -21,7 +21,8 @@ raising, on every test run.
 """
 import pytest
 
-from el_api import _SCENARIO_BUILDERS
+from el_api import _SCENARIO_BUILDERS, _build_referral_runtime
+from fhir_mapper import EncounterContext
 
 
 @pytest.mark.parametrize("scenario_name", sorted(_SCENARIO_BUILDERS.keys()))
@@ -44,3 +45,69 @@ def test_every_scenario_builder_has_a_community_mapping():
     """
     from el_api import _SCENARIO_BUILDERS, _COMMUNITY_FOR_SCENARIO
     assert set(_SCENARIO_BUILDERS.keys()) == set(_COMMUNITY_FOR_SCENARIO.keys())
+
+
+def test_referral_runtime_default_matches_hardcoded_gp_actors():
+    """
+    _build_referral_runtime()'s new encounter_context parameter (R26-R29)
+    must be fully optional: called with no argument (module load path,
+    `_runtime = _build_referral_runtime()` at the bottom of el_api.py) it
+    has to produce byte-for-byte the same WorldState as before the
+    parameter existed. Passing encounter_context=None explicitly must be
+    indistinguishable from omitting it.
+    """
+    default_state = _build_referral_runtime().current_state()
+    explicit_none_state = _build_referral_runtime(encounter_context=None).current_state()
+
+    assert explicit_none_state.actors == default_state.actors
+    assert explicit_none_state.tokens == default_state.tokens
+
+    actor_names = {a.actor_name for a in default_state.actors}
+    assert "GPPractice" in actor_names
+    assert "GPClinician" in actor_names
+
+    holders = {t.token_name: t.holder for t in default_state.tokens}
+    assert holders["referralInitiationBurden"] == "GPClinician"
+    assert holders["clinicalHandoverBurden"] == "GPClinician"
+
+
+def test_referral_runtime_encounter_context_grounds_gp_side_only():
+    """
+    When an EncounterContext (R26-R29) is supplied, only the GP side
+    (GPPractice party enrollment, GPClinician's two role fills, and the
+    two GP-held burdens) is substituted. SpecialistClinician,
+    SpecialistAIAgent, SpecialistPractice, and Patient — actors and
+    tokens alike — must come out byte-for-byte identical to the
+    unGrounded default run.
+    """
+    default_state = _build_referral_runtime().current_state()
+    ec = EncounterContext(
+        referring_practitioner="DrChen",
+        gp_practice="NorthsideGPPractice",
+        episode_reference="EpisodeOfCare/ep-001",
+    )
+    grounded_state = _build_referral_runtime(ec).current_state()
+
+    grounded_actor_names = {a.actor_name for a in grounded_state.actors}
+    assert "DrChen" in grounded_actor_names
+    assert "NorthsideGPPractice" in grounded_actor_names
+    assert "GPClinician" not in grounded_actor_names
+    assert "GPPractice" not in grounded_actor_names
+
+    grounded_holders = {t.token_name: t.holder for t in grounded_state.tokens}
+    assert grounded_holders["referralInitiationBurden"] == "DrChen"
+    assert grounded_holders["clinicalHandoverBurden"] == "DrChen"
+
+    gp_actor_names = {"GPClinician", "GPPractice", "DrChen", "NorthsideGPPractice"}
+    non_gp = lambda actors: sorted(
+        (a for a in actors if a.actor_name not in gp_actor_names),
+        key=lambda a: (a.actor_name, a.role_name or ""),
+    )
+    assert non_gp(grounded_state.actors) == non_gp(default_state.actors)
+
+    gp_token_names = {"referralInitiationBurden", "clinicalHandoverBurden"}
+    non_gp_tokens = lambda tokens: sorted(
+        (t for t in tokens if t.token_name not in gp_token_names),
+        key=lambda t: t.token_name,
+    )
+    assert non_gp_tokens(grounded_state.tokens) == non_gp_tokens(default_state.tokens)

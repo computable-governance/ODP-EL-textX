@@ -1384,6 +1384,106 @@ def extract_federation_from_contract(bundle: dict) -> str:
     return "\n".join(lines)
 
 
+@dataclass
+class EncounterContext:
+    """
+    [R26-R29] Grounding context for episode instantiation, extracted from
+    a FHIR Encounter. Returned by extract_encounter_context() below — see
+    that function's docstring for field provenance and the traceability-
+    only caveat on episode_reference.
+    """
+    referring_practitioner: str   # el_id, from participant[type=ATND]
+    gp_practice: str              # el_id, from serviceProvider
+    episode_reference: str        # from episodeOfCare, traceability only
+
+
+def extract_encounter_context(bundle: dict) -> EncounterContext:
+    """
+    [R26-R29] FHIR Encounter -> grounding context for episode instantiation.
+
+    Direction: EXTRACTION (FHIR -> ODP-EL), same as R01-R22 and R23+R24 —
+    this is a standalone function returning parameter VALUES (not DSL-EL
+    text), since its consumer is _build_referral_runtime() in el_api.py,
+    which needs actor-name strings to feed enroll()/grant_token() calls,
+    not a parseable spec fragment.
+
+    Mapping:
+      Encounter.participant[type=ATND] -> referring_practitioner (el_id)
+      Encounter.serviceProvider        -> gp_practice (el_id)
+      Encounter.episodeOfCare[0]       -> episode_reference (raw string,
+          logged for traceability only — this toolchain does not yet
+          support concurrent multi-episode runtimes; seeing this value
+          does not mean it's used to key separate state)
+
+    Error handling (matches extract_federation_from_contract's philosophy
+    — a mis-grounded episode is a governance-integrity gap, not a
+    recoverable detail):
+      - No Encounter resource in the bundle -> ValueError.
+      - No participant with type=ATND -> ValueError. Do not fall back to
+        an arbitrary participant; an unidentified attending clinician is
+        exactly the kind of gap this function exists to catch.
+      - serviceProvider reference does not resolve to an Organization in
+        the bundle -> ValueError.
+    """
+    entries = bundle.get("entry", [])
+    resources = [e.get("resource", {}) for e in entries]
+
+    encounters = [r for r in resources if r.get("resourceType") == "Encounter"]
+    if not encounters:
+        raise ValueError(
+            "extract_encounter_context: bundle contains no Encounter "
+            "resource — nothing to ground an episode against."
+        )
+    encounter = encounters[0]
+    encounter_id = encounter.get("id", "encounter")
+
+    by_ref: Dict[str, dict] = {
+        f"{r.get('resourceType', '')}/{r.get('id', '')}": r for r in resources
+    }
+
+    # ── participant[type=ATND] → referring_practitioner ─────────────────────
+    attending_ref: Optional[dict] = None
+    for participant in encounter.get("participant", []):
+        type_codes = [
+            c.get("code")
+            for t in participant.get("type", [])
+            for c in t.get("coding", [])
+        ]
+        if "ATND" in type_codes:
+            attending_ref = participant.get("individual")
+            break
+
+    if not attending_ref:
+        raise ValueError(
+            f"extract_encounter_context: Encounter/{encounter_id} has no "
+            f"participant with type=ATND — an unidentified attending "
+            f"clinician cannot ground episode accountability."
+        )
+    referring_practitioner = _ref_id(attending_ref)
+
+    # ── serviceProvider → gp_practice ───────────────────────────────────────
+    service_provider = encounter.get("serviceProvider", {})
+    provider_ref = service_provider.get("reference", "")
+    provider = by_ref.get(provider_ref)
+    if provider is None or provider.get("resourceType") != "Organization":
+        raise ValueError(
+            f"extract_encounter_context: Encounter/{encounter_id} "
+            f"serviceProvider '{provider_ref}' does not resolve to an "
+            f"Organization resource in this bundle."
+        )
+    gp_practice = _ref_id(service_provider)
+
+    # ── episodeOfCare[0] → episode_reference (traceability only) ───────────
+    episodes = encounter.get("episodeOfCare", [])
+    episode_reference = episodes[0].get("reference", "") if episodes else ""
+
+    return EncounterContext(
+        referring_practitioner=referring_practitioner,
+        gp_practice=gp_practice,
+        episode_reference=episode_reference,
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CLI entry point
 # ══════════════════════════════════════════════════════════════════════════════
