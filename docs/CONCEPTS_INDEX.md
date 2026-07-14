@@ -229,6 +229,57 @@ already in the Reference scenario); genuinely new design, candidate/probe-tier w
 validating the two-construct shape in isolation, following the same lifecycle
 `federation_consent_scenario.el` and `ereferral_model.el` took before absorption.
 
+**Update 2026-07-14 — three independent motivating cases now on record.**
+
+The peer/subordination shape proposed above (originally scoped to EU AI
+Act/GDPR/HIPAA provider-vs-deployer) has since come up unprompted in two
+further, unrelated contexts — raising confidence this is a general
+governance primitive, not an artifact of one regulatory framing:
+
+1. **Health-AI regulation** (original case) — `AIVendor` ↔ `GPPractice`
+   peer federation (pre-deployment conformance duty) vs. `SpecialistAIAgent`
+   as controlled object under `GPPractice` domain authority (in-use
+   processor duty). 1:1 — one vendor, one deployed instance.
+
+2. **Copyright/collective-licensing** (2026-07-14, Australian TDM-exception
+   brainstorm) — `CollectingSociety` ↔ `FrontierAiCompany` peer contract
+   federation (pre-training royalty/licence-terms commitment) vs. a
+   subordination domain carrying in-use attribution/audit obligation once
+   training is running. Also 1:1.
+
+3. **Industrial multi-agent operations** (Pieter van Schalkwyk, "Agents Are
+   Context Hungry," LinkedIn, 2026-07-10) — describes the identical two-gate
+   structure independently: a context layer performing ingest-time
+   data/meaning checks (Information-viewpoint concern, not deontic), and an
+   agent harness governing "what the agent is allowed to conclude, what it
+   is allowed to do, the operating envelope... the point where authority
+   reverts to a person, and the signed record it leaves behind" (the
+   subordination domain, in our vocabulary). Explicitly **N peers into one
+   domain**: a single plant runs an OEM's agent, a third party's agent, and
+   the operator's own agent concurrently, each governed by one shared
+   harness/domain regardless of which peer federation it came from.
+
+**Consequence for the proposed shape:** case 3 shows the probe scenario
+needs to test N-peer-federations → one-subordination-domain from the
+outset (multiple controlled objects, each traceable to a distinct peer
+federation, one controlling object/domain binding all of them to a common
+envelope) — not just the 1:1 shape cases 1 and 2 alone would have
+suggested. Building a 1:1 version first and discovering the N-peer
+requirement afterward would have meant redoing the domain-membership
+design.
+
+**Priority note:** still probe/candidate-tier, not required for R23–R31
+FHIR mapping, still outside the current commercial-focus window. Ordered
+just ahead of #7 (Board UI polish), #8 (concurrent multi-episode), #9
+(LLM-to-DSL) once that window closes, given three independent cases now
+outweigh those items' single-domain motivation.
+
+**Secondary cross-reference, lower priority:** Pieter's context/harness
+split is also an independent, external, industry-practitioner
+confirmation of the Enterprise-vs-Information viewpoint boundary in
+`five_viewpoint_dsl_position_note.tex` — worth a citation there if that
+paper thread is revisited, not urgent.
+
 ---
 
 ## Concurrent multi-episode runtime
