@@ -231,6 +231,38 @@ validating the two-construct shape in isolation, following the same lifecycle
 
 ---
 
+## Concurrent multi-episode runtime
+
+Toolchain currently runs a single module-level `_runtime` instance per scenario;
+every endpoint (`get_available_actions`, `execute_action`, `/debug/tokens`,
+`/reset`, etc.) implicitly assumes one active episode at a time. Genuine
+multi-instance support — "episode 1 vs. episode 2," each independently
+addressable — requires redesigning state storage (dict of `Runtime` objects
+keyed by episode ID, likely derived from `Encounter.episodeOfCare`) and
+touching every endpoint accordingly. Deliberately out of scope for R26–R29;
+builds on Encounter-extraction work from that item. Own multi-session project;
+treat as a production-readiness milestone, not a routine feature. Not started.
+
+---
+
+## LLM-to-DSL translation pipeline (Mode 2)
+
+Research direction, not yet implemented as a pipeline — components exist
+(CLAUDE.md as in-context grammar spec, `.el` examples as few-shot, validator
+as automated check, API for reasoner execution) but no structured prompt
+template, no automated validator-feedback loop, no translatability scorer,
+no repeatable worked example. Core research question: can an LLM correctly
+classify natural-language obligations as compelled (AF/strict) vs. detectable
+(EF/eventual) — the same distinction driving the toolchain's central formal
+finding. Translatability varies by document type (~60–70% for consent
+directives, ~25–30% for strategic governance documents like the National
+Model for Clinical Governance). Prerequisite: confirm `_build_obligation_descriptors()`
+fix has landed — flagged as non-negotiable before this work starts, since a
+validator that's already wrong makes LLM-output failures unattributable.
+Not started.
+
+---
+
 ## CommunityObject
 
 **Definition:** A community represented as an object, able to fulfil a
