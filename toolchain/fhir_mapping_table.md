@@ -130,7 +130,7 @@ declaration discharges the accountability obligation to maintain consent.
 
 | ID  | FHIR Resource | Rationale for deferral |
 |-----|---------------|------------------------|
-| R23 | AuditEvent | Belongs to the governance ledger (future work) |
+| R32 | AuditEvent | Belongs to the governance ledger (future work) |
 | —   | Bidirectional mapping | DSL speech act → FHIR update requires running FHIR server |
 | —   | FHIR R5 differences | R4 is current HL7 Australia eRequesting target |
 
@@ -247,7 +247,7 @@ This mapping closes the following gaps identified in Table 2:
    delegation revoked), update the corresponding FHIR resource. This is the
    full Mediator component from the EDOC 2024 paper.
 
-2. **AuditEvent → ledger (R23):** map FHIR AuditEvent to governance ledger
+2. **AuditEvent → ledger (R32):** map FHIR AuditEvent to governance ledger
    entries once the governance ledger module is built.
 
 3. **HL7 Australia eRequesting:** apply the mapping to the eRequesting FHIR
