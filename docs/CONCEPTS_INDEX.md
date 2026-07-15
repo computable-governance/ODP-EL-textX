@@ -999,3 +999,29 @@ candidate/superseded tiers. Applied in `scenarios/README.md`.
 around `federation_consent_scenario.el`'s unratified status. Extended the
 same day when naming the not-yet-built unified referral scenario exposed
 a missing tier between "probe" and "reference scenario."
+
+---
+
+## Toolchain implementation priority sequencing (confirmed 2026-07-15)
+
+Current confirmed order for remaining toolchain work, consolidating the
+FHIR-mapping critical path with the AIVendor gap and later-stage items:
+
+1. Encounter.status-driven token-state seeding (needs design pass: status→state
+   mapping table, edge cases for `cancelled`/`entered-in-error`, explicit boundary
+   against R30 Option B)
+2. R30 Option B (live grant/reinstate) — optional, deferred unless a demo
+   narrative needs it
+3. `FHIRConsentMapper` flat-community gap — fix shape undecided
+4. EDOC24 Mediator write-back direction — larger scope
+5. Kripke verifier `conditional_action` gap — captured in arXiv Limitations,
+   not implemented
+6. Board UI polish
+7. **AIVendor gap** — three independent motivating cases now confirmed (health/FHIR
+   EU AI Act provider/deployer split; Australian copyright/TDM policy; Pieter van
+   Schalkwyk's N-peer-federation industrial case, commit `7a6484f`). Priority:
+   just ahead of #8/#9, behind items 1–6 above.
+8. Concurrent multi-episode runtime — production-readiness milestone, last in
+   sequence among these
+9. LLM-to-DSL translation pipeline Mode 2 — prerequisite: confirm
+   `_build_obligation_descriptors()` fix has landed
