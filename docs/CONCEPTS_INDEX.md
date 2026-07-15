@@ -1025,3 +1025,37 @@ FHIR-mapping critical path with the AIVendor gap and later-stage items:
    sequence among these
 9. LLM-to-DSL translation pipeline Mode 2 — prerequisite: confirm
    `_build_obligation_descriptors()` fix has landed
+
+---
+
+## Event-triggered activation (Step 7c) — implemented but untested
+
+`el_engine.py`'s `advance()` Step 7c (AM-22, commit `18b243dd`, 2026-06-05)
+performs real event-triggered token activation: when an Action's `emits`
+matches a token's `triggered_by`, that token transitions to `active`.
+The companion event-driven discharge path (Step 3's `event_discharged`,
+same commit) is equally real. Both are original, untouched since authorship,
+and confirmed still present via `git blame`. However: zero scenarios in
+the repo currently pair a token's `triggered_by`/`discharged_by` with a
+matching `emits` in a way that exercises either path with non-empty data
+(the one `emits:` usage, `referral_scenario.el:392`, has no matching
+`discharged_by`), and zero tests in `tests/` reference `triggered_by` or
+`discharged_by` at all. Confirmed via direct grep + full test suite run
+(45/45 passing, none touching this code). If future work builds on this
+mechanism (e.g. item #1's Encounter.status gating), first tests for Step 3/7c
+should be added as part of that work, not assumed correct from authorship alone.
+
+## Engine/Kripke event-model symmetry gap — undocumented, not deliberately designed
+
+`el_engine.py`'s event-triggered activation (Step 7c, AM-22, 2026-06-05) and
+`el_kripke.py`'s `WAITING`/P6 cascade (commit `894afdbd`, 2026-06-13, logged
+under AM-26/27 but the P6/WAITING logic itself was never given its own
+amendment entry) both implement the same idea — a token/obligation waiting on
+a named event before becoming live — using the same grammar fields
+(`triggered_by`/`discharged_by`) but independent state models (`TokenInstance.state`
+string vs. `ObligationState` enum) and independent code, built 8 days apart.
+Neither amendment references the other. This is not confirmed as a deliberate
+design choice — no commit message or amendments-log entry asserts intended
+symmetry or explains the discrepancy. Worth keeping in mind for any future
+work that touches either side: changes to one do not automatically apply to
+the other, and there is currently no shared abstraction between them.
