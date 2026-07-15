@@ -204,10 +204,15 @@ artefact_object patientRecord
 // discharge_mode: strict — GP must initiate promptly; AF(discharged:referralInitiationBurden) holds.
 // Discharging this action also emits referralSubmitted (see GPPracticeCommunity's
 // events list below), which triggers ReferralEpisodeCommunity's establishment (AM-33).
+// triggered_by: encounterConcluded (R26-R29 probe, docs/CONCEPTS_INDEX.md item #1) —
+// fired directly via Runtime.fire_event() from a FHIR Encounter.status=finished
+// event, not from any DSL action's emits. See GPPracticeCommunity's events list
+// below for the EventDecl.
 burden referralInitiationBurden {
     for_action: "initiateReferral"
     state: active
     deadline: "48 hours from clinical decision"
+    triggered_by: encounterConcluded
     discharge_mode: strict
     priority: critical
     description: "Obligation on GP clinician to initiate and transmit specialist referral for the patient"
@@ -366,6 +371,9 @@ community GPPracticeCommunity
 
         event referralSubmitted
             description: "Emitted when GP clinician submits the specialist referral — the Creation act (Part 2 §9.18) that instantiates ReferralEpisodeCommunity"
+
+        event encounterConcluded
+            description: "R26-R29 probe: fired directly from Python (Runtime.fire_event()) when a FHIR Encounter resource transitions to status=finished — not emitted by any DSL action"
 
         invariant gpRegistrationCurrency:
             "GP clinician must hold current GP registration and referral prescribing authority to remain a member"

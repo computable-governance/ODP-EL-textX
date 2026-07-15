@@ -158,6 +158,23 @@ def _find_spec_tokens_for_event(spec, event_name: str, attr: str) -> set:
     return result
 
 
+def _activate_triggered_tokens(spec, tokens: list, event_name: str) -> tuple[list, list[str]]:
+    """
+    Transition to 'active' every token whose triggered_by matches event_name.
+    Returns (updated_tokens, effect_log_lines). Shared by advance() Step 7c
+    (action-driven) and Runtime.fire_event() (direct-call, e.g. FHIR-driven).
+    """
+    triggered = _find_spec_tokens_for_event(spec, event_name, "triggered_by")
+    if not triggered:
+        return tokens, []
+    new_tokens = [
+        _transition(t, "active") if t.token_name in triggered else t
+        for t in tokens
+    ]
+    log_lines = [f"event '{event_name}' triggered activation of '{name}'" for name in triggered]
+    return new_tokens, log_lines
+
+
 # ── Core engine function ──────────────────────────────────────────────────────
 
 def advance(
@@ -370,17 +387,10 @@ def advance(
 
     # 7c — AM-22: event-triggered token activation
     if grammar_action and grammar_action.emits:
-        event_name = grammar_action.emits.name
-        triggered = _find_spec_tokens_for_event(spec, event_name, "triggered_by")
-        if triggered:
-            tokens = [
-                _transition(t, "active") if t.token_name in triggered else t
-                for t in tokens
-            ]
-            for name in triggered:
-                effects_log.append(
-                    f"event '{event_name}' triggered activation of '{name}'"
-                )
+        tokens, triggered_log = _activate_triggered_tokens(
+            spec, tokens, grammar_action.emits.name
+        )
+        effects_log.extend(triggered_log)
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
     record = TransitionRecord(
@@ -539,6 +549,39 @@ def revoke_authorization(
         tick=tick,
         actor_name=auth.authority.name,
         action_name=f"revoke:{authorization_name}",
+        outcome="ok",
+        discharged=(),
+        effects=tuple(effects_log),
+        violations=(),
+    )
+    return new_state, record
+
+
+def fire_event(
+    state: WorldState, spec, event_name: str, source: str = "external"
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    Directly fire a named event against state, activating any token whose
+    triggered_by matches it — without requiring an Action/emits. Used for
+    externally-driven events (e.g. FHIR resource state changes) that have
+    no corresponding DSL action.
+
+    Mirrors revoke_authorization()'s direct-call pattern (AM-31): there is
+    no calling actor the way advance() has one, so `source` documents the
+    event's origin for the ledger (analogous to advance()'s actor_name
+    parameter) instead of attributing it to an EnterpriseObject. Callers
+    with more specific provenance (e.g. a FHIR resource id) should pass it
+    via `source`; this module stays domain-generic and assumes nothing
+    about the calling context.
+    """
+    tick = state.tick
+    tokens, effects_log = _activate_triggered_tokens(spec, list(state.tokens), event_name)
+
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=source,
+        action_name=f"fire_event:{event_name}",
         outcome="ok",
         discharged=(),
         effects=tuple(effects_log),

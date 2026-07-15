@@ -1,13 +1,16 @@
 """
 fhir_event_handler.py
 ======================
-Layer 1 -> Layer 3 bridge: FHIR R4 Consent resource events -> runtime
-authorization state changes.
+Layer 1 -> Layer 3 bridge: FHIR R4 Consent/Encounter resource events ->
+runtime authorization/token state changes.
 
-Standard reference: ISO/IEC 15414:2015 §6.6.4 (Authorization). AM-31
-(Runtime.revoke_authorization, toolchain/el_engine.py) is the underlying
-engine primitive this module calls into — this module does not duplicate
-that logic, it only decides when to call it from a FHIR event.
+Standard reference: ISO/IEC 15414:2015 §6.6.4 (Authorization), §6.4/§7.8
+(DeonticToken lifecycle, AM-22 triggered_by/EventDecl). AM-31
+(Runtime.revoke_authorization, toolchain/el_engine.py) and Runtime.fire_event()
+(toolchain/el_engine.py/el_runtime.py, built on the AM-22 triggered_by
+mechanism) are the underlying engine primitives this module calls into —
+this module does not duplicate that logic, it only decides when to call it
+from a FHIR event.
 
 Scope (rule numbers per FHIR_ODP_EL_Positioning_Notes):
 
@@ -39,7 +42,47 @@ R30 — Consent.status: active (bootstrap-only; agreed Option A).
   function returns an informative ConsentEventResult explaining why,
   rather than raising or silently discarding the event.
 
-Out of scope this session: R26-R29 (Encounter-based episode bootstrap).
+R26-R29 probe — Encounter.status: finished -> fires 'encounterConcluded'
+  event (probe-tier; see docs/CONCEPTS_INDEX.md "Toolchain implementation
+  priority sequencing", item #1). handle_encounter_event() calls
+  Runtime.fire_event() directly (in-process), activating any token whose
+  triggered_by matches the fired event name — currently only
+  referralInitiationBurden in scenarios/referral/referral_scenario.el,
+  via the AM-22 triggered_by/EventDecl mechanism (el_engine.py Step 7c /
+  _activate_triggered_tokens(), shared with action-driven emits).
+
+  Unlike R31's revoke_authorization(), fire_event() never raises for an
+  unrecognised event name — a mismatched or unwired event is silently a
+  no-op at the engine level (empty triggered set, empty effects log).
+  handle_encounter_event() does NOT collapse this into the same
+  action_taken as a genuine activation: it inspects the returned
+  TransitionRecord.effects and reports three distinct outcomes —
+    "fired"           — event fired AND at least one token's triggered_by
+                         matched (transition.effects non-empty).
+    "fired_no_match"  — event genuinely fired via Runtime.fire_event()
+                         (tick advances, a ledger entry is recorded) but no
+                         token in the current spec has triggered_by set to
+                         this event name, so transition.effects is empty.
+                         This is the case that would otherwise be a silent
+                         no-op if action_taken were not distinguished from
+                         "fired".
+    "no_op"           — status is not "finished"/"cancelled"/
+                         "entered-in-error"; fire_event() is never called
+                         at all, and transition stays None.
+  event_name/transition are set for both "fired" and "fired_no_match"
+  (fire_event() was actually called in both cases); only "no_op" leaves
+  them None.
+
+  status="cancelled"/"entered-in-error" raise ValueError — no clinical
+  decision occurred; this is a bootstrap-time integrity gap, not a
+  recoverable no-op (mirrors extract_encounter_context's existing error
+  philosophy, fhir_mapper.py).
+
+  This is a probe-only wiring of the fire_event()/triggered_by mechanism —
+  it does NOT implement the full Encounter.status-driven token-state
+  seeding design (status -> state mapping table, deadline computation,
+  etc.) tracked as item #1 in docs/CONCEPTS_INDEX.md's priority
+  sequencing; that remains future work.
 """
 
 from __future__ import annotations
@@ -56,6 +99,12 @@ from el_runtime import Runtime
 # a different scenario's authorization name can override it.
 PATIENT_DATA_AUTHORIZATION = "patientDataAuthorization"
 
+# Scenario-specific: the single Encounter-triggered event declared in
+# scenarios/referral/referral_scenario.el (GPPracticeCommunity's events
+# list, R26-R29 probe). Passed as a default parameter rather than hardwired
+# so callers targeting a different scenario's event name can override it.
+ENCOUNTER_CONCLUDED_EVENT = "encounterConcluded"
+
 
 @dataclass(frozen=True)
 class ConsentEventResult:
@@ -67,6 +116,24 @@ class ConsentEventResult:
     fhir_provenance: str           # == fhir_consent_id; carried for API-layer stamping
     authorization_name: Optional[str] = None   # set only when action_taken == "revoked"
     transition: Optional[TransitionRecord] = None   # set only when action_taken == "revoked"
+
+
+@dataclass(frozen=True)
+class EncounterEventResult:
+    """Outcome of feeding one FHIR Encounter resource to handle_encounter_event().
+
+    action_taken is one of "fired" | "fired_no_match" | "no_op" — see the
+    module docstring's R26-R29 probe section for exactly what each means.
+    event_name/transition are set for "fired" and "fired_no_match" alike
+    (fire_event() was actually called in both); only "no_op" leaves them None.
+    """
+    fhir_encounter_id: str
+    fhir_status: str
+    action_taken: str              # "fired" | "fired_no_match" | "no_op"
+    message: str
+    fhir_provenance: str           # == fhir_encounter_id; carried for API-layer stamping
+    event_name: Optional[str] = None                # None only when action_taken == "no_op"
+    transition: Optional[TransitionRecord] = None    # None only when action_taken == "no_op"
 
 
 def handle_consent_event(
@@ -139,4 +206,87 @@ def handle_consent_event(
             "R31 handles 'inactive', R30 handles 'active' as a no-op)."
         ),
         fhir_provenance=consent_id,
+    )
+
+
+def handle_encounter_event(
+    encounter: dict,
+    runtime: Runtime,
+    event_name: str = ENCOUNTER_CONCLUDED_EVENT,
+) -> EncounterEventResult:
+    """
+    Apply a FHIR R4 Encounter resource event to `runtime`.
+
+    status == "finished" (R26-R29 probe): fires `event_name` (default
+      'encounterConcluded') via Runtime.fire_event(). Runtime.fire_event()
+      never raises for an unmatched event name, so this branch inspects the
+      returned TransitionRecord.effects to distinguish a genuine activation
+      ("fired") from a fire that matched no token's triggered_by
+      ("fired_no_match") — see module docstring for full detail. Both
+      outcomes carry the real transition on the result; only the true
+      no-op below (status not "finished") leaves transition as None.
+    status == "cancelled" or "entered-in-error": raises ValueError — no
+      clinical decision occurred; this is a bootstrap-time integrity gap,
+      not a recoverable no-op (mirrors extract_encounter_context's
+      existing error philosophy, fhir_mapper.py).
+    any other status (planned/arrived/triaged/in-progress/onleave/unknown):
+      no-op; not yet handled by this handler. fire_event() is not called.
+
+    Raises ValueError if the Encounter resource is missing 'id' or 'status',
+    or if status is 'cancelled'/'entered-in-error'.
+    """
+    encounter_id = encounter.get("id")
+    status = encounter.get("status")
+    if not encounter_id:
+        raise ValueError("Encounter resource missing required 'id' field")
+    if not status:
+        raise ValueError("Encounter resource missing required 'status' field")
+
+    if status == "finished":
+        tr = runtime.fire_event(event_name, source=f"fhir:Encounter/{encounter_id}")
+        if tr.effects:
+            return EncounterEventResult(
+                fhir_encounter_id=encounter_id,
+                fhir_status=status,
+                action_taken="fired",
+                message=(
+                    f"Encounter '{encounter_id}' status=finished: fired event "
+                    f"'{event_name}', activating: {'; '.join(tr.effects)}."
+                ),
+                fhir_provenance=encounter_id,
+                event_name=event_name,
+                transition=tr,
+            )
+        return EncounterEventResult(
+            fhir_encounter_id=encounter_id,
+            fhir_status=status,
+            action_taken="fired_no_match",
+            message=(
+                f"Encounter '{encounter_id}' status=finished: fired event "
+                f"'{event_name}', but no token in the current spec has "
+                f"triggered_by='{event_name}' — nothing was activated."
+            ),
+            fhir_provenance=encounter_id,
+            event_name=event_name,
+            transition=tr,
+        )
+
+    if status in ("cancelled", "entered-in-error"):
+        raise ValueError(
+            f"Encounter '{encounter_id}' status='{status}': no clinical "
+            "decision occurred — this is a bootstrap-time integrity gap, "
+            "not a recoverable no-op (mirrors extract_encounter_context's "
+            "error philosophy, fhir_mapper.py)."
+        )
+
+    return EncounterEventResult(
+        fhir_encounter_id=encounter_id,
+        fhir_status=status,
+        action_taken="no_op",
+        message=(
+            f"Encounter '{encounter_id}' status='{status}' is not handled "
+            "by this event handler (only 'finished' fires an event; "
+            "'cancelled' and 'entered-in-error' raise ValueError)."
+        ),
+        fhir_provenance=encounter_id,
     )

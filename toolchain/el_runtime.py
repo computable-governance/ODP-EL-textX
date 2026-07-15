@@ -16,6 +16,7 @@ from el_engine import (
     TransitionRecord,
     advance as _engine_advance,
     enroll,
+    fire_event as _engine_fire_event,
     grant_token,
     initial_state,
     revoke_authorization as _engine_revoke_authorization,
@@ -215,6 +216,24 @@ class Runtime:
         """Withdraw a revocable Authorization and append the event to the ledger. (AM-31)"""
         new_state, record = _engine_revoke_authorization(
             self._state, self._spec, authorization_name
+        )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def fire_event(self, event_name: str, source: str = "external") -> TransitionRecord:
+        """
+        Directly fire a named event against the current state, activating any
+        token whose triggered_by matches it — without requiring an Action/emits.
+        Used for externally-driven events (e.g. FHIR resource state changes)
+        that have no corresponding DSL action, mirroring revoke_authorization()'s
+        direct-call pattern (AM-31) rather than routing through advance().
+
+        `source` documents the event's origin in the ledger (e.g. a FHIR
+        resource reference) since there is no DSL actor performing this event.
+        """
+        new_state, record = _engine_fire_event(
+            self._state, self._spec, event_name, source
         )
         self._state = new_state
         self._ledger.append(record)

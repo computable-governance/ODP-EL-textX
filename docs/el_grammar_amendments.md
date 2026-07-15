@@ -2343,3 +2343,146 @@ plausible across a larger federation of communities.
 
 **Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
 `toolchain/el_parser.py`, `docs/el_grammar_amendments.md` (this entry).
+
+---
+
+## AM-39 (2026-07-15) — Encounter.status=finished triggers referralInitiationBurden activation via Runtime.fire_event() (R26-R29 probe)
+
+**Standard references:** ODP Part 2 §8.4 (events), ISO 15414 §6.4/§7.8
+(DeonticToken lifecycle).
+
+**Rationale:**
+`referralInitiationBurden` should not be treated as in force until the
+originating clinical Encounter concludes. Rather than a Python-side
+conditional, this reuses the existing-but-previously-untested AM-22
+`triggered_by`/`EventDecl` mechanism (Step 7c), extended with a new
+direct-call path (`Runtime.fire_event()`) for externally-driven events
+that have no corresponding DSL action — mirroring AM-31's
+`revoke_authorization()` direct-call pattern rather than routing through
+`advance()`.
+
+**Note on prior state:** Step 7c (`el_engine.py`'s event-triggered
+activation, AM-22, commit `18b243dd`, 2026-06-05) and its companion
+`event_discharged` discharge path were fully implemented but had zero test
+coverage anywhere in the repo before this amendment — see
+`docs/CONCEPTS_INDEX.md`, "Event-triggered activation (Step 7c) —
+implemented but untested" (logged separately, commit `88633a4`). That
+same entry also logs an unresolved symmetry gap between this engine-level
+mechanism and the Kripke layer's independent `WAITING`/P6 cascade (built 8
+days apart, 2026-06-13, never cross-referenced with AM-22). This amendment
+is the first thing in the repo to actually exercise Step 7c end-to-end.
+
+**Scenario changes (`scenarios/referral/referral_scenario.el`):**
+- Added `event encounterConcluded` to `GPPracticeCommunity`'s events list
+  (alongside the existing `event referralSubmitted`), described as fired
+  directly from Python via `Runtime.fire_event()`, not emitted by any DSL
+  action.
+- Added `triggered_by: encounterConcluded` to the top-level
+  `referralInitiationBurden` `DeonticToken` declaration. This is the first
+  real, parseable usage of `DeonticToken.triggered_by` in the repo — the
+  only prior occurrences of the literal text `triggered_by` were in
+  `scenarios/ecommerce/ecommerce_scenario.el`'s `violation_response`
+  blocks, which use a field set (`violated_by`, `condition`,
+  `violation_type`, `notifies`) that does not match the current
+  `ViolationResponse` grammar rule at all (unrelated construct, and that
+  file has a separate pre-existing syntax error, CLAUDE.md §4/§9).
+  Confirmed by parse: the cross-community `[EventDecl]` reference resolves
+  correctly (AM-22's changelog entry had flagged this as an unconfirmed
+  risk — "textX global resolution will attempt to resolve across the
+  whole spec... a scope provider will be added in a follow-up amendment
+  [if needed]" — no scope provider was needed).
+
+**el_engine.py changes:**
+- Step 7c's inline activation logic extracted into a shared helper
+  `_activate_triggered_tokens(spec, tokens, event_name)`, called both by
+  `advance()` Step 7c (action-driven, via `Action.emits`) and the new
+  `fire_event(state, spec, event_name, source="external")` (direct-call).
+  Pure refactor of Step 7c — confirmed behavior-identical via a regression
+  test (`test_step7c_activates_token_via_action_emits`) and via `git
+  blame` showing every line of the pre-refactor block traced to the
+  original AM-22 commit with no intervening edits.
+- New `fire_event(state, spec, event_name, source="external")`: directly
+  fires a named event against `state`, activating any token whose
+  `triggered_by` matches it, without requiring an `Action`/`emits`.
+  Mirrors `revoke_authorization()`'s direct-call pattern (AM-31): no
+  calling actor exists the way `advance()` has one, so `source` documents
+  the event's origin in the returned `TransitionRecord.actor_name`
+  (analogous to `advance()`'s `actor_name` parameter) instead of
+  attributing it to an `EnterpriseObject`. `source` defaults to
+  `"external"`; this module stays domain-generic and assumes nothing
+  about the calling context (no FHIR-specific strings in `el_engine.py`).
+  Never raises for an unmatched event name — see `fhir_event_handler.py`
+  changes below for how that's surfaced.
+
+**el_runtime.py changes:**
+- New `Runtime.fire_event(event_name, source="external")`: thin wrapper
+  matching `revoke_authorization()`'s pattern exactly — imports
+  `fire_event` from `el_engine.py` as `_engine_fire_event`, calls it,
+  updates `self._state`, appends the `TransitionRecord` to `self._ledger`,
+  returns the record.
+
+**fhir_event_handler.py changes:**
+- New `ENCOUNTER_CONCLUDED_EVENT = "encounterConcluded"` module constant
+  (scenario-specific default, same pattern as the existing
+  `PATIENT_DATA_AUTHORIZATION` constant).
+- New `EncounterEventResult` dataclass, matching `ConsentEventResult`'s
+  shape/spirit (`fhir_encounter_id`, `fhir_status`, `action_taken`,
+  `message`, `fhir_provenance`, `event_name`, `transition`).
+- New `handle_encounter_event(encounter, runtime, event_name=
+  ENCOUNTER_CONCLUDED_EVENT)`:
+  - `status == "finished"` fires the event via `Runtime.fire_event()` and
+    distinguishes `action_taken="fired"` (genuine activation —
+    `TransitionRecord.effects` non-empty) from `action_taken=
+    "fired_no_match"` (event fired, tick advanced, ledger entry recorded,
+    but no token's `triggered_by` matched — `effects` empty). This
+    distinction exists because `Runtime.fire_event()` never raises on an
+    unmatched event name, unlike `revoke_authorization()`; without it,
+    "fired and matched nothing" would be indistinguishable from "fired and
+    activated something," silently masking a mis-wired or typo'd event
+    name. Both outcomes carry the real `transition`/`event_name` on the
+    result.
+  - `status in ("cancelled", "entered-in-error")` raises `ValueError` — no
+    clinical decision occurred; a bootstrap-time integrity gap, not a
+    recoverable no-op, mirroring `extract_encounter_context()`'s existing
+    error philosophy (`fhir_mapper.py`, R26-R29).
+  - Any other status is `action_taken="no_op"`; `fire_event()` is not
+    called, and `event_name`/`transition` stay `None`.
+  - Missing `'id'`/`'status'` on the input resource raises `ValueError`,
+    matching `handle_consent_event()`.
+
+**Tests (`tests/test_referral_event_triggers.py`, new file, 11 tests):**
+- `_activate_triggered_tokens()` directly — matching token activates,
+  unrelated token with no `triggered_by` is untouched, and an unmatched
+  event name is a no-op that leaves tokens/log empty.
+- `advance()` Step 7c end-to-end, via a minimal synthetic spec
+  (`parse_string()`, not a fixture file) — no scenario in the repo pairs a
+  real `emits` with a matching `triggered_by`, so this is the only test
+  exercising a genuine `Action.emits` → token activation.
+- `Runtime.fire_event()` directly, including the default `source`
+  parameter and the unmatched-event no-op case.
+- `handle_encounter_event()` round-trip: `status="finished"` activating a
+  real `pending`-state token (not the scenario's default `active` state —
+  a manually-overridden `TokenInstance`, so the transition being tested is
+  real, not a same-value no-op), the `"fired_no_match"` distinction, and
+  both `ValueError` paths (`cancelled`/`entered-in-error`, missing
+  `id`/`status`).
+- Mutation-checked: confirmed these tests fail (`ImportError: cannot
+  import name 'fire_event'`) when run against `el_engine.py` reverted to
+  its pre-Step-2/3 state via `git stash`; confirmed byte-identical
+  restoration (`git stash pop`, diff compared hash-for-hash against the
+  approved version) and 56/56 passing afterward.
+
+**Note on scope:** this is a probe-tier implementation of item #1
+(`docs/CONCEPTS_INDEX.md`, "Toolchain implementation priority
+sequencing") — it wires the mechanism end-to-end for
+`referralInitiationBurden` specifically, but does NOT implement the full
+Encounter.status-driven token-state seeding design (a complete
+status→state mapping table across all nine FHIR Encounter statuses,
+deadline computation, etc.). That remains future work under item #1.
+
+**Files changed:** `scenarios/referral/referral_scenario.el`,
+`toolchain/el_engine.py`, `toolchain/el_runtime.py`,
+`toolchain/fhir_event_handler.py`, `tests/test_referral_event_triggers.py`
+(new), `docs/el_grammar_amendments.md` (this entry).
+
+**Status:** CONFIRMED
