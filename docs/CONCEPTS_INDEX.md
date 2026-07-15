@@ -1010,6 +1010,14 @@ FHIR-mapping critical path with the AIVendor gap and later-stage items:
 1. Encounter.status-driven token-state seeding (needs design pass: status→state
    mapping table, edge cases for `cancelled`/`entered-in-error`, explicit boundary
    against R30 Option B)
+
+   **Update 2026-07-15:** A probe-tier implementation now exists — see AM-39
+   (commit `7699baa`). This wires the mechanism end-to-end for
+   referralInitiationBurden specifically (Encounter.status=finished fires an
+   event via the new Runtime.fire_event(), activating the burden), but does
+   NOT implement the full status→state mapping design described above (all
+   nine FHIR Encounter statuses, deadline computation, etc.). That full design
+   remains outstanding under this item.
 2. R30 Option B (live grant/reinstate) — optional, deferred unless a demo
    narrative needs it
 3. `FHIRConsentMapper` flat-community gap — fix shape undecided
@@ -1059,3 +1067,22 @@ design choice — no commit message or amendments-log entry asserts intended
 symmetry or explains the discrepancy. Worth keeping in mind for any future
 work that touches either side: changes to one do not automatically apply to
 the other, and there is currently no shared abstraction between them.
+
+---
+
+## Amendments-log gap — AM-34 through AM-37 missing; dangling AM-34 reference
+
+`docs/el_grammar_amendments.md` has no entries for AM-34 through AM-37 —
+AM-33 is the last logged entry before AM-38 (which, per its own commit
+96b7795, only ever touched `toolchain/fhir_mapping_table.md` and was never
+meant to be logged here) and AM-39 (this session, commit `7699baa`).
+Despite this, `toolchain/fhir_event_handler.py`'s own module docstring
+references "AM-34 in docs/el_grammar_amendments.md" (in the R30 section) —
+a currently dangling pointer to an entry that was never written. Per
+CLAUDE.md's Key Invariant #3 (every grammar amendment must be logged),
+this is a real, pre-existing gap, surfaced while adding AM-39, not
+introduced by it. Not fixed as part of this session — worth either
+backfilling AM-34–37 from git history if their content can be
+reconstructed, or correcting the dangling reference in
+fhir_event_handler.py to point somewhere accurate, whenever there's
+bandwidth.
