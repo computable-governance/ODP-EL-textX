@@ -1068,6 +1068,52 @@ symmetry or explains the discrepancy. Worth keeping in mind for any future
 work that touches either side: changes to one do not automatically apply to
 the other, and there is currently no shared abstraction between them.
 
+## Engine/Kripke unification — what a shared design would and wouldn't merge
+
+Following up on the symmetry gap above: the operational/modal split itself
+is legitimate and shouldn't be merged — `el_engine.py` models one concrete
+`WorldState` advancing step by step (what actually happened); `el_kripke.py`
+explores a branching reachability graph via BFS (what could happen, per
+AF/EF). Collapsing those would blur the compelled-vs-detectable distinction
+that's the paper's central finding.
+
+What *did* diverge unnecessarily, and could be factored out without
+threatening that split:
+
+1. **A single canonical state vocabulary.** `TokenInstance.state` (plain
+   string) and `ObligationState` (typed enum) are two independent
+   representations of the same idea, bridged only by a hand-written
+   ternary in `build_kripke_from_runtime()` — exactly the kind of seam
+   where a case can silently go missing (see open question below on
+   whether `WAITING` is ever actually reachable from that function).
+2. **A single event-matching function.** `_activate_triggered_tokens()`
+   (engine) and the Kripke P6a cascade both answer "given an event name,
+   which tokens does it activate?" via two independently written
+   implementations — one over live tokens, one over hypothetical
+   `ObligationDescriptor`s. If the matching logic itself lived in one
+   shared function, both layers could call into it and could not
+   disagree about which tokens relate to which events; only how each
+   layer *processes* that shared fact (commit vs. explore) would differ.
+
+A from-scratch version might look like a shared module owning the state
+enum and the trigger-matching function, with `advance()`/`fire_event()` and
+the Kripke BFS step both built as thin layers over it — one committing to
+a single transition per call, one exploring all reachable ones. The
+anchoring function (`build_kripke_from_runtime()`) would then be closer to
+a formality than a hand-maintained classification with room to drift.
+
+**Open question, not yet confirmed:** does `build_kripke_from_runtime()`
+(the hybrid mode, anchored to a live runtime) ever produce
+`ObligationState.WAITING`, or is `WAITING` only reachable from a separate,
+pure spec-only world-builder that doesn't involve a runtime at all? If
+the hybrid mode never produces `WAITING`, a pending→active transition via
+`Runtime.fire_event()` would be invisible to that proof mode's output —
+worth a targeted recon before relying on `Runtime.fire_event()` as any kind
+of bridge between the two layers, which it currently is not.
+
+Not scheduled — this is a forward-looking design note, useful the next
+time either layer is touched, not urgent work.
+
 ---
 
 ## Amendments-log gap — AM-34 through AM-37 missing; dangling AM-34 reference
