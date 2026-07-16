@@ -1114,6 +1114,50 @@ of bridge between the two layers, which it currently is not.
 Not scheduled — this is a forward-looking design note, useful the next
 time either layer is touched, not urgent work.
 
+## TokenGroup/any_discharged coordination semantics — Kripke-only, not enacted by operational engine
+
+Confirmed via direct grep (2026-07-16): `el_engine.py` contains zero
+references to `TokenGroup`, `any_discharged`, or `SUPERSEDED` — and zero
+imports of `el_kripke.py`/`el_domain.py` at all (stdlib-only dependencies
+confirmed). The `TokenGroup`/`any_discharged`/`SUPERSEDED` coordination
+semantics (AM-26/27, commit `894afdbd`, explicitly titled "coordination
+semantics in Layer 4 Kripke verifier") exist only in the Kripke/
+verification layer and the grammar — never in the live operational engine
+that `coordination-simulator.html` actually calls (`get_available_actions`/
+`execute_action` via `Runtime`).
+
+**Practical implication:** if a `.el` scenario declares an `any_discharged`
+`TokenGroup`, the Kripke layer can prove that one sibling's discharge
+suppresses the others (SUPERSEDED) — but the live engine has no code path
+that ever produces this suppression. A real running instance would let
+every sibling burden sit independently dischargeable, indefinitely,
+contradicting what the construct's name and the Kripke-side proof imply.
+
+**Not yet checked:** whether any current `.el` scenario (referral,
+ecommerce, consent, etc.) actually declares an `any_discharged`
+`TokenGroup` — if one does, its live-demo behavior is currently silently
+non-functional for this specific coordination guarantee.
+
+**Relation to other findings this session:** a sharper, more consequential
+instance of the operational/verification divergence documented in
+"Engine/Kripke event-model symmetry gap" and
+`docs/OPERATIONAL_VS_VERIFICATION_SEMANTICS.md` (commit `9b48284`) — not a
+shared-but-inconsistent implementation (like triggered_by/Step 7c vs
+WAITING/P6), but a construct implemented on only one side at all.
+
+**Paper relevance:** directly relevant to the arXiv revision already
+committed to reviewers (`reviewer_response.md`) distinguishing
+specification-level verification from runtime-level enforcement — a
+concrete, checkable example supporting exactly that qualification.
+Candidate addition to the Limitations section. The already-submitted
+workshop paper (`soea4ee26.tex`) makes no claims referencing
+`TokenGroup`/`any_discharged`/coordination — confirmed via grep, zero
+matches — so this finding does not affect its correctness.
+
+Not scheduled for implementation — logging only. Checking current
+scenarios for actual `any_discharged` usage is a reasonable next step
+before any implementation decision.
+
 ---
 
 ## Amendments-log gap — AM-34 through AM-37 missing; dangling AM-34 reference
