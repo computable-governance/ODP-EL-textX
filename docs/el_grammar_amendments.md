@@ -2486,3 +2486,102 @@ deadline computation, etc.). That remains future work under item #1.
 (new), `docs/el_grammar_amendments.md` (this entry).
 
 **Status:** CONFIRMED
+
+---
+
+## AM-40 (2026-07-19) — Domain controlling_object/controlled_object as roles
+
+**Status:** PROPOSED, not yet implemented. This entry records the design
+only — `grammar/v2/el_grammar.tx`, `toolchain/el_parser.py`,
+`toolchain/el_validator.py`, and `scenarios/referral/referral_scenario.el`
+are all untouched by this amendment.
+
+**Standard reference:** §7.5.1 — "An <X>-domain community comprises an
+<X>-domain of enterprise objects in the roles of controlled objects and an
+enterprise object in the role of controlling object."
+
+**Problem:** `Domain`'s `controlling_object`/`controlled_object` are
+currently implemented as bare `EnterpriseObject` references, with no role
+machinery at all:
+```
+DomainControllingObj: 'controlling_object' ':' obj=[EnterpriseObject]
+DomainControlledObj:  'controlled_object' ':' obj=[EnterpriseObject]
+```
+This conflicts with the standard's own language quoted above — explicit
+role language, not fixed object slots.
+
+**Blast radius check (2026-07-19):** `controlling_object`/
+`controlled_object` have zero references in `el_kripke.py`,
+`el_engine.py`, `el_reasoner.py`, `el_validator.py`, or `el_api.py` — only
+`el_parser.py`'s P8 processor and `referral_scenario.el`'s
+`PatientDataDomain` use them. This is a grammar + parser + one migrated
+scenario change, not a runtime rewrite.
+
+**Proposed grammar (`grammar/v2/el_grammar.tx`):**
+```
+DomainBodyItem:
+    DomainControllingRole | DomainControlledRole | DomainRoleFiller
+    | PolicyRef | NormativePolicyRef | Lifecycle
+;
+
+DomainControllingRole:
+    'controlling_role' role=Role
+;
+
+DomainControlledRole:
+    'controlled_role' role=Role
+;
+
+DomainRoleFiller:
+    obj=[EnterpriseObject] 'fills' role=[Role]
+    ('via' via=[Federation])?
+;
+```
+
+**Design rationale:**
+- Reuses the existing `Role` rule (interface?/isa/description/
+  `RoleBodyItem`) rather than inventing a new role type.
+- The "X fills role Y" idiom is not new — it generalizes `MemberRef`'s
+  existing `('fills' fills=[Role])?` field (currently Community-fills-Role
+  for federation membership) to EnterpriseObject-fills-Role for domains.
+- `via=[Federation]` is the one genuinely new field: it lets a
+  controlled-object filler trace back to whichever federation authorized
+  it — needed for domains that aggregate fillers arriving from multiple
+  distinct peer federations (the AIVendor N-peer case — see
+  `docs/CONCEPTS_INDEX.md`, AIVendor entry, 2026-07-19 update).
+- Considered and rejected: a labelled `filler:` keyword. Rejected in
+  favour of the bare fills-statement above, to stay consistent with the
+  one existing precedent (`MemberRef`) rather than introduce a second,
+  differently-shaped idiom for the same underlying concept.
+
+**Migration required (not part of this amendment):**
+`referral_scenario.el`'s `PatientDataDomain` needs rewriting under this
+grammar once it lands. Per a separate 2026-07-19 design decision logged in
+`docs/CONCEPTS_INDEX.md` (Domain entry), `PatientDataDomain` should
+actually be split into two overlapping domains
+(`PatientDataAuthorshipDomain` and `PatientDataConsentDomain`) rather than
+migrated as a single domain — treat that split as a follow-on
+scenario-file change after AM-40's grammar lands, not part of this
+amendment itself.
+
+**Validator impact (not yet implemented):** V-NEW-04 (currently: at least
+one `controlling_object`, at least one `controlled_object`) needs
+updating to check for role-based fillers instead. Do not add a
+cardinality constraint requiring exactly one controlling-role filler —
+this is explicitly unresolved (checked: not settled by the standard, not
+settled by any current scenario) and should stay open rather than be
+silently enforced.
+
+**Open questions, recorded not resolved:**
+1. Should `controlling_role`/`controlled_role` embed the full `Role` type
+   (interface/isa/description/body items) or would a lighter
+   bare-name-only form suffice for current use cases? Full `Role` costs
+   nothing extra grammatically; left open for the AIVendor probe to
+   stress-test.
+2. Controlling-role filler cardinality (one vs many) remains unresolved
+   by the standard.
+
+**Files changed:** `docs/el_grammar_amendments.md` (this entry only). No
+grammar, parser, validator, or scenario files touched in this pass.
+
+**Status:** PROPOSED
