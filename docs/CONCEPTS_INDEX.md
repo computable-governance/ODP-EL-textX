@@ -110,6 +110,67 @@ as communities, represented by CommunityObjects for federation
 participation (AM-26). `domain` is reserved for genuine future
 cross-cutting cases — not used in the unified referral scenario.
 
+**Gap found 2026-07-19:** `PatientDataDomain`'s `controlling_object:
+GPPractice` has no documented rationale anywhere in this file or
+`el_grammar_amendments.md` — checked both, zero hits. This predates a
+needed split (see below) and should not be read as settled design intent.
+
+**Settled 2026-07-19 — PatientDataDomain splits into two overlapping
+domains.** Rather than one domain with multiple controlling roles,
+`PatientDataDomain` should become two domains with different
+characterizing relationships and different controlling objects:
+- `PatientDataAuthorshipDomain` — characterizing relationship: authorship/
+  ownership of the clinical record (copyright-like). Controlling object
+  `GPPractice` (for `GPClinician`) and `SpecialistPractice` (for
+  `SpecialistClinician`/`SpecialistAIAgent`) — assuming, for now, both
+  clinicians are employees (not independent contractors) of their
+  respective practices.
+- `PatientDataConsentDomain` — characterizing relationship: consent-governed
+  use of the record. Controlling object `Patient`.
+
+Grounded directly in the standard, not inferred: X.902 §10.3 note 2 states
+domains can be disjoint or overlapping; the Annex B.1.5.9 worked example
+shows the same object set governed by multiple overlapping policy domains
+with different controlling objects and no hierarchy implied between them.
+An object subject to more than one domain must conform to all of their
+policies concurrently (§7.4 NOTE, objects governed by multiple communities'
+policies at once).
+
+The employee/contractor fork is deliberately deferred, not resolved. If
+later revisited: contractor status shifts data ownership from practice to
+clinician per general agency-law default (employee records generally owned
+by employer; independent contractor generally owns their own patients'
+records as part of their own business) — this would need per-clinician or
+even per-record granularity rather than a single static `controlling_object`
+per domain, and a lifecycle-triggered succession/transfer mechanism (Domain
+already has `lifecycle` from AM-33) for what happens to authorship-domain
+membership when a contractor's engagement ends. Not being built now —
+logged so it isn't rediscovered from scratch later.
+
+**AM-40 syntax direction (2026-07-19, still pending):** Domain's
+`controlling_object`/`controlled_object` are currently bare object
+references with no role machinery at all — §7.5.1 explicitly says "roles
+of controlled objects... role of controlling object," so these should
+become genuine roles. The role-filling statement should NOT introduce a
+new `filler:` keyword — it should reuse the `fills` idiom already
+established by `MemberRef` (`community fills role`), applied to
+`EnterpriseObject` instead of `Community`, as a bare, unlabelled
+`DomainBodyItem`:
+
+    obj=[EnterpriseObject] 'fills' role=[Role] ('via' via=[Federation])?
+
+`via` is genuinely new vocabulary — nothing existing lets a domain
+role-filling trace back to the federation that authorized it. `fills` is
+not new; it's `MemberRef`'s existing pattern generalized.
+
+**Open (2026-07-19):** controlling-role cardinality — can more than one
+object fill a controlling role in a single domain? — remains genuinely
+unresolved by the standard, and is NOT settled by the
+`PatientDataAuthorshipDomain`/`SpecialistPractice` case above, since that
+case is resolved via two overlapping single-controller domains rather than
+by one domain needing multiple controlling fillers. Logged as still open
+for any future case that might need it.
+
 ---
 
 ## Federation (community type)
@@ -279,6 +340,38 @@ split is also an independent, external, industry-practitioner
 confirmation of the Enterprise-vs-Information viewpoint boundary in
 `five_viewpoint_dsl_position_note.tex` — worth a citation there if that
 paper thread is revisited, not urgent.
+
+**Update 2026-07-19 — consolidated N-peer probe design.**
+
+Three peer contract federations — `OEMVendorFederation`,
+`ThirdPartyVendorFederation`, `OperatorVendorFederation` — each pairing a
+`PlantCommunity`/`PlantObj` with one vendor's own `Community`/
+`CommunityObject`, each carrying its own `NormativePolicy` representing a
+pre-deployment provider duty. One shared `PlantGovernanceDomain` with
+`controlling_role` `plantAuthority` (filled by `Plant`) and
+`controlled_role` `deployedAgent` (filled by three agent instances, each
+`via=[Federation]` tracing back to whichever peer federation admitted it),
+carrying its own `NormativePolicy` representing the in-use/deployer safety
+duty.
+
+Deliberate modelling choice: AI agents get no intrinsic provider/deployer
+type marker — that character emerges purely from which federation/domain
+the agent is a member of (ODP-faithful: type membership emerging from
+role-filling, not an intrinsic label).
+
+Three motivating cases this mechanism is meant to generalize across, with
+`NormativePolicy.kind` varying per case:
+- Health/FHIR EU AI Act — `kind: legislation` on both the federation and
+  the domain side.
+- AU copyright/TDM — `kind: legislation` for the copyright-act
+  absence-of-TDM-exception side; `kind: contractual` for the
+  licensing-terms side.
+- Pieter van Schalkwyk's industrial N-peer case — `kind: contractual` for
+  vendor conformance agreements; `kind: standard`/`legislation` for in-use
+  machinery-safety obligations.
+
+Not yet written to any scenario file. Depends on AM-40 (Domain role-filling
+syntax — see the Domain entry) landing first.
 
 ---
 
@@ -885,6 +978,23 @@ asymmetric-vs-paired distinction for `principal_of` specifically was
 identified the same day, resolving the earlier-flagged semantic
 looseness (see "Party vs agent for clinicians" entry) more precisely
 than the caveat-comment first proposed.
+
+**Key learnings (2026-07-19):** `principal_of`/`delegated_from` (§6.6.8,
+formal agency) is a distinct question from data ownership. `GPPractice`'s
+existing `principal_of` `GPClinician` (with no reciprocal
+`delegated_from`) signals organisational affiliation without full
+agency, because `GPClinician` retains independent professional
+accountability — and this reasoning holds whether `GPClinician` is an
+employee or a contractor, i.e. neither engagement type should get
+`delegated_from`. Data ownership is a separate fact, properly
+represented via a `NormativePolicy` (`kind: contractual`, source citing
+the employment/engagement agreement or relevant legal default) attached
+to the authorship domain (see `PatientDataAuthorshipDomain`, Domain
+entry) — not via `principal_of`/`delegated_from`. Also logged: there is
+currently no grammar construct for recording a clinician's engagement
+type (employee vs. contractor) as a checkable fact — it can only live as
+prose in a `NormativePolicy.source` string today. Flagged as a future
+gap, not something to build now.
 
 ---
 
