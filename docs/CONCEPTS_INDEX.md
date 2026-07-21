@@ -373,6 +373,14 @@ Three motivating cases this mechanism is meant to generalize across, with
 Not yet written to any scenario file. Depends on AM-40 (Domain role-filling
 syntax — see the Domain entry) landing first.
 
+**Cross-reference (2026-07-19):** each peer federation's pre-deployment
+`NormativePolicy` and the shared domain's in-use `NormativePolicy` are
+exactly the kind of policy pair the enforcement-mode finding below is
+about — see the NormativePolicy scope entry's "Finding (2026-07-19)"
+paragraph for the proposed `enforcement: policed_pessimistic |
+policed_optimistic | unpoliced` field and why it stays distinct from
+`discharge_mode`.
+
 ---
 
 ## Concurrent multi-episode runtime
@@ -531,6 +539,68 @@ validator also permits Domain.
 
 **Open:** AM candidate — relax V-NEW-20 to permit NormativePolicy on any
 Community. Not yet drafted or implemented.
+
+**Finding (2026-07-19) — standard grounding for an enforcement-mode field
+on NormativePolicy.** ISO/IEC 15414 §7.9.4 ("Policy enforcement") states
+policies can be specified as policed and enforced, or unpoliced. If
+policed, enforcement is either pessimistic (preventative — mechanisms
+ensure obligated actions occur, prohibited actions don't, authorized
+actions aren't blocked; used when trust is low and potential damage is
+high) or optimistic (allow the action, detect and respond to
+non-compliance after the fact).
+
+This is a genuinely new field to propose adding to NormativePolicy, not
+yet implemented:
+
+    enforcement: policed_pessimistic | policed_optimistic | unpoliced
+
+Status: PROPOSED, not yet in `grammar/v2/el_grammar.tx`.
+
+Explicitly NOT the same concept as `discharge_mode` (strict/monitored) on
+DeonticToken, and should NOT be renamed or merged with it, despite the
+conceptual overlap. `discharge_mode` is a runtime/Kripke-model property of
+a specific token (is violation reachable by construction, or only
+observable after the fact) — already established, reader-facing
+vocabulary threaded through the arXiv paper, board UI, and figures,
+deliberately kept in plain language ("detectable" → "monitored", per an
+earlier revision). `NormativePolicy.enforcement` would instead be a
+policy/regulatory-level property, grounded in the cited source, of
+whether and how that obligation is meant to be enforced at all. The
+relationship: a policy's declared enforcement mode is the regulatory
+justification for a token's `discharge_mode` choice — e.g. a
+NormativePolicy citing the EU AI Act's conformity-assessment requirement
+would declare `enforcement: policed_pessimistic`, which is the reason a
+token it governs should get `discharge_mode: strict`. Keep the two
+concepts and their vocabulary distinct; do not collapse them.
+
+**Worked-example grounding.** ISO/IEC 15414 Annex B has exactly two
+worked examples: B.1 (e-commerce system) and B.2 (Templeman Library,
+University of Kent). B.2's borrowing regulations show a concrete
+enforcement/consequence chain: late return creates a financial charge
+(new obligation triggered by violation); continued non-payment escalates
+to suspension of borrowing privileges by the Librarian (identified
+authority revoking a permit). This is structurally identical to the
+already-implemented `patientDataAuthorization` /
+`patientRecordAccessEmbargo` pattern (revoke → embargo) — log that no new
+grammar construct is needed for the consequence chain itself, only the
+enforcement-mode label on NormativePolicy. The existing
+token/embargo/lifecycle machinery already covers "what happens on
+violation"; enforcement mode only needs to state the regulatory posture
+that machinery is satisfying.
+
+**Open question, recorded not resolved:** should there eventually be a
+validator check for consistency between a NormativePolicy's declared
+enforcement mode and the `discharge_mode` of the tokens it governs (e.g.
+flagging a `policed_pessimistic` policy governing a `monitored`-mode
+token as a mismatch worth surfacing)? Not building this now — logged so
+it isn't lost.
+
+**Positioning link:** this sharpens the AU AI-regulation positioning note
+(2026-07-19, `AU_AI_Regulation_NormativePolicy_Positioning_Note.md`) —
+NAIC's Guidance for AI Adoption would be `kind: guideline`,
+`enforcement: unpoliced`; the EU AI Act would be `kind: legislation`,
+`enforcement: policed_pessimistic`. Not just a different citation, a
+different enforcement posture.
 
 ---
 
