@@ -41,7 +41,7 @@ except ImportError as exc:
 # declare parent — use _ELNode for roots, _ELParentable for contained objects.
 # See el_domain.py base class hierarchy and Igor Dejanovic's recommendation (June 2026).
 
-from el_domain import DOMAIN_CLASSES
+from el_domain import DOMAIN_CLASSES, RoleFillerRef
 
 # ── Path resolution ──────────────────────────────────────────────────────────
 
@@ -197,6 +197,9 @@ def process_domain(domain):
 
     AM-33: Lifecycle item (if present) assigned to domain.lifecycle
     (field itself inherited from Community).
+    AM-40 (proposed): role-based controlling_role/controlled_role/fills
+    syntax populated alongside the existing object-reference syntax.
+    Both may be used; neither is required by this processor.
     """
     for item in domain.body_items:
         cls = type(item).__name__
@@ -204,6 +207,14 @@ def process_domain(domain):
             domain.controlling_objects.append(item.obj)
         elif cls == 'DomainControlledObj':
             domain.controlled_objects.append(item.obj)
+        elif cls == 'DomainControllingRole':
+            domain.controlling_roles.append(item.role)
+        elif cls == 'DomainControlledRole':
+            domain.controlled_roles.append(item.role)
+        elif cls == 'DomainRoleFiller':
+            domain.role_fillers.append(RoleFillerRef(
+                obj=item.obj, role=item.role, via=item.via,
+            ))
         elif cls == 'PolicyRef':
             domain.policy_refs.append(item)
         elif cls == 'NormativePolicyRef':     # AM-28

@@ -731,7 +731,9 @@ Domain:
 ;
 
 DomainBodyItem:
-    DomainControllingObj | DomainControlledObj | PolicyRef | NormativePolicyRef | Lifecycle
+    DomainControllingObj | DomainControlledObj
+    | DomainControllingRole | DomainControlledRole | DomainRoleFiller
+    | PolicyRef | NormativePolicyRef | Lifecycle
 ;
 
 DomainControllingObj:
@@ -740,6 +742,31 @@ DomainControllingObj:
 
 DomainControlledObj:
     'controlled_object' ':' obj=[EnterpriseObject]
+;
+
+/*
+ * AM-40 (proposed 2026-07-19, grammar landed <date TBD>) — role-based
+ * alternative to DomainControllingObj/DomainControlledObj, added
+ * alongside the object-reference syntax above (both remain valid; a
+ * domain may use either). §7.5.1: "...enterprise objects in the roles
+ * of controlled objects and an enterprise object in the role of
+ * controlling object." DomainRoleFiller's 'fills' idiom generalizes
+ * MemberRef's existing ('fills' fills=[Role])? field from
+ * Community-fills-Role to EnterpriseObject-fills-Role; 'via' is the one
+ * new field, tracing a filler back to the federation that admitted it
+ * (see docs/el_grammar_amendments.md, AM-40).
+ */
+DomainControllingRole:
+    'controlling_role' role=Role
+;
+
+DomainControlledRole:
+    'controlled_role' role=Role
+;
+
+DomainRoleFiller:
+    obj=[EnterpriseObject] 'fills' role=[Role]
+    ('via' via=[Federation])?
 ;
 
 

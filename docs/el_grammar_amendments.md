@@ -2491,10 +2491,11 @@ deadline computation, etc.). That remains future work under item #1.
 
 ## AM-40 (2026-07-19) — Domain controlling_object/controlled_object as roles
 
-**Status:** PROPOSED, not yet implemented. This entry records the design
-only — `grammar/v2/el_grammar.tx`, `toolchain/el_parser.py`,
-`toolchain/el_validator.py`, and `scenarios/referral/referral_scenario.el`
-are all untouched by this amendment.
+**Status:** PARTIALLY IMPLEMENTED (2026-07-21) — grammar, parser, and
+validator support both syntaxes; `PatientDataDomain` migration and
+old-syntax removal still pending. See "Implementation notes" below for
+what actually landed and how it differs from the original proposal text
+that follows.
 
 **Standard reference:** §7.5.1 — "An <X>-domain community comprises an
 <X>-domain of enterprise objects in the roles of controlled objects and an
@@ -2517,7 +2518,7 @@ role language, not fixed object slots.
 `PatientDataDomain` use them. This is a grammar + parser + one migrated
 scenario change, not a runtime rewrite.
 
-**Proposed grammar (`grammar/v2/el_grammar.tx`):**
+**Proposed grammar (`grammar/v2/el_grammar.tx`), as originally drafted:**
 ```
 DomainBodyItem:
     DomainControllingRole | DomainControlledRole | DomainRoleFiller
@@ -2537,6 +2538,20 @@ DomainRoleFiller:
     ('via' via=[Federation])?
 ;
 ```
+**Correction — what actually landed differs in one respect:** the scope
+for this session's implementation pass was explicitly dual-syntax, not a
+replacement — see "Implementation notes" below. `DomainControllingRole`,
+`DomainControlledRole`, and `DomainRoleFiller` are exactly as drafted
+above; `DomainBodyItem` instead reads:
+```
+DomainBodyItem:
+    DomainControllingObj | DomainControlledObj
+    | DomainControllingRole | DomainControlledRole | DomainRoleFiller
+    | PolicyRef | NormativePolicyRef | Lifecycle
+;
+```
+keeping `DomainControllingObj`/`DomainControlledObj` (§ Problem, above) as
+live alternatives rather than removing them.
 
 **Design rationale:**
 - Reuses the existing `Role` rule (interface?/isa/description/
@@ -2564,13 +2579,33 @@ migrated as a single domain — treat that split as a follow-on
 scenario-file change after AM-40's grammar lands, not part of this
 amendment itself.
 
-**Validator impact (not yet implemented):** V-NEW-04 (currently: at least
-one `controlling_object`, at least one `controlled_object`) needs
-updating to check for role-based fillers instead. Do not add a
-cardinality constraint requiring exactly one controlling-role filler —
-this is explicitly unresolved (checked: not settled by the standard, not
-settled by any current scenario) and should stay open rather than be
-silently enforced.
+**Validator impact — corrected (2026-07-21):** this entry originally
+claimed a rule numbered V-NEW-04 already existed, checking "at least one
+`controlling_object`, at least one `controlled_object`," and needed
+updating. That claim was checked against `toolchain/el_validator.py` at
+implementation time and found to be **factually wrong** — no rule under
+any name enforced controlling/controlled-object presence on Domain prior
+to this session; `V-NEW-04` does not appear anywhere in the file. The
+original text was itself part of the proposal, not a description of
+current state, and should not have been read as one.
+
+What was actually added: a new rule, `V-NEW-21` (chosen as the next
+available number after the existing `V-NEW-19`/`V-NEW-20`, not reused
+from the incorrect `V-NEW-04` reference), since none existed before. It
+passes a Domain if EITHER at least one `controlling_object` AND at least
+one `controlled_object` are declared (old syntax), OR at least one
+`controlling_role` AND at least one `controlled_role` are each filled by
+a `DomainRoleFiller` resolving to that role (new syntax) — either syntax
+alone is sufficient. Role-filler matches are checked by object identity
+(`is`) against the domain's own `controlling_roles`/`controlled_roles`,
+not by name string or `==`: `role=[Role]` cross-references resolve
+globally (no custom `scope_provider`, same as `MemberRef.fills`), and
+these dataclasses use default value-based `__eq__`, so either a
+name-string or an `in`/`==` check would risk a false positive from a
+same-named role declared in a different domain. No cardinality
+constraint requiring exactly one controlling-role filler was added — this
+remains explicitly unresolved (see Open questions, below) and stays open
+rather than silently enforced.
 
 **Open questions, recorded not resolved:**
 1. Should `controlling_role`/`controlled_role` embed the full `Role` type
@@ -2581,7 +2616,50 @@ silently enforced.
 2. Controlling-role filler cardinality (one vs many) remains unresolved
    by the standard.
 
-**Files changed:** `docs/el_grammar_amendments.md` (this entry only). No
-grammar, parser, validator, or scenario files touched in this pass.
+**Implementation notes (2026-07-21) — dual-syntax landing:**
+Scope for this pass was deliberately narrow: add the new syntax alongside
+the old one, touch nothing else. Specifically out of scope and untouched:
+`referral_scenario.el`'s `PatientDataDomain` migration (see "Migration
+required," above — still deferred), and removal of the old
+`controlling_object`/`controlled_object` syntax (no removal is planned
+until migration happens).
 
-**Status:** PROPOSED
+- `grammar/v2/el_grammar.tx` — `DomainBodyItem` extended (not replaced;
+  see the "Correction" note above); `DomainControllingRole`,
+  `DomainControlledRole`, `DomainRoleFiller` added exactly as drafted.
+- `toolchain/el_domain.py` — `DomainControllingRole`, `DomainControlledRole`,
+  `DomainRoleFiller` domain classes added and registered in
+  `DOMAIN_CLASSES`; `Domain` gained `controlling_roles`, `controlled_roles`,
+  `role_fillers` fields (populated alongside the existing
+  `controlling_objects`/`controlled_objects`, not replacing them). A
+  `RoleFillerRef` helper dataclass (`obj`/`role`/`via`) was also added —
+  deliberately **not** registered in `DOMAIN_CLASSES`, since it has no
+  corresponding grammar rule; textX's `validate_user_classes()` raises
+  `TextXSemanticError` for any registered class name not used in the
+  grammar, so adding it there would have broken metamodel construction
+  entirely, not just been inert.
+- `toolchain/el_parser.py` — P8 (`process_domain`) extended with three new
+  branches populating `controlling_roles`/`controlled_roles`/`role_fillers`
+  (the last as `RoleFillerRef` instances); the existing
+  `DomainControllingObj`/`DomainControlledObj` branches are unchanged.
+- `toolchain/el_validator.py` — new rule `V-NEW-21` added (see "Validator
+  impact," above, for the correction and the rule's actual logic).
+- `tests/test_am40_domain_role_syntax.py` — new file, 5 tests: new-syntax
+  parsing populates the typed lists correctly; `obj`/`role` resolve by
+  identity to the actual declared objects; `via=[Federation]` resolves
+  correctly; a fully-filled role-based domain passes `V-NEW-21`; a domain
+  with declared-but-unfilled roles fails it. Throwaway minimal fixtures,
+  not the referral scenario — `PatientDataDomain` is untouched.
+- Full suite: 56 pre-existing tests pass unchanged, plus these 5 new ones
+  (61 total).
+
+**Files changed:** `docs/el_grammar_amendments.md` (this entry),
+`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_parser.py`, `toolchain/el_validator.py`,
+`tests/test_am40_domain_role_syntax.py`. `scenarios/referral/
+referral_scenario.el` remains untouched — migration is separate follow-on
+work (see "Migration required," above).
+
+**Status:** PARTIALLY IMPLEMENTED — grammar/parser/validator support both
+syntaxes; PatientDataDomain migration and old-syntax removal still
+pending.

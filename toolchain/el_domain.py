@@ -45,8 +45,11 @@ Class inventory (mirrors STEP1_grammar_audit.md):
     Group G  — Lifecycle, Establishing, EmbeddedCommitment, Changes,
                Terminating
     Group H  — CommunityObject, Domain, DomainControllingObj, DomainControlledObj,
+               DomainControllingRole, DomainControlledRole, DomainRoleFiller,
                Federation, FedSharedObjective, MemberRef,
                WithdrawalBehaviour, ConflictResolution
+               (RoleFillerRef is also defined in this group but is a plain
+               Python helper, not a registered grammar class — see below)
     Group I  — Commitment, Delegation, Authorization, Prescription,
                Declaration, Evaluation, ViolationResponse
     Group J  — Correspondence
@@ -971,6 +974,30 @@ class DomainControlledObj(_ELParentable):
     """Grammar rule: DomainControlledObj"""
     obj: Optional[object] = None   # → EnterpriseObject ref
 
+@dataclass
+class DomainControllingRole(_ELParentable):
+    """Grammar rule: DomainControllingRole (AM-40, proposed)"""
+    role: Optional[object] = None   # embedded Role
+
+@dataclass
+class DomainControlledRole(_ELParentable):
+    """Grammar rule: DomainControlledRole (AM-40, proposed)"""
+    role: Optional[object] = None   # embedded Role
+
+@dataclass
+class DomainRoleFiller(_ELParentable):
+    """Grammar rule: DomainRoleFiller (AM-40, proposed)"""
+    obj:  Optional[object] = None   # → EnterpriseObject ref
+    role: Optional[object] = None   # → Role ref
+    via:  Optional[object] = None   # → Federation ref, optional
+
+@dataclass
+class RoleFillerRef:
+    """AM-40 (proposed) — a resolved obj/role/via triple for Domain role-filling."""
+    obj:  Optional[object] = None   # → EnterpriseObject ref
+    role: Optional[object] = None   # → Role ref
+    via:  Optional[object] = None   # → Federation ref, optional
+
 
 @dataclass
 class CommunityObject(_ELParentable):
@@ -1005,6 +1032,10 @@ class Domain(Community):
     controlling_objects:  List = field(default_factory=list)  # List[EnterpriseObject]
     controlled_objects:   List = field(default_factory=list)  # List[EnterpriseObject]
     normative_policies:   List = field(default_factory=list)  # List[NormativePolicy] (AM-28)
+    # AM-40 (proposed) — role-based alternative, populated alongside the above
+    controlling_roles:    List = field(default_factory=list)  # List[Role]
+    controlled_roles:     List = field(default_factory=list)  # List[Role]
+    role_fillers:         List = field(default_factory=list)  # List[RoleFillerRef]
 
 
 @dataclass
@@ -1258,6 +1289,7 @@ DOMAIN_CLASSES = [
     # H
     CommunityObject,
     Domain, DomainControllingObj, DomainControlledObj,
+    DomainControllingRole, DomainControlledRole, DomainRoleFiller,
     Federation, FedSharedObjective, MemberRef, WithdrawalBehaviour,
     ConflictResolution,
     # I

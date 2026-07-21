@@ -38,6 +38,11 @@ Rules implemented
         Community or Domain.                                     §6.2.2, §7.8.3
   V-NEW-20  NormativePolicy only referenced from Domain or
         Federation body items, not plain Community.              AM-28
+  V-NEW-21  Every Domain must have at least one controlling and
+        one controlled filler, via either the object-reference
+        syntax (controlling_object/controlled_object) or the
+        role-based syntax (controlling_role/controlled_role,
+        filled by 'fills' — AM-40, proposed).                    §7.5.1
   V-16a  Every TokenGroup member must have a backing Commitment or
         Delegation — static check for missing obligation descriptor. §6.4.2
   V-16b  SatisfactionCondition with a single member has no
@@ -169,6 +174,9 @@ def validate_spec(model) -> List[str]:
 
     # V-NEW-20 — NormativePolicy only in Domain/Federation (AM-28)
     errors.extend(_validate_normative_policy_placement(model))
+
+    # V-NEW-21 — Domain controlling/controlled filler, either syntax (AM-40)
+    errors.extend(_validate_domain_controlling_controlled(model))
 
     # V-16a — TokenGroup member provenance check (§6.4.2)
     errors.extend(_validate_token_group_provenance(model))
@@ -608,6 +616,51 @@ def _validate_normative_policy_placement(model) -> List[str]:
                 f"[V-NEW-20] Community '{el.name}': normative_policy "
                 f"'{policy_name}' may only appear in Domain or Federation "
                 f"body items, not in plain Community. (AM-28)"
+            )
+    return errors
+
+
+def _validate_domain_controlling_controlled(model) -> List[str]:
+    """V-NEW-21: Domain must have at least one controlling and one
+    controlled filler, via either syntax. (§7.5.1)
+
+    Object-reference syntax: at least one controlling_object and one
+    controlled_object.
+    Role-based syntax (AM-40, proposed): at least one controlling_role and
+    one controlled_role, each filled by at least one DomainRoleFiller
+    ('fills') resolving to that role.
+
+    Identity comparison (`is`), not equality: role=[Role] cross-references
+    resolve globally (no custom scope_provider — same behaviour as
+    MemberRef.fills), so a same-named role declared in a different domain
+    could otherwise slip past a value-equality or name-string check.
+    Plain dataclasses here use default value-based __eq__, so `in`/`==`
+    would risk a false positive; `is` against this domain's own
+    controlling_roles/controlled_roles is the only check that actually
+    confirms the filler resolved to *this* domain's role.
+
+    No cardinality constraint beyond "at least one" on either side —
+    controlling-role filler cardinality is deliberately left open (see
+    docs/CONCEPTS_INDEX.md and docs/el_grammar_amendments.md, AM-40).
+    """
+    errors: List[str] = []
+    for d in _collect(model, "Domain"):
+        has_obj_syntax = bool(d.controlling_objects) and bool(d.controlled_objects)
+
+        has_role_syntax = any(
+            any(rf.role is c for c in d.controlling_roles)
+            for rf in d.role_fillers
+        ) and any(
+            any(rf.role is c for c in d.controlled_roles)
+            for rf in d.role_fillers
+        )
+
+        if not has_obj_syntax and not has_role_syntax:
+            errors.append(
+                f"[V-NEW-21] Domain '{d.name}': must declare at least one "
+                f"controlling_object and one controlled_object, or at "
+                f"least one controlling_role and one controlled_role each "
+                f"filled by a role-filling statement ('fills'). (§7.5.1)"
             )
     return errors
 
