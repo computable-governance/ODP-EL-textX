@@ -33,7 +33,8 @@ Class inventory (mirrors STEP1_grammar_audit.md):
     Group D  — Policy, PolicyRule, AffectedElement, SettingBehaviour,
                Enforcement, Duration, NumberInterval,
                PolicyEnvelope, EnvelopeRule,
-               NormativePolicy, NormativePolicyRef (AM-28)
+               NormativePolicy, NormativePolicyRef (AM-28),
+               NormativePolicyEnforcement (AM-42)
     Group E  — Community, EventDecl, Objective, SubObjective, Invariant,
                AssignmentPolicy, AssignmentRule subtypes, JoinLeaveEffect,
                CommunityInteraction
@@ -414,12 +415,28 @@ class SettingBehaviour(_ELParentable):
 class Enforcement(_ELParentable):
     """§7.9.4 — enforcement mode for a policy.
 
-    Grammar rule: EnforcementDecl
-    Object processor (P11) sets unpoliced=True when mode is absent.
+    Grammar rule: Enforcement
+    unpoliced?='unpoliced' is a textX boolean match — True/False assigned
+    directly at parse time, no object processor needed.
     """
     mode:      Optional[str]  = None   # EnforcementMode; None = unpoliced
     mechanism: Optional[str]  = None
-    unpoliced: bool            = False  # P11: derived from absent mode
+    unpoliced: bool            = False
+
+
+@dataclass
+class NormativePolicyEnforcement(_ELParentable):
+    """AM-42, §7.9.4 — enforcement mode for a NormativePolicy.
+
+    Grammar rule: NormativePolicyEnforcement
+    Reuses Policy.Enforcement's EnforcementMode vocabulary (mode:
+    'optimistic' | 'pessimistic'; unpoliced: bool) by direct reference,
+    not a redeclaration — deliberately omits Enforcement's 'mechanism'
+    sub-field, per NormativePolicy's lightweight design principle
+    (docs/CONCEPTS_INDEX.md, "NormativePolicy scope").
+    """
+    mode:      Optional[str]  = None   # EnforcementMode; None = unpoliced
+    unpoliced: bool            = False
 
 
 @dataclass
@@ -500,6 +517,7 @@ class NormativePolicy(_ELParentable):
     description:       Optional[str] = None
     source:            str            = ""     # citation — mandatory
     kind:              str            = ""     # NormativePolicyKind — mandatory
+    enforcement:       Optional[NormativePolicyEnforcement] = None  # AM-42
     policy_type:       Optional[str] = None
     initial_value:     Optional[object] = None
     review_cycle:      Optional[object] = None  # Duration
@@ -1279,6 +1297,7 @@ DOMAIN_CLASSES = [
     Policy, PolicyRule, AffectedElement, SettingBehaviour, Enforcement,
     PolicyRef,
     NormativePolicy, NormativePolicyRef,  # AM-28
+    NormativePolicyEnforcement,  # AM-42
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
     # E
     Community, EventDecl, SatisfactionCondition, SatisfactionArg, Objective, SubObjective, SubObjectiveRef, Invariant,

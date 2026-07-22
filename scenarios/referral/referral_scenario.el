@@ -544,11 +544,13 @@ normative_policy AIMedicalDeviceRegulation {
 normative_policy AuthorshipBasis {
     source: "Health Records and Information Privacy Act 2002 (NSW); both clinicians engaged as employees of their respective practices"
     kind: legislation
+    enforcement: policed pessimistic
 }
 
 normative_policy ConsentRightsBasis {
     source: "Privacy Act 1988 (Cth) — Australian Privacy Principles; patient consent and revocation rights"
     kind: legislation
+    enforcement: policed pessimistic
 }
 
 

@@ -2790,3 +2790,147 @@ these 5 new ones (66 total).
 
 **Status:** IMPLEMENTED — grammar/parser/validator widen NormativePolicy
 to any Community; V-NEW-20 retired.
+
+---
+
+## AM-42 (2026-07-22) — Optional enforcement field on NormativePolicy (§7.9.4)
+
+**Status:** IMPLEMENTED (2026-07-22) — `NormativePolicy` gains an optional
+`enforcement` field, reusing Policy's own pre-existing `EnforcementMode`
+vocabulary by direct reference.
+
+**Problem:** `NormativePolicy` (docs/CONCEPTS_INDEX.md, "NormativePolicy
+scope," 2026-07-19 finding) had no way to record whether the norm it cites
+is policed and enforced, or unpoliced — ISO/IEC 15414 §7.9.4 ("Policy
+enforcement") distinguishes policed-pessimistic (preventative — mechanisms
+ensure compliance before the fact; used when trust is low and potential
+damage is high) from policed-optimistic (allow the action, detect and
+respond to non-compliance after the fact) from unpoliced (no enforcement
+specified). This is a policy/regulatory-level property of the cited
+source, distinct from `DeonticToken.discharge_mode` (a runtime/Kripke-model
+property of a specific token) — the two must not be collapsed or
+renamed into one another (see CONCEPTS_INDEX.md finding for the full
+argument; unchanged by this amendment).
+
+**Standard reference(s):** §7.9.4 (Policy enforcement — policed
+pessimistic/optimistic, or unpoliced); §6.5 (Policy concept, which
+`NormativePolicy` specialises, AM-28).
+
+**Blast radius:** `NormativePolicy` has no `body_items` catch-all — every
+field is typed directly in its grammar rule (`source`, `kind`, `type`,
+etc.), the same style `Community` uses (AM-41). One new optional field,
+no changes to any existing field, no changes to `NormativePolicyRef`,
+`Domain`, `Federation`, or `Community`'s handling of `normative_policies`.
+
+**Design/implementation history — a real collision, not a clean first
+pass:** The first attempt added a brand-new grammar rule, also named
+`EnforcementMode`, with literals `'policed_pessimistic' |
+'policed_optimistic' | 'unpoliced'` (the exact vocabulary proposed in the
+2026-07-19 CONCEPTS_INDEX.md finding). This broke the existing test suite
+— `grammar/v2/el_grammar.tx` already has an unrelated, pre-existing
+`EnforcementMode` rule (`'optimistic' | 'pessimistic'`, line ~298),
+implemented for generic `Policy`'s own `Enforcement` construct
+(`Policy.enforcement: Optional[Enforcement]`, `Enforcement` supporting
+`'policed' mode=EnforcementMode ('mechanism' ':' ...)?  | unpoliced?='unpoliced'`).
+textX did not raise an error at metamodel-build time for the duplicate
+rule name; it silently broke parsing of `scenarios/gp_referral/gp_referral_scenario.el`'s
+own pre-existing `enforcement policed pessimistic` usage instead
+(regression caught by the full suite: `tests/test_revocation_endpoint.py`,
+`tests/test_scenario_builders.py[gp_referral]`). The first attempt was
+reverted in full (grammar rule and dataclass field) before redesigning.
+
+**Proposed grammar (`grammar/v2/el_grammar.tx`), as actually landed:**
+```
+NormativePolicy:
+    'normative_policy' name=ID '{'
+        ('description'       ':' description=STRING)?
+        'source'             ':' source=STRING
+        'kind'               ':' kind=NormativePolicyKind
+        ('enforcement'       ':' enforcement=NormativePolicyEnforcement)?
+        ('type'              ':' policy_type=PolicyType)?
+        ('initial_value'     ':' initial_value=PolicyValue)?
+        ('review_cycle'      ':' review_cycle=Duration)?
+        ('policy_setting_behaviour' ':' setting_behaviour=STRING)?
+    '}'
+;
+
+NormativePolicyEnforcement:
+    ('policed' mode=EnforcementMode)
+    | (unpoliced?='unpoliced')
+;
+```
+`EnforcementMode` itself (`'optimistic' | 'pessimistic'`) is **reused
+as-is** from its pre-existing declaration — no new rule with that name,
+no new literal vocabulary. `NormativePolicyEnforcement` is new; it
+mirrors `Enforcement`'s two-branch shape (`policed <mode>` vs.
+`unpoliced`) but deliberately omits `Enforcement`'s `('mechanism' ':'
+STRING)?` sub-field, consistent with `NormativePolicy`'s existing
+lightweight design principle (a source, a kind, now optionally an
+enforcement mode — not the full policy envelope/value machinery).
+
+**Design rationale:**
+- Reusing the existing `EnforcementMode` rule by reference
+  (`mode=EnforcementMode`) rather than inventing new literals means
+  `NormativePolicy.enforcement` and `Policy.enforcement` now share
+  identical enforcement-mode vocabulary by direct reuse, not coincidence
+  — `policed pessimistic`/`policed optimistic`/`unpoliced`, not the
+  originally-proposed single-token `policed_pessimistic` form.
+- `NormativePolicyEnforcement`'s ordered-choice alternation (`('policed'
+  mode=EnforcementMode) | (unpoliced?='unpoliced')`) makes `mode`
+  non-`None` and `unpoliced=True` mutually exclusive **by grammar
+  construction**, not by convention: each branch only ever assigns its
+  own field, and PEG ordered choice commits to the first branch that
+  matches without attempting the other. Confirmed both by this reasoning
+  and by a direct test: `enforcement: policed pessimistic unpoliced` and
+  `enforcement: unpoliced pessimistic` are both syntax errors (leftover
+  unconsumed token), not silently-accepted values that would set both
+  fields (see `tests/test_am42_normative_policy_enforcement.py`,
+  `test_enforcement_mode_and_unpoliced_are_mutually_exclusive`).
+- No object processor needed for either the plain-scalar case
+  (`Policy.enforcement`'s pre-existing `Enforcement` class, confirmed by
+  smoke test) or the new `NormativePolicyEnforcement` class — both are
+  registered classes matching their own grammar rules, so textX
+  instantiates and populates them directly at parse time. In the course
+  of this investigation, a stale doc comment was found and corrected:
+  `Enforcement`'s docstring claimed "Object processor (P11) sets
+  unpoliced=True when mode is absent" — grepped `el_parser.py` and
+  confirmed no such processor exists or ever did; `unpoliced?='unpoliced'`
+  is a textX boolean match, assigned directly at parse time. (Also
+  incidentally the "P11" label in that stale comment collided in name,
+  though not in effect, with this session's real P11 — `process_community`,
+  AM-41 — an unrelated coincidence worth noting for anyone grepping "P11"
+  later.)
+
+**Validator impact:** none. No validator rule reads or checks
+`NormativePolicy.enforcement` in this pass — explicitly out of scope.
+In particular, no relationship between `NormativePolicy.enforcement` and
+`DeonticToken.discharge_mode` is built, checked, or cross-referenced;
+CONCEPTS_INDEX.md's "Open question" about an eventual consistency check
+between the two remains open, unresolved, exactly as before this
+amendment.
+
+**Files changed:** `docs/el_grammar_amendments.md` (this entry),
+`docs/CONCEPTS_INDEX.md` ("NormativePolicy scope" entry: Finding
+paragraph corrected from "proposed, not yet implemented" to "landed
+2026-07-22"; two inline literal-syntax examples elsewhere in the entry
+corrected from `policed_pessimistic` to `policed pessimistic` to match
+what actually landed; AIVendor section's cross-reference paragraph
+likewise corrected), `grammar/v2/el_grammar.tx` (`NormativePolicy` rule,
+new `NormativePolicyEnforcement` rule), `toolchain/el_domain.py` (new
+`NormativePolicyEnforcement` dataclass, registered in `DOMAIN_CLASSES`;
+`NormativePolicy.enforcement` field added; `Enforcement`'s stale
+docstring corrected), `scenarios/referral/referral_scenario.el`
+(`AuthorshipBasis` and `ConsentRightsBasis` — both added under AM-41 —
+now declare `enforcement: policed pessimistic`, since privacy legislation
+isn't optional/voluntary), `tests/test_am42_normative_policy_enforcement.py`
+(new file, 6 tests: policed-pessimistic resolves; policed-optimistic
+resolves; unpoliced resolves; absent defaults to `None`; mode/unpoliced
+mutual exclusivity confirmed as a syntax error in both combined-token
+orderings; the real referral scenario's `AuthorshipBasis`/
+`ConsentRightsBasis` both resolve to `policed pessimistic`). `toolchain/el_parser.py`
+required no changes — confirmed by smoke test, not assumed. Full suite:
+68 pre-existing tests pass unchanged, plus these 6 new ones (74 total).
+
+**Status:** IMPLEMENTED — `NormativePolicy.enforcement` optional field
+landed, reusing Policy's existing `EnforcementMode` vocabulary; no link
+to `discharge_mode` built (deliberately out of scope).

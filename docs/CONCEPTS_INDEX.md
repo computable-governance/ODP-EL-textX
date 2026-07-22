@@ -398,9 +398,9 @@ syntax — see the Domain entry) landing first.
 `NormativePolicy` and the shared domain's in-use `NormativePolicy` are
 exactly the kind of policy pair the enforcement-mode finding below is
 about — see the NormativePolicy scope entry's "Finding (2026-07-19)"
-paragraph for the proposed `enforcement: policed_pessimistic |
-policed_optimistic | unpoliced` field and why it stays distinct from
-`discharge_mode`.
+paragraph for the `enforcement: policed pessimistic | policed optimistic
+| unpoliced` field (landed 2026-07-22, AM-42) and why it stays distinct
+from `discharge_mode`.
 
 ---
 
@@ -579,12 +579,22 @@ actions aren't blocked; used when trust is low and potential damage is
 high) or optimistic (allow the action, detect and respond to
 non-compliance after the fact).
 
-This is a genuinely new field to propose adding to NormativePolicy, not
-yet implemented:
+**Landed 2026-07-22 (AM-42).** Implemented as:
 
-    enforcement: policed_pessimistic | policed_optimistic | unpoliced
+    enforcement: policed pessimistic | policed optimistic | unpoliced
 
-Status: PROPOSED, not yet in `grammar/v2/el_grammar.tx`.
+This reuses Policy's own pre-existing `Enforcement`/`EnforcementMode`
+construct (§7.9.4, already implemented in `grammar/v2/el_grammar.tx` for
+generic `Policy`) by direct reference to the same `EnforcementMode` rule
+— not a coincidence of vocabulary — rather than the differently-shaped
+single-enum `policed_pessimistic | policed_optimistic | unpoliced` form
+originally proposed here. That original proposal turned out to collide
+by rule name with the pre-existing `EnforcementMode` and was reverted and
+redesigned mid-session; see `docs/el_grammar_amendments.md`, AM-42, for
+the full account. `NormativePolicy.enforcement` deliberately omits
+`Policy.Enforcement`'s `mechanism` sub-field, consistent with
+NormativePolicy's lightweight design (a source, a kind, now optionally
+an enforcement mode — not the full policy envelope/value machinery).
 
 Explicitly NOT the same concept as `discharge_mode` (strict/monitored) on
 DeonticToken, and should NOT be renamed or merged with it, despite the
@@ -599,7 +609,7 @@ whether and how that obligation is meant to be enforced at all. The
 relationship: a policy's declared enforcement mode is the regulatory
 justification for a token's `discharge_mode` choice — e.g. a
 NormativePolicy citing the EU AI Act's conformity-assessment requirement
-would declare `enforcement: policed_pessimistic`, which is the reason a
+would declare `enforcement: policed pessimistic`, which is the reason a
 token it governs should get `discharge_mode: strict`. Keep the two
 concepts and their vocabulary distinct; do not collapse them.
 
@@ -621,7 +631,7 @@ that machinery is satisfying.
 **Open question, recorded not resolved:** should there eventually be a
 validator check for consistency between a NormativePolicy's declared
 enforcement mode and the `discharge_mode` of the tokens it governs (e.g.
-flagging a `policed_pessimistic` policy governing a `monitored`-mode
+flagging a `policed pessimistic` policy governing a `monitored`-mode
 token as a mismatch worth surfacing)? Not building this now — logged so
 it isn't lost.
 

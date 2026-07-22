@@ -327,6 +327,7 @@ NormativePolicy:
         ('description'       ':' description=STRING)?
         'source'             ':' source=STRING
         'kind'               ':' kind=NormativePolicyKind
+        ('enforcement'       ':' enforcement=NormativePolicyEnforcement)?
         ('type'              ':' policy_type=PolicyType)?
         ('initial_value'     ':' initial_value=PolicyValue)?
         ('review_cycle'      ':' review_cycle=Duration)?
@@ -336,6 +337,20 @@ NormativePolicy:
 
 NormativePolicyKind:
     'legislation' | 'regulation' | 'standard' | 'guideline' | 'contractual'
+;
+
+/*
+ * NormativePolicyEnforcement — AM-42, §7.9.4
+ * Reuses the existing EnforcementMode rule (line ~298, defined for
+ * Policy's own Enforcement construct) by reference, not redeclaration —
+ * avoids the AM-42 naming collision found during implementation.
+ * Deliberately omits Policy.Enforcement's 'mechanism' sub-field, per
+ * NormativePolicy's existing lightweight design principle
+ * (docs/CONCEPTS_INDEX.md, "NormativePolicy scope").
+ */
+NormativePolicyEnforcement:
+    ('policed' mode=EnforcementMode)
+    | (unpoliced?='unpoliced')
 ;
 
 NormativePolicyRef:
