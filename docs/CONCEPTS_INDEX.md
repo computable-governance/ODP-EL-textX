@@ -611,17 +611,29 @@ NAIC's Guidance for AI Adoption would be `kind: guideline`,
 `enforcement: policed_pessimistic`. Not just a different citation, a
 different enforcement posture.
 
-**Future consideration, not building now:** from the 2026-07-19
-positioning discussion — episodic-level NormativePolicy citation will
-matter once episodic communities (see Creation-style / episodic community
-entry) can carry their own NormativePolicy references, not just standing
-Domain/Federation/Community-level ones. AISI's targeted-reform model means
-the specific reform that actually governed a particular past instance can
-differ from whatever a standing, community-level citation says today — a
-standing citation can go stale relative to which reform applied at the
-time a given instance ran. AM-41 makes plain Community eligible for
-NormativePolicy, which is a prerequisite for this, but episodic-community
-support itself is a distinct, larger piece of work, out of scope here.
+**Confirmed 2026-07-22 — episodic communities already support this via
+AM-41, no new grammar required.** Investigated directly: the
+"Creation-style / episodic community" pattern (see that entry) is not a
+distinct grammar construct — `ReferralEpisodeCommunity` in
+`referral_scenario.el` parses as `type(el).__name__ == 'Community'`,
+the exact same rule AM-41 modified. "Episodic" is purely a usage pattern
+(established via `lifecycle { establishing { established_by: <event> } }`,
+AM-33, with the triggering event emitted from a separate, standing
+community) layered on top of the ordinary `Community` rule — nothing
+distinguishes it from a standing community at the grammar or type level.
+A throwaway fixture mirroring `ReferralEpisodeCommunity`'s real creation
+pattern, additionally carrying a `normative_policy:` reference, parsed,
+validated, and resolved by identity with zero grammar changes; now a
+permanent regression test (`tests/test_am41_community_normative_policy.py`,
+`test_episodic_community_normative_policy_resolves`).
+
+The genuinely open matter here is not a toolchain gap — it's a
+modelling/process question for whoever writes the `.el` file: how a
+citation stays correctly pinned to whichever specific reform (e.g. an
+AISI targeted reform) actually governed a particular past deployment
+instance, versus a standing citation that may drift out of sync as
+guidance evolves over time. That's a usage-discipline concern, not
+something the grammar needs to solve.
 
 ---
 

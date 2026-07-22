@@ -129,3 +129,45 @@ def test_community_with_multiple_normative_policies():
 
     community = _find(result.model, 'Community', 'PlainCommunity')
     assert {p.name for p in community.normative_policies} == {'TestAct', 'OtherAct'}
+
+
+def test_episodic_community_normative_policy_resolves():
+    """Confirmed 2026-07-22 (docs/CONCEPTS_INDEX.md, AM-41 entry): an
+    episodic community — created via the lifecycle/establishing pattern,
+    established_by an event emitted from a separate, standing community,
+    mirroring referral_scenario.el's real ReferralEpisodeCommunity — is
+    parsed by the exact same Community grammar rule AM-41 modified. It
+    can therefore also carry a normative_policy: reference and have it
+    resolve by identity, with zero new grammar work."""
+    src = _HEADER + _POLICY + (
+        'party Referrer\n\n'
+        'community CreatingCommunity {\n'
+        '    objective: "probe creating community"\n'
+        '    event referralSubmitted\n'
+        '    role referringRole {\n'
+        '        action initiateReferral {\n'
+        '            actor: referringRole\n'
+        '            emits: referralSubmitted\n'
+        '        }\n'
+        '    }\n'
+        '}\n\n'
+        'community EpisodicProbeCommunity {\n'
+        '    objective: "probe episodic community with a normative policy"\n'
+        '    normative_policy: TestAct\n'
+        '    lifecycle {\n'
+        '        establishing {\n'
+        '            established_by: referralSubmitted\n'
+        '        }\n'
+        '    }\n'
+        '}\n'
+    )
+    result = parse_string(src, validate=True)
+    assert result.ok, result.errors
+
+    episodic = _find(result.model, 'Community', 'EpisodicProbeCommunity')
+    policy = _find(result.model, 'NormativePolicy', 'TestAct')
+
+    assert type(episodic).__name__ == 'Community'
+    assert episodic.normative_policies == [policy]
+    assert episodic.normative_policies[0] is policy
+    assert episodic.lifecycle.establishing.established_by.name == 'referralSubmitted'
