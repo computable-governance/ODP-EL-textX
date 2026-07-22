@@ -2663,3 +2663,130 @@ work (see "Migration required," above).
 **Status:** PARTIALLY IMPLEMENTED — grammar/parser/validator support both
 syntaxes; PatientDataDomain migration and old-syntax removal still
 pending.
+
+---
+
+## AM-41 (2026-07-22) — Widen NormativePolicy from Domain/Federation-only to any Community
+
+**Status:** IMPLEMENTED (2026-07-22) — grammar, parser, and validator
+widen `NormativePolicy` to any plain `Community`; V-NEW-20 (the rule that
+previously restricted it) is retired.
+
+**Problem:** `NormativePolicy` (AM-28) could only be referenced from
+`Domain` or `Federation` body items — validator rule V-NEW-20 rejected any
+`normative_policy:` reference on a plain `Community`. This restriction's
+own stated justification ("domain policies bind all controlled objects,"
+§7.5.1) does not survive scrutiny once Domain IS a Community (settled
+2026-06-04, AM-25): §7.3.1 gives an ordinary Community's contract the same
+universal-binding property over its members, and Annex B.1.5.3's
+e-commerce example cites an external legal agreement directly from a
+plain Community's contract, with no Domain or Federation involved. Logged
+as an open AM candidate in `docs/CONCEPTS_INDEX.md`'s "NormativePolicy
+scope" entry since 2026-07-06.
+
+**Standard reference(s):** §6.5 (Policy concept); §7.3.1 (a plain
+community's contract "governs... and constrains the behaviour of its
+enterprise object members" — the universal-binding property this
+amendment extends NormativePolicy eligibility to match); §7.5.1 ("domain
+policies bind all controlled objects" — V-NEW-20's now-superseded original
+justification); Annex B.1.5.3 (e-commerceCommunity's contract "refers to a
+legal agreement between e.com and its customers" — a plain Community
+citing an external source directly, the standard's own precedent for this
+widening).
+
+**Blast radius:** `NormativePolicyRef` (the grammar rule for a
+`normative_policy:` reference line) appears in exactly three places in
+`grammar/v2/el_grammar.tx`: `DomainBodyItem`, `FedBodyItem`, and now
+`Community`'s own rule. No other grammar rule references it. In the
+toolchain, `normative_policies` is read only by
+`_validate_normative_policy_placement` (V-NEW-20, now removed) and is
+otherwise inert data carried on the model — zero references in
+`el_kripke.py`, `el_engine.py`, `el_reasoner.py`, or `el_api.py`. This is a
+grammar + parser + validator change with no runtime/Kripke impact.
+
+**Proposed grammar (`grammar/v2/el_grammar.tx`):** one new line added to
+`Community`'s rule body, alongside its other typed lists:
+```
+Community:
+    (contract?='contract')? 'community' name=ID
+    ('isa' type_ref=[Community])?
+    ('description' ':' description=STRING)?
+    '{'
+        objective=Objective
+        (events+=EventDecl)*
+        (invariants+=Invariant)*
+        (assignment_policies+=AssignmentPolicy)*
+        (join_leave_effects+=JoinLeaveEffect)*
+        (roles+=Role)*
+        (processes+=Process)*
+        (policy_refs+=PolicyRef)*
+        (normative_policies+=NormativePolicyRef)*   // AM-41
+        (interactions+=CommunityInteraction)*
+        (lifecycle=Lifecycle)?
+    '}'
+;
+```
+`NormativePolicyRef` and `NormativePolicy` themselves are unchanged —
+reused as-is from AM-28.
+
+**Design rationale:**
+- Community's grammar rule types every body item directly (no
+  `body_items*=CommunityBodyItem` catch-all the way Domain/Federation
+  use), so `normative_policies+=NormativePolicyRef` sits alongside
+  `policy_refs`, `invariants`, etc. as a plain typed list — consistent
+  with the rest of the rule's style, not a new pattern.
+- Because it's a direct typed attribute rather than a body-items
+  catch-all, textX populates `community.normative_policies` with raw
+  `NormativePolicyRef` wrapper objects, not resolved `NormativePolicy`
+  instances — unlike `Domain`/`Federation`, which resolve via their P8/P9
+  body-items processors. A new object processor, **P11**
+  (`process_community`, registered for `'Community'`), was added purely
+  to unwrap `ref.policy` for each item, so `Community.normative_policies`
+  ends up holding the same kind of resolved list Domain/Federation
+  already expose — one line, mirroring the existing
+  `domain.normative_policies.append(item.policy)` idiom from P8.
+- No double-population risk: `Domain`'s grammar rule
+  (`grammar/v2/el_grammar.tx`, `Domain:`) is entirely separate from
+  `Community`'s — it has its own `body_items*=DomainBodyItem` and does
+  not invoke Community's grammar rule at all (Python class inheritance
+  via AM-25 does not imply grammar-rule reuse). textX's
+  `register_obj_processors` keys strictly by exact type name, so P11
+  (`'Community'`) never fires on `Domain` instances even though `Domain`
+  is a Python subclass of `Community`. `Domain.normative_policies` stays
+  governed solely by P8, and `Federation.normative_policies` solely by
+  P9, both unchanged by this amendment. Verified by a passing regression
+  test for each (see "Files changed," below).
+
+**Validator impact:** V-NEW-20 previously flagged any plain-`Community`
+element with a non-empty `normative_policies` list. Investigated before
+deciding whether to widen its condition or retire it outright: since
+`NormativePolicyRef` only ever appears in three grammar locations —
+`Community`, `DomainBodyItem`, `FedBodyItem` — and this amendment makes
+all three legitimate, **V-NEW-20 can no longer fire on anything the
+grammar allows**. There is no remaining case for it to widen into or
+narrow around, so it was **removed outright** (function
+`_validate_normative_policy_placement`, its dispatch call, and its header
+doc-comment line all deleted) rather than kept as a no-op stub, per the
+codebase's no-dead-code convention. The rule number `V-NEW-20` is retired
+and will not be reused, matching how the incorrect `V-NEW-04` reference
+was handled in AM-40 — a rule number, once assigned in this log, is never
+recycled even after removal.
+
+**Files changed:** `docs/el_grammar_amendments.md` (this entry),
+`docs/CONCEPTS_INDEX.md` ("NormativePolicy scope" entry: table row,
+Toolchain status, Open→Closed, new "Future consideration" paragraph on
+episodic-level citation staleness — deliberately not built here),
+`grammar/v2/el_grammar.tx` (`Community` rule), `toolchain/el_domain.py`
+(`Community.normative_policies` field added), `toolchain/el_parser.py`
+(`process_community` / P11 added and registered), `toolchain/el_validator.py`
+(V-NEW-20 function, dispatch call, and header line removed),
+`tests/test_am41_community_normative_policy.py` (new file, 5 tests: plain
+Community resolves a NormativePolicy by identity; plain Community passes
+validation with no V-NEW-20 error; Domain's existing normative_policy
+handling (P8) is unaffected; Federation's existing normative_policy
+handling (P9) is unaffected; a Community may cite more than one
+NormativePolicy). Full suite: 61 pre-existing tests pass unchanged, plus
+these 5 new ones (66 total).
+
+**Status:** IMPLEMENTED — grammar/parser/validator widen NormativePolicy
+to any Community; V-NEW-20 retired.

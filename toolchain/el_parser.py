@@ -192,6 +192,21 @@ def process_process(proc):
     proc.satisfies_objectives = [s.objective for s in proc.satisfies_objectives]
 
 
+def process_community(community):
+    """P11: resolve NormativePolicyRef wrappers to NormativePolicy (AM-41).
+
+    Community's grammar rule types normative_policies directly
+    (normative_policies+=NormativePolicyRef), unlike Domain/Federation's
+    body_items catch-all — so textX populates the field with raw
+    NormativePolicyRef wrappers, not resolved policies. This processor
+    unwraps them, matching the resolved-policy convention already used by
+    process_domain (P8) and process_federation (P9).
+    """
+    community.normative_policies = [
+        ref.policy for ref in community.normative_policies
+    ]
+
+
 def process_domain(domain):
     """P8: split body_items into typed sublists.
 
@@ -290,6 +305,7 @@ def _build_metamodel():
         'Domain':             process_domain,              # P8
         'Federation':         process_federation,          # P9
         'TokenGroup':         process_token_group,         # P10 (AM-26)
+        'Community':          process_community,           # P11 (AM-41)
     })
     return mm
 

@@ -687,6 +687,12 @@ class Community(_ELParentable):
            invariants, assignment_policies, join_leave_effects promoted
            from Contract sub-block to direct community fields.
     AM-22: events list added for community-scoped EventDecl declarations.
+    AM-41: normative_policies added — widens NormativePolicy from
+           Domain/Federation-only to any plain Community (§7.3.1's
+           universal-binding contract property). Populated by P11
+           (process_community), which resolves each NormativePolicyRef
+           wrapper to its .policy, same pattern as P8/P9 already use for
+           Domain/Federation.
     """
     contract:            bool           = False  # AM-21: optional 'contract' qualifier
     name:                str            = ""
@@ -700,6 +706,7 @@ class Community(_ELParentable):
     roles:               List = field(default_factory=list)  # List[Role]
     processes:           List = field(default_factory=list)  # List[Process]
     policy_refs:         List = field(default_factory=list)  # List[PolicyRef]
+    normative_policies:  List = field(default_factory=list)  # List[NormativePolicy] (AM-41)
     interactions:        List = field(default_factory=list)  # List[CommunityInteraction]
     lifecycle:           Optional[object] = None              # → Lifecycle
 

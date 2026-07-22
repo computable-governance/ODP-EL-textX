@@ -365,6 +365,7 @@ Community:
         (roles+=Role)*
         (processes+=Process)*
         (policy_refs+=PolicyRef)*
+        (normative_policies+=NormativePolicyRef)*   // AM-41
         (interactions+=CommunityInteraction)*
         (lifecycle=Lifecycle)?
     '}'

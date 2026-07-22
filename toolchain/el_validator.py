@@ -36,8 +36,6 @@ Rules implemented
         continuity check).                                       §7.10.1
   V-NEW-19  CommunityObject.abstracts must reference a declared
         Community or Domain.                                     §6.2.2, §7.8.3
-  V-NEW-20  NormativePolicy only referenced from Domain or
-        Federation body items, not plain Community.              AM-28
   V-NEW-21  Every Domain must have at least one controlling and
         one controlled filler, via either the object-reference
         syntax (controlling_object/controlled_object) or the
@@ -171,9 +169,6 @@ def validate_spec(model) -> List[str]:
 
     # V-NEW-19 — CommunityObject.abstracts must resolve (AM-26)
     errors.extend(_validate_community_objects(model, all_communities))
-
-    # V-NEW-20 — NormativePolicy only in Domain/Federation (AM-28)
-    errors.extend(_validate_normative_policy_placement(model))
 
     # V-NEW-21 — Domain controlling/controlled filler, either syntax (AM-40)
     errors.extend(_validate_domain_controlling_controlled(model))
@@ -602,22 +597,6 @@ def _validate_satisfaction_singleton(model) -> List[str]:
                 f"semantics. Consider whether a TokenGroup is needed. (AM-29)"
             )
     return warnings
-
-
-def _validate_normative_policy_placement(model) -> List[str]:
-    """V-NEW-20: NormativePolicy only in Domain/Federation (AM-28)."""
-    errors: List[str] = []
-    for el in _collect(model, "Community"):
-        if type(el).__name__ != "Community":
-            continue  # Domain and Federation are subclasses — skip
-        for ref in getattr(el, "normative_policies", []):
-            policy_name = getattr(ref, "name", str(ref))
-            errors.append(
-                f"[V-NEW-20] Community '{el.name}': normative_policy "
-                f"'{policy_name}' may only appear in Domain or Federation "
-                f"body items, not in plain Community. (AM-28)"
-            )
-    return errors
 
 
 def _validate_domain_controlling_controlled(model) -> List[str]:

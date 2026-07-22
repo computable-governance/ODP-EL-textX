@@ -21,7 +21,7 @@ maturity status).
 | CommunityObject | Implemented (AM-26) |
 | Objective rules | Implemented |
 | Policy / policy envelope | Grammar exists — deliberately excluded from reference scenarios |
-| NormativePolicy scope | Implemented (AM-28), restriction under review — proposed widening to any Community (2026-07-06) |
+| NormativePolicy scope | Implemented (AM-28); widened to any Community (AM-41, 2026-07-22); enforcement-mode field still proposed |
 | Establishing behaviour | Implemented (AM-33) — demonstrated in `referral_scenario.el` |
 | Creation-style / episodic community | Settled 2026-07-07: created COMMUNITY, not federation (corrected from a 2026-07-06 conclusion) — demonstrated in `referral_scenario.el` |
 | Implicit creation / standing communities | Implemented |
@@ -512,9 +512,16 @@ Annex B.1.5.3 (e-commerceCommunity's contract "refers to a legal
 agreement between e.com and its customers" — a plain Community, not a
 Domain or Federation, citing an external source directly)
 
-**Toolchain status:** Implemented (AM-28), but restricted by validator
-rule V-NEW-20 to Domain and Federation body items only — not permitted on
-plain Community.
+**Toolchain status:** Implemented (AM-28); widened to any plain Community
+by AM-41 (2026-07-22). Validator rule V-NEW-20, which previously
+restricted NormativePolicy to Domain/Federation body items only, is
+retired — once Community's own grammar rule could carry a
+NormativePolicyRef too, V-NEW-20 could no longer fire on anything the
+grammar allows, so it was removed rather than widened. Community's rule
+gained `(normative_policies+=NormativePolicyRef)*` alongside its other
+typed lists; a new object processor P11 (`process_community`) resolves
+each reference to its `NormativePolicy`, matching the resolution
+convention P8/P9 already use for Domain/Federation.
 
 **Demonstrated in:** `ereferral_model.el` — `MyHealthRecordsAct`,
 `NationalClinicalGovernance`, both referenced from `ReferralNetworkFederation`
@@ -537,8 +544,10 @@ validator also permits Domain.
   be able to cite a practice-specific regulation without requiring
   federation-wide scope.
 
-**Open:** AM candidate — relax V-NEW-20 to permit NormativePolicy on any
-Community. Not yet drafted or implemented.
+**Closed (2026-07-22) — AM-41 drafted and implemented.** Grammar, parser,
+and validator now permit `NormativePolicy` on any `Community`, `Domain`,
+or `Federation` — no distinction remains between them for this purpose.
+See `docs/el_grammar_amendments.md`, AM-41, for the full change record.
 
 **Finding (2026-07-19) — standard grounding for an enforcement-mode field
 on NormativePolicy.** ISO/IEC 15414 §7.9.4 ("Policy enforcement") states
@@ -601,6 +610,18 @@ NAIC's Guidance for AI Adoption would be `kind: guideline`,
 `enforcement: unpoliced`; the EU AI Act would be `kind: legislation`,
 `enforcement: policed_pessimistic`. Not just a different citation, a
 different enforcement posture.
+
+**Future consideration, not building now:** from the 2026-07-19
+positioning discussion — episodic-level NormativePolicy citation will
+matter once episodic communities (see Creation-style / episodic community
+entry) can carry their own NormativePolicy references, not just standing
+Domain/Federation/Community-level ones. AISI's targeted-reform model means
+the specific reform that actually governed a particular past instance can
+differ from whatever a standing, community-level citation says today — a
+standing citation can go stale relative to which reform applied at the
+time a given instance ran. AM-41 makes plain Community eligible for
+NormativePolicy, which is a prerequisite for this, but episodic-community
+support itself is a distinct, larger piece of work, out of scope here.
 
 ---
 
