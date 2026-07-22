@@ -96,6 +96,26 @@ def test_patient_data_consent_domain_structure():
     assert [p.name for p in domain.normative_policies] == ["ConsentRightsBasis"]
 
 
+def test_referral_episode_community_normative_policy():
+    """ReferralEpisodeCommunity cites ReferralEpisodeAccountability — the
+    episodic-Community-level NormativePolicy example (AM-41's capability
+    confirmed via a throwaway fixture in test_am41_community_normative_policy.py;
+    this is the real scenario demonstration). Deliberately kind: guideline /
+    enforcement: unpoliced, contrasting with the standing
+    PatientDataAuthorshipDomain/PatientDataConsentDomain and federation-level
+    citations, which cite binding legislation under
+    enforcement: policed pessimistic (AM-42). mode must stay None — mode and
+    unpoliced are mutually exclusive by grammar construction (AM-42)."""
+    result = parse(_SCENARIO, validate=True)
+    assert result.ok
+    community = next(el for el in result.model.elements if el.name == "ReferralEpisodeCommunity")
+    assert [p.name for p in community.normative_policies] == ["ReferralEpisodeAccountability"]
+    policy = community.normative_policies[0]
+    assert policy.kind == "guideline"
+    assert policy.enforcement.unpoliced is True
+    assert policy.enforcement.mode is None
+
+
 def test_two_hop_delegation_chain():
     """Option B (2026-07-07): clinician-to-clinician, not
     practice-to-practice, with sub-delegation enabling the AI hop."""

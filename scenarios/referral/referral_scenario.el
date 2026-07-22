@@ -553,6 +553,12 @@ normative_policy ConsentRightsBasis {
     enforcement: policed pessimistic
 }
 
+normative_policy ReferralEpisodeAccountability {
+    source: "National Model for Clinical Governance: The foundations of high-quality care (Australian Commission on Safety and Quality in Health Care, 2026) — episode-of-care accountability under Foundation 5, Managing and reducing risk"
+    kind: guideline
+    enforcement: unpoliced
+}
+
 
 // ================================================================
 // §7.3.2, Part 2 §9.18 — REFERRAL EPISODE COMMUNITY (created, transient)
@@ -635,6 +641,14 @@ community ReferralEpisodeCommunity
         role episodePatientRole
             description: "Patient — consents to and may revoke authorization for AI agent record access, scoped to this episode"
             {}
+
+        // Contrast with PatientDataAuthorshipDomain/ConsentDomain above (~line 332) and
+        // the federation-level citations above (~line 461): those cite binding legislation
+        // (kind: legislation, enforcement: policed pessimistic). This episodic citation
+        // cites voluntary sector guidance instead (kind: guideline, enforcement: unpoliced)
+        // — same NormativePolicy mechanism, three different governance levels, three
+        // different enforcement postures, demonstrating the mechanism's genericity.
+        normative_policy: ReferralEpisodeAccountability
 
         lifecycle {
             establishing {
