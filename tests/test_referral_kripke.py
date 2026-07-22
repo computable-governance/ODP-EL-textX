@@ -3,10 +3,10 @@ Layer 4 — Kripke AF/EF verification and structural checks for
 referral_scenario.el (candidate reference scenario). Required for
 promotion to Reference status per scenarios/README.md's promotion
 criteria ("correctly applies every settled decision current in the
-concept index") — closes the gap where AF/EF values, PatientDataDomain's
-structure, and the two-hop delegation chain were manually verified in a
-sandbox during design (2026-07-07) but never asserted as a persisted
-test.
+concept index") — closes the gap where AF/EF values, the (now split,
+2026-07-22) PatientDataDomain's structure, and the two-hop delegation
+chain were manually verified in a sandbox during design (2026-07-07) but
+never asserted as a persisted test.
 """
 from pathlib import Path
 
@@ -64,17 +64,36 @@ def test_assessment_scheduling_is_detectable_not_compelled(runtime):
     assert km.check_permission("assessmentSchedulingBurden").satisfied is True
 
 
-def test_patient_data_domain_structure():
-    """PatientDataDomain: genuine cross-cutting characterizing
-    relationship, one controlling authority reaching across three
-    controlled objects at once (docs/CONCEPTS_INDEX.md, 'Domain' entry)."""
+def test_patient_data_authorship_domain_structure():
+    """PatientDataAuthorshipDomain (split from the original PatientDataDomain
+    2026-07-22, design settled 2026-07-19, docs/CONCEPTS_INDEX.md 'Domain'
+    entry): controller-processor relationship — GPPractice and
+    SpecialistPractice as controlling authorities, each across their own
+    clinicians plus the shared AI diagnostic agent."""
     result = parse(_SCENARIO, validate=True)
     assert result.ok
-    domain = next(el for el in result.model.elements if el.name == "PatientDataDomain")
-    assert [o.name for o in domain.controlling_objects] == ["GPPractice"]
+    domain = next(el for el in result.model.elements if el.name == "PatientDataAuthorshipDomain")
+    assert {o.name for o in domain.controlling_objects} == {"GPPractice", "SpecialistPractice"}
     assert {o.name for o in domain.controlled_objects} == {
         "GPClinician", "SpecialistClinician", "SpecialistAIAgent",
     }
+    assert [p.name for p in domain.normative_policies] == ["AuthorshipBasis"]
+
+
+def test_patient_data_consent_domain_structure():
+    """PatientDataConsentDomain (split from the original PatientDataDomain
+    2026-07-22): consent-governed use — Patient as the controlling
+    authority over the same three controlled objects, genuinely
+    overlapping with PatientDataAuthorshipDomain rather than partitioning
+    them."""
+    result = parse(_SCENARIO, validate=True)
+    assert result.ok
+    domain = next(el for el in result.model.elements if el.name == "PatientDataConsentDomain")
+    assert [o.name for o in domain.controlling_objects] == ["Patient"]
+    assert {o.name for o in domain.controlled_objects} == {
+        "GPClinician", "SpecialistClinician", "SpecialistAIAgent",
+    }
+    assert [p.name for p in domain.normative_policies] == ["ConsentRightsBasis"]
 
 
 def test_two_hop_delegation_chain():

@@ -8,9 +8,13 @@ syntax was removed; a domain may use either. These are minimal
 Layer 1 (grammar/parse) and Layer 2 (validator rule) tests per
 tests/README.md's strategy — throwaway fixtures, not a full scenario.
 
-referral_scenario.el's PatientDataDomain migration to this syntax is
-deliberately deferred to a separate session (see AM-40 entry) and is not
-exercised here.
+referral_scenario.el's original PatientDataDomain was split 2026-07-22
+into PatientDataAuthorshipDomain and PatientDataConsentDomain (see
+docs/el_grammar_amendments.md's AM-41 entry, and CONCEPTS_INDEX.md's
+Domain entry for the design rationale) — still using the existing
+controlling_object/controlled_object syntax, not this file's role-based
+syntax. Migrating either domain to the role-based syntax remains
+deliberately deferred and is not exercised here.
 """
 from el_parser import parse_string
 

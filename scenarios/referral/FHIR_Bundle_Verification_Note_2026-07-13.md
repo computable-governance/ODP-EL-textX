@@ -74,7 +74,9 @@ for this rule.
 flat `community` per bundle (`FhirbundleCommunity` in this run). The
 reference scenario has a materially richer structure —
 `GPPracticeCommunity`, `SpecialistPracticeCommunity`,
-`ReferralEpisodeCommunity`, a `PatientDataDomain`, all connected via
+`ReferralEpisodeCommunity`, `PatientDataAuthorshipDomain` and
+`PatientDataConsentDomain` (split 2026-07-22 from the original single
+`PatientDataDomain`), all connected via
 `ReferralNetworkFederation`. These are not close enough in shape for a
 direct structural comparison as-is. Closing this gap fully would require
 extending `FHIRConsentMapper`'s community-generation logic to produce a

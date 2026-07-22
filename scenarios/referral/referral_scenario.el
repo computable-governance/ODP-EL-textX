@@ -78,8 +78,9 @@
  * underlying fact. principal_of is used here as the lighter mechanism
  * for a single practice-clinician pair; Domain is the natural choice
  * when one controlling authority reaches across several controlled
- * objects at once, as PatientDataDomain does below for data governance
- * specifically. See docs/CONCEPTS_INDEX.md, "Standing accountability:
+ * objects at once, as PatientDataAuthorshipDomain/PatientDataConsentDomain
+ * do below for data governance specifically. See docs/CONCEPTS_INDEX.md,
+ * "Standing accountability:
  * principal_of/delegated_from vs. Domain".
  *
  * Authorization (separate from delegation, §4.0b): Patient
@@ -319,24 +320,47 @@ token_group specialistBurdenGroup {
 
 
 // ================================================================
-// §7.5.1 — PATIENT DATA DOMAIN
-// (genuine cross-cutting characterizing relationship — not an
-// organisational unit; see docs/CONCEPTS_INDEX.md "Domain" entry.
-// Cuts across GPClinician/SpecialistClinician/SpecialistAIAgent
-// regardless of which community/episode they currently participate in.
-// Contrast with principal_of above: this Domain reaches across THREE
-// controlled objects under one controlling authority at once — exactly
-// the case where Domain is the natural mechanism, per the header note.)
+// §7.5.1 — PATIENT DATA DOMAINS (two, overlapping)
+// (genuine cross-cutting characterizing relationships — not an
+// organisational unit; see docs/CONCEPTS_INDEX.md "Domain" entry. Split
+// 2026-07-22 (design settled 2026-07-19) from a single PatientDataDomain
+// into two overlapping domains, now that AM-41 lets each carry its own
+// NormativePolicy: PatientDataAuthorshipDomain (controller-processor /
+// authorship relationship — GPPractice and SpecialistPractice as
+// controlling authorities over their respective clinicians plus the AI
+// agent) and PatientDataConsentDomain (consent-governed use — Patient as
+// the controlling authority over the same three controlled objects).
+// Both cut across GPClinician/SpecialistClinician/SpecialistAIAgent
+// regardless of which community/episode they currently participate in;
+// contrast with principal_of above, per the header note. NormativePolicy
+// full declarations (AuthorshipBasis, ConsentRightsBasis) are grouped
+// with the file's other normative_policy declarations below, per this
+// file's existing convention (see "NORMATIVE POLICIES" section).)
 // ================================================================
 
-domain PatientDataDomain
-    characterized_by: "Data controller-processor relationship"
-    description: "Domain governing access to and processing of patient clinical records"
+domain PatientDataAuthorshipDomain
+    characterized_by: "Data controller-processor relationship — authorship/ownership of record"
+    description: "Domain governing authorship/ownership of patient clinical records — controller-processor relationship between each practice and its own clinicians, plus the AI diagnostic agent"
     {
         controlling_object: GPPractice
+        controlling_object: SpecialistPractice
         controlled_object: GPClinician
         controlled_object: SpecialistClinician
         controlled_object: SpecialistAIAgent
+
+        normative_policy: AuthorshipBasis
+    }
+
+domain PatientDataConsentDomain
+    characterized_by: "Consent-governed use of the record"
+    description: "Domain governing consent-based use of patient clinical records — patient as controlling authority over the clinicians and AI diagnostic agent who access it"
+    {
+        controlling_object: Patient
+        controlled_object: GPClinician
+        controlled_object: SpecialistClinician
+        controlled_object: SpecialistAIAgent
+
+        normative_policy: ConsentRightsBasis
     }
 
 
@@ -515,6 +539,16 @@ normative_policy AIMedicalDeviceRegulation {
     type: string
     initial_value: "TGA conformity assessment and post-market surveillance requirements for AI/software-based medical devices"
     policy_setting_behaviour: "TGA regulatory update"
+}
+
+normative_policy AuthorshipBasis {
+    source: "Health Records and Information Privacy Act 2002 (NSW); both clinicians engaged as employees of their respective practices"
+    kind: legislation
+}
+
+normative_policy ConsentRightsBasis {
+    source: "Privacy Act 1988 (Cth) — Australian Privacy Principles; patient consent and revocation rights"
+    kind: legislation
 }
 
 
@@ -700,7 +734,7 @@ authorization patientDataAuthorization {
     conditions: "Active GP referral and patient data sharing consent on file"
     revocable: true
     on_revocation: activate patientRecordAccessEmbargo
-    domain_scope: "PatientDataDomain"
+    domain_scope: "PatientDataConsentDomain"
     description: "Patient authorizes specialist AI diagnostic agent to access their clinical records for referral assessment; consent may be withdrawn by the patient at any time"
 }
 

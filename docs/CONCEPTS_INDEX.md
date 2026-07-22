@@ -171,6 +171,27 @@ case is resolved via two overlapping single-controller domains rather than
 by one domain needing multiple controlling fillers. Logged as still open
 for any future case that might need it.
 
+**Landed (2026-07-22) — migration carried out.** The split described
+above is implemented in `referral_scenario.el`: `PatientDataDomain` is
+replaced by `PatientDataAuthorshipDomain` (controlling objects
+`GPPractice`, `SpecialistPractice`) and `PatientDataConsentDomain`
+(controlling object `Patient`), each still using the existing
+`controlling_object`/`controlled_object` syntax (the AM-40 role-based
+syntax direction above remains separately pending — not part of this
+migration) and each now carrying its own `NormativePolicy`
+(`AuthorshipBasis`, `ConsentRightsBasis` respectively), made possible by
+AM-41 widening NormativePolicy to any Domain/Community/Federation. The
+"Gap found 2026-07-19" note above (undocumented `controlling_object:
+GPPractice` rationale) is resolved by this split — each domain's
+characterizing relationship and controlling object now has an explicit,
+documented rationale. `authorization patientDataAuthorization`'s
+`domain_scope` (a plain STRING, not a cross-reference — nothing
+validates it) was updated from `"PatientDataDomain"` to
+`"PatientDataConsentDomain"`, matching its actual consent/revocation
+semantics. See `tests/test_referral_kripke.py`
+(`test_patient_data_authorship_domain_structure`,
+`test_patient_data_consent_domain_structure`) for the regression tests.
+
 ---
 
 ## Federation (community type)
