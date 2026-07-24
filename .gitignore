@@ -1,6 +1,7 @@
 DEV_NOTES.md
 PRIVATE_NOTES.md
-.claude/
+.claude/*
+!.claude/settings.json
 memory/
 toolchain/__pycache__/
 __pycache__/
