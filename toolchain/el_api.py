@@ -8,6 +8,7 @@ Endpoints implemented:
   GET /communities/{community_name}/objective-reachable
   GET /communities/{community_name}/objective-score
   GET /obligations/{token_name}/status
+  GET /tokens/{token_name}/governance
   POST /authorizations/{authorization_name}/revoke
   POST /fhir/consent-events
 
@@ -31,7 +32,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from el_engine import enroll, grant_token, initial_state, token_from_spec, TransitionRecord
-from el_kripke import build_kripke_from_runtime
+from el_kripke import build_kripke_from_runtime, find_normative_policies_for_token
 from el_parser import parse
 from el_runtime import Runtime
 from fhir_event_handler import handle_consent_event, PATIENT_DATA_AUTHORIZATION
@@ -349,6 +350,25 @@ class ObligationStatusResponse(BaseModel):
     witness_path: Optional[List[PathStep]] = None          # present iff detectable
 
 
+class NormativePolicyEnforcementInfo(BaseModel):
+    mode: Optional[str] = None     # EnforcementMode: 'optimistic' | 'pessimistic' | None (unset)
+    unpoliced: bool = False
+
+
+class NormativePolicyInfo(BaseModel):
+    name: str
+    description: Optional[str] = None
+    source: str                    # citation — mandatory on NormativePolicy
+    kind: str                      # legislation | regulation | standard | guideline | contractual
+    enforcement: Optional[NormativePolicyEnforcementInfo] = None
+
+
+class TokenGovernanceResponse(BaseModel):
+    token_name: str
+    governing_element: Optional[str] = None   # Community/Domain/Federation name, or None if unresolved
+    normative_policies: List[NormativePolicyInfo]
+
+
 class ScoredObligation(BaseModel):
     obligation: str
     state: str           # DISCHARGED | PENDING | VIOLATED | EXPIRED | SUPERSEDED | WAITING
@@ -603,6 +623,60 @@ def get_obligation_status(token_name: str) -> ObligationStatusResponse:
         worlds_checked=af_verdict.worlds_checked,
         counterexample_path=_serialize_path(af_verdict.counterexample_path) if not af_verdict.satisfied else None,
         witness_path=_serialize_path(ef_verdict.witness_path) if ef_verdict.satisfied else None,
+    )
+
+
+# ── Endpoint: GET /tokens/{token_name}/governance ──────────────────────────────
+
+@app.get(
+    "/tokens/{token_name}/governance",
+    response_model=TokenGovernanceResponse,
+    summary="Return the NormativePolicy citations governing a token, if any",
+    description=(
+        "Resolves the Community/Domain/Federation that governs the named "
+        "token (via the same role-action favoured_by traversal used to find "
+        "its action), and returns that element's normative_policies "
+        "(AM-28/AM-41) — citations of externally-grounded instruments: "
+        "legislation, regulation, standard, guideline, contractual. Most "
+        "tokens will not resolve to a governing element or any citation: "
+        "burden tokens with no favoured_by reference, and permit/embargo "
+        "tokens (not reachable by this traversal at all — see "
+        "el_kripke.find_normative_policies_for_token's KNOWN LIMITATION) "
+        "both yield an empty normative_policies list. That is a normal "
+        "outcome, not an error — 404 is reserved for a token name that "
+        "does not exist in the current runtime state at all."
+    ),
+)
+def get_token_governance(token_name: str) -> TokenGovernanceResponse:
+    tokens = _runtime.current_state().tokens
+    if not any(t.token_name == token_name for t in tokens):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Token '{token_name}' is not present in the current runtime state.",
+        )
+
+    element, policies = find_normative_policies_for_token(_runtime._spec, token_name)
+
+    return TokenGovernanceResponse(
+        token_name=token_name,
+        governing_element=getattr(element, "name", None),
+        normative_policies=[
+            NormativePolicyInfo(
+                name=p.name,
+                description=getattr(p, "description", None),
+                source=p.source,
+                kind=p.kind,
+                enforcement=(
+                    NormativePolicyEnforcementInfo(
+                        mode=getattr(p.enforcement, "mode", None),
+                        unpoliced=getattr(p.enforcement, "unpoliced", False),
+                    )
+                    if getattr(p, "enforcement", None) is not None
+                    else None
+                ),
+            )
+            for p in policies
+        ],
     )
 
 

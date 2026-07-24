@@ -1117,10 +1117,17 @@ def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
     return default
 
 
-def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
+def _find_element_and_action_for_burden(
+    model: Any, burden_name: str
+) -> Optional[Tuple[Any, str]]:
     """
     Search community Role bodies for the Action that carries burden_name as a
-    ConditionalAction.favoured_by entry.
+    ConditionalAction.favoured_by entry, and the Community/Domain/Federation
+    element it was found inside.
+
+    Same traversal as _find_action_for_burden, but also returns the
+    enclosing element — needed to resolve which element's normative_policies
+    (AM-28/AM-41) govern a given burden. See find_normative_policies_for_token.
 
     Traversal path (post-dissolution attributes):
       model.elements
@@ -1129,9 +1136,9 @@ def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
             → role.actions (post-P3, not role.items)
               → action.conditional_actions (post-P4, not action.items)
                 → ca.favoured_by (post-P5, not ca.favoured_by_burden)
-                  → if _obj_name(burden_ref) == burden_name → return action.name
+                  → if _obj_name(burden_ref) == burden_name → return (el, action.name)
 
-    Returns the Action name, or None if no match is found.
+    Returns (enclosing_element, action_name), or None if no match is found.
     """
     for el in model.elements:
         if _cls(el) not in ("Community", "Domain", "Federation"):
@@ -1140,12 +1147,65 @@ def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
             for action in getattr(role, "actions", []):
                 for burden_ref in getattr(action, "favoured_by", []):
                     if _obj_name(burden_ref) == burden_name:
-                        return action.name
+                        return (el, action.name)
                 for ca in getattr(action, "conditional_actions", []):
                     for burden_ref in getattr(ca, "favoured_by", []):
                         if _obj_name(burden_ref) == burden_name:
-                            return action.name
+                            return (el, action.name)
     return None
+
+
+def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
+    """
+    Search community Role bodies for the Action that carries burden_name as a
+    ConditionalAction.favoured_by entry.
+
+    Thin wrapper over _find_element_and_action_for_burden, which performs the
+    same traversal and additionally captures the enclosing element.
+
+    Returns the Action name, or None if no match is found.
+    """
+    found = _find_element_and_action_for_burden(model, burden_name)
+    return found[1] if found else None
+
+
+def find_normative_policies_for_token(
+    model: Any, token_name: str
+) -> Tuple[Optional[Any], List[Any]]:
+    """
+    Resolve the Community/Domain/Federation that governs a given token, and
+    return its normative_policies (AM-28/AM-41 — citation of externally-
+    grounded instruments: legislation, regulation, standard, guideline,
+    contractual).
+
+    KNOWN LIMITATION (2026-07-24 board-citation feature): governance
+    resolution reuses _find_element_and_action_for_burden's role → action →
+    favoured_by traversal, so it only resolves burden-kind tokens that are
+    referenced by some role action's favoured_by clause. It does NOT resolve
+    permit/embargo tokens at all — those are never referenced via
+    favoured_by, and their actual governing Domains (e.g.
+    PatientDataAuthorshipDomain, PatientDataConsentDomain in
+    referral_scenario.el) link to actors via controlling_object/
+    controlled_object membership, not via any token reference. Reaching
+    those would need a second, structurally different lookup (match
+    token.holder against Domain.controlling_object/controlled_object) that
+    can plausibly return more than one governing element per token — out of
+    scope here; not implemented.
+
+    Even for burden tokens, most will NOT resolve — a burden with no
+    favoured_by reference anywhere in the spec falls through same as an
+    unresolvable one. That is a normal, expected outcome, not an error:
+    callers get (None, []), never an exception. An enclosing element with
+    no normative_policies of its own also yields an empty list, distinct
+    from no enclosing element at all.
+
+    Returns (enclosing_element_or_None, normative_policies_list).
+    """
+    found = _find_element_and_action_for_burden(model, token_name)
+    if found is None:
+        return (None, [])
+    element, _action_name = found
+    return (element, list(getattr(element, "normative_policies", [])))
 
 
 def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]:
