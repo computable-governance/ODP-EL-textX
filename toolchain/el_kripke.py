@@ -1169,6 +1169,65 @@ def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
     return found[1] if found else None
 
 
+def find_governing_element_via_authorization(
+    model: Any, token_name: str
+) -> Tuple[Optional[Any], List[Any]]:
+    """
+    Second, fallback resolution path for find_normative_policies_for_token.
+
+    Scope, precisely: resolves a token that is the grants_permit or
+    on_revocation_embargo target of some Authorization declaration — NOT
+    general permit/embargo resolution. A permit/embargo token can be
+    referenced elsewhere (e.g. a role action's requires_permit or
+    inhibited_by_embargo, grammar lines ~677-678) without ever appearing in
+    any Authorization; such tokens are still unresolvable by either this
+    function or the burden path, and correctly return (None, []) — e.g.
+    patientRecordAccessPermitByRole (referral_scenario.el), referenced via
+    requires_permit on aiExaminationRole but granted by no Authorization.
+
+    Traversal:
+      model.elements
+        → Authorization
+          → match if _obj_name(auth.permit) == token_name (grants_permit,
+            a typed cross-reference to DeonticToken)
+            or auth.on_revocation_embargo == token_name (AM-31: plain ID
+            string, not a cross-reference — compare directly, not via
+            _obj_name)
+          → auth.domain_scope (plain STRING, unvalidated — AM-14's proposal
+            to make this a [DomainDecl] cross-reference is still tentative
+            and has not landed)
+            → look up the model element whose .name matches that string
+              (plain name lookup across model.elements — domain_scope
+              carries no type information at the grammar level, so any
+              element kind can match, not just Domain/Community/Federation)
+          → return (element, element.normative_policies)
+
+    Degrades gracefully to (None, []) at every failure point: no
+    Authorization grants/revokes this token, the matching Authorization has
+    no domain_scope, or domain_scope names no real element in the model.
+    Never raises.
+
+    If more than one Authorization grants/revokes the same token name, the
+    first match in model.elements declaration order wins — same
+    first-match convention as _find_element_and_action_for_burden. Not
+    expected in practice (a token is normally granted/revoked by exactly
+    one Authorization) but not validated against here.
+    """
+    for auth in _collect(model, "Authorization"):
+        permit_match = _obj_name(getattr(auth, "permit", None)) == token_name
+        embargo_match = getattr(auth, "on_revocation_embargo", None) == token_name
+        if not (permit_match or embargo_match):
+            continue
+        domain_scope = getattr(auth, "domain_scope", None)
+        if not domain_scope:
+            return (None, [])
+        for el in model.elements:
+            if getattr(el, "name", None) == domain_scope:
+                return (el, list(getattr(el, "normative_policies", [])))
+        return (None, [])
+    return (None, [])
+
+
 def find_normative_policies_for_token(
     model: Any, token_name: str
 ) -> Tuple[Optional[Any], List[Any]]:
@@ -1178,34 +1237,55 @@ def find_normative_policies_for_token(
     grounded instruments: legislation, regulation, standard, guideline,
     contractual).
 
-    KNOWN LIMITATION (2026-07-24 board-citation feature): governance
-    resolution reuses _find_element_and_action_for_burden's role → action →
-    favoured_by traversal, so it only resolves burden-kind tokens that are
-    referenced by some role action's favoured_by clause. It does NOT resolve
-    permit/embargo tokens at all — those are never referenced via
-    favoured_by, and their actual governing Domains (e.g.
-    PatientDataAuthorshipDomain, PatientDataConsentDomain in
-    referral_scenario.el) link to actors via controlling_object/
-    controlled_object membership, not via any token reference. Reaching
-    those would need a second, structurally different lookup (match
-    token.holder against Domain.controlling_object/controlled_object) that
-    can plausibly return more than one governing element per token — out of
-    scope here; not implemented.
+    Two resolution paths, tried in order:
 
-    Even for burden tokens, most will NOT resolve — a burden with no
-    favoured_by reference anywhere in the spec falls through same as an
-    unresolvable one. That is a normal, expected outcome, not an error:
-    callers get (None, []), never an exception. An enclosing element with
-    no normative_policies of its own also yields an empty list, distinct
-    from no enclosing element at all.
+    1. Burden path (primary). Reuses _find_element_and_action_for_burden's
+       role → action → favoured_by traversal — resolves burden-kind tokens
+       that are referenced by some role action's favoured_by clause.
+
+    2. Authorization path (fallback, only tried if 1 finds nothing). Reuses
+       find_governing_element_via_authorization — resolves a token that is
+       the grants_permit or on_revocation_embargo target of some
+       Authorization declaration, via that Authorization's domain_scope.
+       This is narrower than "permit/embargo resolution": a permit/embargo
+       referenced only via a role action's requires_permit or
+       inhibited_by_embargo — never via any Authorization — is NOT resolved
+       by this path either, and correctly falls through to (None, []). What
+       it does cover: patientRecordAccessPermitByAuthorization and
+       patientRecordAccessEmbargo (referral_scenario.el), both
+       granted/revoked by patientDataAuthorization, whose
+       domain_scope: "PatientDataConsentDomain" resolves them to that
+       Domain's ConsentRightsBasis citation.
+
+    Even with both paths, most tokens will NOT resolve — a burden with no
+    favoured_by reference anywhere, and a permit/embargo referenced by no
+    Authorization, both fall through the same as an unresolvable one. That
+    is a normal, expected outcome, not an error: callers get (None, []),
+    never an exception. An enclosing element with no normative_policies of
+    its own also yields an empty list, distinct from no enclosing element
+    at all.
+
+    KNOWN LIMITATION (updated 2026-07-28): the Authorization path only
+    reaches tokens tied to an Authorization specifically — general
+    permit/embargo resolution (e.g. via requires_permit/inhibited_by_embargo)
+    is still out of scope, same as before. Within its narrower scope, the
+    domain_scope lookup is also a plain string-name match against
+    model.elements, not a typed/validated cross-reference (AM-14's proposal
+    to make domain_scope a [DomainDecl] reference is still tentative, not
+    landed) — a typo'd or stale domain_scope value silently degrades to
+    (None, []) rather than surfacing as an error anywhere. It also only
+    tries the first Authorization that grants or revokes a given token
+    name; a token granted/revoked by more than one Authorization (not
+    expected in practice, not validated against) would only ever resolve
+    via the first one found.
 
     Returns (enclosing_element_or_None, normative_policies_list).
     """
     found = _find_element_and_action_for_burden(model, token_name)
-    if found is None:
-        return (None, [])
-    element, _action_name = found
-    return (element, list(getattr(element, "normative_policies", [])))
+    if found is not None:
+        element, _action_name = found
+        return (element, list(getattr(element, "normative_policies", [])))
+    return find_governing_element_via_authorization(model, token_name)
 
 
 def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]:

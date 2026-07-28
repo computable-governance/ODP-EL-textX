@@ -2,16 +2,19 @@
 Layer 4 — integration test for GET /tokens/{token_name}/governance.
 
 This endpoint resolves the Community/Domain/Federation that governs a
-token (via el_kripke.find_normative_policies_for_token's favoured_by
-traversal) and surfaces that element's normative_policies (AM-28/AM-41)
-citations. Most tokens will NOT resolve to a governing element or a
-citation — that is a normal, expected outcome (empty list, 200 OK), not
-an error. See docs/Board_NormativePolicy_Display_Investigation_2026-07-22.md
-(computable-governance-ui) for the design trace; and el_kripke.py's
-find_normative_policies_for_token docstring for the KNOWN LIMITATION that
-permit/embargo tokens never resolve via this traversal (governed by
-Domain controlling_object/controlled_object membership instead, not
-implemented here).
+token and surfaces that element's normative_policies (AM-28/AM-41)
+citations, via el_kripke.find_normative_policies_for_token's two
+resolution paths:
+
+1. Burden path (primary) — role → action → favoured_by traversal.
+2. Authorization path (fallback, permit/embargo tokens) — granted/revoked
+   token → Authorization.domain_scope → matching model element. See
+   docs/Board_NormativePolicy_Display_Investigation_2026-07-22.md
+   (computable-governance-ui), "combined next-session scope" addendum,
+   item 2, for the design trace.
+
+Most tokens will still NOT resolve to a governing element or a citation
+— that is a normal, expected outcome (empty list, 200 OK), not an error.
 
 Follows test_revocation_endpoint.py's convention: fresh-reload the api
 module per test, pin the scenario explicitly rather than relying on the
@@ -53,11 +56,12 @@ def test_burden_resolves_to_community_normative_policy(api):
 def test_resolved_policy_enforcement_surfaces_mode_and_unpoliced(api):
     # ReferralEpisodeAccountability declares `enforcement: unpoliced` (no
     # mode keyword) — mode should surface as None and unpoliced as True.
-    # (The only other enforcement-bearing policies in this scenario,
-    # AuthorshipBasis/ConsentRightsBasis with `enforcement: policed
-    # pessimistic`, sit on PatientDataAuthorshipDomain/PatientDataConsentDomain,
-    # which are governed by actor membership, not favoured_by — unreachable
-    # by this endpoint per the KNOWN LIMITATION.)
+    # (AuthorshipBasis, the other `enforcement: policed pessimistic` policy
+    # in this scenario, sits on PatientDataAuthorshipDomain, which no
+    # Authorization's domain_scope names — still unreachable by either
+    # resolution path. ConsentRightsBasis, on PatientDataConsentDomain, IS
+    # now reachable via the Authorization path — see
+    # test_permit_resolves_via_authorization_domain_scope below.)
     api._runtime = api._SCENARIO_BUILDERS["referral"]()
 
     resp = api.get_token_governance("assessmentSchedulingBurden")
@@ -70,15 +74,47 @@ def test_resolved_policy_enforcement_surfaces_mode_and_unpoliced(api):
     assert policy.enforcement.unpoliced is True
 
 
-def test_permit_token_has_no_resolvable_governance(api):
-    # Permit/embargo tokens are never referenced via favoured_by, so this
-    # traversal can't reach them — must be a graceful empty response, not
-    # an error.
+def test_permit_resolves_via_authorization_domain_scope(api):
+    # patientRecordAccessPermitByAuthorization is never referenced via
+    # favoured_by, so the burden path can't reach it — but it IS the
+    # grants_permit target of patientDataAuthorization, whose
+    # domain_scope: "PatientDataConsentDomain" resolves it via the
+    # Authorization fallback path.
     api._runtime = api._SCENARIO_BUILDERS["referral"]()
 
     resp = api.get_token_governance("patientRecordAccessPermitByAuthorization")
 
     assert resp.token_name == "patientRecordAccessPermitByAuthorization"
+    assert resp.governing_element == "PatientDataConsentDomain"
+    assert len(resp.normative_policies) == 1
+    policy = resp.normative_policies[0]
+    assert policy.name == "ConsentRightsBasis"
+    assert policy.kind == "legislation"
+    assert policy.url == "https://www.legislation.gov.au/C2004A03712/latest"
+
+
+# Note: patientRecordAccessEmbargo (patientDataAuthorization's
+# on_revocation_embargo target) is NOT tested at this API layer — it
+# starts pending and isn't enrolled in _runtime.current_state().tokens
+# until a revocation event materializes it, so this endpoint's
+# pre-existence check 404s before governance resolution ever runs. Its
+# resolution is covered directly against the parsed model instead, in
+# tests/test_permit_embargo_governance_resolution.py's
+# test_permit_and_embargo_resolve_via_real_authorization.
+
+
+def test_permit_referenced_only_via_role_action_stays_unresolvable(api):
+    # patientRecordAccessPermitByRole is referenced via requires_permit on
+    # aiExaminationRole (referral_scenario.el ~line 632) but granted or
+    # revoked by no Authorization at all — the Authorization fallback path
+    # is scoped to Authorization.grants_permit/on_revocation_embargo
+    # specifically, not general permit/embargo resolution, so this must
+    # still degrade to a graceful empty response.
+    api._runtime = api._SCENARIO_BUILDERS["referral"]()
+
+    resp = api.get_token_governance("patientRecordAccessPermitByRole")
+
+    assert resp.token_name == "patientRecordAccessPermitByRole"
     assert resp.governing_element is None
     assert resp.normative_policies == []
 

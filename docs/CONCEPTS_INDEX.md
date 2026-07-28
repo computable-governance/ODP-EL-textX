@@ -650,10 +650,34 @@ combined next-session scope addendum (item 1): a colleague viewing the
 board's citation line asked "where's the URL?" The referral scenario's
 three board-reachable citations (`AuthorshipBasis`, `ConsentRightsBasis`,
 `ReferralEpisodeAccountability`) now carry real URLs. See
-`docs/el_grammar_amendments.md`, AM-43, for the full change record. Item 2
-of that same addendum — permit/embargo governance resolution, needed to
-make `ConsentRightsBasis` reachable by the Consent panel at all — remains
-open, unstarted.
+`docs/el_grammar_amendments.md`, AM-43, for the full change record.
+
+**Landed 2026-07-28 (item 2 of the same addendum, no AM number).**
+`el_kripke.find_normative_policies_for_token` gains a second, fallback
+resolution path — `find_governing_element_via_authorization` — for a token
+that is the `grants_permit` or `on_revocation_embargo` target of some
+`Authorization` declaration, resolved via that `Authorization`'s
+`domain_scope` (a plain, unvalidated STRING name-matched against
+`model.elements`; still not the typed `[DomainDecl]` cross-reference the
+tentative `AM-14` amendment proposes). This is deliberately narrower than
+"permit/embargo resolution" in general: a permit/embargo referenced only
+via a role action's `requires_permit`/`inhibited_by_embargo` — never via
+any `Authorization` — still doesn't resolve, e.g.
+`patientRecordAccessPermitByRole`. What it does newly reach:
+`patientRecordAccessPermitByAuthorization` and
+`patientRecordAccessEmbargo`, both granted/revoked by
+`patientDataAuthorization`, now resolve to `PatientDataConsentDomain` and
+its `ConsentRightsBasis` citation — the citation most narratively relevant
+to patient consent, per the investigation note. No AM entry: pure
+toolchain logic (`el_kripke.py`), no grammar or validator change,
+consistent with `find_normative_policies_for_token` itself (commit
+`a2b92a6`) also having no AM entry. Tests:
+`tests/test_permit_embargo_governance_resolution.py` (new — direct
+`el_kripke` calls, including a throwaway-fixture case confirming a
+`domain_scope` matching no real element degrades to `(None, [])` rather
+than erroring) and additions to `tests/test_token_governance_endpoint.py`.
+Frontend (`renderConsent` wiring, computable-governance-ui) is separate
+follow-on work, not done here.
 
 **Confirmed 2026-07-22 — episodic communities already support this via
 AM-41, no new grammar required.** Investigated directly: the
