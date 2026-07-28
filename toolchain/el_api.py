@@ -359,6 +359,7 @@ class NormativePolicyInfo(BaseModel):
     name: str
     description: Optional[str] = None
     source: str                    # citation — mandatory on NormativePolicy
+    url: Optional[str] = None      # AM-43 — optional link for the citation
     kind: str                      # legislation | regulation | standard | guideline | contractual
     enforcement: Optional[NormativePolicyEnforcementInfo] = None
 
@@ -665,6 +666,7 @@ def get_token_governance(token_name: str) -> TokenGovernanceResponse:
                 name=p.name,
                 description=getattr(p, "description", None),
                 source=p.source,
+                url=getattr(p, "url", None),
                 kind=p.kind,
                 enforcement=(
                     NormativePolicyEnforcementInfo(

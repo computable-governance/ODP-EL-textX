@@ -21,7 +21,7 @@ maturity status).
 | CommunityObject | Implemented (AM-26) |
 | Objective rules | Implemented |
 | Policy / policy envelope | Grammar exists — deliberately excluded from reference scenarios |
-| NormativePolicy scope | Implemented (AM-28); widened to any Community (AM-41, 2026-07-22); enforcement-mode field still proposed |
+| NormativePolicy scope | Implemented (AM-28); widened to any Community (AM-41, 2026-07-22); enforcement-mode field landed (AM-42); optional url field landed (AM-43, 2026-07-28) |
 | Establishing behaviour | Implemented (AM-33) — demonstrated in `referral_scenario.el` |
 | Creation-style / episodic community | Settled 2026-07-07: created COMMUNITY, not federation (corrected from a 2026-07-06 conclusion) — demonstrated in `referral_scenario.el` |
 | Implicit creation / standing communities | Implemented |
@@ -641,6 +641,19 @@ NAIC's Guidance for AI Adoption would be `kind: guideline`,
 `enforcement: unpoliced`; the EU AI Act would be `kind: legislation`,
 `enforcement: policed_pessimistic`. Not just a different citation, a
 different enforcement posture.
+
+**Landed 2026-07-28 (AM-43).** `NormativePolicy` gains an optional `url`
+field, a plain STRING alongside `source` — a link to the cited instrument,
+where `source` only ever carried descriptive text. Motivated by
+`docs/Board_NormativePolicy_Display_Investigation_2026-07-22.md`'s
+combined next-session scope addendum (item 1): a colleague viewing the
+board's citation line asked "where's the URL?" The referral scenario's
+three board-reachable citations (`AuthorshipBasis`, `ConsentRightsBasis`,
+`ReferralEpisodeAccountability`) now carry real URLs. See
+`docs/el_grammar_amendments.md`, AM-43, for the full change record. Item 2
+of that same addendum — permit/embargo governance resolution, needed to
+make `ConsentRightsBasis` reachable by the Consent panel at all — remains
+open, unstarted.
 
 **Confirmed 2026-07-22 — episodic communities already support this via
 AM-41, no new grammar required.** Investigated directly: the

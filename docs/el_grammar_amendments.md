@@ -2934,3 +2934,89 @@ required no changes — confirmed by smoke test, not assumed. Full suite:
 **Status:** IMPLEMENTED — `NormativePolicy.enforcement` optional field
 landed, reusing Policy's existing `EnforcementMode` vocabulary; no link
 to `discharge_mode` built (deliberately out of scope).
+
+## AM-43 (2026-07-28) — Optional url field on NormativePolicy (§6.5 citation identity)
+
+**Status:** IMPLEMENTED (2026-07-28) — `NormativePolicy` gains an optional
+`url` field, a plain STRING sub-field alongside `source`.
+
+**Problem:** `NormativePolicy.source` is a plain descriptive string with no
+link to the actual instrument it cites. A colleague viewing the board's
+citation line (`docs/Board_NormativePolicy_Display_Investigation_2026-07-22.md`,
+"combined next-session scope" addendum, item 1) asked "where's the URL?" —
+the honest answer was "there isn't one yet." This amendment is item 1 of
+that addendum's two paired follow-ups; item 2 (permit/embargo governance
+resolution) is separate follow-on work, not touched here.
+
+**Standard reference(s):** §6.5 (Policy concept, which `NormativePolicy`
+specialises, AM-28) — no new standard grounding needed; `url` is an
+identity/reference detail of the same citation `source` already carries,
+not a new concept.
+
+**Blast radius:** one new optional field on `NormativePolicy`'s own grammar
+rule, placed directly after `source` (the field it complements). No changes
+to `NormativePolicyRef`, `NormativePolicyEnforcement`, `Domain`,
+`Federation`, or `Community`'s handling of `normative_policies`.
+
+**Grammar (`grammar/v2/el_grammar.tx`), as landed:**
+```
+NormativePolicy:
+    'normative_policy' name=ID '{'
+        ('description'       ':' description=STRING)?
+        'source'             ':' source=STRING
+        ('url'               ':' url=STRING)?
+        'kind'               ':' kind=NormativePolicyKind
+        ('enforcement'       ':' enforcement=NormativePolicyEnforcement)?
+        ('type'              ':' policy_type=PolicyType)?
+        ('initial_value'     ':' initial_value=PolicyValue)?
+        ('review_cycle'      ':' review_cycle=Duration)?
+        ('policy_setting_behaviour' ':' setting_behaviour=STRING)?
+    '}'
+;
+```
+
+**Design rationale:**
+- Plain STRING field, same shape as `source`/`description` — no new
+  sub-rule, no new class. Confirmed by smoke test (not assumed, same
+  discipline as AM-42): `toolchain/el_parser.py` required no changes; no
+  object processor is needed for a plain scalar to populate directly at
+  parse time.
+- One behavioural note worth recording, not a bug: textX resolves an
+  absent optional STRING match to `''` (empty string), not `None` —
+  confirmed by smoke test to match `description`'s pre-existing behaviour
+  on the same rule. `NormativePolicy.url`'s dataclass default
+  (`Optional[str] = None`) is only ever observed if a `NormativePolicy` is
+  constructed directly in Python, not via the parser. `''` is falsy in
+  both Python and JS, so the frontend's "render `<a href>` when present,
+  plain text otherwise" check works correctly regardless of which of the
+  two falsy/absent values is in play.
+
+**Validator impact:** none. `url` is not checked by any validator rule —
+purely descriptive, like `source`.
+
+**Files changed:** `grammar/v2/el_grammar.tx` (`NormativePolicy` rule, new
+`url` field), `toolchain/el_domain.py` (`NormativePolicy.url: Optional[str]
+= None`), `toolchain/el_api.py` (`NormativePolicyInfo.url: Optional[str] =
+None`; `get_token_governance`'s construction of `NormativePolicyInfo` passes
+`url=getattr(p, "url", None)`, matching the existing `description` pattern),
+`scenarios/referral/referral_scenario.el` (`AuthorshipBasis`,
+`ConsentRightsBasis`, `ReferralEpisodeAccountability` — the three citations
+reachable by the board's Obligations panel — each given a real `url`),
+`tests/test_am43_normative_policy_url.py` (new file, 3 tests: url present
+resolves; url absent resolves to `''`, matching `description`'s existing
+behaviour; the three real referral-scenario citations resolve to their real
+URLs), `tests/test_token_governance_endpoint.py` (one assertion added to
+`test_burden_resolves_to_community_normative_policy`, confirming `url`
+passes through the `/tokens/{token_name}/governance` endpoint's
+`NormativePolicyInfo` construction). Full suite: 80 pre-existing tests pass
+unchanged, plus 3 new (83 total).
+
+**Frontend (computable-governance-ui, separate repo):** not part of this
+amendment — `referral-board-view.html`'s `renderObligationCard` rendering
+`url` as a real `<a href>` when present (plain text otherwise) is tracked
+separately in that repo, per the addendum's step 4.
+
+**Status:** IMPLEMENTED — `NormativePolicy.url` optional field landed;
+`AuthorshipBasis`/`ConsentRightsBasis`/`ReferralEpisodeAccountability` in
+the referral scenario now carry real URLs. Permit/embargo governance
+resolution (item 2 of the paired addendum) remains open, unstarted.

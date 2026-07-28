@@ -326,6 +326,7 @@ NormativePolicy:
     'normative_policy' name=ID '{'
         ('description'       ':' description=STRING)?
         'source'             ':' source=STRING
+        ('url'               ':' url=STRING)?
         'kind'               ':' kind=NormativePolicyKind
         ('enforcement'       ':' enforcement=NormativePolicyEnforcement)?
         ('type'              ':' policy_type=PolicyType)?

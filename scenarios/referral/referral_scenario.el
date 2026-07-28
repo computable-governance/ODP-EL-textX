@@ -543,18 +543,21 @@ normative_policy AIMedicalDeviceRegulation {
 
 normative_policy AuthorshipBasis {
     source: "Health Records and Information Privacy Act 2002 (NSW); both clinicians engaged as employees of their respective practices"
+    url: "https://legislation.nsw.gov.au/view/pdf/asmade/act-2002-71"
     kind: legislation
     enforcement: policed pessimistic
 }
 
 normative_policy ConsentRightsBasis {
     source: "Privacy Act 1988 (Cth) — Australian Privacy Principles; patient consent and revocation rights"
+    url: "https://www.legislation.gov.au/C2004A03712/latest"
     kind: legislation
     enforcement: policed pessimistic
 }
 
 normative_policy ReferralEpisodeAccountability {
     source: "National Model for Clinical Governance: The foundations of high-quality care (Australian Commission on Safety and Quality in Health Care, 2026) — episode-of-care accountability under Foundation 5, Managing and reducing risk"
+    url: "https://www.safetyandquality.gov.au/clinical-topics/clinical-governance/2026-national-model"
     kind: guideline
     enforcement: unpoliced
 }

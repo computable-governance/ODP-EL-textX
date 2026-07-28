@@ -46,6 +46,8 @@ def test_burden_resolves_to_community_normative_policy(api):
     assert policy.name == "ReferralEpisodeAccountability"
     assert policy.kind == "guideline"
     assert "National Model for Clinical Governance" in policy.source
+    # AM-43: url passed through from NormativePolicy to NormativePolicyInfo
+    assert policy.url == "https://www.safetyandquality.gov.au/clinical-topics/clinical-governance/2026-national-model"
 
 
 def test_resolved_policy_enforcement_surfaces_mode_and_unpoliced(api):

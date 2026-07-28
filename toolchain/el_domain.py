@@ -516,6 +516,7 @@ class NormativePolicy(_ELParentable):
     name:              str            = ""
     description:       Optional[str] = None
     source:            str            = ""     # citation — mandatory
+    url:               Optional[str] = None     # AM-43 — optional link for the citation
     kind:              str            = ""     # NormativePolicyKind — mandatory
     enforcement:       Optional[NormativePolicyEnforcement] = None  # AM-42
     policy_type:       Optional[str] = None
