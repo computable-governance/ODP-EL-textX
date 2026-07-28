@@ -3,6 +3,15 @@
 This file gives Claude Code persistent context for working on this repository.
 Read it at the start of every session before touching any code or grammar file.
 
+**Before starting design or implementation work on any new scenario, construct,
+or grammar feature**, run:
+
+    grep -n "OPEN FINDING" docs/CONCEPTS_INDEX.md
+
+and check whether any open finding relates to what's about to be built. If one
+does, surface it explicitly to the user before proceeding, rather than
+discovering the dependency mid-task.
+
 ---
 
 ## 1. What This Repository Is

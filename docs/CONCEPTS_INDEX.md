@@ -136,7 +136,7 @@ An object subject to more than one domain must conform to all of their
 policies concurrently (§7.4 NOTE, objects governed by multiple communities'
 policies at once).
 
-The employee/contractor fork is deliberately deferred, not resolved. If
+**OPEN FINDING** — The employee/contractor fork is deliberately deferred, not resolved. If
 later revisited: contractor status shifts data ownership from practice to
 clinician per general agency-law default (employee records generally owned
 by employer; independent contractor generally owns their own patients'
@@ -147,7 +147,7 @@ already has `lifecycle` from AM-33) for what happens to authorship-domain
 membership when a contractor's engagement ends. Not being built now —
 logged so it isn't rediscovered from scratch later.
 
-**AM-40 syntax direction (2026-07-19, still pending):** Domain's
+**OPEN FINDING** — **AM-40 syntax direction (2026-07-19, still pending):** Domain's
 `controlling_object`/`controlled_object` are currently bare object
 references with no role machinery at all — §7.5.1 explicitly says "roles
 of controlled objects... role of controlling object," so these should
@@ -163,7 +163,7 @@ established by `MemberRef` (`community fills role`), applied to
 role-filling trace back to the federation that authorized it. `fills` is
 not new; it's `MemberRef`'s existing pattern generalized.
 
-**Open (2026-07-19):** controlling-role cardinality — can more than one
+**OPEN FINDING** — **Open (2026-07-19):** controlling-role cardinality — can more than one
 object fill a controlling role in a single domain? — remains genuinely
 unresolved by the standard, and is NOT settled by the
 `PatientDataAuthorshipDomain`/`SpecialistPractice` case above, since that
@@ -277,6 +277,8 @@ scenario. Nothing currently blocking; simply hasn't come up.
 ---
 
 ### AIVendor — regulatory-overlay gap (identified 2026-07-09, not yet modelled)
+
+**OPEN FINDING**
 
 **Status:** Deliberately deferred. Not present in any scenario, including `referral_scenario.el` (Reference).
 
@@ -406,6 +408,8 @@ from `discharge_mode`.
 
 ## Concurrent multi-episode runtime
 
+**OPEN FINDING**
+
 Toolchain currently runs a single module-level `_runtime` instance per scenario;
 every endpoint (`get_available_actions`, `execute_action`, `/debug/tokens`,
 `/reset`, etc.) implicitly assumes one active episode at a time. Genuine
@@ -475,7 +479,7 @@ is the primary filler; the community is what it represents. Those existing
 informal phrasings are not being rewritten as part of this correction — only
 flagged here as informal, pending any future editing pass.
 
-**Open question, recorded not resolved (2026-07-28):** `MemberRef`'s
+**OPEN FINDING** — **Open question, recorded not resolved (2026-07-28):** `MemberRef`'s
 current grammar (`grammar/v2/el_grammar.tx`) reads
 
     member: community=[Community] ('represented_by' represented_by=[CommunityObject])?
@@ -490,7 +494,7 @@ needs a careful check against the actual grammar file (done — quoted above)
 and against whatever existing tests/scenarios use `MemberRef` before any
 change is proposed. Recording the question here, not proposing a fix.
 
-**Finding 1 (2026-07-28) — `DelegatedFrom.delegator` should be typed
+**OPEN FINDING** — **Finding 1 (2026-07-28) — `DelegatedFrom.delegator` should be typed
 `[Party]`, not `[EnterpriseObject]`.** Per ISO/IEC 15414's Figure A.5
 (class diagram; confirmed via a secondary source describing the figure
 directly — Sepanosian's thesis, cited here only for its factual
@@ -576,7 +580,7 @@ reference — the same pattern AM-31-V1 already uses for
 grammar). Choosing between those two mechanisms is a separate design
 decision, not resolved by this investigation.
 
-**Open conceptual question, not an engineering one — recorded, not
+**OPEN FINDING** — **Open conceptual question, not an engineering one — recorded, not
 resolved:** §6.6.8 NOTE 2 states "the delegation may have been direct, by
 a party, or indirect, by an agent of the party having authorization from
 the party to so delegate." The three `agent`-declared delegators above
@@ -596,7 +600,7 @@ already treats `DelegationDecl`)? Not resolved here — this is the
 question that has to be settled before Finding 1 can be scoped for
 implementation.
 
-**Finding 2 (2026-07-28) — CommunityObject should satisfy
+**OPEN FINDING** — **Finding 2 (2026-07-28) — CommunityObject should satisfy
 EnterpriseObject/ActiveEO typing (Figure A.2).** Per §6.2.2 and Figure
 A.2, CommunityObject is itself an active enterprise object (a composite
 one, representing a community). Confirmed earlier this week: in the
@@ -881,7 +885,7 @@ token/embargo/lifecycle machinery already covers "what happens on
 violation"; enforcement mode only needs to state the regulatory posture
 that machinery is satisfying.
 
-**Open question, recorded not resolved:** should there eventually be a
+**OPEN FINDING** — **Open question, recorded not resolved:** should there eventually be a
 validator check for consistency between a NormativePolicy's declared
 enforcement mode and the `discharge_mode` of the tokens it governs (e.g.
 flagging a `policed pessimistic` policy governing a `monitored`-mode
@@ -1102,6 +1106,8 @@ models both practice communities today.
 
 ## Kripke/runtime impact of community lifecycle
 
+**OPEN FINDING**
+
 **Definition:** Extending the Kripke world model so community existence
 is itself a modelled, checkable dimension — not assumed from world 0.
 
@@ -1243,7 +1249,7 @@ items 17-18.
   semantic-looseness concern more precisely than the caveat-comment
   originally proposed for it.
 
-**Open:** Formal written treatment (paper/design-note) not started;
+**OPEN FINDING** — **Open:** Formal written treatment (paper/design-note) not started;
 concrete modelling pattern now exists and is demonstrated.
 
 ---
@@ -1355,7 +1361,7 @@ variations of one shared rule.
   something to fold into the current pragmatic amendment, which is
   additive-only and touches nothing existing.
 
-**Open:** Candidate for a dedicated future refactor session. Today's
+**OPEN FINDING** — **Open:** Candidate for a dedicated future refactor session. Today's
 pragmatic fix (adding `lifecycle=Lifecycle` directly to `FedBodyItem` and
 `DomainBodyItem`) proceeds in the meantime as the additive, low-risk
 option.
@@ -1414,7 +1420,7 @@ employee or a contractor, i.e. neither engagement type should get
 represented via a `NormativePolicy` (`kind: contractual`, source citing
 the employment/engagement agreement or relevant legal default) attached
 to the authorship domain (see `PatientDataAuthorshipDomain`, Domain
-entry) — not via `principal_of`/`delegated_from`. Also logged: there is
+entry) — not via `principal_of`/`delegated_from`. **OPEN FINDING** — Also logged: there is
 currently no grammar construct for recording a clinician's engagement
 type (employee vs. contractor) as a checkable fact — it can only live as
 prose in a `NormativePolicy.source` string today. Flagged as a future
@@ -1431,7 +1437,7 @@ federation member whose own action emits the event that triggers the
 episode's establishment. Nothing in either declaration references the
 other directly.
 
-**Open question (Zoran, 2026-07-07):** federated networks of this kind
+**OPEN FINDING** — **Open question (Zoran, 2026-07-07):** federated networks of this kind
 exist to reflect digital health business and regulatory arrangements
 between providers — but there may need to be explicit traceability and
 provenance between that static, standing arrangement and each dynamic,
@@ -1545,14 +1551,14 @@ FHIR-mapping critical path with the AIVendor gap and later-stage items:
    mapping table, edge cases for `cancelled`/`entered-in-error`, explicit boundary
    against R30 Option B)
 
-   **Update 2026-07-15:** A probe-tier implementation now exists — see AM-39
+   **OPEN FINDING** — **Update 2026-07-15:** A probe-tier implementation now exists — see AM-39
    (commit `7699baa`). This wires the mechanism end-to-end for
    referralInitiationBurden specifically (Encounter.status=finished fires an
    event via the new Runtime.fire_event(), activating the burden), but does
    NOT implement the full status→state mapping design described above (all
    nine FHIR Encounter statuses, deadline computation, etc.). That full design
    remains outstanding under this item.
-2. R30 Option B (live grant/reinstate) — optional, deferred unless a demo
+2. **OPEN FINDING** — R30 Option B (live grant/reinstate) — optional, deferred unless a demo
    narrative needs it
 3. `FHIRConsentMapper` flat-community gap — fix shape undecided
 4. EDOC24 Mediator write-back direction — larger scope
@@ -1572,6 +1578,8 @@ FHIR-mapping critical path with the AIVendor gap and later-stage items:
 
 ## Event-triggered activation (Step 7c) — implemented but untested
 
+**OPEN FINDING**
+
 `el_engine.py`'s `advance()` Step 7c (AM-22, commit `18b243dd`, 2026-06-05)
 performs real event-triggered token activation: when an Action's `emits`
 matches a token's `triggered_by`, that token transitions to `active`.
@@ -1588,6 +1596,8 @@ mechanism (e.g. item #1's Encounter.status gating), first tests for Step 3/7c
 should be added as part of that work, not assumed correct from authorship alone.
 
 ## Engine/Kripke event-model symmetry gap — undocumented, not deliberately designed
+
+**OPEN FINDING**
 
 `el_engine.py`'s event-triggered activation (Step 7c, AM-22, 2026-06-05) and
 `el_kripke.py`'s `WAITING`/P6 cascade (commit `894afdbd`, 2026-06-13, logged
@@ -1636,7 +1646,7 @@ a single transition per call, one exploring all reachable ones. The
 anchoring function (`build_kripke_from_runtime()`) would then be closer to
 a formality than a hand-maintained classification with room to drift.
 
-**Open question, not yet confirmed:** does `build_kripke_from_runtime()`
+**OPEN FINDING** — **Open question, not yet confirmed:** does `build_kripke_from_runtime()`
 (the hybrid mode, anchored to a live runtime) ever produce
 `ObligationState.WAITING`, or is `WAITING` only reachable from a separate,
 pure spec-only world-builder that doesn't involve a runtime at all? If
@@ -1649,6 +1659,8 @@ Not scheduled — this is a forward-looking design note, useful the next
 time either layer is touched, not urgent work.
 
 ## TokenGroup/any_discharged coordination semantics — Kripke-only, not enacted by operational engine
+
+**OPEN FINDING**
 
 Confirmed via direct grep (2026-07-16): `el_engine.py` contains zero
 references to `TokenGroup`, `any_discharged`, or `SUPERSEDED` — and zero
@@ -1695,6 +1707,8 @@ before any implementation decision.
 ---
 
 ## Amendments-log gap — AM-34 through AM-37 missing; dangling AM-34 reference
+
+**OPEN FINDING**
 
 `docs/el_grammar_amendments.md` has no entries for AM-34 through AM-37 —
 AM-33 is the last logged entry before AM-38 (which, per its own commit
