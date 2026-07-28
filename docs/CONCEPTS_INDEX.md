@@ -18,7 +18,7 @@ maturity status).
 | Community | Implemented |
 | Domain (community type) | Settled 2026-07-06: retired for organizational structure; reserved for cross-cutting characterizing relationships |
 | Federation (community type) | Implemented |
-| CommunityObject | Implemented (AM-26) |
+| CommunityObject | Implemented (AM-26); 2026-07-28 correction on record — community object, not community, is the role filler; MemberRef emphasis open question |
 | Objective rules | Implemented |
 | Policy / policy envelope | Grammar exists — deliberately excluded from reference scenarios |
 | NormativePolicy scope | Implemented (AM-28); widened to any Community (AM-41, 2026-07-22); enforcement-mode field landed (AM-42); optional url field landed (AM-43, 2026-07-28) |
@@ -457,6 +457,38 @@ for a community to participate in a federation.
 - **Missed in 2026-07-05 analysis** — the incident that motivated this
   index. The fact was already in project memory; not cross-checked
   before reasoning about community/federation structure.
+
+**Correction (2026-07-28) — it is the community OBJECT, not the community
+itself, that fills a federation role.** Direct standard citations: §7.3.2,
+"a community object fulfils one or more roles in other communities"; §6.2.2,
+a community object "is a composite enterprise object that represents a
+community" whose "components... are objects of the community represented."
+The community is what is being represented; the CommunityObject is the
+actual, interaction-capable filler of the role. This corrects informal
+language used in recent design discussion (the AIVendor probe sketches
+above; this index's own existing entries describing `MemberRef`, e.g. the
+Domain entry's "`community fills role`" phrasing and the Federation entry's
+"whole communities" phrasing) that said or implied the community itself
+fills the federation role, with the community object as a secondary/
+optional detail. Per the standard, it is the reverse: the community object
+is the primary filler; the community is what it represents. Those existing
+informal phrasings are not being rewritten as part of this correction — only
+flagged here as informal, pending any future editing pass.
+
+**Open question, recorded not resolved (2026-07-28):** `MemberRef`'s
+current grammar (`grammar/v2/el_grammar.tx`) reads
+
+    member: community=[Community] ('represented_by' represented_by=[CommunityObject])?
+        ('fills' fills=[Role])?
+
+with `fills` attached to the `community` field and `represented_by` marked
+optional. Given the standard's own wording above, this may have the
+emphasis backwards — if the community object is what actually does the
+filling, a `MemberRef` with `fills` present but no `represented_by` would
+be asserting a role-filling with no object capable of performing it. This
+needs a careful check against the actual grammar file (done — quoted above)
+and against whatever existing tests/scenarios use `MemberRef` before any
+change is proposed. Recording the question here, not proposing a fix.
 
 ---
 
