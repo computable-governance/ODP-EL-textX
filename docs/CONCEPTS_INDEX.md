@@ -490,6 +490,227 @@ needs a careful check against the actual grammar file (done — quoted above)
 and against whatever existing tests/scenarios use `MemberRef` before any
 change is proposed. Recording the question here, not proposing a fix.
 
+**Finding 1 (2026-07-28) — `DelegatedFrom.delegator` should be typed
+`[Party]`, not `[EnterpriseObject]`.** Per ISO/IEC 15414's Figure A.5
+(class diagram; confirmed via a secondary source describing the figure
+directly — Sepanosian's thesis, cited here only for its factual
+description of the standard's own diagram structure, not as a design
+authority, per this project's standing "do not cite Sepanosian as a
+design reference" note): "Principal and Agent... are specialisations of
+Party and ActiveEO respectively." That is, Principal is required to be a
+Party specifically (narrower type); Agent may be any active enterprise
+object (broader type, not restricted to Party). Confirmed against the
+current grammar (`grammar/v2/el_grammar.tx`):
+
+    DelegatedFrom:
+        'delegated_from' delegator=[EnterpriseObject]
+        ('duration' ':' duration=STRING)?
+    ;
+
+`delegator` is typed `[EnterpriseObject]`, not `[Party]` — this does not
+enforce the Figure A.5 restriction. Also confirmed: no validator rule
+enforces this either. V-07 (`DelegationDecl`, a separate, different
+construct — the speech-act version, §7.10.1) requires both delegator and
+delegate to be party OR agent (symmetric), which is a different rule from
+the Figure A.5 restriction and doesn't substitute for it. AM-31-V1
+(`Authorization.authority` must be a party) is also a different, adjacent
+relationship, not this one. This is a confirmed gap, not yet fixed —
+flagged for careful implementation in a future session, given the need to
+check whether any existing scenario currently declares a `delegated_from`
+pointing at something other than a Party before tightening this type.
+
+**Investigation 1 results (2026-07-28) — blast radius, before any grammar
+change.** Every `delegated_from:` declaration in `scenarios/**/*.el` was
+searched and its delegator traced back to its `ObjectKind` declaration.
+16 real declarations found; 10 are already `party` (no-op if tightened):
+`referral_scenario.el:178` (`GPClinician`), `referral_scenario.el:190`
+(`SpecialistClinician`), `ecommerce_scenario.el:55` (`ECom`),
+`ecommerce_scenario.el:57` (`CFO`), `consent_scenario.el:46`
+(`GPPracticeParty`), `ereferral_model.el:20` (`GPPractice`),
+`generated_governance.el:32` (`GpPractice001`),
+`federation_consent_scenario.el:22` (`SpecialistParty`),
+`gp_referral_scenario.el:76` (`GPPracticeParty`),
+`gp_referral_scenario.el:92` (`SpecialistClinician`).
+
+**5 are declared `agent`** and would fail to validate if `delegator` were
+tightened to require party kind:
+- `ecommerce_scenario.el:67,75,82` — `eSystem` (declared `agent` at line
+  52, described as "automated agent handling orders, payments, and
+  catalogue"), delegating to `pricingService`, `shippingSubsystem`,
+  `purchasingSubsystem` respectively.
+- `consent_scenario.el:54` — `SpecialistAgent` (declared `agent` at line
+  43), delegating to `AIDiagnosticAgent`.
+- `generated_governance.el:39` — `SpecialistDrOkonkwo` (declared `agent`
+  at line 29), delegating to `AiDiagnosticAgent001`.
+
+Of these three files, only `generated_governance.el` is exercised by a
+currently-passing test — `tests/test_fhir_mapper_golden.py::test_fhir_mapper_output_parses_and_validates`
+parses and validates it with `validate=True` and asserts `result.ok`.
+Tightening the type would break this test, and would additionally require
+new kind-aware logic in `toolchain/fhir_mapper.py` (`_set_delegated_from`/
+`_infer_delegation_structure`), which currently sets `delegated_from` from
+FHIR-derived data with no kind check at all. `ecommerce_scenario.el` and
+`consent_scenario.el` are not loaded by any test by path, so no test would
+fail for those two, but the files themselves would stop validating.
+(A separate, pre-existing, unrelated issue surfaced incidentally:
+`ecommerce_scenario.el:89` references `Customer` as a delegator, but
+`Customer` is never declared with any `ObjectKind` anywhere in that file —
+a latent dangling reference, not a consequence of this finding.)
+
+No test in `tests/` constructs or asserts on `DelegatedFrom`/
+`ObjectBody.delegated_from` directly. The two `.delegator` assertions
+found in `tests/test_referral_kripke.py:130,133` turned out to be on the
+unrelated `Delegation` speech-act construct (`from:`/`to:`, §7.10.1), not
+`DelegatedFrom` — same attribute name, structurally different rule/class
+(`el_domain.py`: `Delegation` vs. `DelegatedFrom`).
+
+**Structural finding:** there is no `[Party]` grammar rule to retype to.
+`party` is only one enum value of `EnterpriseObject.ObjectKind`
+(`grammar/v2/el_grammar.tx:90-99`), not a distinct subtype/rule — there is
+no `Party` class the way there is a `Domain`/`Community` class pair.
+"Tightening to Party" therefore cannot be a same-shape grammar retype; it
+would need either a new grammar-level Party subtype, or a validator-level
+kind check layered on top of the existing loose `[EnterpriseObject]`
+reference — the same pattern AM-31-V1 already uses for
+`Authorization.authority` (enforced in `el_validator.py`, not in the
+grammar). Choosing between those two mechanisms is a separate design
+decision, not resolved by this investigation.
+
+**Open conceptual question, not an engineering one — recorded, not
+resolved:** §6.6.8 NOTE 2 states "the delegation may have been direct, by
+a party, or indirect, by an agent of the party having authorization from
+the party to so delegate." The three `agent`-declared delegators above
+(`eSystem`, `SpecialistAgent`, `SpecialistDrOkonkwo`) may be legitimate
+instances of exactly this indirect/sub-delegation case, rather than
+modelling errors. Before any validator rule is written enforcing a
+Party-only restriction, this needs settling against the standard's own
+text: does an agent sub-delegating in this way formally become a
+Principal in Figure A.5's strict Party-only sense (in which case these
+three would genuinely need to be reclassified, or the delegation
+re-expressed some other way), or does the standard model indirect
+delegation through some different mechanism that doesn't reuse the
+Principal class at all (in which case tightening `delegator` to
+`[Party]` unconditionally would be the wrong fix, and a Party-OR-agent-
+with-authorization rule would be needed instead, mirroring how V-07
+already treats `DelegationDecl`)? Not resolved here — this is the
+question that has to be settled before Finding 1 can be scoped for
+implementation.
+
+**Finding 2 (2026-07-28) — CommunityObject should satisfy
+EnterpriseObject/ActiveEO typing (Figure A.2).** Per §6.2.2 and Figure
+A.2, CommunityObject is itself an active enterprise object (a composite
+one, representing a community). Confirmed earlier this week: in the
+current grammar/domain-class implementation, CommunityObject is its own
+separate top-level rule/dataclass, NOT typed as a subtype of
+EnterpriseObject — meaning a CommunityObject currently cannot fill
+anywhere an EnterpriseObject is expected: not a Domain's `controlled_role`
+(AM-40), and, per Finding 1 above, potentially not `PrincipalOf.agent` or
+`DelegatedFrom.delegator` either, despite the standard treating it as
+exactly the kind of thing that should qualify. This is the same gap
+already noted in the "Correction (2026-07-28)" entry above regarding
+`MemberRef`'s `fills`/`represented_by` emphasis, now confirmed to be part
+of a broader pattern: CommunityObject's standing as a full ActiveEO is not
+currently reflected anywhere in this toolchain's type system. Flagged as a
+confirmed, real gap requiring a proper grammar/domain-layer fix — not a
+quick patch, since it likely requires either a shared parent class between
+CommunityObject and EnterpriseObject in the Python domain layer, or
+restructuring how cross-reference matching works for these types. Not yet
+investigated for blast radius or implemented.
+
+**Investigation 2 results (2026-07-28) — class hierarchy, metamodel risk,
+and cross-reference site inventory.** Confirmed directly in
+`toolchain/el_domain.py`: `EnterpriseObject` and `CommunityObject` are
+pure Python siblings — neither inherits the other, and nothing else in
+the file inherits from `EnterpriseObject` at all. The one existing
+inheritance relationship in the whole domain-class file is
+`class Domain(Community)` (AM-25).
+
+The toolchain's entire semantic layer — `el_validator.py`,
+`el_reasoner.py`, `el_runtime.py`, `el_kripke.py` — is driven purely by
+`type(x).__name__` string comparisons (e.g. `_collect(model, "EnterpriseObject")`,
+`if type(el).__name__ != "EnterpriseObject": continue`). Zero `isinstance()`
+calls against any domain class were found anywhere in those four modules.
+This matters directly: even if `CommunityObject` were made a Python
+subclass of `EnterpriseObject`, every one of these exact-name-string
+checks would keep evaluating false for a `CommunityObject` instance (its
+`__name__` stays `"CommunityObject"`, unaffected by inheritance) — so
+inheritance alone would fix nothing at the semantic-validation/runtime
+layer. That would be a second, separate required fix, touching every
+`_collect`/`type(...).__name__` site currently keyed on
+`"EnterpriseObject"`.
+
+Separately, textX's own cross-reference resolution (`textx_isinstance`,
+used by the default `PlainName` scope provider for every un-annotated
+`[ClassName]` reference in this grammar) checks Python `isinstance()`
+first. This is exactly the mechanism that already lets `Domain` satisfy
+`[Community]` cross-references today, per `Domain`'s own docstring in
+`el_domain.py` citing AM-25 for that purpose — a direct, working
+precedent for the grammar-level effect this finding is asking about.
+
+**Metamodel-construction risk, corrected citation.** The prior note
+mislabeling the `DOMAIN_CLASSES`/`validate_user_classes()` incident as
+"AM-41" is corrected here: the incident is documented under **AM-40**
+(`docs/el_grammar_amendments.md`, "Implementation notes (2026-07-21) —
+dual-syntax landing"), not AM-41 (which is the unrelated NormativePolicy-
+widening entry — see the NormativePolicy scope entry above).
+`validate_user_classes()` raises `TextXSemanticError` when a registered
+class's `__name__` was never matched against a grammar rule name during
+parsing — a name-string/registration mismatch, unrelated to Python class
+hierarchy; it never inspects `__mro__` or base classes. Since
+`CommunityObject`'s grammar rule and its `DOMAIN_CLASSES` registration
+would both be left untouched by an inheritance-only change, this specific
+failure mode looks low-risk for that change in isolation — the AM-40 risk
+comes from *accompanying* changes (e.g. introducing a new unregistered
+helper class), not from the inheritance edge itself.
+
+**Full `[EnterpriseObject]` cross-reference inventory** (18 occurrences
+across 13 fields in `grammar/v2/el_grammar.tx`): `EnterpriseObject.type_ref`
+(`isa`), `DelegatedFrom.delegator`, `PrincipalOf.agent`,
+`DomainControllingObj.obj`, `DomainControlledObj.obj`,
+`DomainRoleFiller.obj` (AM-40), `Commitment.actor`, `Commitment.principals`,
+`Delegation.delegator`, `Delegation.delegate`, `Authorization.authority`,
+`Authorization.authorized_agent`, `Prescription.actor`,
+`Declaration.actor`, `Evaluation.evaluator`,
+`ViolationResponse.responding_actor`, `ViolationResponse.escalate_to`.
+
+Several of these already carry a kind-based validator check layered on
+top of the raw `[EnterpriseObject]` cross-reference type — `Commitment.actor`/
+`principals` (V-10), `Authorization.authority` (AM-31-V1, requires party),
+`ViolationResponse.escalate_to` (V-NEW-16, requires party if
+`response_kind == escalate`), `Delegation.delegator`/`delegate` (V-07,
+requires party or agent) — every one of which reads `obj.kind`, a field
+`CommunityObject` does not have at all (confirmed against its class
+definition: only `name`, `description`, `abstracts`). So even for slots
+where letting a `CommunityObject` fill them seems plausible per §6.2.2/
+Figure A.2's characterization of a community object as a composite active
+EO, each kind-checked site would need its validator logic reconciled
+(giving `CommunityObject` a synthetic `kind`, or special-casing it in each
+rule) before the fix would work end-to-end — a grammar-level typing
+change and a toolchain-semantics change are two separate pieces of work,
+not one.
+
+**Status for both findings above:** both findings fully investigated
+(blast radius, metamodel risk, and full cross-reference-site inventory
+complete). Neither is scoped for implementation yet, and neither is
+scheduled.
+
+Finding 1 needs the sub-delegation conceptual question above (§6.6.8 NOTE
+2, direct vs. indirect delegation) resolved before any validator rule can
+be written — this is a standard-interpretation question, not an
+engineering one.
+
+Finding 2 is a multi-step fix — the `CommunityObject`/`EnterpriseObject`
+inheritance change itself, plus updating every name-string check across
+`el_validator.py`/`el_reasoner.py`/`el_runtime.py`/`el_kripke.py` that
+currently excludes `CommunityObject` by construction, plus resolving
+`CommunityObject`'s missing `.kind` field against the several kind-based
+validator rules cataloged above — warranting its own dedicated future
+session, at least comparable in size to today's AM-40 through AM-43 work
+combined.
+
+(See also the still-open `MemberRef` `fills`/`represented_by` question
+logged earlier today, which is closely related to Finding 2.)
+
 ---
 
 ## Objective rules
