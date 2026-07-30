@@ -1724,3 +1724,9 @@ backfilling AM-34–37 from git history if their content can be
 reconstructed, or correcting the dangling reference in
 fhir_event_handler.py to point somewhere accurate, whenever there's
 bandwidth.
+
+---
+
+## `ObligationState.EXPIRED` — declared and priced but unreachable
+
+**OPEN FINDING**: `ObligationState.EXPIRED` is declared in `el_kripke.py` and priced in the utility function (0.0, neutral) and world-labelling function ("expired"), but is never produced by any transition rule in the current Kripke world-construction code — it is a reserved-but-unreachable state. Comment at declaration site says "context no longer applies (actor left community etc.)", suggesting it's intended for future revocation/context-loss handling (connects to deferred R30 Option B — live Consent revocation via FHIR). Until wired into an actual transition, any paper/reviewer-facing description of the reachable state space for this scenario should state {PENDING, DISCHARGED, VIOLATED} as reachable and EXPIRED as reserved, not omit it or claim it's fully implemented.
