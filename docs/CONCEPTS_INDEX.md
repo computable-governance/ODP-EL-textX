@@ -1858,3 +1858,61 @@ backed by what the model actually computes: the burden this delegation is
 meant to transfer (`referralResponseBurden`) is held by a Commitment naming
 the institution (`GPPractice`), so the "clinician-to-clinician" framing is
 narrative intent, not verified chain-walk behaviour.
+
+---
+
+## `escalationNoticeBurden` has no ObligationDescriptor — invisible to Layer 4
+
+**OPEN FINDING**
+
+Surfaced while checking whether every declared burden in
+`referral_scenario.el` has a corresponding `ObligationDescriptor` in
+`km.obligation_descriptors`, given that `_build_obligation_descriptors()`
+was known to iterate `Commitment` elements only. Verified by running
+`build_kripke_model()` directly against `referral_scenario.el` and
+comparing the full set of declared burdens against
+`km.obligation_descriptors.keys()`.
+
+**CONFIRMED FACT (verified by running `build_kripke_model` against
+`referral_scenario.el` and inspecting `km.obligation_descriptors`
+directly):**
+
+- `escalationNoticeBurden` is created only via `violation_response`
+  `referralNoResponseViolation`'s `creates_burden` field (line 769) — no
+  `Commitment` anywhere in the file creates it.
+- `_build_obligation_descriptors()` (`el_kripke.py`) only ever iterates
+  `Commitment` elements (`for c in _collect(model, "Commitment")`) — it
+  never reads `ViolationResponse` at all.
+- Confirmed empirically: `km.obligation_descriptors` has entries for all
+  five Commitment-backed burdens (`referralInitiationBurden`,
+  `referralResponseBurden`, `clinicalHandoverBurden`,
+  `assessmentSchedulingBurden`, `aiExaminationBurden`) but NOT for
+  `escalationNoticeBurden`.
+- Practical consequence: `escalationNoticeBurden` is parsed and validates
+  cleanly per the grammar, but is structurally absent from the Kripke
+  model — invisible not just to AF/EF checks, but also to `utility()` and
+  Bellman planning, since both only ever score obligations already
+  present in `obligation_descriptors`. A burden created via a violation
+  response can therefore never appear in an "optimal path" recommendation
+  at all, not merely be scored low.
+
+**OPEN QUESTION (not a prescribed fix — this is narrower than "who is
+accountable," since the specification already answers that):**
+
+The specification is not actually silent on who is accountable here:
+`referralNoResponseViolation` already names `obligates: SpecialistPractice`
+directly (line 767). So the open question isn't "who is this allocated
+to" — the file already answers that — it's narrower:
+
+- Should `ViolationResponse.obligates` + `.creates_burden` be treated as a
+  second valid root by `_build_obligation_descriptors()`, functionally
+  equivalent to a `Commitment`, without requiring any duplicated
+  authoring?
+- Or does genuine accountability grounding require a separate, explicit
+  `Commitment` authored alongside every `ViolationResponse` that creates a
+  burden — treating `ViolationResponse.obligates` alone as insufficient,
+  even though it already names an actor?
+- This may generalise beyond this one case: check whether any other
+  grammar construct has a `creates_burden`-shaped field outside
+  `Commitment` and `ViolationResponse`, since each would have the same
+  blind spot.
