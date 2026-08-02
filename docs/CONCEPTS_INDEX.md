@@ -1730,3 +1730,74 @@ bandwidth.
 ## `ObligationState.EXPIRED` — declared and priced but unreachable
 
 **OPEN FINDING**: `ObligationState.EXPIRED` is declared in `el_kripke.py` and priced in the utility function (0.0, neutral) and world-labelling function ("expired"), but is never produced by any transition rule in the current Kripke world-construction code — it is a reserved-but-unreachable state. Comment at declaration site says "context no longer applies (actor left community etc.)", suggesting it's intended for future revocation/context-loss handling (connects to deferred R30 Option B — live Consent revocation via FHIR). Until wired into an actual transition, any paper/reviewer-facing description of the reachable state space for this scenario should state {PENDING, DISCHARGED, VIOLATED} as reachable and EXPIRED as reserved, not omit it or claim it's fully implemented.
+
+---
+
+## Layer 4 discharge has no negative preconditions; strict-mode AF may be structurally guaranteed
+
+**OPEN FINDING**
+
+Surfaced while adding a declared-vs-verified `discharge_mode` classifier to
+a local verification-report script, using a probe scenario combining a
+`strict` `Burden` with an `Embargo` on the same `for_action`, plus a
+deadline-shrink test. The classifier expected two of its six branches —
+`declaration_mismatch_not_compelled` and `declaration_mismatch_unreachable`
+— to fire when a `strict` obligation doesn't actually verify as compelled.
+Constructing a scenario to exercise them surfaced the following.
+
+**CONFIRMED (verified by code read + empirical test):**
+
+- Rule T1 (DISCHARGE) in `build_kripke_model()` is unconditional whenever an
+  obligation is `PENDING` and its holder is `ACTIVE` — no `Permit`,
+  `Embargo`, or other precondition gates it. Confirmed by code read (the
+  transition-guard code at `el_kripke.py` lines ~1733–1783 checks only
+  obligation state and holder `ActorStatus`; `requires_permit` and
+  `inhibited_by_embargo` appear elsewhere in the file only in comments about
+  an unrelated Authorization-resolution function,
+  `find_governing_element_via_authorization`, never in transition-guard
+  code) and by an empirical test: declaring an `Embargo` on the same
+  `for_action` as a `strict` `Burden` had zero effect on the AF/EF result or
+  on `worlds_explored`.
+
+- Rule T3 (TICK) is blocked globally whenever any `strict`-mode obligation
+  is `PENDING` with an `ACTIVE` holder (`el_kripke.py` lines ~1823–1828,
+  `has_strict_pending_dischargeable`). Confirmed by code read and by an
+  empirical test: shrinking a `strict` obligation's deadline to the
+  parser's minimum (`_parse_deadline_steps`, 2 steps via `"1 second"`) had
+  zero effect on the result — `w.step` cannot advance past `0` while such
+  an obligation is outstanding, so Rule T2's deadline guard
+  (`w.step >= desc.deadline_steps`) can never fire before T1 does,
+  regardless of the declared deadline's value.
+
+- `ActorStatus.INACTIVE` is declared as an enum member but never assigned
+  to any world's `actor_states`, anywhere in the toolchain. Confirmed by a
+  repo-wide grep for `ActorStatus`/`INACTIVE` across every `toolchain/*.py`
+  module — the only file where either symbol appears at all is
+  `el_kripke.py`. All three model-construction paths in that file
+  (`build_kripke_model()`, the hybrid-mode `build_kripke_from_runtime()`,
+  and the synthetic demo functions `_run_consent_scenario()` /
+  `_run_hybrid_smoke_test()`) initialize every actor to `ACTIVE` and
+  contain no transition rule that ever writes `INACTIVE`. The only other
+  reference is a docstring block on `build_kripke_model()` describing a
+  planned **"Rule T4 — REVOCATION"** (delegation revocation → holder
+  `INACTIVE`, obligation reverts to the delegator), explicitly marked
+  `(Not yet implemented — placeholder for hybrid mode.)`. Delegation
+  revocation and Community-leave/`JoinLeaveEffect` grammar constructs are
+  parsed elsewhere in the domain model but are not consulted by
+  `el_kripke.py`'s actor-state handling.
+
+**OPEN QUESTION (hypothesis, not a proven universal claim):**
+
+Combined, these facts suggest that for any obligation with a
+validator-passing `Commitment`, AF may be structurally guaranteed to hold
+once declared `strict`, regardless of the obligation's actual structure —
+which would mean the three "declaration mismatch" / "unreachable"
+classification branches added to the verification-report script this
+session are currently unreachable for any well-formed scenario. This has
+NOT been exhaustively tested against every possible scenario shape (e.g.
+multiple competing strict obligations, unusual Delegation/Community
+structures) — flagged here as a hypothesis worth further investigation,
+not a settled fact. Rule T4 (revocation), once implemented, would be the
+most direct route to making the holder-inactive path — and therefore the
+`declaration_mismatch_*`/`unreachable_obligation` branches — actually
+reachable.
