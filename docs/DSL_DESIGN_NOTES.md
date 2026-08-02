@@ -265,6 +265,37 @@ LibraryDirector
 Chain closed — obligation discharged
 ```
 
+**Commitment's purpose, beyond being a delegation chain's starting point.**
+The grammar's own comment on Commitment describes it narrowly — "the
+created burden is the anchor for delegation chain tracing." That's
+mechanically true, but understates what Commitment is actually for: it's
+the act that grounds an obligation in a genuinely accountable party,
+rather than leaving it as an unowned rule. A Prescription can create a
+rule; only a Commitment makes someone answerable for it.
+
+This matters for two distinct reasons, not one:
+- For verification — no Commitment, no ObligationDescriptor, nothing for
+  AF/EF to check at all. The holder being checked for availability is only
+  meaningful if it's genuinely who the standard intends to be answerable
+  — which is why NOTE 1 (§7.10.3) matters: a commitment made by an agent
+  obligates that agent's principal, not the agent itself.
+  principals_obligated exists in the grammar for exactly this case.
+- For dynamic programming — the same gate applies with a sharper
+  consequence: a burden with no Commitment isn't merely unverified, it's
+  entirely invisible to utility() and Bellman planning. It won't be
+  scored low or deprioritized — it will never be considered in an
+  "optimal path" recommendation at all.
+
+Worth flagging explicitly, since it's easy to assume otherwise: an agent
+can make a commitment. Commitment's actor need not be a party — §7.10.3
+explicitly covers "every commitment made by an agent." This is
+conditional, not automatic: the agent-of relationship must already be
+established (by a prior Delegation, per §7.10.1 — "by each such
+delegation, that active enterprise object becomes an agent"). An
+agent-kind entity with no established principal hasn't satisfied that
+precondition, and a Commitment naming it directly is incomplete relative
+to what the standard intends.
+
 ---
 
 ### 3.2 Community Lifecycle — Explicit Establishing
