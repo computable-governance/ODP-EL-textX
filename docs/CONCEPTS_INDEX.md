@@ -1801,3 +1801,60 @@ not a settled fact. Rule T4 (revocation), once implemented, would be the
 most direct route to making the holder-inactive path — and therefore the
 `declaration_mismatch_*`/`unreachable_obligation` branches — actually
 reachable.
+
+---
+
+## `referralResponseBurden`'s accountability chain does not reach SpecialistClinician
+
+**OPEN FINDING**
+
+Surfaced while checking whether `referralResponseBurden`'s computed holder
+resolves through the GP-to-specialist delegation chain
+(`GPClinician` → `SpecialistClinician`) the way `referral_scenario.el`'s own
+comments (lines 708–714) describe it. Verified by running
+`build_kripke_model()` directly against `referral_scenario.el` and printing
+`km.obligation_descriptors`.
+
+**CONFIRMED FACT (verified by running `build_kripke_model` against
+`referral_scenario.el` directly):**
+
+- `referralResponseCommitment.by` = `GPPractice` (line 681).
+- `gpToSpecialistDelegation.from` = `GPClinician` (line 716).
+- `walk_chain()` starts from the Commitment's actor and only follows
+  Delegation edges whose `from` exactly matches that name. Since
+  `GPPractice != GPClinician`, the walk terminates at `GPPractice` — it
+  never reaches `gpToSpecialistDelegation` at all. Confirmed by the printed
+  descriptor: `referralResponseBurden` holder = `GPPractice`, chain =
+  `['GPPractice']`.
+- By contrast, `aiExaminationBurden` resolves correctly:
+  `aiExaminationCommitment.by` = `SpecialistClinician` matches
+  `specialistToAIDelegation.from` = `SpecialistClinician` exactly, and the
+  printed descriptor shows the full two-hop chain: holder =
+  `SpecialistAIAgent`, chain = `['SpecialistClinician',
+  'SpecialistAIAgent']`. This confirms the chain-walk mechanism itself
+  works correctly when actor names align — the gap is specific to the
+  `GPPractice`/`GPClinician` naming mismatch, not a general defect in
+  `walk_chain()`.
+
+**OPEN QUESTION (not a prescribed fix):**
+
+Which side is actually wrong is undecided:
+
+- Should `referralResponseCommitment.by` name `GPClinician` instead of
+  `GPPractice`?
+- Should `gpToSpecialistDelegation.from` name `GPPractice` instead of
+  `GPClinician`?
+- Or is there a missing link between `GPPractice` and `GPClinician` that
+  the model should represent explicitly (e.g. the practice standing behind
+  its clinician), and both names are individually correct but
+  disconnected?
+
+The scenario's own comments at lines 708–714 describe
+`gpToSpecialistDelegation` as "the TRUE referral delegation... GP
+clinician delegates referral response and scheduling obligations to
+specialist clinician — clinician-to-clinician, not
+institution-to-institution." As things stand, that specific claim is not
+backed by what the model actually computes: the burden this delegation is
+meant to transfer (`referralResponseBurden`) is held by a Commitment naming
+the institution (`GPPractice`), so the "clinician-to-clinician" framing is
+narrative intent, not verified chain-walk behaviour.
