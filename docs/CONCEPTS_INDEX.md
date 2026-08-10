@@ -1991,3 +1991,41 @@ for now, not silently assumed to generalize.
 during T5/Embargo-guard design discussion (2026-08-10), in the context of
 the pre-existing federation domain-scope concern raised with Pieter's
 industrial multi-agent case.
+
+---
+
+## Recommended vs. Compelled — undefined relationship (framing only)
+
+**OPEN FINDING (2026-08-10)**
+
+Surfaced during the FTI Consulting conversation (Sabine Bennett, Nicki
+Doyle) while demoing the coordination-simulator's Bellman planner: there
+is no formal statement of how the planner's "Recommended" action
+(advisory, Q-value-based) relates to Compelled obligations
+(`discharge_mode: strict`, architecturally enforced via T3-tick
+suppression).
+
+Two sub-questions, deliberately kept separate rather than treated as one:
+
+1. **Does the planner even operate over Compelled obligations, or only
+   Monitored ones?** A Compelled obligation isn't really a "choice" in
+   the sense the planner is built to evaluate — `discharge_mode: strict`
+   already forces action at first opportunity by construction, so a
+   Q-value ranking over "whether/when to discharge" may not apply to it
+   at all.
+
+2. **If the planner does weigh in on a Compelled obligation, what is it
+   actually ranking?** Candidate framing (untested, not yet designed):
+   "Recommended" may simply be "the Q-value-optimal action *within* the
+   already-constrained compliant action space" — i.e. Recommended and
+   Compelled aren't competing categories where one might override the
+   other; Recommended could be a refinement operating strictly inside
+   Compelled's boundary. This framing avoids ever implying a Compelled
+   obligation could be "recommended against."
+
+**Status:** framing only, no design work started. This is distinct from
+T5 (Exercise) and V-17, landed the same session — those gave Permit/
+Embargo real Kripke semantics (EF/AG) but did not touch the planner's
+relationship to `discharge_mode`. Flagged as highest-priority remaining
+item from the 2026-08-10 FTI conversation, deferred to next session for
+proper design treatment (chat, not CC) rather than rushed same-day.
