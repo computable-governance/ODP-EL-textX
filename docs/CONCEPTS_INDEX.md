@@ -2029,3 +2029,64 @@ Embargo real Kripke semantics (EF/AG) but did not touch the planner's
 relationship to `discharge_mode`. Flagged as highest-priority remaining
 item from the 2026-08-10 FTI conversation, deferred to next session for
 proper design treatment (chat, not CC) rather than rushed same-day.
+
+---
+
+## Recommended vs. Compelled — RESOLVED (2026-08-11)
+
+Follow-up to the 2026-08-10 framing note above. Ground truth established
+by reading `el_kripke.py` directly, not inferred.
+
+**Finding 1 — `discharge_mode` doesn't affect valuation.** `utility()`
+(el_kripke.py:649-708) and `bellman_values()` (900-966) never read
+`discharge_mode`. A `strict` (Compelled) obligation is scored identically
+to an `eventual` one at every state (+1.0 discharged / +0.3 pending /
+-1.0 violated, weighted by `priority_weight`). `discharge_mode: strict`
+only affects graph topology — it suppresses the T3 (Tick) edge, narrowing
+`max(successors)` in the Bellman recursion to fewer candidates. There is
+no certainty bonus, no special-cased reward — the "compulsion" is
+structural (fewer branches), not a distinct value the planner assigns.
+
+**Finding 2 — Permit-exercise (T5) is entirely utility-neutral.**
+Confirmed by grep and by reading T5's world construction directly: T5
+edges leave `obligation_states` unchanged (only `occurred_actions`
+differs), and `utility()` is a pure function of `obligation_states`. So
+`utility(w') == utility(w)` always, for any T5 edge. Nothing downstream
+(T1's discharge guard) reads `occurred_actions` either, so a Permit's
+exercise cannot even indirectly influence value via later obligation
+outcomes, under the current implementation.
+
+**Conclusion — the planner's silence on Permission is correct, not a
+gap.** Burden and Permit answer different kinds of question:
+- **Burden asks "ought this happen?"** — the planner has an opinion
+  because deontic obligation semantics give it one to have. Compelled
+  obligations participate in this ranking on identical terms to Monitored
+  ones, just with a narrower choice set.
+- **Permit asks "may this happen?"** — a modal possibility question
+  (§7.8.8.2: "allowed to occur"), never an "ought." There is no normative
+  pressure toward exercising a mere permission, so a value function with
+  no opinion on it is faithful to what Permission actually means, not an
+  oversight.
+
+It is obligations — not permissions — that are the active drivers of
+behaviour toward a community's objectives; permission and prohibition are
+gates on what obligations may use to discharge, not independent sources
+of directedness. This is the resting design position: **"Recommended" is
+a Burden-only concept.** There is no competing category to reconcile it
+against — the original framing question ("does a Compelled obligation's
+discharge action always have to be the Recommended one," "does the
+planner even weigh in on Compelled obligations") is dissolved rather than
+answered by a new rule, once it's clear Compelled obligations were never
+excluded from valuation in the first place.
+
+**Left deliberately open, not a gap:** if a future scenario needs the
+planner to have an opinion about *exercising* a Permit (e.g., "merely
+permitted but strategically valuable to do now"), that would be a
+genuine new extension — `utility()` would need to read `occurred_actions`,
+which it structurally does not today — not a bug fix to this finding.
+No such case identified yet (checked against the industrial/XMPro
+context and IT-governance framing; neither surfaced one).
+
+**Status:** resolved by direct code inspection, 2026-08-11. No
+implementation change made or required — this closes the framing
+question, it does not open new work.
