@@ -1944,3 +1944,50 @@ keep separate rather than collapsing into one "engine trust" line:
 **Status:** candidate/probe-tier, no design work started. Surfaced from
 FTI Consulting conversation (2026-08-10, Sabine Bennett / Nicki Doyle)
 discussion context, not FTI-specific in substance.
+
+---
+
+## Permit/Embargo missing domain scope (§7.8.8.2/§7.8.8.3 gap)
+
+**OPEN FINDING (2026-08-10)**
+
+Per ISO 15414 §7.8.8.2 and §7.8.8.3, Permission and Prohibition are each
+*defined* as starting with "an authorization domain that prescribes the
+[permission/prohibition]" — domain scope is intrinsic to what a Permit or
+Embargo token *is*, not something borrowed from a wrapping construct.
+
+Current grammar (`el_grammar.tx`) does not reflect this: `domain_scope`
+exists only on `Authorization`, not on bare `DeonticToken` (which covers
+burden/permit/embargo via shared fields). Permit and Embargo tokens
+declared outside an `Authorization` wrapper currently carry no domain
+scope at all.
+
+This matters concretely, not just formally: §7.8.8.4 states plainly that
+"Authorizations will not necessarily be effective outside the domain
+controlling them. In federations, the effect of authorizations is
+determined by the contract of the federation." Domain scope actively
+gates whether a Permit/Embargo has force at all once a federation
+boundary is crossed — it is not just descriptive metadata.
+
+**Distinct from, and complementary to, `inhibited_by_embargo` /
+`requires_permit_for` / `favoured_by_burden`:** those fields answer
+"is this token blocked by another specific token" (grounded in
+§7.8.8.4's "other restrictions that might prevent use of the permit").
+`domain_scope` answers "is this token authoritative in the domain where
+the action is being attempted" — a different question, currently
+unaddressed for permit/embargo.
+
+**Immediate practical consequence:** the T5 (Permit-occurrence) rule and
+its Embargo guard, as currently scoped for `el_kripke.py`, use
+`inhibited_by_embargo` token-to-token linkage and hold correctly only
+*within a single domain*. They do not yet know what to do if a Permit
+and the Embargo that would block it belong to different domains in a
+federation — per §7.8.8.4, that case is federation-contract-determined,
+and no federation-level authorization-conflict resolution exists in the
+toolchain yet. T5 should be built and documented as single-domain-scoped
+for now, not silently assumed to generalize.
+
+**Status:** candidate/probe-tier, no grammar change proposed yet. Surfaced
+during T5/Embargo-guard design discussion (2026-08-10), in the context of
+the pre-existing federation domain-scope concern raised with Pieter's
+industrial multi-agent case.
