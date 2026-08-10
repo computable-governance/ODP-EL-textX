@@ -135,6 +135,7 @@ class ActorStatus(Enum):
 # Immutable alias types used in World
 _ObligStates = FrozenSet[Tuple[str, ObligationState]]   # (obligation_id, state)
 _ActorStates = FrozenSet[Tuple[str, ActorStatus]]       # (actor_name, status)
+_ActionOccurrences = FrozenSet[str]                     # action names that have occurred
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,14 @@ class World:
     We represent a world as:
       - obligation_states : the deontic state of every tracked obligation
       - actor_states      : the active/inactive status of every tracked actor
+      - occurred_actions  : action names that have occurred by this world
+                            (T5 — Exercise; §7.8.8.2/§7.8.8.3 permit-occurrence).
+                            Action occurrence is a fact about the world, not
+                            about a token's lifecycle: a Permit is a standing
+                            grant and does not itself transition when exercised
+                            (unlike Burden's PENDING→DISCHARGED), so occurrence
+                            cannot be recorded in obligation_states keyed by
+                            token name — it needs its own action-indexed set.
       - step              : discrete time step (0 = initial)
 
     Frozen so that worlds are hashable and can appear in sets/dict keys.
@@ -155,6 +164,7 @@ class World:
     """
     obligation_states: _ObligStates   # frozenset of (obligation_id, ObligationState)
     actor_states: _ActorStates        # frozenset of (actor_name, ActorStatus)
+    occurred_actions: _ActionOccurrences  # frozenset of action names
     step: int
 
     # ── Convenience accessors ─────────────────────────────────────────────────
@@ -179,6 +189,10 @@ class World:
     def actor_dict(self) -> Dict[str, ActorStatus]:
         return dict(self.actor_states)
 
+    def has_occurred(self, action_name: str) -> bool:
+        """True iff action_name has occurred by this world (T5)."""
+        return action_name in self.occurred_actions
+
     def all_discharged(self) -> bool:
         """True iff every obligation in this world is DISCHARGED or SUPERSEDED.
 
@@ -202,12 +216,14 @@ class World:
 def _make_world(
     obligation_states: Dict[str, ObligationState],
     actor_states: Dict[str, ActorStatus],
+    occurred_actions: FrozenSet[str],
     step: int,
 ) -> World:
-    """Convenience constructor from plain dicts."""
+    """Convenience constructor from plain dicts (+ a frozenset of action names)."""
     return World(
         obligation_states=frozenset(obligation_states.items()),
         actor_states=frozenset(actor_states.items()),
+        occurred_actions=frozenset(occurred_actions),
         step=step,
     )
 
@@ -246,6 +262,173 @@ class ObligationDescriptor:
     # Name of the Action (within a community Role body) whose ConditionalAction
     # has this obligation as a favoured_by_burden entry. Resolved by
     # _find_action_for_burden() when not set directly on the DeonticToken.
+
+
+@dataclass
+class PermitDescriptor:
+    """
+    Metadata about one Permit token extracted from the DSL-EL spec, analogous
+    to ObligationDescriptor but for a standing grant rather than an obligation.
+
+    Used by Rule T5 (Exercise) to generate action-occurrence edges. Unlike
+    ObligationDescriptor, a Permit has no deadline, chain, or discharge_mode —
+    it is not delegated along an accountability chain in the same sense as a
+    burden (§7.10.1); it is granted directly via HoldsToken or Authorization
+    (§6.6.4) and remains ACTIVE, standing, until revoked.
+    """
+    permit_id: str             # permit token name
+    holder: str                # actor currently holding the permit
+    for_action: Optional[str] = None
+    # Name of the Action this permit governs. Tier 1 only for now: the
+    # explicit for_action attribute on the DeonticToken. No structural
+    # (requires_permit / ConditionalAction) fallback yet — every Permit in
+    # every current scenario declares for_action directly, so the Tier-2
+    # search mirroring _find_action_for_burden()/_find_action_for_permit()
+    # is deferred until a real scenario needs it. May be None if the token
+    # omits for_action; T5 must skip such descriptors (nothing to occur).
+
+
+def _build_permit_descriptors(model: Any) -> Dict[str, PermitDescriptor]:
+    """
+    Extract a PermitDescriptor for each Permit token whose holder can be
+    statically resolved.
+
+    Holder resolution, in priority order (first match wins):
+      1. HoldsToken — some EnterpriseObject.holds_tokens names this permit.
+         V-09 already enforces at most one such holder per token.
+      2. Authorization.to_agent — some Authorization grants this permit
+         directly to a named EnterpriseObject.
+
+    Authorization.to_role is deliberately NOT resolved here: doing so would
+    require statically inferring which EnterpriseObject(s) fill a given
+    Role, which no existing Layer 4 code path performs (el_engine.py's
+    equivalent runtime resolution over state.actors has no static
+    counterpart here). A permit granted only via to_role is skipped —
+    consistent with find_governing_element_via_authorization's documented
+    "degrades gracefully, never raises" convention for unresolvable cases.
+
+    A Permit whose holder cannot be resolved by either path is omitted
+    entirely (no descriptor built), mirroring how _build_obligation_descriptors
+    skips Commitments with an unresolved actor or burden.
+    """
+    permits: Dict[str, Any] = {
+        t.name: t
+        for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "permit"
+    }
+
+    # Tier: HoldsToken — EnterpriseObject.holds_tokens (first match wins).
+    holder_by_permit: Dict[str, str] = {}
+    for obj in _collect(model, "EnterpriseObject"):
+        for tok in getattr(obj, "holds_tokens", []):
+            tok_name = _obj_name(tok)
+            if tok_name in permits and tok_name not in holder_by_permit:
+                holder_by_permit[tok_name] = obj.name
+
+    # Tier: Authorization.to_agent (first match wins; only fills gaps left
+    # by HoldsToken above).
+    for auth in _collect(model, "Authorization"):
+        permit_name = _obj_name(getattr(auth, "permit", None))
+        to_agent = _obj_name(getattr(auth, "authorized_agent", None))
+        if permit_name in permits and to_agent and permit_name not in holder_by_permit:
+            holder_by_permit[permit_name] = to_agent
+
+    descriptors: Dict[str, PermitDescriptor] = {}
+    for permit_name, permit_tok in permits.items():
+        # §7.8.7: state active|pending. A pending (masked/suspended) Permit
+        # confers no standing grant yet — T5 must not generate occurrence
+        # edges for it. Filtered here at extraction time rather than in T5
+        # itself, consistent with this function's "which grants are usable"
+        # framing.
+        if getattr(permit_tok, "state", None) != "active":
+            continue
+        holder = holder_by_permit.get(permit_name)
+        if not holder:
+            continue
+        descriptors[permit_name] = PermitDescriptor(
+            permit_id=permit_name,
+            holder=holder,
+            for_action=getattr(permit_tok, "for_action", None) or None,
+        )
+
+    return descriptors
+
+
+def _build_embargo_inhibition_index(model: Any) -> Dict[str, List[str]]:
+    """
+    Map action_name -> [embargo_token_name, ...] via the 'inhibited_by_embargo'
+    linkage (§6.4.6 conditional-action semantics).
+
+    This is the Action-scoped DeonticRequirement / CondActionBodyItem
+    mechanism (grammar lines ~640-679: an Action declares itself inhibited
+    by a named Embargo) — NOT the DeonticToken-level inhibited_by_embargo
+    STRING field (grammar line ~160). That field is informational-only and
+    unused: confirmed by repo-wide grep across every toolchain/*.py module
+    and every .el scenario before this was written — it is never read and
+    never set. There is no direct Permit↔Embargo linkage anywhere in the
+    grammar; the real relationship is Action → Embargo. T5's guard walks
+    from a Permit's for_action to the Action, then to the Embargo(s) that
+    inhibit that Action via this index.
+
+    Mirrors el_reasoner.can_perform()'s traversal of
+    action.deontic_requirements (kind == 'inhibited_by_embargo'), extended
+    to also cover the ConditionalAction.inhibited_by path (post-P5
+    dissolution) that can_perform does not currently walk — matching the
+    established two-tier Action/ConditionalAction pattern already used by
+    _find_action_for_burden and _find_action_for_permit's Tier-2 (deferred)
+    design for for_action resolution.
+    """
+    index: Dict[str, List[str]] = {}
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                names: List[str] = []
+                for req in getattr(action, "deontic_requirements", []):
+                    if getattr(req, "kind", None) == "inhibited_by_embargo":
+                        n = _obj_name(getattr(req, "token", None))
+                        if n:
+                            names.append(n)
+                for ca in getattr(action, "conditional_actions", []):
+                    for embargo_ref in getattr(ca, "inhibited_by", []):
+                        n = _obj_name(embargo_ref)
+                        if n:
+                            names.append(n)
+                if names:
+                    index.setdefault(action.name, []).extend(names)
+    return index
+
+
+def _build_embargo_holder_index(model: Any) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """
+    Map embargo_token_name -> (state, holder) for every Embargo-kind
+    DeonticToken.
+
+    Holder resolved via HoldsToken only (EnterpriseObject.holds_tokens) —
+    the same single mechanism el_reasoner.can_perform uses for its
+    held_token_names set (el_reasoner.py:367-371). No Authorization-based
+    tier here, unlike _build_permit_descriptors: Authorization.
+    on_revocation_embargo names an embargo ACTIVATED on revocation, a
+    different relationship, not a holder grant — it does not establish who
+    holds the embargo day-to-day.
+    """
+    embargoes: Dict[str, Any] = {
+        t.name: t
+        for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "embargo"
+    }
+    holder_by_embargo: Dict[str, str] = {}
+    for obj in _collect(model, "EnterpriseObject"):
+        for tok in getattr(obj, "holds_tokens", []):
+            tok_name = _obj_name(tok)
+            if tok_name in embargoes and tok_name not in holder_by_embargo:
+                holder_by_embargo[tok_name] = obj.name
+
+    return {
+        name: (getattr(tok, "state", None), holder_by_embargo.get(name))
+        for name, tok in embargoes.items()
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1582,6 +1765,7 @@ def _build_propositions(
       "any_violated"                ↔  at least one obligation is VIOLATED
       "any_pending"                 ↔  at least one obligation is PENDING
       "objective_satisfied:<name>"  ↔  community <name> satisfaction condition holds (AM-27)
+      "occurred:<action>"           ↔  action_name ∈ occurred_actions (T5 — Exercise)
     """
     props: Set[str] = set()
 
@@ -1604,6 +1788,9 @@ def _build_propositions(
     }
     for aname, status in world.actor_states:
         props.add(f"{actor_tags[status]}:{aname}")
+
+    for action_name in world.occurred_actions:
+        props.add(f"occurred:{action_name}")
 
     if world.all_discharged():
         props.add("all_discharged")
@@ -1668,6 +1855,14 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            obligation reverts to PENDING on the delegator.
            (Not yet implemented — placeholder for hybrid mode.)
 
+         Rule T5 — EXERCISE (§7.8.8.2/§7.8.8.3 permit-occurrence):
+           For each ACTIVE Permit P with a for_action held by an ACTIVE
+           actor A, add an edge w → w' where w' is identical to w except
+           P's for_action is added to occurred_actions. Unlike T1, the
+           Permit token's own state does NOT transition — a Permit is a
+           standing grant (§6.4.5), not consumed by being exercised. No
+           Embargo guard yet (landing separately).
+
     Parameters
     ----------
     model   : parsed EnterpriseSpec (output of el_parser.parse)
@@ -1678,15 +1873,28 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     KripkeModel with all worlds, edges, propositions, and descriptors populated.
     """
     descriptors = _build_obligation_descriptors(model)
+    permit_descriptors = _build_permit_descriptors(model)
+    embargo_inhibition_index = _build_embargo_inhibition_index(model)
+    embargo_holder_index = _build_embargo_holder_index(model)
     group_index = _build_group_index(model)
     any_discharged_groups = _build_any_discharged_groups(model)
     satisfaction_conditions = _build_satisfaction_conditions(model)
 
-    if not descriptors:
+    # A permit/embargo-only spec (no burdens) must not hit the trivial-model
+    # path below — T5 (Exercise) still needs to generate occurrence edges for
+    # it. The trivial branch itself does not yet wire permit_descriptors in
+    # (that lands with T5 in the main BFS path); this guard only ensures such
+    # a spec falls through to that path instead of short-circuiting here.
+    if not descriptors and not permit_descriptors:
         # No obligations found — return trivial model
         w0_obligs = frozenset()
         w0_actors = frozenset()
-        w0 = World(obligation_states=w0_obligs, actor_states=w0_actors, step=0)
+        w0 = World(
+            obligation_states=w0_obligs,
+            actor_states=w0_actors,
+            occurred_actions=frozenset(),
+            step=0,
+        )
         props = {w0: _build_propositions(w0, satisfaction_conditions)}
         props[w0].add("all_discharged")  # vacuously true
         return KripkeModel(
@@ -1701,10 +1909,14 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             satisfaction_conditions=satisfaction_conditions,
         )
 
-    # Collect all actors appearing in any chain
+    # Collect all actors appearing in any chain, plus every Permit holder
+    # (T5 needs holders present in current_actors from w0 onward, the same
+    # way T1 needs burden holders present).
     all_actors: Set[str] = set()
     for desc in descriptors.values():
         all_actors.update(desc.chain)
+    for pdesc in permit_descriptors.values():
+        all_actors.add(pdesc.holder)
 
     # Build initial world: obligations with triggered_by start WAITING (trigger
     # not yet fired); all others start PENDING. All actors start ACTIVE.
@@ -1713,7 +1925,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         for oid, desc in descriptors.items()
     }
     init_actors = {actor: ActorStatus.ACTIVE for actor in all_actors}
-    w0 = _make_world(init_obligs, init_actors, step=0)
+    w0 = _make_world(init_obligs, init_actors, occurred_actions=frozenset(), step=0)
 
     # BFS expansion
     worlds: Set[World]                       = {w0}
@@ -1727,6 +1939,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         _iter_count += 1
         current_obligs = w.obligation_dict()
         current_actors = w.actor_dict()
+        current_occurred = w.occurred_actions
 
         successors_for_w: Set[World] = set()
 
@@ -1770,7 +1983,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                                              ObligationState.WAITING):
                             new_obligs[sibling_oid] = ObligationState.SUPERSEDED
 
-            w_prime = _make_world(new_obligs, current_actors, w.step)
+            w_prime = _make_world(new_obligs, current_actors, current_occurred, w.step)
             label   = f"discharge:{oid} by {desc.holder}"
 
             if w_prime not in worlds:
@@ -1792,7 +2005,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.VIOLATED
 
-            w_viol  = _make_world(new_obligs, current_actors, w.step)
+            w_viol  = _make_world(new_obligs, current_actors, current_occurred, w.step)
             label   = f"violate:{oid} (deadline={desc.deadline_steps} steps)"
 
             if w_viol not in worlds:
@@ -1827,7 +2040,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 for oid in descriptors
             )
             if has_eventual_pending and not has_strict_pending_dischargeable:
-                w_tick = _make_world(current_obligs, current_actors, w.step + 1)
+                w_tick = _make_world(current_obligs, current_actors, current_occurred, w.step + 1)
                 label  = "tick (time passes)"
 
                 if w_tick not in worlds:
@@ -1837,6 +2050,55 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 edges.setdefault(w, set()).add(w_tick)
                 labels[(w, w_tick)] = label
                 successors_for_w.add(w_tick)
+
+        # ── Rule T5: EXERCISE (Permit occurrence) ──────────────────────────────
+        for permit_id, pdesc in permit_descriptors.items():
+            if pdesc.for_action is None:
+                continue
+            if current_actors.get(pdesc.holder) != ActorStatus.ACTIVE:
+                continue
+            if pdesc.for_action in current_occurred:
+                # Already occurred in this world — mirrors T1's implicit
+                # "not PENDING → skip" guard: nothing left for this rule to
+                # establish, so don't add a self-loop edge.
+                continue
+
+            # Embargo guard (§6.4.6): suppress this edge if the Permit's
+            # for_action is inhibited by an Embargo that is ACTIVE and held
+            # by the SAME holder as the Permit — mirrors el_reasoner.
+            # can_perform()'s actor-scoped held_token_names check
+            # (el_reasoner.py:367-371, 404-406; verified verbatim, not
+            # inferred), not a token-to-token Permit↔Embargo relationship
+            # (no such construct exists in the grammar; see
+            # _build_embargo_inhibition_index's docstring).
+            #
+            # Single-domain-scope limitation: this guard cannot reason about
+            # Permit/Embargo pairs that span domains in a federation, because
+            # domain_scope does not exist on bare DeonticToken today — see
+            # "Permit/Embargo missing domain scope (§7.8.8.2/§7.8.8.3 gap)"
+            # in docs/CONCEPTS_INDEX.md. Correct only within a single domain;
+            # do not assume it generalises to federated Permit/Embargo pairs.
+            blocked = False
+            for embargo_name in embargo_inhibition_index.get(pdesc.for_action, []):
+                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+                if e_state == "active" and e_holder == pdesc.holder:
+                    blocked = True
+                    break
+            if blocked:
+                continue
+
+            new_occurred = current_occurred | {pdesc.for_action}
+            w_prime = _make_world(current_obligs, current_actors, new_occurred, w.step)
+            label   = f"exercise:{permit_id} → {pdesc.for_action}"
+
+            if w_prime not in worlds:
+                worlds.add(w_prime)
+                if w_prime.step < horizon:
+                    queue.append(w_prime)
+
+            edges.setdefault(w, set()).add(w_prime)
+            labels[(w, w_prime)] = label
+            successors_for_w.add(w_prime)
 
     print(f"[Kripke] Converged in {_iter_count} iterations")
 
@@ -2071,16 +2333,17 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         for m in desc.chain:
             if m not in init_actors:
                 init_actors[m] = ActorStatus.ACTIVE
-    w0 = _make_world(init_obligs, init_actors, step=state.tick)
+    w0 = _make_world(init_obligs, init_actors, occurred_actions=frozenset(), step=state.tick)
     worlds, edges, labels, queue = {w0}, {}, {}, deque([w0])
 
     while queue:
         w = queue.popleft()
         obligs, actors = w.obligation_dict(), w.actor_dict()
+        occurred = w.occurred_actions
         for oid, desc in descriptors.items():
             if obligs.get(oid) == ObligationState.PENDING:
                 if actors.get(desc.holder) == ActorStatus.ACTIVE:
-                    wd = _make_world({**obligs, oid: ObligationState.DISCHARGED}, actors, w.step)
+                    wd = _make_world({**obligs, oid: ObligationState.DISCHARGED}, actors, occurred, w.step)
                     if wd not in worlds:
                         worlds.add(wd)
                         if wd.step < horizon:
@@ -2088,7 +2351,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     edges.setdefault(w, set()).add(wd)
                     labels[(w, wd)] = f"discharge:{oid} by {desc.holder}"
                 if w.step >= desc.deadline_steps:
-                    wv = _make_world({**obligs, oid: ObligationState.VIOLATED}, actors, w.step)
+                    wv = _make_world({**obligs, oid: ObligationState.VIOLATED}, actors, occurred, w.step)
                     if wv not in worlds:
                         worlds.add(wv)
                     edges.setdefault(w, set()).add(wv)
@@ -2103,7 +2366,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             and actors.get(descriptors[o].holder) == ActorStatus.ACTIVE
             for o in descriptors
         ):
-            wt = _make_world(obligs, actors, w.step + 1)
+            wt = _make_world(obligs, actors, occurred, w.step + 1)
             if wt not in worlds:
                 worlds.add(wt)
                 queue.append(wt)
@@ -2196,7 +2459,7 @@ def _run_consent_scenario() -> None:
 
     init_obligs = {"seekConsentObligation": ObligationState.PENDING}
     init_actors = {a: ActorStatus.ACTIVE for a in actors}
-    w0 = _make_world(init_obligs, init_actors, step=0)
+    w0 = _make_world(init_obligs, init_actors, occurred_actions=frozenset(), step=0)
 
     worlds: Set[World]                     = {w0}
     edges: Dict[World, Set[World]]         = {}
@@ -2210,12 +2473,13 @@ def _run_consent_scenario() -> None:
         _iter_count += 1
         obligs = w.obligation_dict()
         act    = w.actor_dict()
+        occurred = w.occurred_actions
 
         # T1: Discharge
         if obligs.get("seekConsentObligation") == ObligationState.PENDING \
                 and act.get("AIDiagnosticAgent") == ActorStatus.ACTIVE:
             new_o = {**obligs, "seekConsentObligation": ObligationState.DISCHARGED}
-            wd = _make_world(new_o, act, w.step)
+            wd = _make_world(new_o, act, occurred, w.step)
             if wd not in worlds:
                 worlds.add(wd)
             edges.setdefault(w, set()).add(wd)
@@ -2225,7 +2489,7 @@ def _run_consent_scenario() -> None:
         if obligs.get("seekConsentObligation") == ObligationState.PENDING \
                 and w.step >= DESC.deadline_steps:
             new_o = {**obligs, "seekConsentObligation": ObligationState.VIOLATED}
-            wv = _make_world(new_o, act, w.step)
+            wv = _make_world(new_o, act, occurred, w.step)
             if wv not in worlds:
                 worlds.add(wv)
             edges.setdefault(w, set()).add(wv)
@@ -2234,7 +2498,7 @@ def _run_consent_scenario() -> None:
         # T3: Tick
         if w.step < horizon \
                 and obligs.get("seekConsentObligation") == ObligationState.PENDING:
-            wt = _make_world(obligs, act, w.step + 1)
+            wt = _make_world(obligs, act, occurred, w.step + 1)
             if wt not in worlds:
                 worlds.add(wt)
                 queue.append(wt)
