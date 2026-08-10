@@ -1916,3 +1916,31 @@ to" — the file already answers that — it's narrower:
   grammar construct has a `creates_burden`-shaped field outside
   `Commitment` and `ViolationResponse`, since each would have the same
   blind spot.
+
+---
+
+## Governance-engine builder accountability gap
+
+**OPEN FINDING (2026-08-10)**
+
+No entry currently exists for who is accountable if the deployed
+*governance engine itself* has a bug or bypass path — distinct from
+whether the AI agent being governed was correctly specified/supplied.
+Arguably more consequential than the AIVendor gap (see "AIVendor —
+regulatory-overlay gap" entry, 2026-07-09/2026-07-14), since it concerns
+trustworthiness of the verifier, not just the governed party.
+
+At least two distinct failure modes, likely needing different remedies —
+keep separate rather than collapsing into one "engine trust" line:
+
+- **Verifier-logic failure**: a bug in Kripke transition
+  construction/reasoning (`el_kripke.py`) produces an incorrect
+  governance verdict despite correct scenario input.
+- **Bypass-path failure**: the engine is logically correct but something
+  in deployment (misconfiguration, an unenforced construct, an
+  integration gap) allows an action to proceed without passing through
+  governance at all.
+
+**Status:** candidate/probe-tier, no design work started. Surfaced from
+FTI Consulting conversation (2026-08-10, Sabine Bennett / Nicki Doyle)
+discussion context, not FTI-specific in substance.
