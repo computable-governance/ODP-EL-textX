@@ -2090,3 +2090,66 @@ context and IT-governance framing; neither surfaced one).
 **Status:** resolved by direct code inspection, 2026-08-11. No
 implementation change made or required — this closes the framing
 question, it does not open new work.
+
+---
+
+## IT-governance demo — live consent-grant path required (R30 Option B), deferred for proper design
+
+**OPEN FINDING (2026-08-11)**
+
+Investigating what the IT-governance demo (originally motivated by the
+2026-08-10 FTI conversation) would need to show surfaced three findings,
+verified empirically against the live codebase and UI, not assumed:
+
+1. **No live consent-grant path exists today.** The board UI's consent
+   panel has only revocation buttons (`btn-revoke`, `btn-revoke-fhir`).
+   `fhir_event_handler.py`'s R30 handling of `Consent.status: active` is
+   explicitly bootstrap-only ("Option A") — a live `active` event received
+   after runtime construction is a documented no-op
+   (`fhir_event_handler.py:182-197`). No grant/activate endpoint exists in
+   `el_api.py`. "Live grant/reinstate (Option B)" — already listed as
+   deferred FHIR work — is the actual gap.
+
+2. **Consequence: T5 already fires silently at `w0` in both live
+   scenarios.** `patientRecordAccessPermitByAuthorization` is declared
+   `state: active` statically in both `referral_scenario.el` and
+   `gp_referral_scenario.el`, with `for_action` set and holder resolvable
+   via `Authorization.to_agent`. Confirmed by building the Kripke model:
+   `exercise:patientRecordAccessPermitByAuthorization →
+   access_patient_clinical_records` is present in `w0`'s successors in
+   both scenarios, since parse time — not something a demo or UI action
+   triggers, it's simply always true today. Not a regression from T5's
+   build (2026-08-10) — just the first time anyone looked.
+
+3. **"6 iterations" paper claim is safe.** Comes from
+   `_run_consent_scenario()`, a hand-rolled synthetic demo structurally
+   incapable of ever touching T5 (never parses a real `.el` file, no
+   Permits). Confirmed unchanged: still 6 iterations, 15 worlds. The
+   pre-existing 30-vs-31-worlds discrepancy (see CONCEPTS_INDEX §13.2)
+   is against `build_kripke_model()` on the real consent scenario — a
+   different, already-tracked item, unrelated to and untouched by T5.
+
+4. **No UI surface for `occurred_actions` exists anywhere** — confirmed
+   by grep across both repos and by tracing `execute-action`'s response
+   shape (`step`/`obligations`/`actors` only). Nothing to extend; this
+   would be built from scratch.
+
+**Decision (2026-08-11):** the IT-governance demo deserves the "live
+grant → T5 fires → occurrence becomes reachable" story, not just a
+static display of what's already true at `w0` — the transition is the
+compelling part, especially for the FTI audience. That means R30 Option
+B (live grant/reinstate) needs to be built first, as its own properly
+scoped design item — same discipline as T5 (design in chat, precise spec
+to CC, diff-by-diff review), not folded in as a rushed side effect of
+"just build the demo."
+
+**Not started.** Scope for the eventual design session should cover, at
+minimum: the live grant endpoint (`el_api.py`), the `fhir_event_handler.py`
+change to make a post-bootstrap `active` event a real transition rather
+than a no-op, and the UI button/flow to trigger it — plus, separately,
+the `occurred_actions` display surface needed regardless of which demo
+shape is chosen.
+
+**Priority:** next IT-governance-adjacent design session, whenever that
+naturally falls — not blocking on FTI's calendar, since this is buildable
+independent of any specific meeting date.
