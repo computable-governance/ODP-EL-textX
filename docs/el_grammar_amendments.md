@@ -3020,3 +3020,80 @@ separately in that repo, per the addendum's step 4.
 `AuthorshipBasis`/`ConsentRightsBasis`/`ReferralEpisodeAccountability` in
 the referral scenario now carry real URLs. Permit/embargo governance
 resolution (item 2 of the paired addendum) remains open, unstarted.
+
+---
+
+## V-17 — Burden/Embargo `for_action` conflict (2026-08-10)
+
+**Status:** IMPLEMENTED (2026-08-10) — `_validate_burden_embargo_conflict`
+lands as validator rule `V-17`, registered in `validate_spec`'s dispatcher.
+
+**Motivation:** Follow-on from T5 (Exercise, `el_kripke.py`) — building
+T5's Embargo guard surfaced that nothing in the toolchain ever checked
+whether a Burden and an Embargo could name the *same* `for_action` at the
+specification level. A spec could declare an actor simultaneously
+obligated to perform an action (`burden`, §6.4.3) and prohibited from
+performing that same action (`embargo`, §6.4.4) — a direct normative
+contradiction, not a delegation-chain or discharge-timing question, so it
+belongs at Layer 2 (specification validity), not Layer 4 (Kripke
+reachability).
+
+**What it checks:** every pair of an `active`-state Burden and an
+`active`-state Embargo, both with a non-empty `for_action`. If the two
+`for_action` strings match, the rule flags a `[V-17]` error naming both
+tokens.
+
+**Why specification-time, not Kripke-time:** this mirrors the
+`specification_time_assurance` conflict-resolution strategy already used
+at the federation level (§7.9.1 NOTE 3) — a normative conflict this direct
+should be rejected when the spec is written, not silently masked or
+arbitrated by `el_kripke.py` at model-construction time. T5's Embargo
+guard (a Kripke-time mechanism) answers a different question — "is this
+specific Permit's exercise blocked right now" — and is actor- and
+Action-linkage-scoped; V-17 is unconditional and checked once, at parse
+time, independent of any Kripke world.
+
+**Standard reference(s):** §6.4.3 (Burden/obligation), §6.4.4
+(Embargo/prohibition), §7.9.1 NOTE 3 (specification-time conflict
+resolution, the precedent this rule's timing follows).
+
+**Single-domain-scope limitation:** like T5's Embargo guard, this rule
+cannot detect conflicts where the Burden and Embargo belong to different
+domains in a federation — `domain_scope` does not exist on bare
+`DeonticToken` today. See "Permit/Embargo missing domain scope
+(§7.8.8.2/§7.8.8.3 gap)" in `docs/CONCEPTS_INDEX.md`.
+
+**Validator (`toolchain/el_validator.py`), as landed:**
+```python
+def _validate_burden_embargo_conflict(model) -> List[str]:
+    errors: List[str] = []
+    burdens = [
+        t for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "burden"
+        and getattr(t, "state", None) == "active"
+        and getattr(t, "for_action", None)
+    ]
+    embargoes = [
+        t for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "embargo"
+        and getattr(t, "state", None) == "active"
+        and getattr(t, "for_action", None)
+    ]
+    for burden in burdens:
+        for embargo in embargoes:
+            if burden.for_action == embargo.for_action:
+                errors.append(
+                    f"[V-17] Burden '{burden.name}' requires action "
+                    f"'{burden.for_action}', which Embargo '{embargo.name}' "
+                    f"actively prohibits — normative conflict. (§6.4.3, §6.4.4)"
+                )
+    return errors
+```
+Registered in `validate_spec`'s dispatcher immediately after V-16b.
+
+**Files changed:** `toolchain/el_validator.py` (`_validate_burden_embargo_conflict`,
+new function; module docstring's "Rules implemented" list; dispatcher
+registration). `tests/test_v17_burden_embargo_conflict.py` (new file, 2
+tests: fires on matching active `for_action`; does not fire when the
+Embargo is `pending` or the `for_action` values differ). Full suite: 92
+pre-existing tests pass unchanged, plus 2 new (94 total).

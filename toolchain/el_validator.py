@@ -45,6 +45,11 @@ Rules implemented
         Delegation — static check for missing obligation descriptor. §6.4.2
   V-16b  SatisfactionCondition with a single member has no
         collective semantics — warn (not error).                 AM-29
+  V-17  An ACTIVE Burden's for_action must not match an ACTIVE
+        Embargo's for_action — direct normative conflict
+        (obligated to do the one thing that is prohibited).
+        Single-domain-scoped: see docs/CONCEPTS_INDEX.md,
+        "Permit/Embargo missing domain scope".               §6.4.3, §6.4.4
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -178,6 +183,9 @@ def validate_spec(model) -> List[str]:
 
     # V-16b — singleton SatisfactionCondition warning (AM-29)
     errors.extend(_validate_satisfaction_singleton(model))
+
+    # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
+    errors.extend(_validate_burden_embargo_conflict(model))
 
     return errors
 
@@ -665,5 +673,61 @@ def _validate_obligation_chain(
                 f"does not match any CommitmentDecl. "
                 f"Delegation chain has no commitment root. (§7.10.1)"
             )
+
+    return errors
+
+
+def _validate_burden_embargo_conflict(model) -> List[str]:
+    """
+    V-17: An ACTIVE Burden's for_action must not match an ACTIVE Embargo's
+    for_action — the spec would obligate an actor to perform the one
+    action it is simultaneously prohibited from performing. (§6.4.3
+    obligation, §6.4.4 prohibition)
+
+    Specification-time check, not a Kripke/runtime one — consistent with
+    the specification_time_assurance conflict-resolution strategy already
+    used at the federation level (§7.9.1 NOTE 3), rather than letting the
+    Kripke builder (el_kripke.py) silently mask or resolve the conflict at
+    model-construction time.
+
+    Direct for_action-to-for_action string comparison — the field both
+    Burden and Embargo already carry — not DeonticToken.inhibited_by_embargo
+    (confirmed dead/unused repo-wide during T5's build: no scenario sets it,
+    no toolchain code reads it) and not the Action-scoped
+    inhibited_by_embargo linkage T5's Embargo guard uses
+    (el_kripke.py:_build_embargo_inhibition_index). This rule checks a
+    different, simpler thing than that guard: not "is this specific Permit
+    blocked by a linked Embargo" but "does a Burden's required action
+    directly collide with an Embargo's prohibited action" — no
+    Action-scoped traversal needed here.
+
+    Single-domain-scoped, same caveat as T5's Embargo guard: cannot detect
+    conflicts where the Burden and Embargo belong to different domains in a
+    federation, since domain_scope does not exist on bare DeonticToken
+    today — see "Permit/Embargo missing domain scope" in
+    docs/CONCEPTS_INDEX.md.
+    """
+    errors: List[str] = []
+    burdens = [
+        t for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "burden"
+        and getattr(t, "state", None) == "active"
+        and getattr(t, "for_action", None)
+    ]
+    embargoes = [
+        t for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "embargo"
+        and getattr(t, "state", None) == "active"
+        and getattr(t, "for_action", None)
+    ]
+
+    for burden in burdens:
+        for embargo in embargoes:
+            if burden.for_action == embargo.for_action:
+                errors.append(
+                    f"[V-17] Burden '{burden.name}' requires action "
+                    f"'{burden.for_action}', which Embargo '{embargo.name}' "
+                    f"actively prohibits — normative conflict. (§6.4.3, §6.4.4)"
+                )
 
     return errors
