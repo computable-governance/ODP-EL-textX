@@ -288,10 +288,12 @@ class PermitDescriptor:
     # omits for_action; T5 must skip such descriptors (nothing to occur).
 
 
-def _build_permit_descriptors(model: Any) -> Dict[str, PermitDescriptor]:
+def _extract_permit_structure(model: Any) -> Dict[str, PermitDescriptor]:
     """
-    Extract a PermitDescriptor for each Permit token whose holder can be
-    statically resolved.
+    Structural extraction only for Permit tokens: permit_id, holder,
+    for_action. No state filtering — callers apply their own state source
+    (spec-static for pre-exec, live-runtime for hybrid). Mirrors
+    _build_obligation_descriptors()'s existing purity for Burdens.
 
     Holder resolution, in priority order (first match wins):
       1. HoldsToken — some EnterpriseObject.holds_tokens names this permit.
@@ -335,13 +337,6 @@ def _build_permit_descriptors(model: Any) -> Dict[str, PermitDescriptor]:
 
     descriptors: Dict[str, PermitDescriptor] = {}
     for permit_name, permit_tok in permits.items():
-        # §7.8.7: state active|pending. A pending (masked/suspended) Permit
-        # confers no standing grant yet — T5 must not generate occurrence
-        # edges for it. Filtered here at extraction time rather than in T5
-        # itself, consistent with this function's "which grants are usable"
-        # framing.
-        if getattr(permit_tok, "state", None) != "active":
-            continue
         holder = holder_by_permit.get(permit_name)
         if not holder:
             continue
@@ -352,6 +347,29 @@ def _build_permit_descriptors(model: Any) -> Dict[str, PermitDescriptor]:
         )
 
     return descriptors
+
+
+def _build_permit_descriptors(model: Any) -> Dict[str, PermitDescriptor]:
+    """
+    Pre-exec: structure + spec-static state filter (§7.8.7 active|pending).
+    Thin wrapper over _extract_permit_structure() for backward
+    compatibility with existing callers/tests.
+    """
+    structural = _extract_permit_structure(model)
+    active_permit_names = {
+        t.name
+        for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "permit" and getattr(t, "state", None) == "active"
+    }
+    # §7.8.7: state active|pending. A pending (masked/suspended) Permit
+    # confers no standing grant yet — T5 must not generate occurrence
+    # edges for it. Filtered here at extraction time rather than in T5
+    # itself, consistent with this function's "which grants are usable"
+    # framing.
+    return {
+        name: desc for name, desc in structural.items()
+        if name in active_permit_names
+    }
 
 
 def _build_embargo_inhibition_index(model: Any) -> Dict[str, List[str]]:
@@ -2300,6 +2318,19 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     init_obligs: Dict[str, ObligationState] = {}
     descriptors: Dict[str, ObligationDescriptor] = {}
 
+    # Spec-derived structure, shared with pre-exec mode. Only covers burdens
+    # that appear in a Commitment or Delegation.token_group (see that
+    # function's docstring) — some scenario builders enrol tokens directly
+    # in Python without a matching Commitment (documented gap, see
+    # el_api._build_gp_referral_runtime's docstring), so a live token may
+    # have no entry here; fall back to the original inline computation for
+    # those. holder/chain are deliberately NOT taken from this: unlike
+    # pre-exec mode, hybrid mode has a live runtime holder that may have
+    # moved via real delegation/transfer since the spec was parsed, so
+    # holder/chain must always come from state.tokens, not from the static
+    # Commitment/Delegation walk.
+    spec_descriptors = _build_obligation_descriptors(spec)
+
     for tok in state.tokens:
         if tok.kind != "burden":
             continue
@@ -2310,22 +2341,45 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             else ObligationState.PENDING
         )
         init_obligs[tok.token_name] = obl_st
-        spec_tok = next(
-            (e for e in spec.elements
-             if type(e).__name__ == "DeonticToken" and e.name == tok.token_name), None
-        )
-        dl = getattr(spec_tok, "deadline", None)
-        try:
-            steps = int(dl) if dl else 5
-        except (ValueError, TypeError):
-            steps = _parse_deadline_steps(dl, default=5)
         chain = _delegation_chain_for_token(spec, tok.token_name, tok.holder)
+
+        spec_desc = spec_descriptors.get(tok.token_name)
+        if spec_desc is not None:
+            steps = spec_desc.deadline_steps
+            discharge_mode = spec_desc.discharge_mode
+            priority_weight = spec_desc.priority_weight
+            revocable = spec_desc.revocable
+            sub_delegation_allowed = spec_desc.sub_delegation_allowed
+            triggered_by = spec_desc.triggered_by
+            fires_event = spec_desc.fires_event
+            for_action = spec_desc.for_action
+        else:
+            spec_tok = next(
+                (e for e in spec.elements
+                 if type(e).__name__ == "DeonticToken" and e.name == tok.token_name), None
+            )
+            dl = getattr(spec_tok, "deadline", None)
+            try:
+                steps = int(dl) if dl else 5
+            except (ValueError, TypeError):
+                steps = _parse_deadline_steps(dl, default=5)
+            discharge_mode = tok.discharge_mode or "eventual"
+            priority_weight = _priority_weight(tok.priority)
+            revocable = False
+            sub_delegation_allowed = False
+            triggered_by = None
+            fires_event = None
+            for_action = None
+
         descriptors[tok.token_name] = ObligationDescriptor(
             obligation_id=tok.token_name, obligation_text=tok.token_name,
             deadline_steps=steps, holder=tok.holder, chain=chain,
-            revocable=False, sub_delegation_allowed=False,
-            discharge_mode=tok.discharge_mode or "eventual",
-            priority_weight=_priority_weight(tok.priority),
+            revocable=revocable, sub_delegation_allowed=sub_delegation_allowed,
+            discharge_mode=discharge_mode,
+            priority_weight=priority_weight,
+            triggered_by=triggered_by,
+            fires_event=fires_event,
+            for_action=for_action,
         )
 
     init_actors: Dict[str, ActorStatus] = {a.actor_name: ActorStatus.ACTIVE for a in state.actors}
