@@ -557,6 +557,102 @@ def revoke_authorization(
     return new_state, record
 
 
+def reinstate_authorization(
+    state: WorldState, spec, authorization_name: str
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    R30 Option B: (Re-)establish a revocable Authorization's grant at runtime.
+
+    Mirrors revoke_authorization() in reverse:
+    1. Transitions the granted permit's TokenInstance to 'active' — if one
+       already exists (most likely 'superseded' from a prior revoke),
+       reuses it; otherwise instantiates and grants it fresh (first-time
+       grant, no prior revoke). This single branch correctly handles both
+       cases without needing to distinguish them explicitly.
+    2. Lifts the on_revocation embargo — if a TokenInstance for it exists
+       and is 'active', transitions it to 'lifted' (a state distinct from
+       'superseded': 'superseded' means a Permit lost governance to an
+       Embargo taking over the same action; 'lifted' means an Embargo's
+       own restriction has been rescinded — the opposite relationship).
+       If no embargo TokenInstance exists at all, there is nothing to
+       lift — unlike revoke's embargo branch, reinstate never creates an
+       embargo token.
+    3. Returns a TransitionRecord documenting the reinstatement for the
+       ledger.
+
+    Raises KeyError if authorization_name is not declared, or has no
+    on_revocation embargo — same defensive check as revoke_authorization().
+    """
+    auth = None
+    for el in spec.elements:
+        if type(el).__name__ == "Authorization" and el.name == authorization_name:
+            auth = el
+            break
+    if auth is None:
+        raise KeyError(f"Authorization '{authorization_name}' not found in spec")
+
+    permit_name = auth.permit.name
+    # on_revocation_embargo is a plain ID: absent → "" per textX default, not None
+    embargo_name = getattr(auth, "on_revocation_embargo", "")
+    if not embargo_name:
+        raise KeyError(f"Authorization '{authorization_name}' has no on_revocation embargo")
+
+    tick = state.tick
+    effects_log: list[str] = []
+
+    # 1 — (re-)activate the permit. Only append to effects_log when a real
+    # state change happens — mirrors fire_event()'s convention (empty
+    # effects means nothing was activated), which handle_consent_event()
+    # relies on to distinguish "already_active" from "reinstated" the same
+    # way handle_encounter_event() distinguishes "fired" from
+    # "fired_no_match" by inspecting TransitionRecord.effects.
+    existing_permit = next(
+        (t for t in state.tokens if t.token_name == permit_name and t.kind == "permit"),
+        None,
+    )
+    if existing_permit is not None and existing_permit.state == "active":
+        tokens = list(state.tokens)
+    elif existing_permit is not None:
+        tokens = [
+            _transition(t, "active")
+            if t.token_name == permit_name and t.kind == "permit"
+            else t
+            for t in state.tokens
+        ]
+        effects_log.append(f"activated permit '{permit_name}'")
+    else:
+        # First-time grant: no prior permit TokenInstance to reactivate.
+        # Target the Authorization's declared recipient. to_role is not
+        # resolved to a concrete actor anywhere in this codebase (same
+        # degrade-gracefully convention as _build_permit_descriptors's
+        # Tier-2), so fall back to the authority as a last resort.
+        target = auth.authorized_agent.name if auth.authorized_agent else auth.authority.name
+        tokens = list(state.tokens) + [
+            _transition(token_from_spec(spec, permit_name, target), "active")
+        ]
+        effects_log.append(f"activated permit '{permit_name}'")
+
+    # 2 — lift the on_revocation embargo, if one is currently active
+    if any(t.token_name == embargo_name and t.state == "active" for t in tokens):
+        tokens = [
+            _transition(t, "lifted") if t.token_name == embargo_name else t
+            for t in tokens
+        ]
+        effects_log.append(f"lifted embargo '{embargo_name}'")
+
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=auth.authority.name,
+        action_name=f"reinstate:{authorization_name}",
+        outcome="ok",
+        discharged=(),
+        effects=tuple(effects_log),
+        violations=(),
+    )
+    return new_state, record
+
+
 def fire_event(
     state: WorldState, spec, event_name: str, source: str = "external"
 ) -> Tuple[WorldState, TransitionRecord]:

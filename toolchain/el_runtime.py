@@ -19,6 +19,7 @@ from el_engine import (
     fire_event as _engine_fire_event,
     grant_token,
     initial_state,
+    reinstate_authorization as _engine_reinstate_authorization,
     revoke_authorization as _engine_revoke_authorization,
     token_from_spec,
 )
@@ -215,6 +216,16 @@ class Runtime:
     def revoke_authorization(self, authorization_name: str) -> TransitionRecord:
         """Withdraw a revocable Authorization and append the event to the ledger. (AM-31)"""
         new_state, record = _engine_revoke_authorization(
+            self._state, self._spec, authorization_name
+        )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def reinstate_authorization(self, authorization_name: str) -> TransitionRecord:
+        """(Re-)establish a revocable Authorization's grant and append the event
+        to the ledger. (R30 Option B)"""
+        new_state, record = _engine_reinstate_authorization(
             self._state, self._spec, authorization_name
         )
         self._state = new_state

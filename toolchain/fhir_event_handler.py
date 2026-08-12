@@ -24,23 +24,26 @@ R31 — Consent.status: active -> inactive (implemented here in full).
   activates patientRecordAccessEmbargo (see AM-31, AM-31b). The FHIR
   Consent.id is carried through as fhir_provenance on the result.
 
-R30 — Consent.status: active (bootstrap-only; agreed Option A).
-  Runtime.revoke_authorization has no grant/reinstate counterpart, and
-  authorizations are only ever established active at build_from_spec() /
-  build_from_federation() time, or by the hand-written scenario builders
-  in el_api.py (e.g. _build_referral_runtime()) — this is confirmed
-  intended scope, not a gap being patched around.
-  A FHIR Consent bundle with status="active", if received BEFORE runtime
-  construction, would be the natural input for determining the initial
-  authorization state fed into a runtime builder such as
-  el_api.py:_build_referral_runtime() — that wiring is the intended
-  future entry point but is NOT implemented in this session.
-  Runtime.grant_authorization() / reinstate does not exist and is not
-  built here (R30 Option B, deferred).
-  If a Consent with status="active" reaches handle_consent_event() after
-  the runtime has already been constructed, this is a no-op: the
-  function returns an informative ConsentEventResult explaining why,
-  rather than raising or silently discarding the event.
+R30 — Consent.status: active (Option B, live grant/reinstate; implemented
+  here in full, 2026-08-13).
+  A FHIR Consent bundle with status="active" received AFTER runtime
+  construction calls Runtime.reinstate_authorization(authorization_name)
+  directly (in-process, the same pattern R31 already established for
+  revoke). reinstate_authorization() (AM-31 mirror, el_engine.py) handles
+  both directions with a single branch: if the permit was previously
+  granted (most likely 'superseded' from a prior revoke), it is
+  transitioned back to 'active'; if it was never granted at all, it is
+  instantiated and granted fresh to the Authorization's to_agent. Either
+  way, if an on_revocation embargo is currently 'active' for this
+  authorization, it is transitioned to 'lifted' — a state distinct from
+  'superseded' (which means a Permit lost governance to an Embargo, the
+  opposite relationship). The FHIR Consent.id is carried through as
+  fhir_provenance on the result, mirroring R31.
+  A FHIR Consent bundle with status="active" received BEFORE runtime
+  construction still determines the initial authorization state via
+  build_from_spec()/build_from_federation() or the hand-written scenario
+  builders in el_api.py, as before — this section only concerns events
+  arriving after construction.
 
 R26-R29 probe — Encounter.status: finished -> fires 'encounterConcluded'
   event (probe-tier; see docs/CONCEPTS_INDEX.md "Toolchain implementation
@@ -111,11 +114,11 @@ class ConsentEventResult:
     """Outcome of feeding one FHIR Consent resource to handle_consent_event()."""
     fhir_consent_id: str
     fhir_status: str
-    action_taken: str              # "revoked" | "no_op"
+    action_taken: str              # "revoked" | "reinstated" | "already_active" | "no_op"
     message: str
     fhir_provenance: str           # == fhir_consent_id; carried for API-layer stamping
-    authorization_name: Optional[str] = None   # set only when action_taken == "revoked"
-    transition: Optional[TransitionRecord] = None   # set only when action_taken == "revoked"
+    authorization_name: Optional[str] = None   # set when action_taken in ("revoked", "reinstated", "already_active")
+    transition: Optional[TransitionRecord] = None   # set when action_taken in ("revoked", "reinstated", "already_active")
 
 
 @dataclass(frozen=True)
@@ -147,7 +150,24 @@ def handle_consent_event(
     status == "inactive" (R31): revokes `authorization_name` via
       Runtime.revoke_authorization(), which supersedes the permit it
       grants and activates its on_revocation embargo.
-    status == "active" (R30): no-op post-bootstrap; see module docstring.
+    status == "active" (R30 Option B): (re-)establishes `authorization_name`
+      via Runtime.reinstate_authorization(). reinstate_authorization()
+      never raises for an already-active permit, so this branch inspects
+      the returned TransitionRecord.effects to distinguish a genuine
+      reinstatement ("reinstated") from a call that found the permit
+      already active with nothing to change ("already_active") — the same
+      effects-inspection mechanism handle_encounter_event() (below) uses
+      to distinguish "fired" from "fired_no_match", verified by reading
+      that function directly. There is no API endpoint wrapping
+      handle_encounter_event() to compare against, so this is a mechanism
+      match at the handler level only, not a verified match to any
+      existing API response shape — el_api.py's decision to give
+      "already_active" the same full response shape as "reinstated"
+      (tick/authority/outcome all populated) was made on its own merits
+      (a real TransitionRecord exists either way), not against precedent.
+      Both outcomes carry the real transition on the result; only the
+      true no-op below (status not "active"/"inactive") leaves transition
+      as None.
     any other status: no-op; not a recognised event by this handler.
 
     Raises ValueError if the Consent resource is missing 'id' or 'status'.
@@ -180,20 +200,33 @@ def handle_consent_event(
         )
 
     if status == "active":
+        tr = runtime.reinstate_authorization(authorization_name)
+        if tr.effects:
+            return ConsentEventResult(
+                fhir_consent_id=consent_id,
+                fhir_status=status,
+                action_taken="reinstated",
+                message=(
+                    f"Consent '{consent_id}' status=active: reinstated "
+                    f"authorization '{authorization_name}', "
+                    f"{'; '.join(tr.effects)}."
+                ),
+                fhir_provenance=consent_id,
+                authorization_name=authorization_name,
+                transition=tr,
+            )
         return ConsentEventResult(
             fhir_consent_id=consent_id,
             fhir_status=status,
-            action_taken="no_op",
+            action_taken="already_active",
             message=(
-                f"Consent '{consent_id}' status=active received after runtime "
-                "construction: this is a no-op. R30 is bootstrap-only "
-                "(Option A) — an active Consent only determines initial "
-                "authorization state if supplied before the runtime is "
-                "built; there is no live grant/reinstate path (see this "
-                "module's docstring and AM-34 in "
-                "docs/el_grammar_amendments.md)."
+                f"Consent '{consent_id}' status=active: authorization "
+                f"'{authorization_name}' was already active — nothing "
+                "changed."
             ),
             fhir_provenance=consent_id,
+            authorization_name=authorization_name,
+            transition=tr,
         )
 
     return ConsentEventResult(

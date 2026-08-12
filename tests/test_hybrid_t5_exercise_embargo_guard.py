@@ -48,7 +48,7 @@ would itself be fragile in general — not an issue here since only one
 of the two permits is ever superseded by this specific revocation.
 """
 from el_api import _SCENARIO_BUILDERS
-from el_engine import revoke_authorization
+from el_engine import reinstate_authorization, revoke_authorization
 from el_kripke import build_kripke_from_runtime
 from el_parser import parse_string
 from el_runtime import Runtime
@@ -207,3 +207,51 @@ def test_hybrid_t5_revoke_authorization_removes_its_exercise_edge():
     # The independently-granted role-based permit is unaffected by this
     # specific revocation and correctly remains reachable.
     assert "exercise:patientRecordAccessPermitByRole → access_patient_clinical_records" in after_labels
+
+
+def test_hybrid_t5_reinstate_authorization_restores_its_exercise_edge():
+    """Mirrors test_hybrid_t5_revoke_authorization_removes_its_exercise_edge
+    in reverse (R30 Option B): starting from a post-revoke state (permit
+    superseded, embargo active), reinstate_authorization() transitions the
+    permit back to active and the embargo to 'lifted' — rebuild the hybrid
+    Kripke model and confirm the exercise: edge reappears. This is the
+    test that proves a live grant/reinstate's effect is formally
+    verifiable end-to-end, completing what Stage 2 made possible for
+    revoke alone.
+
+    Also exercises, empirically rather than by code inspection alone, the
+    embargo guard's e_state == "active" check correctly treating 'lifted'
+    as not-active — no guard code change was needed for this to work.
+    """
+    rt = _SCENARIO_BUILDERS["referral"]()
+
+    # Get to post-revoke state first.
+    new_state, record = revoke_authorization(rt.current_state(), rt._spec, "patientDataAuthorization")
+    rt._state = new_state
+    rt._ledger.append(record)
+
+    km_post_revoke = build_kripke_from_runtime(rt, horizon=10)
+    post_revoke_labels = set(km_post_revoke.labels.values())
+    assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" not in post_revoke_labels
+
+    new_state2, record2 = reinstate_authorization(rt.current_state(), rt._spec, "patientDataAuthorization")
+    rt._state = new_state2
+    rt._ledger.append(record2)
+
+    embargo = [
+        t for t in rt.current_state().tokens
+        if t.token_name == "patientRecordAccessEmbargo"
+    ]
+    assert embargo and embargo[0].state == "lifted"
+
+    km_post_reinstate = build_kripke_from_runtime(rt, horizon=10)
+    post_reinstate_labels = set(km_post_reinstate.labels.values())
+    assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" in post_reinstate_labels
+    # NOT also asserting patientRecordAccessPermitByRole's label survives
+    # here: post-reinstate, both permits are active again and share the
+    # same for_action, reproducing the exact label-collision finding
+    # logged in CONCEPTS_INDEX.md (2026-08-13) — the second-processed
+    # permit's label silently overwrites the first's in `labels`, even
+    # though its edge is still present in `edges`. Asserting on it would
+    # be asserting against known, documented, order-dependent behavior,
+    # not a real guarantee.

@@ -439,9 +439,9 @@ class ConsentEventResponse(BaseModel):
     fhir_consent_id: str
     fhir_status: str
     fhir_provenance: str
-    action_taken: str              # "revoked" | "no_op"
+    action_taken: str              # "revoked" | "reinstated" | "already_active" | "no_op"
     message: str
-    # populated only when action_taken == "revoked" (mirrors RevokeAuthorizationResponse)
+    # populated only when action_taken in ("revoked", "reinstated", "already_active") (mirrors RevokeAuthorizationResponse)
     tick: Optional[int] = None
     authority: Optional[str] = None
     authorization_name: Optional[str] = None
@@ -992,12 +992,14 @@ def revoke_authorization_endpoint(authorization_name: str) -> RevokeAuthorizatio
     description=(
         "Accepts a FHIR R4 Consent resource. status='inactive' (R31) revokes "
         "patientDataAuthorization via Runtime.revoke_authorization() — the same "
-        "engine path as POST /authorizations/{name}/revoke — and stamps the "
-        "Consent.id as fhir_provenance on the result. status='active' (R30) is "
-        "a bootstrap-only no-op post-construction; see fhir_event_handler.py's "
-        "module docstring (AM-34). 400 if the Consent resource is missing "
-        "id/status, or the target authorization has no on_revocation embargo. "
-        "404 if the target authorization is not declared in the active spec at all."
+        "engine path as POST /authorizations/{name}/revoke. status='active' "
+        "(R30 Option B) (re-)establishes it via Runtime.reinstate_authorization() "
+        "— (re-)activates the permit, lifting its on_revocation embargo if one "
+        "is currently active. Both stamp the Consent.id as fhir_provenance on "
+        "the result; see fhir_event_handler.py's module docstring (AM-34). 400 "
+        "if the Consent resource is missing id/status, or the target "
+        "authorization has no on_revocation embargo. 404 if the target "
+        "authorization is not declared in the active spec at all."
     ),
 )
 def consent_event(consent: dict) -> ConsentEventResponse:
@@ -1028,7 +1030,7 @@ def consent_event(consent: dict) -> ConsentEventResponse:
             detail=f"Consent event could not be applied: {e}",
         )
 
-    if result.action_taken != "revoked":
+    if result.action_taken not in ("revoked", "reinstated", "already_active"):
         return ConsentEventResponse(
             fhir_consent_id=result.fhir_consent_id,
             fhir_status=result.fhir_status,
@@ -1037,17 +1039,24 @@ def consent_event(consent: dict) -> ConsentEventResponse:
             message=result.message,
         )
 
-    # Stash fhir_provenance against the embargo token so GET /debug/tokens can
-    # surface it later — the plain POST /authorizations/{name}/revoke path
-    # never writes here, so a non-FHIR revoke shows no provenance (by design).
+    # Stash fhir_provenance against the token GET /debug/tokens should
+    # attribute this event to — the embargo for a revoke (the token that
+    # newly became active), the permit for a reinstate or already_active
+    # (the token this event targets, whether or not it actually changed
+    # state). The plain POST /authorizations/{name}/revoke path never
+    # writes here, so a non-FHIR revoke/reinstate shows no provenance
+    # (by design).
     auth_el = next(
         (el for el in _runtime._spec.elements
          if type(el).__name__ == "Authorization" and el.name == result.authorization_name),
         None,
     )
-    embargo_name = getattr(auth_el, "on_revocation_embargo", "") if auth_el else ""
-    if embargo_name:
-        _fhir_provenance_by_token[embargo_name] = result.fhir_provenance
+    if result.action_taken == "revoked":
+        target_token_name = getattr(auth_el, "on_revocation_embargo", "") if auth_el else ""
+    else:
+        target_token_name = auth_el.permit.name if auth_el else ""
+    if target_token_name:
+        _fhir_provenance_by_token[target_token_name] = result.fhir_provenance
 
     tr = result.transition
     km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
