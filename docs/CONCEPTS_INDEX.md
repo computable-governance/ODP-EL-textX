@@ -2288,3 +2288,61 @@ Worth fixing before any UI surface is built that displays *which*
 Permit/action-occurrence pairing satisfied a query (ties into the
 "`occurred_actions` display surface" gap already noted in the 2026-08-11
 finding above) — not before then.
+
+---
+
+## `Runtime.build_from_spec()` reads wrong attribute for `holds`-declared tokens
+
+**OPEN FINDING (2026-08-13)**
+
+`Runtime.build_from_spec()` (`el_runtime.py`) reads
+`getattr(el, "tokens", [])` to auto-grant tokens declared via `holds` on
+an `EnterpriseObject`/`party`, but the actual grammar/domain attribute is
+`holds_tokens` — confirmed against `grammar/v2/el_grammar.tx:102` and
+`el_domain.py:321`. Since `"tokens"` is never a real attribute on any
+parsed element, `getattr(..., "tokens", [])` always returns the default
+empty list, silently.
+
+**Consequence:** `build_from_spec()` grants **zero** tokens for any spec
+that declares them via `holds`, with no error, warning, or exception —
+the resulting `state.tokens` is simply empty where it should contain
+every statically-declared grant. A spec like:
+
+```
+party Operator {
+    holds accessPermit
+}
+```
+
+produces a `Runtime` whose `current_state().tokens` does not include
+`accessPermit` at all.
+
+**Discovered:** 2026-08-13, while building Stage 2's hybrid-mode T5 test
+fixtures (`tests/test_hybrid_t5_exercise_embargo_guard.py`), mirroring
+pre-exec T5's original minimal `_T5_FIRE`-style spec. The symptom was an
+unexpectedly empty `state.tokens` and an `EF(occurred:...)` result of
+`False` where `True` was expected for a trivially simple case.
+
+**Workaround used, not a fix:** `el_kripke.py`'s own
+`_run_hybrid_smoke_test()` already established the pattern — grant tokens
+manually after construction via `grant_token(state,
+token_from_spec(model, token_name, holder_name))`. Stage 2's tests reuse
+this same pattern rather than fixing `build_from_spec()` itself, which
+was out of scope for that work.
+
+**Impact beyond Stage 2:** this affects any hybrid-mode scenario —
+existing or future — that relies on `holds` for static token-granting via
+`build_from_spec()`, not just test fixtures. Worth checking whether any
+of the three registered scenario builders (`gp_referral`, `referral`,
+`ereferral`) are also silently affected, or whether they all happen to
+grant tokens through a different path (e.g. directly in Python, as
+`ereferral`'s builder is already known to do for Burdens — see the
+2026-08-11 ereferral coverage-gap finding) and so never hit this bug in
+practice.
+
+**Status:** logged, not fixed. Fix would be a one-line correction
+(`"tokens"` → `"holds_tokens"`) but hasn't been verified safe against
+existing behavior — any scenario builder that happens to rely on the
+current (broken) no-op behavior, even inadvertently, could be affected by
+correcting it. Treat as its own small, separately-reviewed piece of work,
+not a drive-by fix.
