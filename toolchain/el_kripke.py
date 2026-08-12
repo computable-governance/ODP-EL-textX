@@ -418,18 +418,22 @@ def _build_embargo_inhibition_index(model: Any) -> Dict[str, List[str]]:
     return index
 
 
-def _build_embargo_holder_index(model: Any) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+def _extract_embargo_holder(model: Any) -> Dict[str, str]:
     """
-    Map embargo_token_name -> (state, holder) for every Embargo-kind
-    DeonticToken.
+    Structural extraction only for Embargo tokens: embargo_name -> holder.
+    No state read — callers apply their own state source (spec-static for
+    pre-exec, live-runtime for hybrid). Mirrors _extract_permit_structure()'s
+    purity.
 
-    Holder resolved via HoldsToken only (EnterpriseObject.holds_tokens) —
-    the same single mechanism el_reasoner.can_perform uses for its
-    held_token_names set (el_reasoner.py:367-371). No Authorization-based
-    tier here, unlike _build_permit_descriptors: Authorization.
-    on_revocation_embargo names an embargo ACTIVATED on revocation, a
-    different relationship, not a holder grant — it does not establish who
-    holds the embargo day-to-day.
+    Single tier: HoldsToken only (EnterpriseObject.holds_tokens) — the same
+    single mechanism el_reasoner.can_perform uses for its held_token_names
+    set (el_reasoner.py:367-371). No Authorization-based tier here, unlike
+    Permit: Authorization.on_revocation_embargo names an embargo ACTIVATED
+    on revocation, a different relationship, not a holder grant — it does
+    not establish who holds the embargo day-to-day.
+
+    An Embargo whose holder cannot be resolved is omitted entirely, same
+    convention as _extract_permit_structure().
     """
     embargoes: Dict[str, Any] = {
         t.name: t
@@ -442,6 +446,25 @@ def _build_embargo_holder_index(model: Any) -> Dict[str, Tuple[Optional[str], Op
             tok_name = _obj_name(tok)
             if tok_name in embargoes and tok_name not in holder_by_embargo:
                 holder_by_embargo[tok_name] = obj.name
+
+    return holder_by_embargo
+
+
+def _build_embargo_holder_index(model: Any) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """
+    Map embargo_token_name -> (state, holder) for every Embargo-kind
+    DeonticToken.
+
+    Pre-exec: structure + spec-static state read. Thin wrapper over
+    _extract_embargo_holder() for backward compatibility with existing
+    callers/tests (T5's pre-exec Embargo guard).
+    """
+    embargoes: Dict[str, Any] = {
+        t.name: t
+        for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "embargo"
+    }
+    holder_by_embargo = _extract_embargo_holder(model)
 
     return {
         name: (getattr(tok, "state", None), holder_by_embargo.get(name))
@@ -2331,62 +2354,98 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     # Commitment/Delegation walk.
     spec_descriptors = _build_obligation_descriptors(spec)
 
+    # Spec-derived structure for Permit for_action resolution, shared with
+    # pre-exec mode. Only covers permits whose holder can be resolved
+    # statically (HoldsToken or Authorization.to_agent — see that
+    # function's docstring); a live token may have no entry here (e.g.
+    # granted via Authorization.to_role, or enrolled directly without a
+    # matching HoldsToken/Authorization), so fall back to the live token's
+    # own for_action field for those — same fallback pattern as Burden
+    # above. holder is NEVER taken from this: TokenInstance.holder is
+    # always live and authoritative for Permit, same as Burden.
+    #
+    # Embargo holder is sourced from tok.holder directly, with no
+    # structural fallback needed at all: revoke_authorization()
+    # (el_engine.py:543-544) bakes the correct holder into the embargo
+    # TokenInstance at creation time, and no embargo token exists in
+    # state.tokens before a revocation happens — so a live embargo
+    # instance's holder is always reliable by construction.
+    permit_structure = _extract_permit_structure(spec)
+    embargo_inhibition_index = _build_embargo_inhibition_index(spec)  # state-free, reused as-is
+
+    permit_descriptors: Dict[str, PermitDescriptor] = {}
+    embargo_holder_index: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+
     for tok in state.tokens:
-        if tok.kind != "burden":
-            continue
-        obl_st = (
-            ObligationState.DISCHARGED
-            if tok.state in ("discharged", "terminated") or tok.token_name in discharged_in_ledger
-            else ObligationState.VIOLATED if tok.state == "violated"
-            else ObligationState.PENDING
-        )
-        init_obligs[tok.token_name] = obl_st
-        chain = _delegation_chain_for_token(spec, tok.token_name, tok.holder)
-
-        spec_desc = spec_descriptors.get(tok.token_name)
-        if spec_desc is not None:
-            steps = spec_desc.deadline_steps
-            discharge_mode = spec_desc.discharge_mode
-            priority_weight = spec_desc.priority_weight
-            revocable = spec_desc.revocable
-            sub_delegation_allowed = spec_desc.sub_delegation_allowed
-            triggered_by = spec_desc.triggered_by
-            fires_event = spec_desc.fires_event
-            for_action = spec_desc.for_action
-        else:
-            spec_tok = next(
-                (e for e in spec.elements
-                 if type(e).__name__ == "DeonticToken" and e.name == tok.token_name), None
+        if tok.kind == "burden":
+            obl_st = (
+                ObligationState.DISCHARGED
+                if tok.state in ("discharged", "terminated") or tok.token_name in discharged_in_ledger
+                else ObligationState.VIOLATED if tok.state == "violated"
+                else ObligationState.PENDING
             )
-            dl = getattr(spec_tok, "deadline", None)
-            try:
-                steps = int(dl) if dl else 5
-            except (ValueError, TypeError):
-                steps = _parse_deadline_steps(dl, default=5)
-            discharge_mode = tok.discharge_mode or "eventual"
-            priority_weight = _priority_weight(tok.priority)
-            revocable = False
-            sub_delegation_allowed = False
-            triggered_by = None
-            fires_event = None
-            for_action = None
+            init_obligs[tok.token_name] = obl_st
+            chain = _delegation_chain_for_token(spec, tok.token_name, tok.holder)
 
-        descriptors[tok.token_name] = ObligationDescriptor(
-            obligation_id=tok.token_name, obligation_text=tok.token_name,
-            deadline_steps=steps, holder=tok.holder, chain=chain,
-            revocable=revocable, sub_delegation_allowed=sub_delegation_allowed,
-            discharge_mode=discharge_mode,
-            priority_weight=priority_weight,
-            triggered_by=triggered_by,
-            fires_event=fires_event,
-            for_action=for_action,
-        )
+            spec_desc = spec_descriptors.get(tok.token_name)
+            if spec_desc is not None:
+                steps = spec_desc.deadline_steps
+                discharge_mode = spec_desc.discharge_mode
+                priority_weight = spec_desc.priority_weight
+                revocable = spec_desc.revocable
+                sub_delegation_allowed = spec_desc.sub_delegation_allowed
+                triggered_by = spec_desc.triggered_by
+                fires_event = spec_desc.fires_event
+                for_action = spec_desc.for_action
+            else:
+                spec_tok = next(
+                    (e for e in spec.elements
+                     if type(e).__name__ == "DeonticToken" and e.name == tok.token_name), None
+                )
+                dl = getattr(spec_tok, "deadline", None)
+                try:
+                    steps = int(dl) if dl else 5
+                except (ValueError, TypeError):
+                    steps = _parse_deadline_steps(dl, default=5)
+                discharge_mode = tok.discharge_mode or "eventual"
+                priority_weight = _priority_weight(tok.priority)
+                revocable = False
+                sub_delegation_allowed = False
+                triggered_by = None
+                fires_event = None
+                for_action = None
+
+            descriptors[tok.token_name] = ObligationDescriptor(
+                obligation_id=tok.token_name, obligation_text=tok.token_name,
+                deadline_steps=steps, holder=tok.holder, chain=chain,
+                revocable=revocable, sub_delegation_allowed=sub_delegation_allowed,
+                discharge_mode=discharge_mode,
+                priority_weight=priority_weight,
+                triggered_by=triggered_by,
+                fires_event=fires_event,
+                for_action=for_action,
+            )
+        elif tok.kind == "permit":
+            if tok.state != "active":
+                continue
+            struct = permit_structure.get(tok.token_name)
+            for_action = struct.for_action if struct is not None else tok.for_action
+            permit_descriptors[tok.token_name] = PermitDescriptor(
+                permit_id=tok.token_name,
+                holder=tok.holder,
+                for_action=for_action,
+            )
+        elif tok.kind == "embargo":
+            embargo_holder_index[tok.token_name] = (tok.state, tok.holder)
 
     init_actors: Dict[str, ActorStatus] = {a.actor_name: ActorStatus.ACTIVE for a in state.actors}
     for desc in descriptors.values():
         for m in desc.chain:
             if m not in init_actors:
                 init_actors[m] = ActorStatus.ACTIVE
+    for pdesc in permit_descriptors.values():
+        if pdesc.holder not in init_actors:
+            init_actors[pdesc.holder] = ActorStatus.ACTIVE
     w0 = _make_world(init_obligs, init_actors, occurred_actions=frozenset(), step=state.tick)
     worlds, edges, labels, queue = {w0}, {}, {}, deque([w0])
 
@@ -2426,6 +2485,42 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 queue.append(wt)
             edges.setdefault(w, set()).add(wt)
             labels[(w, wt)] = "tick"
+
+        # ── Rule T5: EXERCISE (Permit occurrence) ───────────────────────────
+        # Ported from build_kripke_model()'s T5 (see that block's comments
+        # for full rationale on the Embargo guard: actor-scoped, same-holder
+        # check via embargo_inhibition_index/embargo_holder_index, single-
+        # domain-scope limitation). Operates on the live-sourced
+        # permit_descriptors/embargo_holder_index built above instead of
+        # pre-exec's spec-static ones.
+        for permit_id, pdesc in permit_descriptors.items():
+            if pdesc.for_action is None:
+                continue
+            if actors.get(pdesc.holder) != ActorStatus.ACTIVE:
+                continue
+            if pdesc.for_action in occurred:
+                continue
+
+            blocked = False
+            for embargo_name in embargo_inhibition_index.get(pdesc.for_action, []):
+                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+                if e_state == "active" and e_holder == pdesc.holder:
+                    blocked = True
+                    break
+            if blocked:
+                continue
+
+            new_occurred = occurred | {pdesc.for_action}
+            w_prime = _make_world(obligs, actors, new_occurred, w.step)
+            label   = f"exercise:{permit_id} → {pdesc.for_action}"
+
+            if w_prime not in worlds:
+                worlds.add(w_prime)
+                if w_prime.step < horizon:
+                    queue.append(w_prime)
+
+            edges.setdefault(w, set()).add(w_prime)
+            labels[(w, w_prime)] = label
 
     props = {w: _build_propositions(w, satisfaction_conditions) for w in worlds}
     return KripkeModel(

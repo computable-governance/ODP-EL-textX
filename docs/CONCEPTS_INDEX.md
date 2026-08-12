@@ -2221,3 +2221,70 @@ availability of a longer working block.
 **Related:** the `ObligationState.EXPIRED` "reserved but unreachable"
 finding, already noting this general territory (runtime events not
 wired into obligation-state handling) was anticipated but left unbuilt.
+
+---
+
+## T5's edge labels silently collide when two Permits share a for_action
+
+**OPEN FINDING (2026-08-13)**
+
+Surfaced while writing Diff 4's revoke_authorization end-to-end test for
+Stage 2 (hybrid-mode T5, building on the 2026-08-11 finding above).
+Verified empirically against the real referral scenario, not inferred.
+
+**Mechanism.** `patientRecordAccessPermitByRole` (held by
+`SpecialistClinician`) and `patientRecordAccessPermitByAuthorization`
+(held by `SpecialistAIAgent`) both declare the same
+`for_action: "access_patient_clinical_records"`. `World` identity
+(`el_kripke.py`'s `World` dataclass) is computed purely from the
+resulting `(obligation_states, actor_states, occurred_actions, step)`
+tuple — it carries no notion of *which* Permit caused a transition. So
+from `w0`, both Permits independently compute the exact same successor
+world `w'` (same resulting `occurred = {access_patient_clinical_records}`).
+`edges[w0]` is a `Set[World]`, so the duplicate successor collapses
+harmlessly — but `labels[(w, w')]` is a plain `Dict[Tuple[World, World],
+str]` keyed only on the `(w, w')` pair, so the second Permit processed in
+T5's loop (dict iteration order, which follows `state.tokens`/
+`permit_descriptors` insertion order) silently **overwrites** the first
+Permit's label. Confirmed directly: before revoking
+`patientDataAuthorization`, only
+`"exercise:patientRecordAccessPermitByAuthorization → ..."` survives in
+`labels`, even though `patientRecordAccessPermitByRole`'s edge is
+present and real in `edges` — its specific attribution is silently
+dropped.
+
+**Not a Diff 3 (hybrid-mode T5 port) bug.** The same `labels[(w, w')] =
+label` pattern, with the same collision property, already exists
+unchanged in `build_kripke_model()`'s (pre-exec) original T5 (2026-08-10)
+— Diff 3 copied it verbatim, correctly. This is a pre-existing property
+of T5's design in both build modes; it was never exercised by a test
+before because no prior test had two Permits sharing a `for_action` from
+the same reachable world. The referral scenario's real content happens
+to have exactly that shape.
+
+**Consequence.** `EF(occurred:<action>)` at the action level remains
+correct regardless (it only asks "does the action ever occur on any
+path," which doesn't depend on `labels`) — this is not an AF/EF
+correctness bug. But anything that reads `labels` for
+explainability/audit purposes (a witness-path display, an API surface
+showing "which Permit satisfied this") could report the wrong Permit as
+having enabled an action-occurrence, or fail to show that a second,
+independent Permit also grants the same access. For a governance
+toolchain whose value proposition rests on explainability, that's a real
+(if narrow) gap, not cosmetic.
+
+**Not fixed.** Logged only; Diff 4's revoke_authorization test works
+around it by asserting on the specific `exercise:` label string rather
+than a blanket `EF` query. A real fix would need `labels` (or an
+equivalent structure) to support multiple attributions per edge — e.g.
+`Dict[Tuple[World, World], List[str]]` — which touches every call site
+that reads `labels[(w, w')]` as a single string (witness-path
+construction, `_serialize_path` in `el_api.py`, etc.), so it's a
+real-sized change, not a one-line fix.
+
+**Priority:** low urgency — doesn't affect any AF/EF verdict, only
+label/attribution fidelity when multiple Permits share a `for_action`.
+Worth fixing before any UI surface is built that displays *which*
+Permit/action-occurrence pairing satisfied a query (ties into the
+"`occurred_actions` display surface" gap already noted in the 2026-08-11
+finding above) — not before then.
