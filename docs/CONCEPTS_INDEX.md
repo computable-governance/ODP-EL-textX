@@ -2354,3 +2354,45 @@ produced duplicate `TokenInstance` entries. Those three tests were
 updated in the same change to drop the now-redundant manual
 `grant_token()` calls and rely on the corrected auto-grant directly. Full
 suite green afterward (98/98, identical test set to before the fix).
+
+---
+
+## `holds` declarations on `EnterpriseObject` are dead code in `gp_referral`/`referral` scenarios
+
+**OPEN FINDING (2026-08-13)**
+
+Discovered while verifying the `build_from_spec()` fix (see the
+`tokens`/`holds_tokens` finding above, RESOLVED same day): both
+`gp_referral_scenario.el` and `referral_scenario.el` declare tokens via
+`holds` directly on `EnterpriseObject`s — e.g. `agent GPClinician { holds
+referralInitiationBurden; holds clinicalHandoverBurden }` — but these
+declarations are currently **never honored**. `_build_gp_referral_runtime()`
+and `_build_referral_runtime()` (`el_api.py:127,171`) each construct their
+`Runtime` directly (`Runtime(state, spec)`) and grant every token by hand
+in Python, never calling `build_from_spec()` — the only function that
+would actually read these `holds` declarations.
+
+**Consequence:** the `.el` file's `holds` declaration and the Python
+builder's manual grant are two independent, currently-redundant sources
+of truth for the same fact — token X is held by actor Y — and only the
+Python one is live today. If someone edits a scenario's `holds`
+declaration expecting it to change runtime behavior (a reasonable
+assumption, since it's declarative and reads as authoritative), nothing
+will happen; the Python builder's hand-written grant is what actually
+governs. This is easy to miss silently, since both currently agree in
+content even though only one is causally active.
+
+**Not a bug in the sense of incorrect behavior today** — both sources
+happen to agree, so nothing is currently wrong. It's a maintainability
+trap: a latent inconsistency risk for whoever next edits either the `.el`
+file or the Python builder without knowing the other exists.
+
+**Relevant if:** a future scenario builder is written to call
+`build_from_spec()` directly instead of hand-rolling grants (now that
+`build_from_spec()` correctly reads `holds_tokens` per the same-day fix)
+— at that point these `.el` declarations would suddenly become live,
+which could either be the desired simplification or a surprise, depending
+on whether the Python-side manual grants are removed at the same time.
+
+**Status:** logged, no action planned. Worth revisiting only if/when a
+scenario builder is refactored to rely on `build_from_spec()`.
