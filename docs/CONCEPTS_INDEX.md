@@ -2153,3 +2153,71 @@ shape is chosen.
 **Priority:** next IT-governance-adjacent design session, whenever that
 naturally falls — not blocking on FTI's calendar, since this is buildable
 independent of any specific meeting date.
+
+---
+
+## R30 Option B design blocked on a deeper gap: runtime events invisible to both Kripke builders
+
+**OPEN FINDING (2026-08-11)**
+
+Traced R31 (consent revocation) end to end before designing its mirror
+(R30 Option B, live grant). The trace surfaced a structural gap larger
+than "grant doesn't exist yet" — the desired demo narrative ("live event
+→ T5 fires → occurrence becomes reachable," already flagged in the
+2026-08-11 IT-governance-demo finding) is **not currently possible for
+either grant or revoke**, under either Kripke build mode.
+
+**R31 (revocation) itself works correctly, but only at the runtime/ledger
+level.** `revoke_authorization()` (`el_engine.py:490-557`) correctly
+mutates `Runtime._state` (permit → superseded, embargo → active,
+copy-on-write via `with_tokens()`) and appends to `Runtime._ledger`.
+Auditable via `GET /debug/tokens` and the FHIR-provenance side-dict in
+`el_api.py`. AM-34's 6 tests (6/6 passing, confirmed just now) all assert
+against `WorldState`/`TokenInstance` state or API response fields
+directly — none of them build a Kripke model, import `el_kripke`, or
+check an AF/EF verdict. This was never noticed before because nothing
+had a reason to build a Kripke model right after a revocation and check
+it.
+
+**Why: neither Kripke builder can see a runtime event.**
+- `build_kripke_model()` (spec-only mode, where T5 lives) reads
+  `DeonticToken.state` off the *static parsed model* only
+  (`_build_permit_descriptors`/`_build_embargo_holder_index`,
+  `el_kripke.py:291,403`). Nothing writes runtime mutations back into
+  the parsed `EnterpriseSpec` — confirmed no re-serialize/re-parse step
+  exists anywhere in the codebase.
+- `build_kripke_from_runtime()` (hybrid mode, the one that *does* read
+  `runtime.current_state()`) only processes `kind == "burden"` tokens
+  (`el_kripke.py:2304`). It never calls the permit/embargo descriptor
+  builders and has no T5 — its own docstring documents Revocation as
+  "Not yet implemented — placeholder for hybrid mode"
+  (`el_kripke.py:1852-1856`).
+
+So revocation (and by extension, any future grant) is real and correctly
+enforced at the runtime layer, but currently unverifiable — AF/EF/
+EF(occurred:...) cannot reflect it, in either build mode.
+
+**Three options identified for closing this, not yet decided between:**
+1. **Extend hybrid mode** to read Permit/Embargo state and generate a
+   T5-equivalent edge from live runtime state — real new work, same
+   category of effort as T5 itself (2026-08-10), deserves the same
+   design-first treatment before implementation.
+2. **Add a re-parse/re-serialize bridge** — translate live runtime state
+   back into something `build_kripke_model()` can consume fresh after
+   each event. No such step exists today; unclear yet whether this is
+   simpler or harder than option 1.
+3. **Rescope the demo** to two static before/after model builds rather
+   than a live-response narrative — buildable without touching the
+   runtime/Kripke bridge at all, but loses the "watch it respond in real
+   time" story that was the compelling part of the IT-governance framing
+   (2026-08-11 finding).
+
+**Status:** not decided. This blocks R30 Option B from being scoped
+precisely, since the right shape for "grant" depends on which of the
+three paths above is chosen. Needs a proper design session (chat-first,
+same discipline as T5), not a quick decision — deferred pending
+availability of a longer working block.
+
+**Related:** the `ObligationState.EXPIRED` "reserved but unreachable"
+finding, already noting this general territory (runtime events not
+wired into obligation-state handling) was anticipated but left unbuilt.
