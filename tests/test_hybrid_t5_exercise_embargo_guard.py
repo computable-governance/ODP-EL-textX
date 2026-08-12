@@ -19,14 +19,15 @@ through the hybrid pipeline (Runtime -> build_kripke_from_runtime())
 instead of build_kripke_model() directly — proving the hybrid port
 produces the same verdicts as pre-exec, not just that it doesn't crash.
 
-Token granting uses direct runtime-state manipulation
-(grant_token()/token_from_spec()) rather than Runtime.build_from_spec()'s
-own `holds` auto-grant, because that auto-grant reads a stale attribute
-name (getattr(el, "tokens", ...) instead of "holds_tokens") and silently
-grants nothing — a pre-existing, unrelated bug confirmed during this
-session, left untouched per CLAUDE.md's "don't fix things outside
-scope" discipline. This is the same manual-grant workaround
-el_kripke.py's own _run_hybrid_smoke_test() already uses.
+The first three cases rely on Runtime.build_from_spec()'s own `holds`
+auto-grant. That auto-grant previously read a stale attribute name
+(getattr(el, "tokens", ...) instead of "holds_tokens") and silently
+granted nothing — discovered while first writing these tests, logged in
+CONCEPTS_INDEX.md, and fixed in el_runtime.py as its own follow-on change
+once confirmed safe (no scenario builder reaches that code path; see the
+finding for the verification). These tests no longer need the manual
+grant_token()/token_from_spec() workaround that el_kripke.py's own
+_run_hybrid_smoke_test() still uses for its own, separate purposes.
 
 The fourth test exercises revoke_authorization() end-to-end against the
 real referral scenario and checks the Kripke-level effect directly on
@@ -47,7 +48,7 @@ would itself be fragile in general — not an issue here since only one
 of the two permits is ever superseded by this specific revocation.
 """
 from el_api import _SCENARIO_BUILDERS
-from el_engine import grant_token, revoke_authorization, token_from_spec
+from el_engine import revoke_authorization
 from el_kripke import build_kripke_from_runtime
 from el_parser import parse_string
 from el_runtime import Runtime
@@ -77,7 +78,6 @@ def test_hybrid_t5_fires_and_action_reaches_occurred_via_ef():
     assert result.ok, result.errors
 
     rt = Runtime.build_from_spec(result.model)
-    rt._state = grant_token(rt._state, token_from_spec(result.model, "accessPermit", "Operator"))
 
     km = build_kripke_from_runtime(rt, horizon=5)
     assert km.EF(km.initial, "occurred:performAccess") is True
@@ -122,8 +122,6 @@ def test_hybrid_t5_suppressed_by_active_embargo_held_by_same_actor():
     assert result.ok, result.errors
 
     rt = Runtime.build_from_spec(result.model)
-    rt._state = grant_token(rt._state, token_from_spec(result.model, "accessPermit", "Operator"))
-    rt._state = grant_token(rt._state, token_from_spec(result.model, "blockingEmbargo", "Operator"))
 
     km = build_kripke_from_runtime(rt, horizon=5)
     assert km.EF(km.initial, "occurred:performAccess") is False
@@ -171,8 +169,6 @@ def test_hybrid_t5_not_suppressed_when_embargo_held_by_different_actor():
     assert result.ok, result.errors
 
     rt = Runtime.build_from_spec(result.model)
-    rt._state = grant_token(rt._state, token_from_spec(result.model, "accessPermit", "Operator"))
-    rt._state = grant_token(rt._state, token_from_spec(result.model, "blockingEmbargo", "OtherActor"))
 
     km = build_kripke_from_runtime(rt, horizon=5)
     assert km.EF(km.initial, "occurred:performAccess") is True

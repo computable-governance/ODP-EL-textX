@@ -2340,9 +2340,17 @@ grant tokens through a different path (e.g. directly in Python, as
 2026-08-11 ereferral coverage-gap finding) and so never hit this bug in
 practice.
 
-**Status:** logged, not fixed. Fix would be a one-line correction
-(`"tokens"` → `"holds_tokens"`) but hasn't been verified safe against
-existing behavior — any scenario builder that happens to rely on the
-current (broken) no-op behavior, even inadvertently, could be affected by
-correcting it. Treat as its own small, separately-reviewed piece of work,
-not a drive-by fix.
+**Status:** RESOLVED (2026-08-13). Fixed as a one-line correction
+(`"tokens"` → `"holds_tokens"`, `el_runtime.py`:104) once confirmed safe:
+none of the three registered scenario builders (`gp_referral`, `referral`,
+`ereferral`) route through `build_from_spec()` at all — each constructs
+its `Runtime` directly (`Runtime(state, spec)`, `el_api.py:127,171,266`)
+and grants tokens by hand in Python — so the fix cannot double-grant
+anything in production. The one real dependency found was Diff 4's own
+three minimal-fixture tests, which called `build_from_spec()` and then
+unconditionally re-granted the same tokens as a workaround; confirmed via
+direct simulation that landing the fix without touching them would have
+produced duplicate `TokenInstance` entries. Those three tests were
+updated in the same change to drop the now-redundant manual
+`grant_token()` calls and rely on the corrected auto-grant directly. Full
+suite green afterward (98/98, identical test set to before the fix).

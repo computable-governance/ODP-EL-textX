@@ -101,7 +101,7 @@ class Runtime:
             role_name = role.name if (role and hasattr(role, "name")) else None
             state = enroll(state, el.name, role_name)
 
-            for tok_ref in getattr(el, "tokens", []) or []:
+            for tok_ref in getattr(el, "holds_tokens", []) or []:
                 tok_name = tok_ref.name if hasattr(tok_ref, "name") else str(tok_ref)
                 try:
                     state = grant_token(state, token_from_spec(spec, tok_name, el.name))
