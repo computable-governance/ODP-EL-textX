@@ -2222,6 +2222,44 @@ availability of a longer working block.
 finding, already noting this general territory (runtime events not
 wired into obligation-state handling) was anticipated but left unbuilt.
 
+**Status: RESOLVED (2026-08-13).** Option 1 (extend hybrid mode) was chosen
+and implemented as R30 Option B: live grant/reinstate, wired end-to-end
+through Kripke verification — `reinstate_authorization()` (`el_engine.py`)
+mirrors `revoke_authorization()` in reverse, `handle_consent_event()` routes
+post-bootstrap `Consent.status: active` events to it instead of the old
+no-op, and `build_kripke_from_runtime()`'s hybrid-mode T5 (from the
+concurrent Stage 2 work) makes both grant and revoke verifiable via
+AF/EF/`EF(occurred:...)`, closing the gap this finding raised. Full details
+and the four-diff implementation record: `docs/session_summaries/2026-08-13_r30_option_b_and_cleanup.md`
+(commit `7471d91`). 102/102 tests passing at landing time.
+
+Confirmed live-verified against the running API on 2026-08-14: a stale
+server process (running since 28 Jul, pre-dating this fix) was found still
+serving the old bootstrap-only no-op behavior for `status: "active"` —
+restarting it to pick up current code resolved this; `POST
+/fhir/consent-events` with `status: "active"` now correctly returns
+`action_taken: "reinstated"` (or `"already_active"`, idempotently) end to
+end. Same session added a direct, non-FHIR counterpart,
+`POST /authorizations/{authorization_name}/reinstate`, mirroring
+`POST /authorizations/{authorization_name}/revoke`'s exact response shape
+(`ReinstateAuthorizationResponse`, no `action_taken` discriminator — the
+URL fixes the semantic, and empty-vs-non-empty `effects` carries the
+already-active-vs-reinstated distinction, same as revoke's `effects` list
+already does) — giving the board UI's consent panel genuine two-button
+(direct + FHIR-event) symmetry for grant/reinstate, matching the existing
+revoke pattern. Tests: `tests/test_reinstate_endpoint.py` (4 new: happy
+path, idempotent already-active, 404 unknown authorization, 400 no
+on_revocation embargo via throwaway fixture — the last of these also
+closes out the pre-existing gap that `revoke_authorization_endpoint`'s own
+400 branch had no test coverage anywhere in the suite, noticed while
+mirroring it). 106/106 passing after this addition.
+
+**Still open, unrelated to this finding:** the T5 label-collision finding
+(logged the same day, immediately below) and the `occurred_actions` UI
+display surface (2026-08-11 finding, above) are both real remaining gaps,
+but neither blocks R30 Option B itself — this finding's blocking condition
+is resolved.
+
 ---
 
 ## T5's edge labels silently collide when two Permits share a for_action

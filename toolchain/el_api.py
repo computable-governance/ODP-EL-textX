@@ -435,6 +435,17 @@ class RevokeAuthorizationResponse(BaseModel):
     objective_reachable: bool
 
 
+class ReinstateAuthorizationResponse(BaseModel):
+    tick: int
+    authority: str                 # the party that reinstated (auth.authority.name)
+    authorization_name: str
+    outcome: str
+    effects: List[str]             # e.g. ["activated permit 'X'", "lifted embargo 'Y'"] — empty if already active
+    updated_world: dict
+    new_objective_score: float
+    objective_reachable: bool
+
+
 class ConsentEventResponse(BaseModel):
     fhir_consent_id: str
     fhir_status: str
@@ -974,6 +985,74 @@ def revoke_authorization_endpoint(authorization_name: str) -> RevokeAuthorizatio
     return RevokeAuthorizationResponse(
         tick=tr.tick,
         authority=tr.actor_name,   # revoke_authorization sets actor_name = auth.authority.name
+        authorization_name=authorization_name,
+        outcome=tr.outcome,
+        effects=list(tr.effects),
+        updated_world=updated_world,
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+@app.post(
+    "/authorizations/{authorization_name}/reinstate",
+    response_model=ReinstateAuthorizationResponse,
+    summary="Reinstate a revocable authorization and advance the runtime state",
+    description=(
+        "Calls Runtime.reinstate_authorization(authorization_name) to (re-)establish "
+        "a revocable authorization: (re-)activates the permit it grants — reusing the "
+        "existing token if previously revoked, or granting fresh if none exists yet — "
+        "and lifts its on_revocation embargo if one is currently active. Mirrors "
+        "POST /authorizations/{authorization_name}/revoke in reverse, including the "
+        "Kripke re-verification step (updated world state, objective score, "
+        "reachability). Idempotent: calling this when the permit is already active "
+        "returns outcome='ok' with an empty effects list rather than raising or "
+        "no-op'ing silently. This is the direct-call counterpart to "
+        "POST /fhir/consent-events with status='active' (R30 Option B) — same "
+        "Runtime.reinstate_authorization() engine path, no FHIR envelope. 404 if the "
+        "authorization is not declared; 400 if it has no on_revocation embargo (i.e. "
+        "is not meaningfully revocable/reinstatable)."
+    ),
+)
+def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthorizationResponse:
+    # 404 check: authorization must be declared in the current spec
+    known_auths = {
+        el.name
+        for el in _runtime._spec.elements
+        if type(el).__name__ == "Authorization"
+    }
+    if authorization_name not in known_auths:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Authorization '{authorization_name}' is not declared in the current spec.",
+        )
+
+    try:
+        tr = _runtime.reinstate_authorization(authorization_name)
+    except KeyError as e:
+        # reinstate_authorization raises KeyError if there's no on_revocation embargo
+        raise HTTPException(
+            status_code=400,
+            detail=f"Authorization '{authorization_name}' is not reinstatable: {e}",
+        )
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return ReinstateAuthorizationResponse(
+        tick=tr.tick,
+        authority=tr.actor_name,   # reinstate_authorization sets actor_name = auth.authority.name
         authorization_name=authorization_name,
         outcome=tr.outcome,
         effects=list(tr.effects),
