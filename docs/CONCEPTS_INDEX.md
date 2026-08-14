@@ -2434,3 +2434,63 @@ on whether the Python-side manual grants are removed at the same time.
 
 **Status:** logged, no action planned. Worth revisiting only if/when a
 scenario builder is refactored to rely on `build_from_spec()`.
+
+---
+
+## `conductAIExamination` has no enforced link to data-access authorization
+
+**OPEN FINDING (2026-08-14)**
+
+Investigating a medico-legal question about patient data authorization
+realism (see `docs/patient_authorization_and_obligation_delegation.md`,
+"Patient Authorization and Clinical Obligation: Two Independent
+Governance Mechanisms") surfaced that `aiExaminationBurden`'s discharge
+action, `conductAIExamination`, is not actually coupled to
+`patientRecordAccessPermitByAuthorization` at the engine or Kripke layer,
+despite the natural real-world assumption that examining a record
+requires having accessed it.
+
+**Confirmed, by direct code read (`referral_scenario.el:635-641`,
+`el_engine.py`, `el_kripke.py`):**
+
+- `conductAIExamination`'s `precondition` field ("AI agent must hold
+  patientRecordAccessPermitByAuthorization") is checked only as an
+  exact-string match against a caller-supplied facts dict — self-asserted
+  by whoever calls the API, not derived from the Permit's actual live
+  state.
+- The Action's `artefact: patientRecord` reference is parsed and stored
+  but never read anywhere in `el_engine.py` — no record is fetched, no
+  data is touched, nothing simulates accessing or analyzing content.
+- `aiExaminationBurden` does not set `requires_permit_for` (confirmed
+  dead code across the codebase, same as the `inhibited_by_embargo`
+  finding earlier this week).
+- At the Kripke layer, `conductAIExamination` can never appear in
+  `occurred_actions` under any current rule — T5 only fires for action
+  names that are some Permit's `for_action`, and `conductAIExamination`
+  isn't one. `EF(occurred:conductAIExamination)` is not just unproven,
+  it's structurally unreachable.
+
+**Practical consequence:** today, revoking
+`patientRecordAccessPermitByAuthorization` does not prevent
+`conductAIExamination` from being called and successfully discharging
+`aiExaminationBurden` — nothing in the engine checks live Permit state
+against this precondition. "Reports findings back to the accountable
+clinician," per the Action's description text, has no grammar construct
+behind it at all (no `emits`, no `DeonticEffect`, no finding/report
+object) — discharging the burden is, mechanically, just a token flipping
+`PENDING`→`DISCHARGED`, gated by a self-asserted boolean.
+
+**Why this matters beyond correctness:** this is the exact
+clinical-safety-relevant coupling ("don't examine without
+authorization") that a governance demo would most want to guarantee, and
+it's currently unenforced — a materially more consequential gap than
+some of today's other findings, since it touches the scenario's central
+governance claim.
+
+**Status:** logged, not fixed. Candidate fix direction: wire
+`conductAIExamination`'s precondition check to actually query
+`patientRecordAccessPermitByAuthorization`'s live state (via whatever
+mechanism `el_reasoner.can_perform()` already uses for held-token
+checks), and/or set `requires_permit_for` meaningfully once that field's
+dead-code status is separately addressed. Not scoped or designed —
+deserves its own design session, not a same-day fix.
