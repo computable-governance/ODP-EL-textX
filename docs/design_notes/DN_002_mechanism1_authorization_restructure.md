@@ -78,6 +78,42 @@ authorization" and "does revoking authorization upstream propagate
 downstream") should be designed together, as one general coupling
 mechanism, rather than two independent fixes landing at different times.
 
+## UI implication of the cascading-revocation decision (not merely downstream — a prerequisite)
+
+The board UI's consent panel (all four buttons: direct revoke, revoke
+via FHIR, direct reinstate, reinstate via FHIR) is currently hardcoded
+to `patientDataAuthorization` — the single Authorization Mechanism 1 has
+today. Under B′, this becomes three Authorizations, and the buttons
+would naturally need to target the **root** (`patientToGPAuthorization`)
+to preserve the patient-facing demo narrative ("patient revokes their
+consent").
+
+**This makes the cascading-revocation decision a UI correctness
+prerequisite, not just an engine design question:**
+
+- If revocation is **independent** (option a), clicking "Revoke" on the
+  patient-facing root would *not* actually affect
+  `specialistToAIAuthorization` — the badge would show "Revoked" while
+  the AI agent's real downstream access remains untouched. This would
+  make the demo **actively misleading**, not merely incomplete — the
+  same "looks verified but isn't" shape as the `conductAIExamination`
+  finding, now at the demo layer.
+- If revocation is **cascading** (option b), the UI can correctly show
+  the patient's action having real effect — but this requires the
+  cascading logic to exist first; the UI cannot be built or considered
+  correct ahead of that decision.
+
+**Conclusion: UI changes for B′ should not be scheduled as a downstream
+follow-on task. They are blocked on the cascading-revocation decision
+specifically**, not merely "affected by" the broader restructure.
+
+Separately, worth deciding whether the FHIR-event path
+(`POST /fhir/consent-events`) should map only to
+`patientToGPAuthorization` (a genuine patient-consent-shaped event) —
+`gpToSpecialistAuthorization` and `specialistToAIAuthorization` are
+internal, provider-side authorizations and probably should not be
+modeled as FHIR Consent events at all. Not yet decided.
+
 ## Downstream impacts (not yet scoped in detail)
 
 - **Board UI consent panel** — currently shows one Authorization
