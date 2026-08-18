@@ -11,6 +11,7 @@ Endpoints implemented:
   GET /tokens/{token_name}/governance
   POST /authorizations/{authorization_name}/revoke
   POST /fhir/consent-events
+  GET /kripke/witness
 
 Design reference: coordination_design_note_v3.md §9 (agent-facing query surface)
 Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, Annex C
@@ -32,7 +33,12 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from el_engine import enroll, grant_token, initial_state, token_from_spec, TransitionRecord
-from el_kripke import build_kripke_from_runtime, find_normative_policies_for_token
+from el_kripke import (
+    build_kripke_from_runtime,
+    build_kripke_model,
+    extract_witness_path,
+    find_normative_policies_for_token,
+)
 from el_parser import parse
 from el_runtime import Runtime
 from fhir_event_handler import handle_consent_event, PATIENT_DATA_AUTHORIZATION
@@ -271,6 +277,16 @@ _SCENARIO_BUILDERS = {
     "gp_referral": _build_gp_referral_runtime,
     "ereferral":   _build_ereferral_runtime,
     "referral":    _build_referral_runtime,
+}
+
+# Scenario registry — maps scenario name to its .el file path, for
+# spec-only mode (build_kripke_model over the parsed model directly,
+# no live Runtime). _SCENARIO/_EREFERRAL_SCENARIO/_REFERRAL_SCENARIO are
+# the same path constants each builder above already parses from.
+_SCENARIO_PATHS = {
+    "gp_referral": _SCENARIO,
+    "ereferral":   _EREFERRAL_SCENARIO,
+    "referral":    _REFERRAL_SCENARIO,
 }
 
 # Active scenario name and community name for objective queries
@@ -1256,3 +1272,45 @@ def switch_scenario(scenario_name: str) -> ScenarioSwitchResponse:
         community=_active_community,
         message=f"Runtime switched to '{scenario_name}' scenario.",
     )
+
+
+# ── Endpoint 9: GET /kripke/witness ─────────────────────────────────────────
+
+@app.get(
+    "/kripke/witness",
+    summary="Extract the shortest witness path to a proposition, for the active scenario",
+    description=(
+        "Builds a KripkeModel for the currently active scenario (see GET "
+        "/scenarios / POST /scenario/{name} to change it) -- hybrid (default) "
+        "via build_kripke_from_runtime() over the shared _runtime singleton, "
+        "same as every other endpoint in this API, or spec-only via "
+        "build_kripke_model() over the active scenario's parsed .el file. "
+        "Returns extract_witness_path()'s shortest BFS path from the initial "
+        "world to the first world satisfying `proposition` (e.g. "
+        "'discharged:aiExaminationBurden', 'occurred:conductAIExamination'). "
+        "witness_path is [] (200, not an error) if the proposition is never "
+        "satisfied on any reachable world within the horizon. 400 for an "
+        "unknown mode. scenario_name in the response reports whichever "
+        "scenario was actually active for this request, since (unlike every "
+        "other parameter here) it isn't something the caller supplied."
+    ),
+)
+def get_witness_path(proposition: str, mode: str = "hybrid") -> Dict:
+    if mode not in ("hybrid", "spec"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown mode '{mode}'. Must be 'hybrid' or 'spec'.",
+        )
+
+    if mode == "hybrid":
+        km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    else:
+        result = parse(_SCENARIO_PATHS[_active_scenario], validate=False)
+        if not result.ok:
+            raise RuntimeError(f"{_active_scenario} parse failed: {result.errors}")
+        km = build_kripke_model(result.model, horizon=_KRIPKE_HORIZON)
+
+    return {
+        "scenario_name": _active_scenario,
+        "witness_path": extract_witness_path(km, target_proposition=proposition),
+    }

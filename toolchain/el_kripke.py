@@ -1297,6 +1297,105 @@ class KripkeModel:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Witness-path extraction (Track B visualizer, first piece — 2026-08-19)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_witness_path(
+    km: "KripkeModel",
+    target_world: Optional[World] = None,
+    target_proposition: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Reconstruct the sequence of (world, edge_label, world) steps from
+    km.initial to a target. Exactly one of target_world / target_proposition
+    must be given.
+
+    target_proposition: delegates directly to KripkeModel._find_EF_witness(),
+    the same single-BFS-pass, dequeue-time-satisfies() check already proven
+    via check_permission() -- guarantees the SHORTEST path to a satisfying
+    world. (A separate "find any world satisfying prop, then BFS to it"
+    two-phase approach was considered and rejected: iterating km.worlds --
+    a Set[World] with no ordering guarantee -- could select a satisfying
+    world farther from km.initial than the nearest one, silently breaking
+    the "shortest witness" guarantee. Delegating avoids that gap entirely.)
+
+    target_world: no existing function does a plain shortest-path walk to a
+    specific World (not a proposition), so this case keeps its own BFS --
+    structurally the same traversal as _find_EF_witness, but stopping when
+    target_world itself is dequeued instead of checking satisfies().
+
+    Returns [] if the target is unreachable from km.initial (including when
+    target_proposition never matches any reachable world).
+    """
+    if (target_world is None) == (target_proposition is None):
+        raise ValueError("Exactly one of target_world / target_proposition must be given")
+
+    if target_proposition is not None:
+        raw = km._find_EF_witness(km.initial, target_proposition)
+        if raw is None:
+            return []
+        # raw: [(w0, label(w0->w1)), (w1, label(w1->w2)), ..., (target, "✓ discharged")]
+        # The last label is a terminal marker attached to the target world
+        # itself, not a real incoming edge label -- drop it; it is not one
+        # of the len(worlds)-1 real edges _format_witness_path expects.
+        worlds = [w for w, _ in raw]
+        edge_labels = [lbl for _, lbl in raw][:-1]
+        return _format_witness_path(worlds, edge_labels)
+
+    # target_world given directly: plain BFS shortest-path walk.
+    if target_world == km.initial:
+        return _format_witness_path([km.initial], [])
+
+    parent: Dict[World, Tuple[World, str]] = {}
+    visited = {km.initial}
+    queue: deque = deque([km.initial])
+    found = False
+    while queue:
+        w = queue.popleft()
+        if w == target_world:
+            found = True
+            break
+        for w_next in km.edges.get(w, ()):
+            if w_next not in visited:
+                visited.add(w_next)
+                parent[w_next] = (w, km.labels.get((w, w_next), "?"))
+                queue.append(w_next)
+    if not found:
+        return []
+
+    path_worlds = [target_world]
+    path_labels: List[str] = []
+    cur = target_world
+    while cur != km.initial:
+        prev, label = parent[cur]
+        path_labels.append(label)
+        path_worlds.append(prev)
+        cur = prev
+    path_worlds.reverse()
+    path_labels.reverse()
+    return _format_witness_path(path_worlds, path_labels)
+
+
+def _format_witness_path(worlds: List[World], edge_labels: List[str]) -> List[Dict]:
+    """
+    worlds: [w0, ..., wn] in path order. edge_labels: [label(w0->w1), ...,
+    label(w(n-1)->wn)] -- exactly one fewer entry than worlds (empty for a
+    single-world/trivial path where km.initial already satisfies the target).
+    """
+    return [
+        {
+            "world_id": f"w{i}",
+            "obligations": {oid: s.name for oid, s in sorted(w.obligation_states)},
+            "actors": {a: s.name for a, s in sorted(w.actor_states)},
+            "occurred_actions": sorted(w.occurred_actions),
+            "step": w.step,
+            "edge_from_previous": edge_labels[i - 1] if i > 0 else None,
+        }
+        for i, w in enumerate(worlds)
+    ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # §C.2  —  Reachability builder
 # ══════════════════════════════════════════════════════════════════════════════
 
