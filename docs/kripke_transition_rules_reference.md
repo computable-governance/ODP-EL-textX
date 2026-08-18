@@ -11,6 +11,47 @@ scenario.
 
 ---
 
+## What "ACTIVE" means, precisely
+
+Every rule above checks an actor's `ActorStatus.ACTIVE` status — worth
+being precise about what this tracks, since it's easy to conflate with
+other uses of "active" in this project (a Permit's own `state: active`,
+or "the community that defines Referral processes").
+
+**`ActorStatus.ACTIVE` is the runtime counterpart of the grammar's
+`ActiveEO` (Active Enterprise Object) classification** — per ISO 15414
+§6.3.1: *"active enterprise object: An enterprise object that is able to
+fill an action role."* Every `party` and `agent` declaration in the
+grammar is a specialization of `ActiveEO` (§6.6.8: *"An agent is an
+active enterprise object that has been delegated something by, and acts
+for, a party"*) — the toolchain's `party`/`agent` keywords are how
+`ActiveEO` is expressed structurally.
+
+The distinction that matters: `ActiveEO` is a **type classification**,
+fixed at declaration time — a `party` or `agent` is permanently
+`ActiveEO`-typed. `ActorStatus.ACTIVE` is a **runtime state** — whether
+this particular `ActiveEO` can currently act, which can in principle
+change per-world (once T4/Revocation is built; today nothing ever flips
+an actor to `INACTIVE`, so every actor is `ACTIVE` throughout every
+scenario).
+
+**Two things `ActorStatus.ACTIVE` is *not*:**
+- It is **not community- or role-scoped**. An actor's status is a
+  single, flat, global flag per actor name in the `WorldState`
+  (`current_actors.get(desc.holder) != ActorStatus.ACTIVE`, a plain
+  dict lookup with no role/community qualifier) — even though the same
+  actor may be *enrolled* in multiple roles across multiple communities
+  simultaneously (e.g. `SpecialistClinician` holds both a standing role
+  in `SpecialistPracticeCommunity` and an episode-scoped role in
+  `ReferralEpisodeCommunity`). The model cannot currently express "active
+  for one role, suspended from another."
+- It is **unrelated to any Permit's own `state` field.** A Permit being
+  `active` (in force) and its holder being an `ACTIVE` actor are two
+  independent conditions — T5 (Exercise) requires both to hold
+  separately; neither implies the other.
+
+---
+
 ## T1 — Discharge
 
 **A `PENDING` obligation, held by an `ACTIVE` actor, transitions to
