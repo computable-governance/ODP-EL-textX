@@ -2612,17 +2612,38 @@ counts would *increase* once T6 landed ("T6 adds new reachable
 worlds"). Measured against a true pre-diff baseline (scratch mirror of
 the last committed `el_kripke.py`), counts *decreased* in every
 scenario/mode checked instead — e.g. `referral_scenario.el` hybrid mode
-went from 639/1515 worlds/edges to 472/1340. Plausible explanation,
-**not traced or proven**: fusing discharge and occurrence into one
-atomic T6 transition removes a combinatorial interleaving degree of
-freedom that the old two-step path allowed (T1's discharge and T5's
-occurrence used to be independent events, reachable in either order, as
-separate BFS branches; T6 collapses them into one, removing that
-ordering freedom). This does **not** affect correctness — exact
-`AF`/`EF` values, the full pytest suite, and the ungated-action
-regression check all independently confirm T6 works as intended. World/
-edge count was a coarse secondary signal, not a correctness check, and
-the spec's prediction about its direction was simply wrong.
+went from 639/1515 worlds/edges to 472/1340.
+
+**Retraction (2026-08-18):** this note originally claimed the decrease
+"does not affect correctness," citing exact `AF`/`EF` values, the full
+pytest suite, and the ungated-action regression check as independent
+confirmation. **That claim is withdrawn — it was checked only against
+`referral_scenario.el`, the one scenario today's tests exercise in
+hybrid mode, and does not hold in general.** A same-day follow-up
+investigation found two real problems the original note missed
+entirely:
+
+1. `ereferral_model.el`'s "unchanged" world/edge count is not evidence
+   for the interleaving-fusion hypothesis below — T6 is completely
+   inert in that scenario (confirmed via a byte-identical before/after
+   graph hash), so nothing was fused or removed. See "T6/T1-exclusion
+   silently inert for scenarios without Commitment/Delegation-backed
+   burdens" below.
+2. `gp_referral_scenario.el`'s larger reduction is not explained by
+   interleaving-removal alone — one of its two gated Burdens
+   (`assessmentSchedulingBurden`) is now genuinely unreachable
+   (`EF` flipped `True`→`False`), a real regression this note
+   incorrectly characterized as harmless. See "T6's same-holder
+   requirement causes a genuine unreachability regression" below.
+
+The interleaving-fusion hypothesis (fusing discharge and occurrence
+into one atomic T6 transition removes a combinatorial ordering degree
+of freedom the old two-step path allowed) may still be *part* of the
+explanation for `referral_scenario.el`'s reduction — still not traced
+or proven — but it is not the complete, or even primary, explanation
+across the three scenarios, and "correctness independently confirmed"
+should be read as applying only to `referral_scenario.el`, the one
+scenario where it was actually checked.
 
 ---
 
@@ -2673,3 +2694,111 @@ diff sequence. A future fix would need a third resolution tier in
 `EnterpriseObject.holds_tokens`/`Authorization.to_agent` tiers — or an
 explicit decision that spec-only mode doesn't need to support this
 permit-granting mechanism at all.
+
+---
+
+## T6/T1-exclusion silently inert for scenarios without Commitment/Delegation-backed burdens (`ereferral_model.el`, confirmed 2026-08-18)
+
+**OPEN FINDING (2026-08-18)**
+
+Root cause: `_build_obligation_descriptors()` only builds an
+`ObligationDescriptor` for a Burden that appears in at least one
+`Commitment` or `Delegation` (per its own docstring).
+`ereferral_model.el` has zero `commitment`/`delegation` declarations
+anywhere in the file — confirmed by grep. So
+`_build_obligation_descriptors()` returns an empty dict for this entire
+scenario. In `build_kripke_from_runtime()`'s per-token loop
+(`el_kripke.py` ~line 2467-2477), when
+`spec_descriptors.get(tok.token_name)` is `None`, the fallback branch
+sets `for_action = None` unconditionally, regardless of what the
+Action's grammar declaration actually says.
+
+Consequence: T1's exclusion check (`if desc.for_action and
+desc.for_action in permit_requirement_index`) never triggers when
+`for_action` is `None` — every Burden in this scenario, including
+`aiExaminationBurden` (which IS gated by `requires_permit
+patientRecordAccessPermit`), still discharges unconditionally via T1,
+exactly as before any of today's T6 work. T6's own guard (`if not
+desc.for_action or ...`) skips for the same reason — T6 never fires
+here either.
+
+Confirmed empirically, not inferred: `km.labels.values()` contains zero
+`examine:` edges for `ereferral_model.el`'s hybrid-mode Kripke model;
+`discharge:aiExaminationBurden by SpecialistAIAgent` is still present.
+The before/after graphs (pre-diff scratch mirror vs. current) are
+byte-identical — same sorted label multiset, same SHA-256 hash
+(`36cb86d486e4a1a0`) — confirming zero behavioral change, not "T6
+correctly found nothing to change."
+
+**Open design question:** should hybrid mode's `for_action` resolution
+be loosened to not depend on `_build_obligation_descriptors()`'s
+Commitment/Delegation-only scoping? That function's narrow scope is
+deliberate for the fields it was originally built to serve (deadline,
+discharge_mode, chain, etc. — all genuinely tied to accountability-chain
+structure), but `for_action` is a different kind of fact (which Action
+discharges this Burden, per `favoured_by_burden`) that doesn't obviously
+need the same Commitment/Delegation gate. A Burden activated via a
+different mechanism (e.g. `effect activate`, as `ereferral_model.el`
+uses for `aiExaminationBurden`) can still have a perfectly
+well-defined `for_action` via the structural `favoured_by_burden`
+search (`_find_action_for_burden`) — hybrid mode just never calls it in
+the fallback branch today. Not scoped or designed here.
+
+**Status:** logged, not fixed. Any future scenario built without
+Commitment/Delegation declarations (as a matter of style, not error)
+will silently bypass T6 the same way.
+
+---
+
+## T6's same-holder requirement causes a genuine unreachability regression: `assessmentSchedulingBurden` in `gp_referral_scenario.el` (EF True→False, confirmed 2026-08-18)
+
+**OPEN FINDING (2026-08-18)**
+
+Confirmed by direct comparison: in `gp_referral_scenario.el`'s live
+runtime (`_build_gp_referral_runtime()`), `assessmentSchedulingBurden`
+is held by `SpecialistParty` (per its `Commitment`: `by: SpecialistParty
+... creates_burden: assessmentSchedulingBurden`), while the Permit its
+discharge Action requires, `patientRecordAccessPermitByRole`, is held
+by `SpecialistClinician` (per the live grant in
+`_build_gp_referral_runtime()`). Different actors.
+
+T6's `all_active` check requires `permit_descriptors[p].holder ==
+desc.holder` — an exact same-actor match, mirroring T5's actor-scoped
+Embargo guard precedent. Given the mismatch above, T6 correctly (per
+its own stated logic) refuses to fire for this Burden. But T1 is now
+excluded from handling it too (`for_action` correctly resolves to
+`'scheduleAssessment'`, correctly found in `permit_requirement_index`)
+— so **no rule can discharge this Burden at all**. Confirmed directly:
+`check_permission("assessmentSchedulingBurden").satisfied` is now
+`False`, where before today's T6 work it was `True` (T1 discharged it
+unconditionally, with no permit check at all). This is a genuine
+regression in provable governance behavior, not a neutral side effect.
+
+**Why this wasn't caught today:**
+`tests/test_referral_kripke_t6_permit_gate.py` and
+`tests/test_referral_kripke.py` both build only `referral_scenario.el`
+in hybrid mode — where the equivalent Burden
+(`assessmentSchedulingBurden`, held by `SpecialistClinician`, matching
+its Permit's holder exactly) correctly retains `EF=True`.
+`gp_referral_scenario.el`'s hybrid-mode `AF`/`EF` values were never
+independently asserted by any test added today; `verify_gp_referral.py`
+(the only existing check against this scenario) runs in spec-only mode,
+which has its own, separately-logged permit-resolution gap and was
+already known-failing before this was found — masking this second,
+distinct problem from view.
+
+**Open design question:** should T6 allow "held by anyone in the Burden
+holder's principal/delegate chain" (e.g. `SpecialistParty` as principal
+of `SpecialistClinician`, matching how `principal_of`/`delegated_from`
+already model this relationship elsewhere in the grammar), rather than
+requiring the exact same actor? Or is the exact-match requirement
+correct, and `assessmentSchedulingBurden`'s Commitment actor
+(`SpecialistParty`) is itself the thing that should change (e.g. the
+Commitment or a Delegation should transfer accountability down to
+`SpecialistClinician`, matching how `referralResponseBurden` is
+explicitly delegated in this same scenario)? Not resolved here — a real
+modeling question, not just an engine bug.
+
+**Status:** logged, not fixed. Confirmed regression, not yet decided
+whether the fix belongs in T6's guard logic or in the scenario's own
+Commitment/holder structure.
