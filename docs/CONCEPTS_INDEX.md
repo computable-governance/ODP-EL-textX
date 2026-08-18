@@ -2572,3 +2572,33 @@ pointer in the `conductAIExamination` finding above, which had assumed
 `can_perform()` was reusable for a live check — it is not; the correct
 reusable mechanism for that fix is `el_engine.py`'s `_actor_holds_permit()`
 (reads `WorldState`, already exercised at Step 6), not `can_perform()`.
+
+---
+
+## T1 is blind to `requires_permit` — affects three Burdens, not one (pre-existing, latent since 2026-06-16)
+
+**OPEN FINDING (2026-08-18)**
+
+Full inventory across all three registered scenarios confirms T1
+discharges any Burden unconditionally, with zero awareness of whether
+that Burden's discharge Action carries a `requires_permit` clause. This
+affects `referralResponseBurden`, `assessmentSchedulingBurden`, and
+`aiExaminationBurden` — not just the `conductAIExamination` case fixed
+today. Two of the three were already correctly gated at Layer 3
+(engine, `advance()` Step 6) since these scenarios were first authored
+(`gp_referral_scenario.el`, 2026-06-16); only the Kripke/Layer 4 side
+(T1) has always been blind to it. Not introduced by today's fix — a
+pre-existing gap this work surfaced while scoping the T6 design.
+
+**Consequence for T6's design:** T6 must be a general rule (detect "does
+this Burden's Action have a `requires_permit` link" as a property), not
+a `conductAIExamination`-specific carve-out. T1 must correspondingly
+exclude any Burden whose Action carries this link, deferring those
+cases to T6 — otherwise the ungated T1 edge remains reachable in the
+Kripke model regardless of what T6 adds.
+
+Full inventory table: `docs/kripke_transition_rules_reference.md`,
+"Known gap" section.
+
+**Status:** logged, not fixed. T6 design not yet started — this is
+groundwork for that future session.
