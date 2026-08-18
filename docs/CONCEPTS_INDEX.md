@@ -2802,3 +2802,85 @@ modeling question, not just an engine bug.
 **Status:** logged, not fixed. Confirmed regression, not yet decided
 whether the fix belongs in T6's guard logic or in the scenario's own
 Commitment/holder structure.
+
+---
+
+## Delegation holder/chain resolution is a coincidental text-match, not a real design — affects up to nine Burden/scenario rows (2026-08-18)
+
+**OPEN FINDING (2026-08-18)**
+
+Follow-up to the `assessmentSchedulingBurden` regression above, tracing
+the mechanism before scoping a fix. Finding, confirmed by reading the
+actual code rather than assumed: **the delegation-holder resolution
+that appears to work for `referralResponseBurden` is not a real
+delegation-following design at all — it is a coincidental text-match.**
+
+`_build_obligation_descriptors()`'s first pass (`el_kripke.py:1601-1653`)
+resolves a Burden's holder via `walk_chain()`, which extends the chain
+from a Commitment's actor only when a Delegation's `obligation:` text
+substring-matches (`obl_text.lower() in oblt.lower()`) the walk's
+current text. It never reads `transfers_burden` or
+`transfers_token_group` at all — confirmed by grep, zero references to
+either field anywhere in `el_kripke.py`. `referralResponseBurden`'s
+chain extends correctly only because `referralResponseCommitment`'s
+`obligation:` string happens to exactly equal
+`gpToSpecialistDelegation`'s `obligation:` string. Hybrid mode's
+equivalent function, `_delegation_chain_for_token()`
+(`el_kripke.py:2388-2403`), is a real back-link walk (not text
+matching) but checks only `d.burden` (the `transfers_burden` field) —
+never `d.token_group` — so any Burden reachable only via
+`transfers_token_group` (not individually named by `transfers_burden`
+on any Delegation) never gets chain-extended there either. Both
+functions have the same blind spot for group-transferred Burdens, by
+two different routes.
+
+**Scope, checked directly, not assumed:** every Burden in both
+`referral_scenario.el` and `gp_referral_scenario.el` is named in
+`gpToSpecialistDelegation`'s `transfers_token_group`, and every one of
+them already has its own `Commitment` — meaning the "may not have a
+Commitment" fallback path documented on
+`_build_obligation_descriptors()`'s second pass never actually runs for
+any Burden in either scenario. Spec-only resolved holders, full table:
+
+| Scenario | Burden | Spec-only holder | Live/intended holder | Match? |
+|---|---|---|---|---|
+| `referral_scenario.el` | `referralInitiationBurden` | `GPPractice` | `GPClinician` | no |
+| `referral_scenario.el` | `clinicalHandoverBurden` | `GPPractice` | `GPClinician` | no |
+| `referral_scenario.el` | `referralResponseBurden` | `GPPractice` | `SpecialistClinician` | no |
+| `referral_scenario.el` | `assessmentSchedulingBurden` | `SpecialistPractice` | `SpecialistClinician` | no |
+| `referral_scenario.el` | `aiExaminationBurden` | `SpecialistAIAgent` | `SpecialistAIAgent` | yes |
+| `gp_referral_scenario.el` | `referralInitiationBurden` | `GPPracticeParty` | `GPClinician` | no |
+| `gp_referral_scenario.el` | `clinicalHandoverBurden` | `GPPracticeParty` | `GPClinician` | no |
+| `gp_referral_scenario.el` | `referralResponseBurden` | `SpecialistClinician` | `SpecialistClinician` | yes |
+| `gp_referral_scenario.el` | `assessmentSchedulingBurden` | `SpecialistParty` | `SpecialistParty` | yes |
+
+7 of 9 rows mismatch between spec-only resolution and the live/intended
+holder — the text-match mechanism is broadly unreliable, not a
+narrow problem specific to `assessmentSchedulingBurden`.
+
+**Checked directly: a naive fix (always override with the Delegation's
+`delegate`) would be actively wrong, not just incomplete.** In
+`gp_referral_scenario.el`, `gpToSpecialistDelegation`'s sole `delegate`
+is `SpecialistClinician` — a naive "second pass always wins" fix would
+reassign `referralInitiationBurden` and `clinicalHandoverBurden` to
+`SpecialistClinician`, when their correct, live-granted holder is
+`GPClinician` — these two Burdens were never meant to be delegated at
+all; the GP keeps them. In `referral_scenario.el`, this problem is
+worse than "pick the wrong actor": the scenario has **multiple
+delegates** across its delegation structure (at least
+`SpecialistClinician` and `SpecialistAIAgent` found), so "the naive
+override target" isn't even a single well-defined actor without first
+correctly matching each Burden to the specific Delegation whose
+`token_group` actually names it — a naive fix has no unambiguous target
+to fall back on in that file at all.
+
+**Status:** logged, not fixed. **A proper fix needs its own design
+session — not something to attempt in the current session.** It needs
+per-Burden correctness, not a blanket guard removal or unconditional
+override: which Delegation (when more than one exists) governs which
+Burden, and confirmation that Burdens with no governing Delegation at
+all (`referralInitiationBurden`, `clinicalHandoverBurden`) are left
+untouched. Candidate fix shapes were sketched in the investigation that
+led to this finding (extend `_delegation_chain_for_token()` to also
+check `token_group` membership; loosen T6's exact-holder match to
+chain-membership) but are not decided or scoped here.
