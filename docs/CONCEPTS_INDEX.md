@@ -2600,5 +2600,76 @@ Kripke model regardless of what T6 adds.
 Full inventory table: `docs/kripke_transition_rules_reference.md`,
 "Known gap" section.
 
-**Status:** logged, not fixed. T6 design not yet started — this is
-groundwork for that future session.
+**Status:** T6 implemented 2026-08-18, across four diffs:
+`_build_permit_requirement_index()`, T1's exclusion check, T6 itself in
+`build_kripke_model()` (spec-only), and T6 ported to
+`build_kripke_from_runtime()` (hybrid). Verified via exact `AF`/`EF`
+values (full pytest suite, 109/109 passing) and a 7-case regression
+check confirming the five ungated actions are unaffected.
+
+**Correction (2026-08-18):** the verification plan predicted world/edge
+counts would *increase* once T6 landed ("T6 adds new reachable
+worlds"). Measured against a true pre-diff baseline (scratch mirror of
+the last committed `el_kripke.py`), counts *decreased* in every
+scenario/mode checked instead — e.g. `referral_scenario.el` hybrid mode
+went from 639/1515 worlds/edges to 472/1340. Plausible explanation,
+**not traced or proven**: fusing discharge and occurrence into one
+atomic T6 transition removes a combinatorial interleaving degree of
+freedom that the old two-step path allowed (T1's discharge and T5's
+occurrence used to be independent events, reachable in either order, as
+separate BFS branches; T6 collapses them into one, removing that
+ordering freedom). This does **not** affect correctness — exact
+`AF`/`EF` values, the full pytest suite, and the ungated-action
+regression check all independently confirm T6 works as intended. World/
+edge count was a coarse secondary signal, not a correctness check, and
+the spec's prediction about its direction was simply wrong.
+
+---
+
+## Permit granted via role-level `holds` is invisible to spec-only `permit_descriptors` (pre-existing, exposed by T6)
+
+**OPEN FINDING (2026-08-18)**
+
+Discovered while verifying Diff 3 (T6) against `verify_gp_referral.py`
+(targets `gp_referral_scenario.el` via `build_kripke_model()`, spec-only
+mode): Q2/Q3/Q4 `EF` checks remained `FAIL` even after T6 landed. Traced
+to the root cause — not a T6 bug.
+
+`patientRecordAccessPermitByRole` is granted via `holds
+patientRecordAccessPermitByRole` **inside `role specialistRole`'s
+body** (`gp_referral_scenario.el:354`), transferred at community join
+via `on_join specialistRole transfer patientRecordAccessPermitByRole`
+(line 348) — not via an `EnterpriseObject.holds_tokens` declaration,
+and not via any `Authorization`. `_extract_permit_structure()` (which
+`build_kripke_model()`'s `permit_descriptors` is built from) has only
+two holder-resolution tiers — `EnterpriseObject.holds_tokens` and
+`Authorization.to_agent` — neither of which covers a permit granted
+structurally to a *Role* and transferred on join. So this permit never
+appears in `permit_descriptors` in spec-only mode at all; T6's
+`all_active` check correctly (given the data available to it) reads
+that as "not active" and refuses to fire.
+
+**Pre-existing, not introduced by T6:** this has always affected T5 too
+in spec-only mode — T5 has never been able to generate a spec-only
+occurrence edge for `access_patient_clinical_records` via
+`patientRecordAccessPermitByRole`. It was invisible until now because
+nothing needed to query `permit_descriptors` for this permit before T6
+existed; T1's old unconditional discharge never consulted
+`permit_descriptors` at all.
+
+**Does not affect hybrid mode:** `build_kripke_from_runtime()`'s
+`permit_descriptors` reads directly from live `state.tokens`, bypassing
+`_extract_permit_structure()`'s tiered resolution entirely.
+`el_api.py`'s `_build_referral_runtime()` (line 260) and
+`_build_gp_referral_runtime()` (line 122) both explicitly grant
+`patientRecordAccessPermitByRole` to `SpecialistClinician` at runtime
+construction — so hybrid-mode T6 consumers should not hit this gap
+(prediction as of logging; Diff 4 will confirm directly).
+
+**Status:** logged, not fixed. Out of scope for the current T1/T5/T6
+diff sequence. A future fix would need a third resolution tier in
+`_extract_permit_structure()` — role-level `holds` +
+`on_join ... transfer`, mirroring the existing
+`EnterpriseObject.holds_tokens`/`Authorization.to_agent` tiers — or an
+explicit decision that spec-only mode doesn't need to support this
+permit-granting mechanism at all.

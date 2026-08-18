@@ -418,6 +418,39 @@ def _build_embargo_inhibition_index(model: Any) -> Dict[str, List[str]]:
     return index
 
 
+def _build_permit_requirement_index(model: Any) -> Dict[str, List[str]]:
+    """
+    Map action_name -> [required_permit_name, ...] via the
+    'requires_permit' linkage on that Action (§6.4.6 conditional action).
+    Built the same way as _build_embargo_inhibition_index: walks every
+    action in every Community/Domain/Federation unconditionally, keyed
+    by action.name. State-free (deontic_requirements is set once at
+    parse time), reused as-is across all worlds in the BFS — same
+    rationale as every other index built once before the loop.
+
+    Deliberately returns a LIST per action, not a single name: the
+    grammar permits more than one requires_permit clause on an Action
+    (ActionBodyItem is a *=-collected alternation with no cap), even
+    though no current scenario declares more than one. T6 must check
+    that ALL listed permits are active, not just one.
+    """
+    index: Dict[str, List[str]] = {}
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                names: List[str] = [
+                    _obj_name(getattr(req, "token", None))
+                    for req in getattr(action, "deontic_requirements", [])
+                    if getattr(req, "kind", None) == "requires_permit"
+                    and _obj_name(getattr(req, "token", None))
+                ]
+                if names:
+                    index[action.name] = names
+    return index
+
+
 def _extract_embargo_holder(model: Any) -> Dict[str, str]:
     """
     Structural extraction only for Embargo tokens: embargo_name -> holder.
@@ -1916,6 +1949,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     descriptors = _build_obligation_descriptors(model)
     permit_descriptors = _build_permit_descriptors(model)
     embargo_inhibition_index = _build_embargo_inhibition_index(model)
+    permit_requirement_index = _build_permit_requirement_index(model)
     embargo_holder_index = _build_embargo_holder_index(model)
     group_index = _build_group_index(model)
     any_discharged_groups = _build_any_discharged_groups(model)
@@ -1986,6 +2020,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
 
         # ── Rule T1: DISCHARGE (one obligation per transition) ────────────────
         for oid, desc in descriptors.items():
+            if desc.for_action and desc.for_action in permit_requirement_index:
+                continue  # gated — T6 handles this obligation's discharge, not T1
             if current_obligs.get(oid) != ObligationState.PENDING:
                 continue
             if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
@@ -2131,6 +2167,46 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             new_occurred = current_occurred | {pdesc.for_action}
             w_prime = _make_world(current_obligs, current_actors, new_occurred, w.step)
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
+
+            if w_prime not in worlds:
+                worlds.add(w_prime)
+                if w_prime.step < horizon:
+                    queue.append(w_prime)
+
+            edges.setdefault(w, set()).add(w_prime)
+            labels[(w, w_prime)] = label
+            successors_for_w.add(w_prime)
+
+        # ── Rule T6: EXAMINE (Burden discharge gated on requires_permit) ───────
+        # Known limitation, matching current data exactly (verified 2026-08-18):
+        # no P6a (triggered_by cascade) or P6b (any_discharged sibling
+        # suppression) here, unlike T1. Safe today because none of the
+        # currently-gated Burdens set triggered_by/discharged_by, and no
+        # scenario in the repo uses any_discharged at all. Would need
+        # extending if a future gated Burden combines with either mechanism.
+        for oid, desc in descriptors.items():
+            if current_obligs.get(oid) != ObligationState.PENDING:
+                continue
+            if not desc.for_action or desc.for_action not in permit_requirement_index:
+                continue  # not gated — T1 already handled this case
+            if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
+                continue
+
+            required = permit_requirement_index[desc.for_action]
+            all_active = all(
+                permit_descriptors.get(p) is not None
+                and permit_descriptors[p].holder == desc.holder
+                # active-state already filtered into permit_descriptors at build time
+                for p in required
+            )
+            if not all_active:
+                continue
+
+            new_obligs = dict(current_obligs)
+            new_obligs[oid] = ObligationState.DISCHARGED
+            new_occurred = current_occurred | {desc.for_action}
+            w_prime = _make_world(new_obligs, current_actors, new_occurred, w.step)
+            label   = f"examine:{oid} → {desc.for_action}"
 
             if w_prime not in worlds:
                 worlds.add(w_prime)
@@ -2372,6 +2448,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     # instance's holder is always reliable by construction.
     permit_structure = _extract_permit_structure(spec)
     embargo_inhibition_index = _build_embargo_inhibition_index(spec)  # state-free, reused as-is
+    permit_requirement_index = _build_permit_requirement_index(spec)  # state-free, reused as-is
 
     permit_descriptors: Dict[str, PermitDescriptor] = {}
     embargo_holder_index: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
@@ -2454,6 +2531,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         obligs, actors = w.obligation_dict(), w.actor_dict()
         occurred = w.occurred_actions
         for oid, desc in descriptors.items():
+            if desc.for_action and desc.for_action in permit_requirement_index:
+                continue  # gated — T6 handles this obligation's discharge, not T1
             if obligs.get(oid) == ObligationState.PENDING:
                 if actors.get(desc.holder) == ActorStatus.ACTIVE:
                     wd = _make_world({**obligs, oid: ObligationState.DISCHARGED}, actors, occurred, w.step)
@@ -2513,6 +2592,41 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             new_occurred = occurred | {pdesc.for_action}
             w_prime = _make_world(obligs, actors, new_occurred, w.step)
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
+
+            if w_prime not in worlds:
+                worlds.add(w_prime)
+                if w_prime.step < horizon:
+                    queue.append(w_prime)
+
+            edges.setdefault(w, set()).add(w_prime)
+            labels[(w, w_prime)] = label
+
+        # ── Rule T6: EXAMINE (Burden discharge gated on requires_permit) ────
+        # Ported from build_kripke_model()'s T6 — see that block's comment
+        # for the P6a/P6b limitation (safe today: no gated Burden uses
+        # triggered_by/discharged_by or any_discharged, confirmed 2026-08-18).
+        for oid, desc in descriptors.items():
+            if obligs.get(oid) != ObligationState.PENDING:
+                continue
+            if not desc.for_action or desc.for_action not in permit_requirement_index:
+                continue  # not gated — T1 already handled this case
+            if actors.get(desc.holder) != ActorStatus.ACTIVE:
+                continue
+
+            required = permit_requirement_index[desc.for_action]
+            all_active = all(
+                permit_descriptors.get(p) is not None
+                and permit_descriptors[p].holder == desc.holder
+                for p in required
+            )
+            if not all_active:
+                continue
+
+            new_obligs = dict(obligs)
+            new_obligs[oid] = ObligationState.DISCHARGED
+            new_occurred = occurred | {desc.for_action}
+            w_prime = _make_world(new_obligs, actors, new_occurred, w.step)
+            label   = f"examine:{oid} → {desc.for_action}"
 
             if w_prime not in worlds:
                 worlds.add(w_prime)
