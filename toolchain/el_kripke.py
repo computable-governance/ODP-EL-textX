@@ -2202,6 +2202,20 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             if not all_active:
                 continue
 
+            # Embargo guard (§6.4.6), mirroring T5's Exercise guard above:
+            # suppress discharge if the gated action is inhibited by an
+            # Embargo that is ACTIVE and held by the SAME holder as the
+            # Burden — actor-scoped, same rationale/limitations as T5's
+            # guard (single-domain-scoped; see that block's comment).
+            blocked = False
+            for embargo_name in embargo_inhibition_index.get(desc.for_action, []):
+                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+                if e_state == "active" and e_holder == desc.holder:
+                    blocked = True
+                    break
+            if blocked:
+                continue
+
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.DISCHARGED
             new_occurred = current_occurred | {desc.for_action}
@@ -2620,6 +2634,19 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 for p in required
             )
             if not all_active:
+                continue
+
+            # Embargo guard, ported from build_kripke_model()'s T6 (see that
+            # block's comment for full rationale) -- same actor-scoped check
+            # T5's guard above uses, operating on the live-sourced
+            # embargo_inhibition_index/embargo_holder_index.
+            blocked = False
+            for embargo_name in embargo_inhibition_index.get(desc.for_action, []):
+                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+                if e_state == "active" and e_holder == desc.holder:
+                    blocked = True
+                    break
+            if blocked:
                 continue
 
             new_obligs = dict(obligs)

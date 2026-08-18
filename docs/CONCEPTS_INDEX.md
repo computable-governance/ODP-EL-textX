@@ -2884,3 +2884,59 @@ untouched. Candidate fix shapes were sketched in the investigation that
 led to this finding (extend `_delegation_chain_for_token()` to also
 check `token_group` membership; loosen T6's exact-holder match to
 chain-membership) but are not decided or scoped here.
+
+---
+
+## T6 (Examine) has no Embargo guard — discharges a gated Burden even while a same-actor Embargo blocks the action — RESOLVED (2026-08-19)
+
+**OPEN FINDING (2026-08-19), RESOLVED same day**
+
+T5's Exercise rule has an actor-scoped Embargo guard (via
+`embargo_inhibition_index`/`embargo_holder_index`, verified against
+`el_reasoner.can_perform()`, 2026-08-18). T6 (Examine) — introduced
+2026-08-18 alongside T1's exclusion — never inherited this guard. Its
+`all_active` check was limited to `permit_descriptors.get(p) is not None
+and permit_descriptors[p].holder == desc.holder`; no call to either
+embargo index anywhere in T6's block, in either build mode.
+
+**Confirmed via a minimal running test, not inferred:** a fixture where
+an actor holds both an `active` Permit and an `active` Embargo blocking
+the same action (`inhibited_by_embargo` on the Action, same actor) —
+T6 discharged the gated Burden anyway. Witness path:
+`examine:testBurden → doTheThing` fired in the world where the Embargo
+was active.
+
+**Fix:** ported T5's existing actor-scoped Embargo guard verbatim into
+T6's block, in both `build_kripke_model()` and `build_kripke_from_runtime()`
+— same `embargo_inhibition_index.get(desc.for_action, [])` /
+`embargo_holder_index` lookup, same-holder/`active`-state check, `blocked`
+→ `continue` before the discharge edge is created. No new mechanism;
+reused the indexes T5 already builds and that were already in scope.
+
+**Regression tests added:** `tests/test_t6_examine_embargo_guard.py`
+(pre-exec, `build_kripke_model()`) and
+`tests/test_hybrid_t6_examine_embargo_guard.py` (hybrid,
+`build_kripke_from_runtime()`), each with the same-holder-suppresses /
+different-holder-does-not-suppress pair mirroring
+`test_t5_exercise_embargo_guard.py`'s pattern.
+
+Building the hybrid-mode fixture surfaced a second, narrower thing worth
+recording: `build_kripke_from_runtime()` sources its obligation
+descriptors by iterating `runtime.current_state().tokens` (live
+WorldState), not the spec's `Commitment`s directly. A Burden declared
+only via `commitment ... creates_burden:` with no `holds` clause on any
+`EnterpriseObject` never reaches `state.tokens` via
+`Runtime.build_from_spec()`'s auto-grant, and is silently invisible to
+hybrid mode — `obligation_descriptors` comes back empty for it, and any
+EF/AF query against it reads `False` for the wrong reason (no obligation
+exists), not because a guard fired. Caught before it produced a
+vacuously-passing test: the first version of the hybrid fixture (without
+`holds gatedBurden`) passed the same-holder case and failed the
+different-holder case, both for this reason rather than the guard.
+Fixed in the test fixtures by adding `holds gatedBurden`, not in
+`el_kripke.py` — this is a pre-existing hybrid-mode/`Runtime.build_from_
+spec()` characteristic, not part of the Embargo-guard bug, and out of
+scope for this fix. Worth knowing before building any other hybrid-mode
+Burden fixture from a bare `Commitment`.
+
+Full suite: 117 passed (113 pre-existing + 4 new), zero regressions.
