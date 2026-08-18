@@ -2940,3 +2940,106 @@ scope for this fix. Worth knowing before building any other hybrid-mode
 Burden fixture from a bare `Commitment`.
 
 Full suite: 117 passed (113 pre-existing + 4 new), zero regressions.
+
+---
+
+## Delegation holder/chain resolution — Option B investigation reveals three compounding problems, not one (paused, 2026-08-19)
+
+**OPEN FINDING (2026-08-19)**
+
+Follow-up to last night's finding ("Delegation holder/chain resolution
+is a coincidental text-match"). Attempted Option B (extend, don't
+replace, the resolution mechanism) — investigation revealed the problem
+is deeper than the original design anticipated. Pausing here; the fix
+needs its own dedicated design session, not continued same-day work.
+
+**Three separate, compounding problems found, each independently
+confirmed:**
+
+1. **`transfers_token_group` conflates two unrelated purposes with no
+   distinguishing field.** `referralBurdenGroup` is simultaneously (a)
+   the community objective's `all_discharged` satisfaction target and
+   (b) (per Delegation's `transfers_token_group` field) an apparent
+   delegation-transfer group — but its actual membership serves purpose
+   (a) only in practice; nothing in the grammar or data distinguishes
+   "these Burdens are delegated together" from "these Burdens together
+   satisfy the episode objective." Both files' `referralBurdenGroup`
+   includes `referralInitiationBurden`/`clinicalHandoverBurden` — the
+   two Burdens that must never be reassigned — alongside the Burdens
+   that should be.
+
+2. **No discriminator over `Commitment.actor`/`Delegation.delegator`
+   cleanly separates "should extend" from "must not reassign."** Tested
+   `actor == delegator` directly against both scenario files: fails in
+   *opposite* directions. In `gp_referral_scenario.el`, it's a false
+   positive (fires true for the two Burdens that must not move, since
+   `GPPracticeParty` both commits and delegates directly — no
+   institution/individual split in this file). In `referral_scenario.el`,
+   it's a false negative on the one Burden it most needs to catch
+   (`referralResponseBurden` — which has an explicit, unambiguous
+   `transfers_burden` link, no group-membership involved at all — because
+   the Commitment is made by `GPPractice`, the delegation is from
+   `GPClinician`, and no other discriminator was found that bridges
+   this correctly across both files' differing accountability shapes).
+
+3. **`walk_chain()` only ever follows `Delegation` elements — never
+   `principal_of`.** `referral_scenario.el`'s `GPPractice → GPClinician`
+   link is declared as a bare `principal_of` relationship (by design —
+   `party GPPractice { principal_of GPClinician }`, with an explicit
+   scenario comment noting there is deliberately no reciprocal
+   `delegated_from`, since `GPClinician` is independently accountable).
+   `walk_chain()` structurally cannot cross this link at all, regardless
+   of text-matching, `transfers_burden`, or `transfers_token_group` —
+   confirmed directly: the walk never reaches `del_graph["GPClinician"]`
+   starting from `GPPractice`. This means `referralResponseBurden` in
+   `referral_scenario.el` cannot be fixed by anything discussed so far
+   (Parts 1/2 of the Option B design, or any discriminator over
+   Commitment/Delegation fields) — a `principal_of`-bridging mechanism
+   would be needed, which is a separate, larger design decision (should
+   `principal_of` be walkable at all? If so, under what conditions,
+   given it's explicitly *not* meant to imply the same accountability
+   transfer a `Delegation` does?).
+
+**Two scenario files also confirmed to have genuinely different
+accountability shapes**, not just different data: `referral_scenario.el`
+has an institution/individual split (`GPPractice` commits,
+`GPClinician` delegates, connected only by `principal_of`);
+`gp_referral_scenario.el` collapses these into one actor
+(`GPPracticeParty` both commits and delegates directly). Any single
+discriminator has to work correctly across both shapes, which is part
+of why every attempt so far has failed in opposite directions per file.
+
+**What was confirmed safe and unaffected, before pausing:**
+`dataclasses.replace()` compatibility for `ObligationDescriptor` (plain
+dataclass, no blockers) — this remains valid groundwork for whichever
+fix direction is eventually chosen. Part 1 of the original Option B
+design (`_delegation_chain_for_token()`'s `token_group` extension, hybrid
+mode) was confirmed mechanically safe against current data — but only
+because the walk is holder-anchored and one-directional, not because
+group membership itself was ever a safe signal, per the original
+design's now-disproven safety claim. Not implemented — held pending the
+same design session as everything else here, since implementing Part 1
+alone while Parts 2/3 remain unresolved would leave the two build modes
+asymmetric.
+
+**Also noted, from the same-day discussion that led to pausing here:**
+a Kripke-model/delegation-chain visualizer (graphical trace of worlds,
+transitions, and accountability links) was independently identified as
+a priority two separate times this week (2026-08-18 during T6's
+world-count investigation, 2026-08-19 during this investigation) —
+both times, the actual debugging work was done through dense
+grep/table-output archaeology that a visual graph would likely have
+shortened substantially. Not scoped here; noted as motivation for
+prioritizing it.
+
+**Status:** paused, not fixed. Needs its own dedicated design session
+covering, at minimum: (a) whether `principal_of` should be walkable by
+`walk_chain()`/`_delegation_chain_for_token()` and under what
+conditions; (b) how to disambiguate `transfers_token_group`'s dual
+purpose (objective-satisfaction vs. delegation-transfer), likely
+requiring a grammar-level or convention-level fix, not just an engine
+change; (c) whether the fix needs to handle `referral_scenario.el` and
+`gp_referral_scenario.el`'s differing accountability shapes via one
+unified mechanism or scenario-aware logic. `assessmentSchedulingBurden`
+in `gp_referral_scenario.el` (yesterday's original regression) remains
+unfixed.
