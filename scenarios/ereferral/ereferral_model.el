@@ -239,6 +239,11 @@ community ReferralEpisodeCommunity
                     description: "AI agent conducts diagnostic examination of patient record"
                     actor: aiExaminationRole
                     artefact: patientRecord
+                    // Checked 2026-08-18 (docs/CONCEPTS_INDEX.md, conductAIExamination
+                    // precondition-enforcement gap): this file's conductAIExamination
+                    // already had the live-permit-check gap covered by the
+                    // requires_permit clause below — unlike referral_scenario.el's
+                    // equivalent action, which was missing it. No fix needed here.
                     requires_permit patientRecordAccessPermit for aiExaminationRole
                     favoured_by_burden aiExaminationBurden
                 }

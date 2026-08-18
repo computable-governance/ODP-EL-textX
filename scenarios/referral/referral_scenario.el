@@ -637,6 +637,7 @@ community ReferralEpisodeCommunity
                     actor: aiExaminationRole
                     artefact: patientRecord
                     precondition: "AI agent must hold patientRecordAccessPermitByAuthorization"
+                    requires_permit patientRecordAccessPermitByAuthorization for aiExaminationRole
                     favoured_by_burden aiExaminationBurden
                 }
             }

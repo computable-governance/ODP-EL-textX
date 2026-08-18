@@ -2439,7 +2439,7 @@ scenario builder is refactored to rely on `build_from_spec()`.
 
 ## `conductAIExamination` has no enforced link to data-access authorization
 
-**OPEN FINDING (2026-08-14)**
+**PARTIALLY RESOLVED — Layer 3 FIXED (2026-08-18); Layer 4 gap remains open**
 
 Investigating a medico-legal question about patient data authorization
 realism (see `docs/patient_authorization_and_obligation_delegation.md`,
@@ -2487,10 +2487,88 @@ it's currently unenforced — a materially more consequential gap than
 some of today's other findings, since it touches the scenario's central
 governance claim.
 
-**Status:** logged, not fixed. Candidate fix direction: wire
-`conductAIExamination`'s precondition check to actually query
-`patientRecordAccessPermitByAuthorization`'s live state (via whatever
-mechanism `el_reasoner.can_perform()` already uses for held-token
-checks), and/or set `requires_permit_for` meaningfully once that field's
-dead-code status is separately addressed. Not scoped or designed —
-deserves its own design session, not a same-day fix.
+**Status:** Layer 3 (engine enforcement) FIXED 2026-08-18. Added
+`requires_permit patientRecordAccessPermitByAuthorization for
+aiExaminationRole` to `conductAIExamination` in
+`scenarios/referral/referral_scenario.el`, mirroring the sibling action
+`access_patient_clinical_records` in the same role — the typed
+`[DeonticToken]` cross-reference mechanism, not a revival of the dead
+`requires_permit_for` field. Activates `advance()`'s existing Step 6
+check (`_actor_holds_permit`, `el_engine.py`); no engine or grammar
+change was needed. `scenarios/ereferral/ereferral_model.el` was checked
+separately and found to already have the equivalent
+`requires_permit patientRecordAccessPermit` clause — a confirmation
+comment was added there, no functional change.
+
+The original candidate fix direction — routing through "whatever
+mechanism `el_reasoner.can_perform()` already uses" — was superseded
+before implementation once ground-truth checks (2026-08-18) confirmed
+`can_perform()` reads static spec-level `holds_tokens`, not live
+`WorldState`; see the `can_perform()` finding immediately below.
+
+Verified by direct `advance()` calls against fresh, throwaway
+`_build_referral_runtime()` instances (no state mutation left behind):
+with the permit `active`, `conductAIExamination` succeeds and
+discharges `aiExaminationBurden`; after `revoke_authorization`
+supersedes the permit, the same call returns `outcome='blocked'`,
+`reason="required permit 'patientRecordAccessPermitByAuthorization'
+not held by actor"`, and the burden stays `active` (undischarged);
+after `reinstate_authorization`, the call succeeds again. New
+regression test: `tests/test_referral_ai_examination_permit_gate.py`
+(3 tests) encodes all three cases. Full suite: 106 → 109 passed, zero
+failures.
+
+**Layer 4 gap remains open and is unaffected by this fix** — the
+Permit token's own `for_action` is still `access_patient_clinical_records`,
+not `conductAIExamination`, so T5 still cannot make
+`conductAIExamination` appear in `occurred_actions`;
+`EF(occurred:conductAIExamination)` remains structurally unreachable.
+This finding is partially resolved, not closed.
+
+---
+
+## `can_perform()` has no live-facing caller — CONFIRMED NOT A GAP (2026-08-18)
+
+Follow-up check prompted by the `conductAIExamination` finding above,
+whose original candidate-fix direction assumed `el_reasoner.can_perform()`
+was (or could stand in for) a live-Permit-state check. Ground truth
+established by grep and direct code read, not inferred.
+
+**Finding — `can_perform()` has zero real callers.** Grepped the whole
+repo outside `el_reasoner.py`'s own definition: no code calls it. The
+only references are documentation-provenance comments — three in
+`el_kripke.py` (391, 394, 429, 2110) noting that T5's Kripke Embargo
+guard was *built to mirror* `can_perform()`'s `held_token_names`
+traversal, and one docstring line in
+`tests/test_t5_exercise_embargo_guard.py:9-10` citing it by line number
+to explain why that guard is actor-scoped. Neither imports or invokes
+`el_reasoner`.
+
+**Finding — the actual live-facing surface (`GET
+/actors/{actor_name}/available-actions`, `el_api.py:492`,
+`get_available_actions()`) does not call `can_perform()` either.** It is
+a separate, independent implementation that reads
+`_runtime.current_state()` directly — live `state.tokens`, filtered on
+`tok.state == "active"` — and its own docstring says so explicitly:
+"Reads directly from the current Layer 3 runtime state — no Kripke
+model is needed for this endpoint." Its embargo handling mirrors
+`el_engine.py` Step 5's logic against the same live token set, per its
+own inline comment (lines 505-506).
+
+**Conclusion — `can_perform()`'s static/spec-level scope is correct, not
+a gap, because nothing live-facing depends on it.** Its own docstring
+already self-discloses the scope ("static check against declared token
+holdings... Runtime token state changes... are not modelled here — this
+is structural, not operational") — that was documented accurately at
+authorship; `get_available_actions()` was simply built as its own thing
+afterward rather than layered on top of it. This is the inverse
+situation from `conductAIExamination`: there, a live-facing action
+lacked any live-state check; here, the one mechanism lacking a
+live-state check has no live-facing consumer to expose it through.
+
+**Status:** resolved by direct code inspection, 2026-08-18. No
+implementation change made or required. Corrects the candidate-fix
+pointer in the `conductAIExamination` finding above, which had assumed
+`can_perform()` was reusable for a live check — it is not; the correct
+reusable mechanism for that fix is `el_engine.py`'s `_actor_holds_permit()`
+(reads `WorldState`, already exercised at Step 6), not `can_perform()`.
