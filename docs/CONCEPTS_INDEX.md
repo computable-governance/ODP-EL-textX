@@ -2525,6 +2525,20 @@ not `conductAIExamination`, so T5 still cannot make
 `EF(occurred:conductAIExamination)` remains structurally unreachable.
 This finding is partially resolved, not closed.
 
+**Correction (2026-08-19):** the "structurally unreachable" claim above
+(both at the first bullet, "At the Kripke layer, `conductAIExamination`
+can never appear in `occurred_actions`...", and again in "Layer 4 gap
+remains open") was accurate at the time it was written — 2026-08-18,
+before T6 existed. It is now stale: T6 landed later the same day, and
+its discharge edge fuses the obligation-state change and the
+action-occurrence into a single atomic transition —
+`occurred:conductAIExamination` is now true on the exact same world,
+via the exact same edge, as `discharged:aiExaminationBurden`. It is
+reachable after all. Not rewritten in place, to preserve the historical
+record of what was true at authorship — see "T6 fuses
+`discharged:<burden>` and `occurred:<action>` onto the same edge —
+confirmed 2026-08-19" (below) for the full finding.
+
 ---
 
 ## `can_perform()` has no live-facing caller — CONFIRMED NOT A GAP (2026-08-18)
@@ -3043,3 +3057,36 @@ change; (c) whether the fix needs to handle `referral_scenario.el` and
 unified mechanism or scenario-aware logic. `assessmentSchedulingBurden`
 in `gp_referral_scenario.el` (yesterday's original regression) remains
 unfixed.
+
+---
+
+## T6 fuses `discharged:<burden>` and `occurred:<action>` onto the same edge — confirmed 2026-08-19
+
+**FINDING (2026-08-19)**
+
+T6's `_make_world` call atomically transitions both the obligation state
+(`PENDING` → `DISCHARGED`) and `occurred_actions` (adding the gated
+action) in one edge — not two separate edges the way pre-T6 discharge
+and T5 exercise were. Consequence: for any T6-gated Burden/action pair
+(e.g. `aiExaminationBurden`/`conductAIExamination`), the two
+propositions `discharged:aiExaminationBurden` and
+`occurred:conductAIExamination` become true on the exact same world,
+reached via the exact same edge — they are not independently
+reachable/unreachable; checking either one via `EF` yields the same
+witness path.
+
+**Confirmed 2026-08-19** by reading T6's code directly and running it
+(`extract_witness_path`/`GET /kripke/witness`), not something previously
+recorded as a verified claim — worth being explicit about that
+provenance, since it corrects a claim made earlier the same day (see
+correction below).
+
+See the correction appended to the `conductAIExamination` finding
+(above) for where the original "structurally unreachable" claim was
+made and corrected.
+
+**Practical consequence:** either proposition string can be used
+interchangeably to query T6-gated reachability going forward, though
+`discharged:<burden>` is the one with prior test coverage
+(`tests/test_referral_kripke_t6_permit_gate.py`) and should remain the
+default choice absent a reason to prefer `occurred:<action>` specifically.
