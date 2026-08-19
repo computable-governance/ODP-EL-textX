@@ -3090,3 +3090,48 @@ interchangeably to query T6-gated reachability going forward, though
 `discharged:<burden>` is the one with prior test coverage
 (`tests/test_referral_kripke_t6_permit_gate.py`) and should remain the
 default choice absent a reason to prefer `occurred:<action>` specifically.
+
+---
+
+## T1 lacks Embargo-awareness — a Burden gated only by `inhibited_by_embargo` (no `requires_permit`) would discharge unconditionally
+
+**OPEN FINDING (2026-08-19)**
+
+T1's exclusion check (`if desc.for_action and desc.for_action in
+permit_requirement_index: continue`) only excludes a Burden if its
+Action has a `requires_permit` clause. It does not check
+`embargo_inhibition_index` at all. T6's own entry condition uses the
+same `permit_requirement_index` key, so an Action gated *only* by
+`inhibited_by_embargo` (no `requires_permit`) would be excluded by
+neither T1 nor T6 — nothing guards it, and T1 would discharge the
+Burden unconditionally, ignoring an active, same-holder Embargo
+entirely.
+
+**Structurally identical to the gap fixed this morning** (T6 missing an
+Embargo guard T5 already had) — same underlying pattern, third instance:
+Permit/Embargo-awareness has had to be added piecemeal to T5, then T6,
+and now T1 is confirmed to have the analogous hole.
+
+**Confirmed real via direct empirical test**, not just inferred from
+reading the code: a minimal probe (Burden → Action with
+`inhibited_by_embargo` only, active same-holder Embargo, no
+`requires_permit`) shows T1 firing unconditionally in both build modes —
+`EF(discharged:gatedBurden) = True` despite the active Embargo.
+
+**Currently latent, not live:** zero Actions in any registered scenario
+use `inhibited_by_embargo` at all — confirmed via repo-wide grep. This
+also means, worth noting separately: **the Embargo-guard machinery built
+this week (T5's guard, this morning's T6 port) has never actually fired
+against real scenario data** — every test exercising it uses a
+throwaway probe spec, not `referral_scenario.el`/`gp_referral_scenario.el`/
+`ereferral_model.el`. `patientRecordAccessEmbargo` exists in real
+scenarios only as a token materialized via `on_revocation`, never wired
+to any Action's `inhibited_by_embargo` clause.
+
+**Status:** logged, not fixed — no live instance to break yet. Candidate
+fix, once needed: extend T1's exclusion to also check
+`embargo_inhibition_index` (mirroring the `permit_requirement_index`
+check), and extend T6's entry condition similarly, so an
+embargo-only-gated Action is correctly excluded from T1 and picked up by
+some future embargo-aware rule (T6 itself, if generalized, or a new
+rule) rather than falling through unguarded to either.
