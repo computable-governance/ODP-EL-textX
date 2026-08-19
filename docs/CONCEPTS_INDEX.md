@@ -3135,3 +3135,136 @@ check), and extend T6's entry condition similarly, so an
 embargo-only-gated Action is correctly excluded from T1 and picked up by
 some future embargo-aware rule (T6 itself, if generalized, or a new
 rule) rather than falling through unguarded to either.
+
+---
+
+## Double role-enrollment bug (GET /actors/SpecialistClinician/available-actions) — actually a double-grant, root cause traced to yesterday's paused delegation finding, fixed 2026-08-20
+
+**OPEN FINDING (2026-08-20), RESOLVED same day**
+
+Coordination simulator showed duplicate `scheduleAssessment` cards for
+`SpecialistClinician`. Investigation (not `enroll()` called twice, not a
+role assigned twice — `SpecialistClinician` filling two roles
+concurrently, `specialistRole` + `referredToRole`, is by design and
+confirmed harmless since `get_available_actions()` derives entirely from
+`state.tokens`, never role names) traced the real cause to **two
+independent mechanisms both granting `referralResponseBurden`/
+`assessmentSchedulingBurden` to the same holder**:
+
+1. `_build_referral_runtime()` (`el_api.py`) pre-seeds both burdens to
+   `SpecialistClinician` directly at tick 0.
+2. `initiateReferral`'s grammar `effect create ... to referredToRole`
+   (`referral_scenario.el:425-426`) unconditionally grants a second,
+   field-for-field identical `TokenInstance` when the action fires
+   (`el_engine.py`'s `create` op, Step 7b).
+
+Confirmed both `acknowledgeReferral` and `scheduleAssessment` duplicated
+identically (same root cause, same effect block, same pre-seed loop) —
+not just the one action visible in the screenshot. Confirmed the
+duplication is Layer-3/API-only: `build_kripke_from_runtime()` builds
+its `descriptors` dict keyed by `tok.token_name` (`el_kripke.py:2608`),
+so duplicate raw tokens collapse before any world/edge is constructed —
+world/edge counts were never affected.
+
+**Why the pre-seed exists — traced, not assumed:** it is the *only*
+mechanism that gets `SpecialistClinician` recorded as these two burdens'
+holder in the Kripke hybrid-mode layer. `_build_obligation_descriptors()`
+itself reads only the parsed spec (`Commitment`/`Delegation`/
+`DeonticToken`), never `WorldState.tokens` — but `build_kripke_from_runtime()`
+never falls back to it for a burden absent from live `state.tokens`;
+that spec-only path was tested directly and resolves the holder to
+**`GPPractice`**/**`SpecialistPractice`** respectively, not
+`SpecialistClinician` — because `walk_chain()` can't cross the
+`GPPractice`→`GPClinician` `principal_of` link and has no
+`Delegation.obligation` text match for `assessmentSchedulingBurden` at
+all. This is the identical gap logged and paused yesterday in
+"Delegation holder/chain resolution — Option B investigation reveals
+three compounding problems, not one (paused, 2026-08-19)" (problem 3,
+the `principal_of`-walkability question). The pre-seed in
+`_build_referral_runtime()` is a working-around-the-gap necessity, not
+redundant leftover code — removing it was tested directly and confirmed
+to break `tests/test_referral_kripke.py::test_referral_response_is_detectable_not_compelled`,
+`test_assessment_scheduling_is_detectable_not_compelled`, and
+`tests/test_referral_kripke_t6_permit_gate.py`'s `referralResponseBurden`
+permission check (all three currently pass; removal was not applied).
+
+**Fix applied** (the reverse of removing the pre-seed): an idempotency
+guard in `el_engine.py`'s `create` effect handler — skip granting if the
+target already holds a `TokenInstance` of that name, per-target, scoped
+inside `op == "create"` only (the separate `clone` op, which
+intentionally adds a second copy, is untouched). Checked against every
+`effect create` site in the repo (5 total, across `consent_scenario.el`,
+`referral_scenario.el`, `gp_referral_scenario.el`) — confirmed the guard
+only ever fires for the two sites that actually had a pre-existing
+duplicate-grant conflict; the other three are unaffected since nothing
+else pre-seeds those tokens. Also fixed the same bug in
+`gp_referral_scenario.el`'s `referralResponseBurden` (identical shape,
+`specialistRole` resolves to `SpecialistClinician`, same as the pre-seed
+holder).
+
+**Left deliberately unfixed, a distinct bug surfaced by this
+investigation:** `gp_referral_scenario.el`'s `assessmentSchedulingBurden`
+does *not* get deduped by this guard — its pre-seed holder
+(`SpecialistParty`, `_build_gp_referral_runtime()`) differs from the
+`create` effect's resolved holder (`SpecialistClinician`, via
+`specialistRole`). These are two genuinely different-holder token
+instances, not a duplicate, so the idempotency guard correctly leaves
+both in place. This is a wrong-pre-seed-holder bug, not a duplication
+bug — worth its own investigation, not addressed here.
+
+A display-layer dedupe (by action name, first-occurrence-wins) was also
+added to `get_available_actions()` in `el_api.py` as defense in depth,
+before the root cause was traced — confirmed lossless (the two entries
+were byte-for-byte identical on every field `AvailableAction` exposes)
+and left in place after the engine-level fix, since it's a harmless
+safety net for any future create-effect/pre-seed overlap of this shape.
+
+Full suite: 121 passed, zero regressions, after both fixes.
+
+---
+
+## Live violation triggering — detection mechanism exists and is tested; wiring to `on_violation_of` effects is the actual gap
+
+**OPEN FINDING (2026-08-20)**
+
+Investigating the "blocked until violation" label on the Escalation
+Notice witness-path option (yesterday's finding: `escalationNoticeBurden`
+permanently unreachable, no code path fires a violation) surfaced a more
+precise picture than originally assumed.
+
+**What already exists and works, confirmed by direct trace:**
+`_violation_entry()` (`el_engine.py`) is a real, tested deadline-check —
+compares an obligation's declared deadline against current time, flags
+`VIOLATED` when passed. Exercised by existing tests. This is not
+missing.
+
+**What's actually missing:** nothing currently *consumes* a detected
+violation to fire the corresponding `on_violation_of` effect.
+`referralNoResponseViolation`'s effect (creating `escalationNoticeBurden`
+when `referralResponseBurden` is violated) is declared in the grammar
+but never wired to `_violation_entry()`'s output — detection and
+effect-firing are disconnected. This is a narrower gap than "build
+violation detection from scratch": the hard part already exists and is
+tested; the missing piece is the wiring step, structurally similar to
+how `create` effects already fire from actions.
+
+**Two open design questions, not yet decided:**
+1. **Trigger mechanism** — should violation-checking fire automatically
+   on every `/advance` call, or require an explicit action/endpoint
+   (e.g., a "check deadlines" control)? The coordination simulator has
+   no time-advancement UI today, so an explicit trigger may be the more
+   demoable and honest-to-the-model choice — makes visible *when* the
+   check happens, rather than silently occurring on unrelated calls.
+2. **Escalation semantics** — should the escalation Burden's creation be
+   fully automatic the moment a violation fires, or should it become a
+   new available action on the escalation target's role (something the
+   actor must discover and then act on)? Real semantic choice about
+   what "escalation" means in this model, not just an implementation
+   detail.
+
+**Status:** logged, not designed or implemented. Deliberately sequenced
+after this session's holder-resolution/double-grant fix, and — per
+2026-08-20 discussion — prioritized *ahead of* the cosmetic UI pass
+(Escalation Notice wording, usage instructions), since the wording fix
+depends on knowing whether this becomes real or stays permanently
+unreachable by design.

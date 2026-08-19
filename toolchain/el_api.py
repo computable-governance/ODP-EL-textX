@@ -553,7 +553,26 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
                     deadline=None,
                 ))
 
-    return AvailableActionsResponse(actor=actor_name, available_actions=actions)
+    # Dedupe by action name. The specific cause this was written for
+    # (scenario-builder pre-seed + grammar `create` effect both granting the
+    # same burden to the same holder) is now fixed at the source — see the
+    # idempotency guard in el_engine.py's `create` handler and the
+    # 2026-08-20 CONCEPTS_INDEX.md finding. Kept deliberately as
+    # defense-in-depth: any other path that grants the same (token_name,
+    # holder) pair twice — e.g. a duplicated tuple in a builder's own
+    # token-grant list, or build_from_federation()'s Commitment/Delegation
+    # auto-grant walking reaching the same delegate twice — would still go
+    # through this endpoint's token loop, not the create-effect guard.
+    # First occurrence wins.
+    seen_actions: set[str] = set()
+    deduped: List[AvailableAction] = []
+    for a in actions:
+        if a.action in seen_actions:
+            continue
+        seen_actions.add(a.action)
+        deduped.append(a)
+
+    return AvailableActionsResponse(actor=actor_name, available_actions=deduped)
 
 
 # ── Endpoint 2: GET /communities/{community_name}/objective-reachable ─────────

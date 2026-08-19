@@ -306,6 +306,17 @@ def advance(
                     targets = [actor_name]
 
                 for target in targets:
+                    # Idempotency guard: some scenario builders pre-seed a token
+                    # that this same create effect also grants to the same
+                    # holder (e.g. referralResponseBurden/assessmentSchedulingBurden
+                    # in referral_scenario.el/gp_referral_scenario.el — see
+                    # docs/CONCEPTS_INDEX.md). Skip creation if the target
+                    # already holds a token of this name rather than granting a
+                    # second, indistinguishable instance.
+                    if any(t.token_name == tok_ref.name and t.holder == target
+                           for t in tokens):
+                        continue
+
                     new_tok = TokenInstance(
                         token_name=tok_ref.name,
                         kind=tok_ref.kind,
