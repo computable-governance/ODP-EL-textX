@@ -128,7 +128,7 @@ def _build_gp_referral_runtime() -> Runtime:
         ("patientRecordAccessPermitByRole",     "SpecialistClinician"),
         ("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent"),
     ]:
-        state = grant_token(state, token_from_spec(spec, token_name, holder))
+        state = grant_token(state, token_from_spec(spec, token_name, holder, state.tick))
 
     return Runtime(state, spec)
 
@@ -172,7 +172,7 @@ def _build_ereferral_runtime() -> Runtime:
         ("aiExaminationBurden",       "SpecialistAIAgent"),
         ("patientRecordAccessPermit", "SpecialistAIAgent"),
     ]:
-        state = grant_token(state, token_from_spec(spec, token_name, holder))
+        state = grant_token(state, token_from_spec(spec, token_name, holder, state.tick))
 
     return Runtime(state, spec)
 
@@ -267,7 +267,7 @@ def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None
         ("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent"),
         ("aiExaminationBurden",        "SpecialistAIAgent"),
     ]:
-        state = grant_token(state, token_from_spec(spec, token_name, holder))
+        state = grant_token(state, token_from_spec(spec, token_name, holder, state.tick))
 
     return Runtime(state, spec)
 

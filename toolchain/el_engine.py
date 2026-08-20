@@ -38,6 +38,9 @@ class TokenInstance:
     state: str                      # 'active' | 'pending' | 'discharged' | 'violated' | 'superseded'
     discharge_mode: str             # 'eventual' | 'strict'
     priority: str                   # 'critical' | 'high' | 'normal' | 'low'
+    granted_at_tick: int            # tick at which this instance was created; required, no
+                                     # default -- see docs/CONCEPTS_INDEX.md, discharge_mode:
+                                     # strict finding's convergence addendum (2026-08-20)
     deadline: Optional[str] = None
     for_action: Optional[str] = None  # informational — see AM-01
 
@@ -117,6 +120,7 @@ def _transition(tok: TokenInstance, new_state: str) -> TokenInstance:
         state=new_state,
         discharge_mode=tok.discharge_mode,
         priority=tok.priority,
+        granted_at_tick=tok.granted_at_tick,
         deadline=tok.deadline,
         for_action=tok.for_action,
     )
@@ -324,6 +328,7 @@ def advance(
                         state="active",
                         discharge_mode=tok_ref.discharge_mode or "eventual",
                         priority=tok_ref.priority or "normal",
+                        granted_at_tick=tick,
                         deadline=getattr(tok_ref, "deadline", None),
                         for_action=getattr(tok_ref, "for_action", None),
                     )
@@ -368,6 +373,7 @@ def advance(
                                     state=t.state,
                                     discharge_mode=t.discharge_mode,
                                     priority=t.priority,
+                                    granted_at_tick=t.granted_at_tick,
                                     deadline=t.deadline,
                                     for_action=t.for_action,
                                 ))
@@ -390,6 +396,7 @@ def advance(
                             state=t.state,
                             discharge_mode=t.discharge_mode,
                             priority=t.priority,
+                            granted_at_tick=t.granted_at_tick,
                             deadline=t.deadline,
                             for_action=t.for_action,
                         ))
@@ -474,7 +481,7 @@ def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
     return None
 
 
-def token_from_spec(spec, token_name: str, holder: str) -> TokenInstance:
+def token_from_spec(spec, token_name: str, holder: str, granted_at_tick: int) -> TokenInstance:
     """
     Construct a TokenInstance from a top-level DeonticToken in the spec.
 
@@ -489,6 +496,7 @@ def token_from_spec(spec, token_name: str, holder: str) -> TokenInstance:
                 state=el.state or "active",
                 discharge_mode=el.discharge_mode or "eventual",
                 priority=el.priority or "normal",
+                granted_at_tick=granted_at_tick,
                 deadline=getattr(el, "deadline", None),
                 for_action=(
                     getattr(el, "for_action", None)
@@ -552,7 +560,7 @@ def revoke_authorization(
         ]
     else:
         target = holders[0] if holders else auth.authority.name
-        tokens.append(_transition(token_from_spec(spec, embargo_name, target), "active"))
+        tokens.append(_transition(token_from_spec(spec, embargo_name, target, tick), "active"))
     effects_log.append(f"activated embargo '{embargo_name}'")
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
@@ -639,7 +647,7 @@ def reinstate_authorization(
         # Tier-2), so fall back to the authority as a last resort.
         target = auth.authorized_agent.name if auth.authorized_agent else auth.authority.name
         tokens = list(state.tokens) + [
-            _transition(token_from_spec(spec, permit_name, target), "active")
+            _transition(token_from_spec(spec, permit_name, target, tick), "active")
         ]
         effects_log.append(f"activated permit '{permit_name}'")
 
@@ -725,8 +733,8 @@ if __name__ == "__main__":
     s = enroll(s, "GPPracticeParty",    "gpRole")
     s = enroll(s, "SpecialistAgent",    "specialistRole")
     s = enroll(s, "AIDiagnosticAgent",  "aiAgentRole")
-    s = grant_token(s, token_from_spec(spec, "seekConsentObligation", "AIDiagnosticAgent"))
-    s = grant_token(s, token_from_spec(spec, "aiAnalysisPermit",      "AIDiagnosticAgent"))
+    s = grant_token(s, token_from_spec(spec, "seekConsentObligation", "AIDiagnosticAgent", s.tick))
+    s = grant_token(s, token_from_spec(spec, "aiAnalysisPermit",      "AIDiagnosticAgent", s.tick))
 
     print(f"\nInitial WorldState (tick {s.tick}):")
     for tok in s.tokens:
@@ -747,7 +755,7 @@ if __name__ == "__main__":
     s_no_permit = enroll(s_no_permit, "AIDiagnosticAgent", "aiAgentRole")
     s_no_permit = grant_token(
         s_no_permit,
-        token_from_spec(spec, "seekConsentObligation", "AIDiagnosticAgent")
+        token_from_spec(spec, "seekConsentObligation", "AIDiagnosticAgent", s_no_permit.tick)
     )
     # aiAnalysisPermit intentionally NOT granted
     _, r2 = advance(s_no_permit, "seekConsent", spec, "AIDiagnosticAgent",

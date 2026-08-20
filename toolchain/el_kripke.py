@@ -2789,7 +2789,7 @@ def _run_hybrid_smoke_test() -> None:
     if not rt.current_state().tokens:        # fallback: grant tokens manually
         for name, holder in [("seekConsentObligation", "AIDiagnosticAgent"),
                               ("aiAnalysisPermit",      "AIDiagnosticAgent")]:
-            rt._state = grant_token(rt._state, token_from_spec(result.model, name, holder))
+            rt._state = grant_token(rt._state, token_from_spec(result.model, name, holder, rt._state.tick))
 
     rt.advance("seek_patient_consent", "AIDiagnosticAgent")   # one step forward
 

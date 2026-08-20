@@ -105,7 +105,7 @@ class Runtime:
             for tok_ref in getattr(el, "holds_tokens", []) or []:
                 tok_name = tok_ref.name if hasattr(tok_ref, "name") else str(tok_ref)
                 try:
-                    state = grant_token(state, token_from_spec(spec, tok_name, el.name))
+                    state = grant_token(state, token_from_spec(spec, tok_name, el.name, state.tick))
                 except KeyError:
                     pass
 
@@ -197,7 +197,7 @@ class Runtime:
             enrolled_names = {a.actor_name for a in state.actors}
             if terminal.name in enrolled_names:
                 try:
-                    state = grant_token(state, token_from_spec(spec, token_name, terminal.name))
+                    state = grant_token(state, token_from_spec(spec, token_name, terminal.name, state.tick))
                 except KeyError:
                     pass
 

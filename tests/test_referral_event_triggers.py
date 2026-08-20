@@ -65,6 +65,7 @@ def _with_pending_referral_burden(runtime: Runtime) -> Runtime:
             state="pending",
             discharge_mode=t.discharge_mode,
             priority=t.priority,
+            granted_at_tick=t.granted_at_tick,
             deadline=t.deadline,
             for_action=t.for_action,
         )
@@ -86,11 +87,13 @@ def test_activate_triggered_tokens_activates_matching_and_skips_others(spec):
     pending = TokenInstance(
         token_name="referralInitiationBurden", kind="burden", holder="GPClinician",
         state="pending", discharge_mode="strict", priority="critical",
+        granted_at_tick=0,
         deadline="48 hours from clinical decision", for_action="initiateReferral",
     )
     unrelated = TokenInstance(
         token_name="clinicalHandoverBurden", kind="burden", holder="GPClinician",
         state="pending", discharge_mode="eventual", priority="normal",
+        granted_at_tick=0,
         deadline="referral episode", for_action="provideHandover",
     )
 
@@ -111,6 +114,7 @@ def test_activate_triggered_tokens_unmatched_event_is_untouched_noop(spec):
     pending = TokenInstance(
         token_name="referralInitiationBurden", kind="burden", holder="GPClinician",
         state="pending", discharge_mode="strict", priority="critical",
+        granted_at_tick=0,
         deadline="48 hours from clinical decision", for_action="initiateReferral",
     )
 
@@ -174,7 +178,7 @@ def test_step7c_activates_token_via_action_emits():
     state = grant_token(state, TokenInstance(
         token_name="waitingBurden", kind="burden", holder="Tester",
         state="pending", discharge_mode="eventual", priority="normal",
-        deadline=None, for_action="someOtherAction",
+        granted_at_tick=0, deadline=None, for_action="someOtherAction",
     ))
 
     pre = [t for t in state.tokens if t.token_name == "waitingBurden"][0]
