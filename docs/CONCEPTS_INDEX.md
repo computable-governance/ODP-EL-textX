@@ -3396,3 +3396,56 @@ engine is faithfully deployed, which is an important open problem we
 acknowledge as future work") already anticipates this exact gap; fold this
 finding in as a concrete instance of that caveat when finalizing
 `reviewer_response.md`.
+
+**Convergence with live-violation-detection design (2026-08-20):**
+attempting to design the trigger mechanism for live violation detection on
+`referralResponseBurden`/`assessmentSchedulingBurden` (both `discharge_mode:
+eventual`) surfaced that this finding's tick-vs-wall-clock ambiguity is not
+abstract — it is the actual, concrete blocker.
+
+Confirmed empirically: there is currently no way, by any method, to
+determine how much time has elapsed since a specific burden was granted.
+`TokenInstance` (`el_engine.py:32-43`) has no "granted at" tick/timestamp
+field. `WorldState.tick` is a single global counter with no per-token
+reference point. `build_kripke_from_runtime()` is structurally
+forward-looking (`w0.step` is always 0 regardless of live `WorldState.tick`
+— `el_kripke.py:2102`), so it can answer "would this violate N hypothetical
+ticks from now" but not "has this already violated, given real elapsed
+time." `_parse_deadline_steps()`'s own docstring
+(`el_kripke.py:1441-1457`) confirms its step-bucket mapping is
+"necessarily approximate," intended only to preserve relative ordering for
+verification — not to represent real elapsed time. Confirmed concretely:
+`referralResponseBurden` (5-day deadline) and `assessmentSchedulingBurden`
+(14-day deadline) both map to the identical bucket value (8), despite
+having different real deadlines.
+
+**This is a missing data model, not an implementation-detail choice
+between two working options.** Two open questions must be decided together,
+in one dedicated design session — not piecemeal:
+1. Does `TokenInstance`/`WorldState` need a real "granted at" reference
+   field before any live elapsed-time comparison is possible?
+2. Is that reference tick-based (count of `advance()` calls since grant —
+   consistent with the paper's own tick-based formal model, T1/T2/T3, and
+   with how `discharge_mode: strict`'s AF guarantee is already proven in
+   tick-steps) or wall-clock-based (would require a real duration parser,
+   which does not exist today — `_parse_deadline_steps()` is a coarse
+   verification-time bucket mapping, not a duration parser)?
+
+**Companion, smaller decision surfaced in the same session:** wiring a
+proper `Action` declaration for `notify_gp_of_non_response` (held by
+`SpecialistPractice`) is separately blocked — `Action` only exists in the
+grammar as a `RoleBodyItem` nested inside `Role`
+(`grammar/v2/el_grammar.tx:543-593`), and `SpecialistPractice` is declared
+as a bare `party` that fills no `Role` anywhere in `referral_scenario.el`
+(confirmed by grep). A scenario-authoring decision — which `Role`, in
+which community — is needed before this Action can be declared. Should be
+resolved alongside the grant-tick design session, since both block the
+same feature (live violation detection + response wiring for the referral
+scenario).
+
+**Status: deferred, not decided piecemeal under today's momentum.** No
+code written for any of the four items in today's design spec. Next
+dedicated session should resolve both the grant-tick mechanism and the
+`SpecialistPractice` Role placement together, then the original four-item
+spec (Action declaration, live-detection trigger, `ViolationResponse`
+firing, tests) can proceed against settled ground truth.
