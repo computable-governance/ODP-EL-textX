@@ -3529,3 +3529,61 @@ Relevant for: any future work extending the federation/hierarchy pattern
 (IPS cross-border scenario, AIVendor gap, further R23+R24-style Contract
 extraction) — the episode-vs-standing-community distinction should hold
 regardless of how many practices/organizations are involved.
+
+---
+
+## Conformance check — behaviour/actions attach to enterprise objects only via roles (verified against both ISO 15414 Annex B examples, 2026-08-20)
+
+**Question checked:** does the grammar's decision to nest `Action` only inside
+`RoleDecl` (i.e. an enterprise object/party can only have declared behaviour by
+filling a community role) faithfully reflect ISO/IEC 15414, or is it more
+restrictive than the standard requires?
+
+**Method:** direct end-to-end read of BOTH running examples in the standard's
+own Annex B — the e-commerce example (§B.1, pages 37–43) and the library
+example (§B.2 Templeman Library, pages 43–49) — plus the normative prose
+(§6.3, §7.4, §7.8.1–7.8.6) and the authoritative Linington/Miyazaki/Vallecillo
+paper "Obligations and Delegation in the ODP Enterprise Language" (the paper by
+the standard's own co-author describing the deontic-token extension as it went
+into ISO 15414; its Figure 2 became Annex A's community-concepts diagram).
+
+**Note:** the standard DOES contain a library example (§B.2, Templeman Library
+at Kent) — this is distinct from and should not be confused with Thomas
+Sepanosian's thesis / pyodpel library scenario, which is not a credible design
+reference. The §B.2 example is normative-annex material and citable.
+
+**Finding — the grammar's choice is fully standard-conformant, not merely
+defensible:** in both worked examples, every action attributes participation to
+enterprise objects *via roles*, with zero instances of an object or party
+having behaviour/action attributed to it outside role-filling:
+- E-commerce §B.1.5.4: "In the action of a customer buying a purple widget,
+  e-system object and the customer object are actors, the object representing a
+  purple widget is an artefact, and shippingSubsystem is both an actor and a
+  resource" — participants named by their roles; "customer object" is explicitly
+  defined as "an object fulfilling the role, customer."
+- Library §B.2.3.3: "In the libraryCommunity, borrowers and librarians are
+  actors in all actions specified for that community. Items are resources.
+  Calendar is an artefact..." — participation stated in terms of role-fillers.
+- Deontic attachment is role-mediated too: §B.1.7.1 "the e-system object needs
+  to hold a permit deontic token before it can participate in the action in the
+  role of orderTaker"; §B.1.7.2 "an auditor object (that is, a party fulfilling
+  the role, auditor)".
+- The obligation-conferring mechanism is role-filling itself: library §B.2.4
+  "the action of filling a borrower role is therefore a speech act, resulting in
+  a burden representing the obligation to obey the [regulations]." An object
+  bears an obligation *because* it fills a role.
+
+**Consequence for the grammar:** nesting `Action` inside `RoleDecl` is faithful
+to the standard's own modelling, confirmed against normative prose + both annex
+examples + Linington. A party (e.g. `SpecialistPractice`) that needs a declared
+action MUST fill a community role — this is the standard-conformant requirement,
+not a toolchain restriction to work around. Multi-role filling is explicitly
+permitted throughout (§B.1.5.4 customer + e.comManager; §B.2.2.5/§B.2.2.7
+librarian + borrower), so giving a standing party a role does not conflict with
+its other modelled aspects.
+
+**Supersedes an earlier over-correction in this session:** a mid-session hedge
+suggested the grammar might be "more restrictive than the standard requires."
+That is retracted — the standard's own examples never once model behaviour
+attaching to an object outside a role. Usable as support for a defensible
+"grammar respects ISO 15414" conformance claim in the position paper.
