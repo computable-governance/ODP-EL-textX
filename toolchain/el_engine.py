@@ -81,6 +81,7 @@ class TransitionRecord:
     effects: Tuple[str, ...]            # human-readable effect log
     violations: Tuple[str, ...]         # violation names (if outcome == 'violation')
     reason: Optional[str] = None        # set when outcome == 'blocked'
+    fired_responses: Tuple[str, ...] = ()  # ViolationResponse names fired (fire_violation_responses() only)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -1068,6 +1069,115 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
         discharged=(),
         effects=tuple(effects_log),
         violations=tuple(violated_names),
+    )
+    return new_state, record
+
+
+def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, TransitionRecord]:
+    """
+    Fire each declared ViolationResponse whose on_violation_of Burden is
+    currently VIOLATED in the live state — exactly once per violation, never
+    again once fired, regardless of what happens to the created burden
+    afterward.
+
+    Deliberately separate from check_live_violations(), not folded into it —
+    a considered reversal of this session's earlier "automatic, same call"
+    recommendation. check_live_violations() stays a pure, poll-safe detector
+    with zero response-firing side effects: detection is freely pollable/
+    displayable on its own; response-firing is a distinct, deliberate beat.
+    See docs/CONCEPTS_INDEX.md for the fuller rationale.
+
+    Fires VR iff:
+      (A) some token named VR.on_violation_of.name is state == 'violated'
+          anywhere in live state — NOT scoped by holder: the violated
+          Burden's holder and VR.obligates are commonly different parties
+          (e.g. referralResponseBurden/SpecialistClinician vs.
+          escalationNoticeBurden/SpecialistPractice).
+      (B) VR.obligates does NOT already hold a token named
+          VR.creates_burden.name in state 'active' OR 'discharged'. The
+          'OR discharged' is load-bearing: checking only 'active' would
+          re-fire (granting a duplicate) the moment the created burden is
+          legitimately discharged by its own for_action — 'violated' never
+          reverts, so without this the predicate would flip back to fireable
+          every poll after a real discharge.
+
+    On fire, two effects:
+      1. Grant creates_burden to obligates as a real TokenInstance via
+         token_from_spec() — the same general-purpose grant path
+         revoke_authorization()/reinstate_authorization() already reuse for
+         their own fresh-grant cases, granted_at_tick stamped.
+      2. escalate_to: an informational effects-log entry only, no token or
+         event fired. The genuine ISO/IEC 15414 X.902 §8.4 outbound
+         notification-to-a-non-participant this conceptually is does NOT
+         map onto this toolchain's `emits` construct (that implements
+         intra-spec token choreography — discharged_by/triggered_by — not
+         §8.4 notification; see docs/CONCEPTS_INDEX.md's emits-vs-
+         notification finding). Revisit only if/when a real GP-side
+         consumer token exists.
+
+    Tick only advances when at least one response actually fires — same
+    conditional-advance pattern and poll-safety rationale as
+    check_live_violations(); a no-op poll (nothing currently violated, or
+    already responded to) must not consume a tick.
+
+    Returns (new_state, record). record.fired_responses holds the
+    ViolationResponse names fired this call (empty if none). outcome is
+    always 'ok' — nothing here is ever 'blocked', and nothing newly
+    'violates' (that's check_live_violations()'s vocabulary, not this
+    function's).
+    """
+    tick = state.tick
+    tokens = list(state.tokens)
+    fired: List[str] = []
+    effects_log: List[str] = []
+
+    for vr in spec.elements:
+        if type(vr).__name__ != "ViolationResponse":
+            continue
+
+        violated_burden_name = getattr(getattr(vr, "violated_burden", None), "name", None)
+        if not violated_burden_name:
+            continue
+        if not any(t.token_name == violated_burden_name and t.state == "violated" for t in tokens):
+            continue
+
+        responding_actor = getattr(getattr(vr, "responding_actor", None), "name", None)
+        creates_burden_ref = getattr(vr, "creates_burden", None)
+        if not responding_actor or creates_burden_ref is None:
+            continue
+        creates_burden_name = creates_burden_ref.name
+
+        already_responded = any(
+            t.token_name == creates_burden_name
+            and t.holder == responding_actor
+            and t.state in ("active", "discharged")
+            for t in tokens
+        )
+        if already_responded:
+            continue
+
+        new_tok = token_from_spec(spec, creates_burden_name, responding_actor, tick)
+        tokens.append(new_tok)
+        fired.append(vr.name)
+        effects_log.append(
+            f"fired '{vr.name}': granted '{creates_burden_name}' to '{responding_actor}'"
+        )
+
+        escalate_to_ref = getattr(vr, "escalate_to", None)
+        if escalate_to_ref is not None:
+            effects_log.append(f"escalated '{vr.name}' to '{escalate_to_ref.name}'")
+
+    new_tick = tick + 1 if fired else tick
+    new_state = state.with_tokens(tokens).with_tick(new_tick)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name="system",
+        action_name="fire_violation_responses",
+        outcome="ok",
+        discharged=(),
+        effects=tuple(effects_log),
+        violations=(),
+        fired_responses=tuple(fired),
     )
     return new_state, record
 

@@ -18,6 +18,7 @@ from el_engine import (
     check_live_violations as _engine_check_live_violations,
     enroll,
     fire_event as _engine_fire_event,
+    fire_violation_responses as _engine_fire_violation_responses,
     grant_token,
     initial_state,
     reinstate_authorization as _engine_reinstate_authorization,
@@ -244,6 +245,18 @@ class Runtime:
         revoke/reinstate, tick only advances on a real transition, not on
         a no-op poll — deliberate exception, see el_engine.py."""
         new_state, record = _engine_check_live_violations(self._state, self._spec)
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def fire_violation_responses(self) -> TransitionRecord:
+        """Fire each declared ViolationResponse whose on_violation_of Burden is
+        currently VIOLATED; append the event to the ledger. Idempotent per
+        violation — see el_engine.fire_violation_responses()'s docstring for
+        the exact predicate. Deliberately separate from
+        check_live_violations() (kept a pure detector); mirrors its
+        direct-call pattern and conditional tick-advance (no-op stays free)."""
+        new_state, record = _engine_fire_violation_responses(self._state, self._spec)
         self._state = new_state
         self._ledger.append(record)
         return record

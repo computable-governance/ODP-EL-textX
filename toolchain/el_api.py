@@ -478,6 +478,15 @@ class CheckViolationsResponse(BaseModel):
     objective_reachable: bool
 
 
+class FireViolationResponsesResponse(BaseModel):
+    tick: int
+    fired: List[str]                # ViolationResponse names fired this call
+    effects: List[str]
+    updated_world: dict
+    new_objective_score: float
+    objective_reachable: bool
+
+
 class ConsentEventResponse(BaseModel):
     fhir_consent_id: str
     fhir_status: str
@@ -1157,6 +1166,58 @@ def check_violations_endpoint() -> CheckViolationsResponse:
         tick=tr.tick,
         outcome=tr.outcome,
         violations=list(tr.violations),
+        effects=list(tr.effects),
+        updated_world=updated_world,
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint: POST /fire-violation-responses ───────────────────────────────────
+
+@app.post(
+    "/fire-violation-responses",
+    response_model=FireViolationResponsesResponse,
+    summary="Fire declared ViolationResponses for currently-violated Burdens",
+    description=(
+        "Calls Runtime.fire_violation_responses() to fire each declared "
+        "ViolationResponse whose on_violation_of Burden is currently VIOLATED "
+        "(set by a prior POST /check-violations call — this endpoint never "
+        "detects violations itself, only responds to ones already detected; "
+        "kept as a separate, deliberate beat rather than folded into "
+        "check-violations, so detection stays a pure, poll-safe operation). "
+        "For each firing: grants creates_burden to obligates via the same "
+        "general-purpose token_from_spec() path every other fresh-grant call "
+        "uses, and logs an informational escalate_to entry (no token/event "
+        "fired for it — emits/§8.4 outbound notification stays deferred, see "
+        "docs/CONCEPTS_INDEX.md). Idempotent: fires exactly once per "
+        "violation, never again — even after its created burden is "
+        "discharged. Tick only advances when at least one response actually "
+        "fires. Then re-queries the Kripke model for the updated world "
+        "state, objective score, and reachability, mirroring the other "
+        "mutating endpoints."
+    ),
+)
+def fire_violation_responses_endpoint() -> FireViolationResponsesResponse:
+    tr = _runtime.fire_violation_responses()
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return FireViolationResponsesResponse(
+        tick=tr.tick,
+        fired=list(tr.fired_responses),
         effects=list(tr.effects),
         updated_world=updated_world,
         new_objective_score=round(score, 4),
