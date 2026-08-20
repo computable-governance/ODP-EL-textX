@@ -3329,6 +3329,46 @@ resolution — Option B investigation reveals three compounding
 problems, not one (paused, 2026-08-19)" — a real gap surfaced mid-design,
 needing its own dedicated session, not continued same-day work.
 
+**Resolved (2026-08-20):** `check_live_violations()` implemented in
+`el_engine.py`, wrapped by `Runtime.check_live_violations()` in
+`el_runtime.py`, exposed via `POST /check-violations` in `el_api.py`.
+Resolves both open questions from this finding: tick-based (not
+wall-clock), explicit trigger (not automatic on `advance()`). Reuses the
+relocated `_build_obligation_descriptors()`/`_parse_deadline_steps()`
+two-tier deadline lookup (see relocation note below) — the same logic
+`build_kripke_from_runtime()` already used, not reinvented. Scope:
+`discharge_mode: eventual` burdens only; `discharge_mode: strict` burdens
+are explicitly excluded, since treating them as violatable on elapsed
+time would fabricate an enforcement guarantee that does not exist live
+(see the separate, still-open `discharge_mode: strict` finding). This is
+the first live code path to produce `TransitionRecord.outcome ==
+"violation"` — previously a documented but never-produced value.
+
+Tick advance on this endpoint is conditional, not unconditional like
+other engine mutations — a deliberate exception so repeated no-op polling
+during a demo doesn't silently erode other Burdens' deadlines. See
+`check_live_violations()`'s docstring for the full reasoning.
+
+**Relocation performed as part of this work:** `ObligationDescriptor`,
+`_parse_deadline_steps()`, and `_build_obligation_descriptors()` moved
+from `el_kripke.py` (Layer 4) into `el_engine.py` (Layer 3);
+`el_kripke.py` now imports all three back. Corrects the layering
+direction (Layer 4 depending on Layer 3, matching how it conceptually
+already worked) rather than duplicating deadline-bucket logic or
+inverting the dependency. Confirmed no circular import. 29/29
+`el_kripke.py`-specific tests passed on the relocation alone, before
+`check_live_violations()` was added.
+
+**9 new tests** (5 engine-level in `tests/test_check_live_violations.py`,
+4 endpoint-level in `tests/test_check_violations_endpoint.py`). Full
+suite: 135/135, zero regressions (baseline 126/126).
+
+**Still open, deliberately out of scope for this work:** `discharge_mode:
+strict` live enforcement (separate finding, unaffected); wiring detected
+violations to `ViolationResponse`/`on_violation_of` effects
+(`referralNoResponseViolation` grammar already confirmed correct — see
+the design spec above — this is the next step, not done here).
+
 ---
 
 ## `discharge_mode: strict` — enforcement exists only in the verifier, not the live runtime — OPEN FINDING (2026-08-20)
