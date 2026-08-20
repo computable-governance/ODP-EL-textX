@@ -3268,3 +3268,131 @@ after this session's holder-resolution/double-grant fix, and — per
 (Escalation Notice wording, usage instructions), since the wording fix
 depends on knowing whether this becomes real or stays permanently
 unreachable by design.
+
+**Correction (2026-08-20, same day) — the "already exists and is tested"
+claim above is wrong; retracted.** Before starting the wiring design,
+a ground-truth check was run against this finding's own claim.
+`_violation_entry()` does not exist anywhere in the codebase — confirmed
+by direct grep across every file in `toolchain/`, zero matches. There is
+no function by that name, and no equivalent under another name either:
+
+- `el_engine.py` documents its own absence of this feature, rather than
+  omitting it by oversight — Step 1's docstring (module header, lines
+  8-9) reads *"identify tokens past deadline (informational; real clock
+  requires caller to manage tick-to-deadline mapping)"*, and the Step 1
+  comment in `advance()` (line 212) reads *"caller to inspect but does
+  not auto-violate here."*
+- Grepped every assignment of `"violated"`/`'violated'` across
+  `toolchain/*.py`: the only two hits are the field comment declaring
+  `TokenInstance.state`'s valid enum values (`el_engine.py:38`, never
+  assigned to) and `el_kripke.py:2574`, which only *reads*
+  `tok.state == "violated"` if a caller had already set it — nothing
+  upstream ever does.
+- Grepped `outcome="violation"` / `outcome='violation'`: zero hits in
+  `el_engine.py`. `TransitionRecord.outcome` is documented as
+  `'ok' | 'blocked' | 'violation'`, but `'violation'` is never actually
+  produced by any live code path — the same declared-but-dead-enum-value
+  pattern as `TokenInstance.state == 'violated'`.
+
+**What actually exists:** deadline→VIOLATED logic is real, but lives
+entirely inside `el_kripke.py`'s Kripke world-expansion BFS (roughly
+lines 2016-2185 and 2658-2659), e.g. `if w.step >= desc.deadline_steps:
+... ObligationState.VIOLATED`. This walks the *model checker's own*
+internal `step` counter within a bounded horizon, generating a
+hypothetical future world where an obligation goes VIOLATED if not
+discharged in time — built for AF/EF verification (is there a path /
+are all paths eventually violating), not for observing the actual live
+`WorldState`. It has no tick-to-wall-clock mapping and no connection to
+the live `Runtime` or ledger. **Live violation detection against the
+running system does not exist at all.**
+
+**New open design question this surfaces, not yet decided:** should
+live violation detection be **tick-based** (reusing/extending the
+Kripke model's own `step` counter and `deadline_steps` semantics — the
+existing verification-layer vocabulary) or **wall-clock-based**
+(matching how deadlines are actually written in scenario text, e.g.
+`referralResponseBurden`'s `"5 working days from referral receipt"`,
+`escalationNoticeBurden`'s `"48 hours from violation detection"`)?
+These are materially different designs — tick-based reuses existing
+machinery but has no real-world time meaning outside the verifier;
+wall-clock-based matches the scenario authors' intent but requires
+building a deadline-string-to-real-time parser that doesn't exist
+today (`_parse_deadline_steps()` in `el_kripke.py` parses these same
+strings into an abstract step count for the Kripke horizon only, not
+into any real-world duration).
+
+**Consequence for the `ViolationResponse` wiring work logged in this
+same finding:** that work is now blocked on this being designed and
+built first, not merely on a wiring step on top of an existing
+detector. **Deferred, same category as** "Delegation holder/chain
+resolution — Option B investigation reveals three compounding
+problems, not one (paused, 2026-08-19)" — a real gap surfaced mid-design,
+needing its own dedicated session, not continued same-day work.
+
+---
+
+## `discharge_mode: strict` — enforcement exists only in the verifier, not the live runtime — OPEN FINDING (2026-08-20)
+
+**Status: OPEN, not fixed. Surfaced as a side effect of the violation-detection
+ground-truth check, not the original target of that check.**
+
+The paper's central formal claim (EDOC26final.tex, reviewer_response.md) is
+that `discharge_mode: strict` is a **runtime enforcement mechanism**: "the
+runtime governance engine enforces this by blocking time advancement when a
+strict obligation is actionable — a constraint on actual agent behaviour...
+not a modelling stipulation." This language was written specifically to
+answer a reviewer's concern that strict mode might merely stipulate the
+desired conclusion at the modelling layer rather than constrain real
+behaviour.
+
+**Confirmed today, by direct grep of `el_engine.py` and `el_runtime.py`
+(not inferred): this claim does not hold in the current implementation.**
+
+- `discharge_mode` is read and copied through unchanged in every code path
+  (e.g. `_transition()`, `el_engine.py:112-119`) — never branched on.
+  Zero conditional logic anywhere in `el_engine.py`/`el_runtime.py` checks
+  `discharge_mode == "strict"`.
+- `WorldState.tick` advances unconditionally at the end of every `advance()`
+  call (`el_engine.py:406`) and identically in `revoke_authorization()` /
+  `reinstate_authorization()` (lines 558, 654, 687) — no check anywhere for
+  a pending strict obligation on an active holder before advancing.
+- The only real tick-suppression logic lives entirely inside
+  `el_kripke.py`'s BFS world-expansion (~line 2196-2218): it governs whether
+  a tick-edge is added between *hypothetical* worlds during AF/EF
+  verification. It has no connection to live `WorldState.tick` or any
+  `advance()` call.
+
+**Net effect:** today, an actor can call unrelated `advance()` actions
+repeatedly while a `strict` burden sits PENDING and actionable on them, and
+nothing in the live system stops it or flags it — `discharge_mode: strict`
+currently only guarantees AF holds inside the *verifier's model* of the
+system, not in the deployed system itself.
+
+**Same architectural shape as two other findings this week** (today's
+double-grant bug; the live-violation-detection gap) — verifier-only logic
+assumed, without checking, to also govern live runtime behaviour. This one
+is more consequential than either: it is the mechanism the paper's central
+formal contribution and the reviewer-response commitments rest on.
+
+**Scope note:** does not affect `referralResponseBurden` /
+`assessmentSchedulingBurden` specifically (both confirmed `discharge_mode:
+eventual` — see the separate live-violation-detection finding), since
+strict-suppression wouldn't apply to them even if live-enforced. This
+finding is about the `strict` mechanism generally, wherever it's declared
+across any scenario.
+
+**Not fixed today — deliberately deferred**, pending an explicit decision
+on urgency (implement live tick-suppression in `el_engine.py` before this
+is visible to any external audience, vs. log precisely and schedule
+separately). Cross-reference: this finding is independent of and does not
+block the in-progress eventual-mode live-violation-detection/
+`ViolationResponse`-wiring design work.
+
+**Urgency resolved (2026-08-20):** does not change urgency for
+`EDOC26final.tex` / `reviewer_response.md` — both still drafting, not yet
+submitted. The reviewer-response document's existing prepared language
+("Full operational assurance additionally requires that the governance
+engine is faithfully deployed, which is an important open problem we
+acknowledge as future work") already anticipates this exact gap; fold this
+finding in as a concrete instance of that caveat when finalizing
+`reviewer_response.md`.
