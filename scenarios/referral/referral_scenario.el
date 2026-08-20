@@ -464,6 +464,16 @@ community SpecialistPracticeCommunity
             description: "Patient role — SpecialistPracticeCommunity's own contract/invariants apply while the patient is under this practice's referred care"
             {}
 
+        role practiceOversightRole
+            description: "Specialist practice's own organisational oversight role — standing escalation/notification responsibility, distinct from specialistRole's clinical membership"
+            {
+                action notify_gp_of_non_response {
+                    description: "Specialist practice notifies GP practice that the referral response deadline was missed"
+                    actor: practiceOversightRole
+                    favoured_by_burden escalationNoticeBurden
+                }
+            }
+
         lifecycle {
             establishing {
                 implicit: true

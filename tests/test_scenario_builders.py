@@ -22,6 +22,8 @@ raising, on every test run.
 import pytest
 
 from el_api import _SCENARIO_BUILDERS, _build_referral_runtime
+from el_engine import _find_action_for_burden
+from el_kripke import find_normative_policies_for_token
 from fhir_mapper import EncounterContext
 
 
@@ -111,3 +113,45 @@ def test_referral_runtime_encounter_context_grounds_gp_side_only():
         key=lambda t: t.token_name,
     )
     assert non_gp_tokens(grounded_state.tokens) == non_gp_tokens(default_state.tokens)
+
+
+def test_specialist_practice_fills_practice_oversight_role():
+    """
+    2026-08-20: SpecialistPractice gained practiceOversightRole
+    (SpecialistPracticeCommunity) so notify_gp_of_non_response has a role to
+    attach to (Action only exists inside a RoleDecl — §6.3/§7.8.1; see
+    docs/CONCEPTS_INDEX.md's role-attachment conformance-check finding).
+    Confirms the enroll() change landed, not just the grammar addition.
+    """
+    state = _build_referral_runtime().current_state()
+    specialist_practice_roles = {
+        a.role_name for a in state.actors if a.actor_name == "SpecialistPractice"
+    }
+    assert specialist_practice_roles == {"practiceOversightRole"}
+
+
+def test_notify_gp_of_non_response_declared_and_governance_resolvable():
+    """
+    Structural-only checks — NOT a claim that notify_gp_of_non_response is
+    live-reachable via get_available_actions(): that endpoint derives purely
+    from state.tokens (el_api.py:518-578), and escalationNoticeBurden is
+    never granted to anyone today (the ViolationResponse-wiring gap is
+    separate, still open — see docs/CONCEPTS_INDEX.md). This confirms the
+    grammar/governance-lookup half of today's change only:
+      1. The structural favoured_by search independently resolves the new
+         action — not exercised via for_action (already set directly on
+         the token; see this session's favoured_by_burden-vs-for_action
+         finding).
+      2. favoured_by_burden escalationNoticeBurden on the new action makes
+         find_normative_policies_for_token() resolve a governing element
+         where it previously returned (None, []).
+    """
+    runtime = _build_referral_runtime()
+    spec = runtime._spec
+
+    assert _find_action_for_burden(spec, "escalationNoticeBurden") == "notify_gp_of_non_response"
+
+    element, policies = find_normative_policies_for_token(spec, "escalationNoticeBurden")
+    assert element is not None
+    assert element.name == "SpecialistPracticeCommunity"
+    assert policies == []  # SpecialistPracticeCommunity declares no normative_policy of its own

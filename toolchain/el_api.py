@@ -205,7 +205,13 @@ def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None
       SpecialistAIAgent   fills aiExaminationRole (ReferralEpisodeCommunity)
       Patient             fills patientRole in BOTH standing communities and
                           episodePatientRole (ReferralEpisodeCommunity)
-      GPPractice, SpecialistPractice are parties (principals), not role-fillers.
+      GPPractice is a party (principal), not a role-filler. SpecialistPractice
+      fills practiceOversightRole (SpecialistPracticeCommunity, standing) —
+      its own organisational escalation/notification role, distinct from
+      specialistRole (SpecialistClinician's clinical membership). Added
+      2026-08-20 so notify_gp_of_non_response has a role to attach to
+      (§6.3/§7.8.1 — an Action only exists inside a RoleDecl; see
+      docs/CONCEPTS_INDEX.md's role-attachment conformance-check finding).
 
     Token grants:
       GPClinician         — referralInitiationBurden, clinicalHandoverBurden
@@ -251,7 +257,7 @@ def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None
     state = enroll(state, gp_practice)
     state = enroll(state, referring_practitioner, role_name="gpClinicianRole")
     state = enroll(state, referring_practitioner, role_name="referringRole")
-    state = enroll(state, "SpecialistPractice")
+    state = enroll(state, "SpecialistPractice",  role_name="practiceOversightRole")
     state = enroll(state, "SpecialistClinician", role_name="specialistRole")
     state = enroll(state, "SpecialistClinician", role_name="referredToRole")
     state = enroll(state, "SpecialistAIAgent",   role_name="aiExaminationRole")
