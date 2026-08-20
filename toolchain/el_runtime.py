@@ -15,6 +15,7 @@ from el_engine import (
     TokenInstance,
     TransitionRecord,
     advance as _engine_advance,
+    check_live_violations as _engine_check_live_violations,
     enroll,
     fire_event as _engine_fire_event,
     grant_token,
@@ -228,6 +229,21 @@ class Runtime:
         new_state, record = _engine_reinstate_authorization(
             self._state, self._spec, authorization_name
         )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def check_live_violations(self) -> TransitionRecord:
+        """Sweep active, discharge_mode: eventual Burdens for elapsed deadlines,
+        transitioning any past due to 'violated'; append the event to the
+        ledger. discharge_mode: strict Burdens are never touched here — see
+        el_engine.check_live_violations()'s docstring for why. Mirrors
+        revoke_authorization()/reinstate_authorization()'s direct-call
+        pattern: no calling actor, so the ledger entry attributes to
+        'system' the same way fire_event() attributes to `source`. Unlike
+        revoke/reinstate, tick only advances on a real transition, not on
+        a no-op poll — deliberate exception, see el_engine.py."""
+        new_state, record = _engine_check_live_violations(self._state, self._spec)
         self._state = new_state
         self._ledger.append(record)
         return record

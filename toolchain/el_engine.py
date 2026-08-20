@@ -24,7 +24,7 @@ Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, §7.8, §7.10
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 # ── Runtime types ─────────────────────────────────────────────────────────────
@@ -481,6 +481,261 @@ def _find_action_for_burden(model: Any, burden_name: str) -> Optional[str]:
     return None
 
 
+# ── Obligation descriptor (relocated from el_kripke.py 2026-08-20) ─────────────
+# Layer 4 (el_kripke.py) depends on Layer 3 for this: ObligationDescriptor and
+# the Commitment/Delegation-chain resolution that builds it are properties of
+# the live accountability model, not of the verifier. el_kripke.py imports
+# these three back (see its own import block) rather than defining them —
+# check_live_violations() below and el_kripke.py's build_kripke_model() /
+# build_kripke_from_runtime() now share one implementation instead of two.
+
+@dataclass
+class ObligationDescriptor:
+    """
+    Metadata about one obligation extracted from the DSL-EL spec.
+    Used by the Layer 4 reachability builder to generate transitions, and by
+    check_live_violations() below to resolve a live Burden's deadline_steps.
+    """
+    obligation_id: str        # burden name from the DSL (e.g. "paymentProcessingObligation")
+    obligation_text: str      # natural language text (e.g. "Process all customer payments…")
+    deadline_steps: int       # finite horizon; parsed from deadline string or defaulted
+    holder: str               # actor currently responsible (leaf of delegation chain)
+    chain: List[str]          # full chain [root_party, …, current_holder]
+    revocable: bool
+    sub_delegation_allowed: bool
+    discharge_mode: str = "eventual"
+    # "eventual" (default) — holder may delay; TICK available; AF may not hold
+    # "strict"             — holder must act at first opportunity; TICK removed; AF holds
+    priority_weight: float = 0.5
+    # Numeric weight derived from PriorityLevel (AM-15):
+    #   critical → 1.00   high → 0.75   normal → 0.50   low → 0.25
+    # Used by the weighted utility function (§C.3) to reflect modeller-specified
+    # importance ordering across obligations.
+    triggered_by: Optional[str] = None
+    # Event name (from DeonticToken.triggered_by) whose firing moves this
+    # obligation from WAITING → PENDING. None means obligation starts PENDING.
+    fires_event: Optional[str] = None
+    # Event name (from DeonticToken.discharged_by) emitted when this obligation
+    # is discharged. Bidirectional convention: discharging this obligation fires
+    # this event, which may cascade to trigger other WAITING obligations (P6).
+    for_action: Optional[str] = None
+    # Name of the Action (within a community Role body) whose ConditionalAction
+    # has this obligation as a favoured_by_burden entry. Resolved by
+    # _find_action_for_burden() when not set directly on the DeonticToken.
+
+
+def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
+    """
+    Convert a natural-language deadline string to a finite step count.
+
+    The mapping is necessarily approximate because the DSL deadline is
+    expressed in domain time (seconds, days, etc.) while our step model
+    is abstract. The goal is to preserve the relative ordering of deadlines.
+
+    Heuristics:
+      "… second …"        → 2 steps   (very tight)
+      "… minute …"        → 3 steps
+      "… hour …"          → 5 steps
+      "… day …"           → 8 steps
+      "… week …"          → 12 steps
+      "… month …"         → 20 steps
+      anything else       → default
+    """
+    if not deadline_str:
+        return default
+    s = deadline_str.lower()
+    if "second" in s:
+        return 2
+    if "minute" in s:
+        return 3
+    if "hour"   in s:
+        return 5
+    if "day"    in s:
+        return 8
+    if "week"   in s:
+        return 12
+    if "month"  in s:
+        return 20
+    return default
+
+
+def _priority_weight(priority_str: Optional[str]) -> float:
+    """
+    §C.3: Convert a PriorityLevel string (AM-15) to a numeric weight.
+
+    Duplicated verbatim from el_kripke.py's identical helper — same
+    circular-import rationale as _find_action_for_burden above. el_kripke.py
+    keeps its own copy since it is used far more widely there than just by
+    the descriptor-building logic that moved here.
+
+      critical → 1.00   (must not be violated under any circumstances)
+      high     → 0.75   (strongly preferred to discharge)
+      normal   → 0.50   (default — equal weight)
+      low      → 0.25   (desirable but not critical)
+    """
+    return {
+        "critical": 1.00,
+        "high":     0.75,
+        "normal":   0.50,
+        "low":      0.25,
+    }.get(priority_str or "normal", 0.50)
+
+
+def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]:
+    """
+    Extract ObligationDescriptor for each burden that appears in at least
+    one CommitmentDecl or DelegationDecl.
+
+    Algorithm:
+    1. Index all BurdenDecl elements by name.
+    2. For each CommitmentDecl, find its creates_burden reference.
+    3. Walk the delegation graph forward to find the current holder.
+    4. Record the full accountability chain.
+    """
+    # Index burdens by name.
+    # The grammar uses DeonticToken for all token kinds (burden/permit/embargo);
+    # we filter by kind == "burden". (AM-18 renamed DeonticTokenDecl → DeonticToken)
+    burdens: Dict[str, Any] = {
+        t.name: t
+        for t in model.elements
+        if type(t).__name__ == "DeonticToken" and getattr(t, "kind", None) == "burden"
+    }
+
+    # Build delegation graph: from_name → list of (to_name, obligation_text)
+    # (duplicates el_reasoner.delegation_graph but avoids import)
+    del_graph: Dict[str, List[Tuple[str, str, bool, bool]]] = {}
+    for d in model.elements:
+        if type(d).__name__ != "Delegation":  # AM-18: DelegationDecl → Delegation
+            continue
+        from_name = getattr(getattr(d, "delegator", None), "name", None)
+        to_name   = getattr(getattr(d, "delegate", None), "name", None)
+        if from_name and to_name:
+            del_graph.setdefault(from_name, []).append((
+                to_name,
+                d.obligation,
+                getattr(d, "sub_delegation_allowed", False),
+                getattr(d, "revocable", False),
+            ))
+
+    def walk_chain(start: str, obl_text: str) -> List[str]:
+        """DFS to leaf; returns [start, …, leaf]."""
+        chain = [start]
+        visited: Set[str] = {start}
+        current = start
+        while True:
+            outgoing = [
+                (to, oblt, sda, rev)
+                for to, oblt, sda, rev in del_graph.get(current, [])
+                if obl_text.lower() in oblt.lower()
+            ]
+            if not outgoing or outgoing[0][0] in visited:
+                break
+            to, oblt, sda, rev = outgoing[0]
+            chain.append(to)
+            visited.add(to)
+            current = to
+        return chain
+
+    descriptors: Dict[str, ObligationDescriptor] = {}
+
+    for c in model.elements:
+        if type(c).__name__ != "Commitment":  # AM-18: CommitmentDecl → Commitment
+            continue
+        burden_ref = getattr(c, "burden", None)
+        burden_name = getattr(burden_ref, "name", None)
+        actor_name  = getattr(getattr(c, "actor", None), "name", None)
+        if not burden_name or not actor_name:
+            continue
+        burden = burdens.get(burden_name)
+        if burden is None:
+            continue
+
+        obl_text     = getattr(c, "obligation", burden_name)
+        deadline_str = getattr(burden, "deadline", None)
+        chain        = walk_chain(actor_name, obl_text)
+        holder       = chain[-1]
+
+        # Use sub_delegation_allowed / revocable from the LAST delegation link
+        # that terminates at holder, if any
+        sda, rev = False, False
+        for d in model.elements:
+            if type(d).__name__ != "Delegation":  # AM-18: DelegationDecl → Delegation
+                continue
+            if getattr(getattr(d, "delegate", None), "name", None) == holder:
+                sda = getattr(d, "sub_delegation_allowed", False)
+                rev = getattr(d, "revocable", False)
+
+        # P6: extract event wiring from the burden token
+        triggered_by = getattr(getattr(burden, "triggered_by", None), "name", None)
+        fires_event  = getattr(getattr(burden, "discharged_by", None), "name", None)
+        # fires_event convention: DeonticToken.discharged_by names the event that
+        # fires when this obligation is discharged (bidirectional: the same event
+        # that the holder's action emits). Used by T1 cascade to activate WAITING
+        # obligations whose triggered_by matches this event name.
+
+        # Tier 1: explicit for_action on the DeonticToken grammar attribute
+        # Tier 2: structural search through community Role → Action → ConditionalAction
+        for_action = getattr(burden, "for_action", None) or None
+        if for_action is None:
+            for_action = _find_action_for_burden(model, burden_name)
+
+        descriptors[burden_name] = ObligationDescriptor(
+            obligation_id=burden_name,
+            obligation_text=obl_text,
+            deadline_steps=_parse_deadline_steps(deadline_str),
+            holder=holder,
+            chain=chain,
+            revocable=rev,
+            sub_delegation_allowed=sda,
+            discharge_mode=getattr(burden, "discharge_mode", "") or "eventual",
+            priority_weight=_priority_weight(getattr(burden, "priority", None)),
+            triggered_by=triggered_by,
+            fires_event=fires_event,
+            for_action=for_action,
+        )
+
+    # Second pass: Delegation elements that transfer a token_group (§7.8.7 NOTE).
+    # These obligations are held by the delegate but may not have a Commitment.
+    for d in model.elements:
+        if type(d).__name__ != "Delegation":
+            continue
+        group_ref = getattr(d, "token_group", None)
+        if group_ref is None:
+            continue
+        delegate_name = getattr(getattr(d, "delegate", None), "name", None)
+        if not delegate_name:
+            continue
+        for tok_ref in getattr(group_ref, "tokens", []):
+            burden_name = getattr(tok_ref, "name", None)
+            if not burden_name or burden_name in descriptors:
+                continue
+            burden = burdens.get(burden_name)
+            if burden is None:
+                continue
+            triggered_by = getattr(getattr(burden, "triggered_by", None), "name", None)
+            fires_event  = getattr(getattr(burden, "discharged_by", None), "name", None)
+            for_action = getattr(burden, "for_action", None) or None
+            if for_action is None:
+                for_action = _find_action_for_burden(model, burden_name)
+            deadline_str = getattr(burden, "deadline", None)
+            descriptors[burden_name] = ObligationDescriptor(
+                obligation_id=burden_name,
+                obligation_text=burden_name,
+                deadline_steps=_parse_deadline_steps(deadline_str),
+                holder=delegate_name,
+                chain=[delegate_name],
+                revocable=getattr(d, "revocable", False),
+                sub_delegation_allowed=getattr(d, "sub_delegation_allowed", False),
+                discharge_mode=getattr(burden, "discharge_mode", "") or "eventual",
+                priority_weight=_priority_weight(getattr(burden, "priority", None)),
+                triggered_by=triggered_by,
+                fires_event=fires_event,
+                for_action=for_action,
+            )
+
+    return descriptors
+
+
 def token_from_spec(spec, token_name: str, holder: str, granted_at_tick: int) -> TokenInstance:
     """
     Construct a TokenInstance from a top-level DeonticToken in the spec.
@@ -701,6 +956,118 @@ def fire_event(
         discharged=(),
         effects=tuple(effects_log),
         violations=(),
+    )
+    return new_state, record
+
+
+def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, TransitionRecord]:
+    """
+    Sweep every live, active, discharge_mode: eventual Burden for an elapsed
+    deadline and transition it to 'violated'.
+
+    Closes the live-detection gap logged in docs/CONCEPTS_INDEX.md ("Live
+    violation triggering — detection mechanism exists and is tested; wiring
+    to on_violation_of effects is the actual gap", corrected same day):
+    the only deadline→VIOLATED logic that existed anywhere in the codebase
+    lived inside el_kripke.py's BFS world-expansion, walking the verifier's
+    own hypothetical `step` counter — it had no connection to a live
+    WorldState.tick at all. This function is that connection: tick-based
+    (not wall-clock-based — the open design question the finding left
+    undecided), reusing the Kripke model's own deadline_steps vocabulary
+    against the real WorldState.tick/TokenInstance.granted_at_tick instead
+    of a hypothetical one. It is deliberately an explicit call, not
+    something advance() invokes automatically — the finding's other open
+    question — so callers control when a deadline sweep happens (e.g. an
+    explicit "check deadlines" endpoint) rather than it firing silently on
+    unrelated actions.
+
+    Deliberately excludes discharge_mode: strict Burdens entirely — not
+    checked, not transitioned, regardless of elapsed time. Strict-mode
+    enforcement is itself a live-runtime gap (see docs/CONCEPTS_INDEX.md,
+    "discharge_mode: strict — enforcement exists only in the verifier, not
+    the live runtime"): today nothing in advance()/revoke_authorization()/
+    reinstate_authorization() suppresses tick advancement for a pending
+    strict obligation, so tick-elapsed time is not a meaningful signal for
+    a strict Burden in the live system the way it is for eventual — treating
+    it as violatable on elapsed time here would fabricate an enforcement
+    guarantee this function does not actually provide. That gap is out of
+    scope for this function to fix.
+
+    deadline_steps is resolved via the same two-tier lookup
+    build_kripke_from_runtime() (el_kripke.py) already uses for exactly
+    this reason — some scenario builders pre-seed a Burden directly onto
+    WorldState.tokens without a matching Commitment (e.g.
+    referralResponseBurden/assessmentSchedulingBurden; see
+    docs/CONCEPTS_INDEX.md, the double-grant/pre-seed finding), so a token
+    absent from the Commitment-derived index still needs a deadline:
+
+      Tier 1 — _build_obligation_descriptors(spec)[token_name].deadline_steps
+               (Commitment-derived: real accountability chain, real
+               discharge_mode/priority context)
+      Tier 2 — direct DeonticToken lookup + _parse_deadline_steps(), default 5
+               (bare-string fallback, for a token with no Commitment)
+
+    Returns (new_state, record). record.outcome is 'violation' if at least
+    one Burden was transitioned this call, 'ok' otherwise (checked, nothing
+    past deadline) — the first live code path to ever produce
+    outcome == 'violation'; TransitionRecord.outcome has documented
+    'violation' as a valid value since its own docstring was written, but
+    no code path produced it until now (also logged in the same finding).
+
+    Deliberate exception to the "every engine mutation advances tick
+    unconditionally" convention established by reinstate_authorization()'s
+    own no-op branch (its tick advances even when the permit was already
+    active and nothing changed): here, tick only advances when at least
+    one Burden actually transitions to VIOLATED. This is the endpoint most
+    likely to be polled repeatedly during a live demo ("is anything
+    overdue yet?") — if a no-op poll silently advanced the global tick the
+    same as a real mutation, every unrelated poll would bring every other
+    live Burden's elapsed-vs-deadline count closer to violation,
+    independent of any real actor action. Confirmed deliberate 2026-08-20.
+    """
+    tick = state.tick
+    spec_descriptors = _build_obligation_descriptors(spec)
+    tokens = list(state.tokens)
+    violated_names: List[str] = []
+    effects_log: List[str] = []
+
+    for i, tok in enumerate(tokens):
+        if tok.kind != "burden" or tok.state != "active" or tok.discharge_mode != "eventual":
+            continue
+
+        spec_desc = spec_descriptors.get(tok.token_name)
+        if spec_desc is not None:
+            deadline_steps = spec_desc.deadline_steps
+        else:
+            spec_tok = next(
+                (e for e in spec.elements
+                 if type(e).__name__ == "DeonticToken" and e.name == tok.token_name),
+                None,
+            )
+            deadline_steps = _parse_deadline_steps(getattr(spec_tok, "deadline", None), default=5)
+
+        elapsed = tick - tok.granted_at_tick
+        if elapsed >= deadline_steps:
+            tokens[i] = _transition(tok, "violated")
+            violated_names.append(tok.token_name)
+            effects_log.append(
+                f"violated '{tok.token_name}' held by '{tok.holder}' "
+                f"(elapsed {elapsed} >= deadline {deadline_steps} steps)"
+            )
+
+    # Tick only advances when something actually happened — deliberate
+    # departure from reinstate_authorization()'s "always advance, even on
+    # a no-op" precedent; see docstring above.
+    new_tick = tick + 1 if violated_names else tick
+    new_state = state.with_tokens(tokens).with_tick(new_tick)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name="system",
+        action_name="check_live_violations",
+        outcome="violation" if violated_names else "ok",
+        discharged=(),
+        effects=tuple(effects_log),
+        violations=tuple(violated_names),
     )
     return new_state, record
 

@@ -462,6 +462,16 @@ class ReinstateAuthorizationResponse(BaseModel):
     objective_reachable: bool
 
 
+class CheckViolationsResponse(BaseModel):
+    tick: int
+    outcome: str                   # 'violation' | 'ok'
+    violations: List[str]          # Burden names transitioned to 'violated' this call
+    effects: List[str]
+    updated_world: dict
+    new_objective_score: float
+    objective_reachable: bool
+
+
 class ConsentEventResponse(BaseModel):
     fhir_consent_id: str
     fhir_status: str
@@ -1090,6 +1100,57 @@ def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthor
         authority=tr.actor_name,   # reinstate_authorization sets actor_name = auth.authority.name
         authorization_name=authorization_name,
         outcome=tr.outcome,
+        effects=list(tr.effects),
+        updated_world=updated_world,
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint: POST /check-violations ───────────────────────────────────────────
+
+@app.post(
+    "/check-violations",
+    response_model=CheckViolationsResponse,
+    summary="Sweep active, discharge_mode: eventual Burdens for elapsed deadlines",
+    description=(
+        "Calls Runtime.check_live_violations() to detect and transition to "
+        "'violated' any active, discharge_mode: eventual Burden whose elapsed "
+        "time (current tick minus granted_at_tick) has reached or passed its "
+        "deadline_steps. deadline_steps is resolved via the same "
+        "Commitment-derived two-tier lookup build_kripke_from_runtime() uses "
+        "(Commitment-derived ObligationDescriptor first, bare DeonticToken "
+        "deadline-string fallback second). discharge_mode: strict Burdens are "
+        "never checked or transitioned here, regardless of elapsed time — "
+        "strict enforcement is a separate, still-open live-runtime gap (see "
+        "docs/CONCEPTS_INDEX.md). This is an explicit trigger, not automatic: "
+        "nothing else in the runtime calls it, so callers decide when a "
+        "deadline sweep happens. Then re-queries the Kripke model for the "
+        "updated world state, objective score, and reachability, mirroring "
+        "POST /authorizations/{authorization_name}/revoke."
+    ),
+)
+def check_violations_endpoint() -> CheckViolationsResponse:
+    tr = _runtime.check_live_violations()
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return CheckViolationsResponse(
+        tick=tr.tick,
+        outcome=tr.outcome,
+        violations=list(tr.violations),
         effects=list(tr.effects),
         updated_world=updated_world,
         new_objective_score=round(score, 4),

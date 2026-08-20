@@ -84,6 +84,15 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
 
+# Relocated 2026-08-20 (see docs/CONCEPTS_INDEX.md, "discharge_mode: strict —
+# enforcement exists only in the verifier, not the live runtime" and "Live
+# violation triggering"): ObligationDescriptor and the Commitment/Delegation
+# two-tier deadline lookup are Layer 3 accountability-chain concepts that
+# Layer 4 depends on, not the reverse. el_engine.py now owns them;
+# check_live_violations() there reuses the same logic build_kripke_model()
+# and build_kripke_from_runtime() below already relied on.
+from el_engine import ObligationDescriptor, _build_obligation_descriptors, _parse_deadline_steps
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # §C.1  —  Why we need Kripke models
@@ -229,40 +238,9 @@ def _make_world(
 
 
 # ── Obligation descriptor ─────────────────────────────────────────────────────
-
-@dataclass
-class ObligationDescriptor:
-    """
-    Metadata about one obligation extracted from the DSL-EL spec.
-    Used by the reachability builder to generate transitions.
-    """
-    obligation_id: str        # burden name from the DSL (e.g. "paymentProcessingObligation")
-    obligation_text: str      # natural language text (e.g. "Process all customer payments…")
-    deadline_steps: int       # finite horizon; parsed from deadline string or defaulted
-    holder: str               # actor currently responsible (leaf of delegation chain)
-    chain: List[str]          # full chain [root_party, …, current_holder]
-    revocable: bool
-    sub_delegation_allowed: bool
-    discharge_mode: str = "eventual"
-    # "eventual" (default) — holder may delay; TICK available; AF may not hold
-    # "strict"             — holder must act at first opportunity; TICK removed; AF holds
-    priority_weight: float = 0.5
-    # Numeric weight derived from PriorityLevel (AM-15):
-    #   critical → 1.00   high → 0.75   normal → 0.50   low → 0.25
-    # Used by the weighted utility function (§C.3) to reflect modeller-specified
-    # importance ordering across obligations.
-    triggered_by: Optional[str] = None
-    # Event name (from DeonticToken.triggered_by) whose firing moves this
-    # obligation from WAITING → PENDING. None means obligation starts PENDING.
-    fires_event: Optional[str] = None
-    # Event name (from DeonticToken.discharged_by) emitted when this obligation
-    # is discharged. Bidirectional convention: discharging this obligation fires
-    # this event, which may cascade to trigger other WAITING obligations (P6).
-    for_action: Optional[str] = None
-    # Name of the Action (within a community Role body) whose ConditionalAction
-    # has this obligation as a favoured_by_burden entry. Resolved by
-    # _find_action_for_burden() when not set directly on the DeonticToken.
-
+# ObligationDescriptor itself is defined in el_engine.py now (relocated
+# 2026-08-20, imported above) — PermitDescriptor below is its Permit-side
+# analogue and stays here; there was never a circular-import constraint on it.
 
 @dataclass
 class PermitDescriptor:
@@ -1438,41 +1416,6 @@ def _priority_weight(priority_str: Optional[str]) -> float:
     }.get(priority_str or "normal", 0.50)
 
 
-def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
-    """
-    Convert a natural-language deadline string to a finite step count.
-
-    The mapping is necessarily approximate because the DSL deadline is
-    expressed in domain time (seconds, days, etc.) while our step model
-    is abstract. The goal is to preserve the relative ordering of deadlines.
-
-    Heuristics:
-      "… second …"        → 2 steps   (very tight)
-      "… minute …"        → 3 steps
-      "… hour …"          → 5 steps
-      "… day …"           → 8 steps
-      "… week …"          → 12 steps
-      "… month …"         → 20 steps
-      anything else       → default
-    """
-    if not deadline_str:
-        return default
-    s = deadline_str.lower()
-    if "second" in s:
-        return 2
-    if "minute" in s:
-        return 3
-    if "hour"   in s:
-        return 5
-    if "day"    in s:
-        return 8
-    if "week"   in s:
-        return 12
-    if "month"  in s:
-        return 20
-    return default
-
-
 def _find_element_and_action_for_burden(
     model: Any, burden_name: str
 ) -> Optional[Tuple[Any, str]]:
@@ -1642,153 +1585,6 @@ def find_normative_policies_for_token(
         element, _action_name = found
         return (element, list(getattr(element, "normative_policies", [])))
     return find_governing_element_via_authorization(model, token_name)
-
-
-def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]:
-    """
-    Extract ObligationDescriptor for each burden that appears in at least
-    one CommitmentDecl or DelegationDecl.
-
-    Algorithm:
-    1. Index all BurdenDecl elements by name.
-    2. For each CommitmentDecl, find its creates_burden reference.
-    3. Walk the delegation graph forward to find the current holder.
-    4. Record the full accountability chain.
-    """
-    # Index burdens by name.
-    # The grammar uses DeonticToken for all token kinds (burden/permit/embargo);
-    # we filter by kind == "burden". (AM-18 renamed DeonticTokenDecl → DeonticToken)
-    burdens: Dict[str, Any] = {
-        t.name: t
-        for t in _collect(model, "DeonticToken")
-        if getattr(t, "kind", None) == "burden"
-    }
-
-    # Build delegation graph: from_name → list of (to_name, obligation_text)
-    # (duplicates el_reasoner.delegation_graph but avoids import)
-    del_graph: Dict[str, List[Tuple[str, str, bool, bool]]] = {}
-    for d in _collect(model, "Delegation"):  # AM-18: DelegationDecl → Delegation
-        from_name = _obj_name(d.delegator)
-        to_name   = _obj_name(d.delegate)
-        if from_name and to_name:
-            del_graph.setdefault(from_name, []).append((
-                to_name,
-                d.obligation,
-                getattr(d, "sub_delegation_allowed", False),
-                getattr(d, "revocable", False),
-            ))
-
-    def walk_chain(start: str, obl_text: str) -> List[str]:
-        """DFS to leaf; returns [start, …, leaf]."""
-        chain = [start]
-        visited: Set[str] = {start}
-        current = start
-        while True:
-            outgoing = [
-                (to, oblt, sda, rev)
-                for to, oblt, sda, rev in del_graph.get(current, [])
-                if obl_text.lower() in oblt.lower()
-            ]
-            if not outgoing or outgoing[0][0] in visited:
-                break
-            to, oblt, sda, rev = outgoing[0]
-            chain.append(to)
-            visited.add(to)
-            current = to
-        return chain
-
-    descriptors: Dict[str, ObligationDescriptor] = {}
-
-    for c in _collect(model, "Commitment"):  # AM-18: CommitmentDecl → Commitment
-        burden_ref = getattr(c, "burden", None)
-        burden_name = _obj_name(burden_ref)
-        actor_name  = _obj_name(getattr(c, "actor", None))
-        if not burden_name or not actor_name:
-            continue
-        burden = burdens.get(burden_name)
-        if burden is None:
-            continue
-
-        obl_text     = getattr(c, "obligation", burden_name)
-        deadline_str = getattr(burden, "deadline", None)
-        chain        = walk_chain(actor_name, obl_text)
-        holder       = chain[-1]
-
-        # Use sub_delegation_allowed / revocable from the LAST delegation link
-        # that terminates at holder, if any
-        sda, rev = False, False
-        for d in _collect(model, "Delegation"):  # AM-18: DelegationDecl → Delegation
-            if _obj_name(d.delegate) == holder:
-                sda = getattr(d, "sub_delegation_allowed", False)
-                rev = getattr(d, "revocable", False)
-
-        # P6: extract event wiring from the burden token
-        triggered_by = _obj_name(getattr(burden, "triggered_by", None))
-        fires_event  = _obj_name(getattr(burden, "discharged_by", None))
-        # fires_event convention: DeonticToken.discharged_by names the event that
-        # fires when this obligation is discharged (bidirectional: the same event
-        # that the holder's action emits). Used by T1 cascade to activate WAITING
-        # obligations whose triggered_by matches this event name.
-
-        # Tier 1: explicit for_action on the DeonticToken grammar attribute
-        # Tier 2: structural search through community Role → Action → ConditionalAction
-        for_action = getattr(burden, "for_action", None) or None
-        if for_action is None:
-            for_action = _find_action_for_burden(model, burden_name)
-
-        descriptors[burden_name] = ObligationDescriptor(
-            obligation_id=burden_name,
-            obligation_text=obl_text,
-            deadline_steps=_parse_deadline_steps(deadline_str),
-            holder=holder,
-            chain=chain,
-            revocable=rev,
-            sub_delegation_allowed=sda,
-            discharge_mode=getattr(burden, "discharge_mode", "") or "eventual",
-            priority_weight=_priority_weight(getattr(burden, "priority", None)),
-            triggered_by=triggered_by,
-            fires_event=fires_event,
-            for_action=for_action,
-        )
-
-    # Second pass: Delegation elements that transfer a token_group (§7.8.7 NOTE).
-    # These obligations are held by the delegate but may not have a Commitment.
-    for d in _collect(model, "Delegation"):
-        group_ref = getattr(d, "token_group", None)
-        if group_ref is None:
-            continue
-        delegate_name = _obj_name(getattr(d, "delegate", None))
-        if not delegate_name:
-            continue
-        for tok_ref in getattr(group_ref, "tokens", []):
-            burden_name = _obj_name(tok_ref)
-            if not burden_name or burden_name in descriptors:
-                continue
-            burden = burdens.get(burden_name)
-            if burden is None:
-                continue
-            triggered_by = _obj_name(getattr(burden, "triggered_by", None))
-            fires_event  = _obj_name(getattr(burden, "discharged_by", None))
-            for_action = getattr(burden, "for_action", None) or None
-            if for_action is None:
-                for_action = _find_action_for_burden(model, burden_name)
-            deadline_str = getattr(burden, "deadline", None)
-            descriptors[burden_name] = ObligationDescriptor(
-                obligation_id=burden_name,
-                obligation_text=burden_name,
-                deadline_steps=_parse_deadline_steps(deadline_str),
-                holder=delegate_name,
-                chain=[delegate_name],
-                revocable=getattr(d, "revocable", False),
-                sub_delegation_allowed=getattr(d, "sub_delegation_allowed", False),
-                discharge_mode=getattr(burden, "discharge_mode", "") or "eventual",
-                priority_weight=_priority_weight(getattr(burden, "priority", None)),
-                triggered_by=triggered_by,
-                fires_event=fires_event,
-                for_action=for_action,
-            )
-
-    return descriptors
 
 
 def _build_group_index(model: Any) -> Dict[str, List[str]]:
