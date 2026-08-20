@@ -487,6 +487,18 @@ class FireViolationResponsesResponse(BaseModel):
     objective_reachable: bool
 
 
+class AdvanceClockRequest(BaseModel):
+    ticks: int
+
+
+class AdvanceClockResponse(BaseModel):
+    tick: int
+    effects: List[str]              # single line, e.g. "clock advanced 8 tick(s): 0 → 8"
+    updated_world: dict
+    new_objective_score: float
+    objective_reachable: bool
+
+
 class ConsentEventResponse(BaseModel):
     fhir_consent_id: str
     fhir_status: str
@@ -1218,6 +1230,56 @@ def fire_violation_responses_endpoint() -> FireViolationResponsesResponse:
     return FireViolationResponsesResponse(
         tick=tr.tick,
         fired=list(tr.fired_responses),
+        effects=list(tr.effects),
+        updated_world=updated_world,
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint: POST /advance-clock ──────────────────────────────────────────────
+
+@app.post(
+    "/advance-clock",
+    response_model=AdvanceClockResponse,
+    summary="Let simulated time pass by N ticks, with no domain action",
+    description=(
+        "Calls Runtime.advance_clock(ticks) to advance WorldState.tick by "
+        "exactly `ticks` — no token transitions, no discharge, no grants, no "
+        "event triggering. This is the 'time passes' primitive that "
+        "deadline-based violation detection needs: drive the clock forward "
+        "with this, then call POST /check-violations to sweep for anything "
+        "now overdue. Deliberately has no action semantics of its own — the "
+        "honest alternative to burning ticks via unrelated no-op actions "
+        "(e.g. N repeated /authorizations/{name}/reinstate calls), which "
+        "would pollute the ledger with events that never really happened. "
+        "400 if ticks < 1. Then re-queries the Kripke model for the updated "
+        "world state, objective score, and reachability, mirroring the "
+        "other mutating endpoints."
+    ),
+)
+def advance_clock_endpoint(body: AdvanceClockRequest) -> AdvanceClockResponse:
+    try:
+        tr = _runtime.advance_clock(body.ticks)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return AdvanceClockResponse(
+        tick=tr.tick,
         effects=list(tr.effects),
         updated_world=updated_world,
         new_objective_score=round(score, 4),

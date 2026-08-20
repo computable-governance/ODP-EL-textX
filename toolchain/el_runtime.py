@@ -15,6 +15,7 @@ from el_engine import (
     TokenInstance,
     TransitionRecord,
     advance as _engine_advance,
+    advance_clock as _engine_advance_clock,
     check_live_violations as _engine_check_live_violations,
     enroll,
     fire_event as _engine_fire_event,
@@ -257,6 +258,18 @@ class Runtime:
         check_live_violations() (kept a pure detector); mirrors its
         direct-call pattern and conditional tick-advance (no-op stays free)."""
         new_state, record = _engine_fire_violation_responses(self._state, self._spec)
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def advance_clock(self, ticks: int) -> TransitionRecord:
+        """Let simulated time pass by `ticks`, with no domain action performed;
+        append the event to the ledger. Mirrors check_live_violations()/
+        fire_violation_responses()'s direct-call pattern (no calling actor,
+        so the ledger entry attributes to 'system'). See
+        el_engine.advance_clock()'s docstring for why this exists — the
+        honest alternative to burning ticks via unrelated no-op actions."""
+        new_state, record = _engine_advance_clock(self._state, ticks)
         self._state = new_state
         self._ledger.append(record)
         return record

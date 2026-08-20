@@ -1182,6 +1182,57 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     return new_state, record
 
 
+def advance_clock(state: WorldState, ticks: int) -> Tuple[WorldState, TransitionRecord]:
+    """
+    Let simulated time pass without performing any domain action.
+
+    Exists purely so a caller can drive WorldState.tick forward to reach a
+    Burden's deadline_steps threshold — the "time passes" primitive that
+    check_live_violations()'s elapsed-vs-deadline check needs — without
+    burning ticks via unrelated no-op actions (e.g. re-reinstating an
+    already-active authorization N times just to advance the clock, which
+    would pollute the ledger with N fake events that never really happened).
+    Deliberately has no action semantics: it never discharges a burden,
+    grants or transitions any token, or triggers any event. It is the
+    honest alternative to that no-op-action workaround, not a shortcut
+    around governance — check_live_violations()/fire_violation_responses()
+    are still the only things that ever act on elapsed time.
+
+    Advances tick by exactly `ticks` — always, unconditionally (like
+    revoke_authorization()/reinstate_authorization(), not the
+    conditional-advance exception check_live_violations()/
+    fire_violation_responses() make for no-op polls: there is no such
+    thing as a no-op call here, every call is a real, deliberate jump
+    forward). Raises ValueError if ticks < 1 — mirrors the KeyError-on-bad-
+    input convention revoke_authorization()/reinstate_authorization()
+    already use for invalid arguments, just ValueError since this is a bad
+    value rather than a bad lookup key (same distinction el_api.py's
+    consent_event() already draws, catching ValueError separately from
+    KeyError).
+
+    Returns (new_state, record). record.effects holds a single line
+    documenting the jump, e.g. "clock advanced 8 tick(s): 0 → 8". outcome
+    is always 'ok' — nothing here is ever 'blocked' or 'violation', the
+    same convention fire_violation_responses() follows.
+    """
+    if ticks < 1:
+        raise ValueError(f"ticks must be >= 1, got {ticks}")
+
+    tick = state.tick
+    new_tick = tick + ticks
+    new_state = state.with_tick(new_tick)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name="system",
+        action_name="advance_clock",
+        outcome="ok",
+        discharged=(),
+        effects=(f"clock advanced {ticks} tick(s): {tick} → {new_tick}",),
+        violations=(),
+    )
+    return new_state, record
+
+
 # ── CLI / test ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
