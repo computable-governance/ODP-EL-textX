@@ -3449,3 +3449,43 @@ dedicated session should resolve both the grant-tick mechanism and the
 `SpecialistPractice` Role placement together, then the original four-item
 spec (Action declaration, live-detection trigger, `ViolationResponse`
 firing, tests) can proceed against settled ground truth.
+
+---
+
+## WorldState scope — episode-community vs. standing federation communities (2026-08-20)
+
+`WorldState` is a toolchain implementation concept, not something ISO/IEC
+15414 defines directly — the standard only defines *state (of an object)*
+(§3.1.1, imported from X.902); it never posits a global snapshot construct.
+The toolchain's `WorldState` is a reasonable, sensible engineering choice
+for enabling replay/comparison/testing (per the paper's own framing), not
+a modelled ODP-EL entity — worth stating explicitly in any positioning
+writeup, same treatment as the existing FHIR Contract caveat ("designed to
+align with," not "modelled using").
+
+In `referral_scenario.el`, there is exactly **one** `WorldState`, scoped
+to `ReferralEpisodeCommunity` — the dynamic, per-episode community whose
+roles are filled by acting parties (`GPClinician`, `SpecialistClinician`,
+`SpecialistAIAgent`, etc.). This is the only community `WorldState` tracks
+live token state for, consistent with §6.4.3 (deontic tokens are held by
+active enterprise objects filling roles, not by roles or communities
+directly) and §7.8.2 (a role is a placeholder; at most one object fulfils
+it at a time).
+
+`GPPractice` and `SpecialistPractice` are two separate **static/standing
+community objects** (§6.2.2 — a community object is itself a composite
+enterprise object representing a community, which is what allows it to be
+used to build community hierarchies or fill member roles in a larger
+federation). They relate to each other via `Contract.signer`/
+`Contract.term` (the federation layer — see AM-35,
+`extract_federation_from_contract()`) — a **peer/federation relationship,
+not a shared enclosing community**. Neither practice holds live
+per-episode token state, and `WorldState` does not track them the way it
+tracks episode role-fillers; they are context/backdrop that licenses and
+constrains the episode (via the standing contract), not participants
+whose internal state `WorldState` represents directly.
+
+Relevant for: any future work extending the federation/hierarchy pattern
+(IPS cross-border scenario, AIVendor gap, further R23+R24-style Contract
+extraction) — the episode-vs-standing-community distinction should hold
+regardless of how many practices/organizations are involved.
