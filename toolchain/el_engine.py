@@ -1182,6 +1182,32 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     return new_state, record
 
 
+def _strict_actionable_burdens(state: WorldState) -> List[Tuple[str, str]]:
+    """(token_name, holder) for every active, discharge_mode: strict burden
+    whose holder is enrolled — the live-engine mirror of el_kripke.py's
+    has_strict_pending_dischargeable check (Rule T3). state == 'active',
+    never 'pending' — §7.8.7's masked/suspended state is a different thing,
+    not what this predicate means."""
+    enrolled = {a.actor_name for a in state.actors}
+    return sorted(
+        (tok.token_name, tok.holder)
+        for tok in state.tokens
+        if tok.kind == "burden"
+        and tok.discharge_mode == "strict"
+        and tok.state == "active"
+        and tok.holder in enrolled
+    )
+
+
+def _list_and(items: List[str]) -> str:
+    """Serial-comma join for reason strings: a / a and b / a, b, and c."""
+    if len(items) <= 1:
+        return items[0] if items else ""
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
 def advance_clock(state: WorldState, ticks: int) -> Tuple[WorldState, TransitionRecord]:
     """
     Let simulated time pass without performing any domain action.
@@ -1198,27 +1224,49 @@ def advance_clock(state: WorldState, ticks: int) -> Tuple[WorldState, Transition
     around governance — check_live_violations()/fire_violation_responses()
     are still the only things that ever act on elapsed time.
 
-    Advances tick by exactly `ticks` — always, unconditionally (like
-    revoke_authorization()/reinstate_authorization(), not the
-    conditional-advance exception check_live_violations()/
-    fire_violation_responses() make for no-op polls: there is no such
-    thing as a no-op call here, every call is a real, deliberate jump
-    forward). Raises ValueError if ticks < 1 — mirrors the KeyError-on-bad-
-    input convention revoke_authorization()/reinstate_authorization()
-    already use for invalid arguments, just ValueError since this is a bad
-    value rather than a bad lookup key (same distinction el_api.py's
-    consent_event() already draws, catching ValueError separately from
-    KeyError).
+    Advances tick by exactly `ticks` — unless blocked (see AM-49 below).
+    Otherwise unconditional, like revoke_authorization()/
+    reinstate_authorization(), not the conditional-advance exception
+    check_live_violations()/fire_violation_responses() make for no-op
+    polls: there is no such thing as a no-op call here, every successful
+    call is a real, deliberate jump forward. Raises ValueError if ticks < 1
+    — mirrors the KeyError-on-bad-input convention
+    revoke_authorization()/reinstate_authorization() already use for
+    invalid arguments, just ValueError since this is a bad value rather
+    than a bad lookup key (same distinction el_api.py's consent_event()
+    already draws, catching ValueError separately from KeyError).
+
+    AM-49: blocked when one or more discharge_mode: strict Burdens are
+    currently active and actionable (holder enrolled) — mirrors
+    el_kripke.py Rule T3's tick-suppression (a strict obligation that CAN
+    be discharged right now MUST be; time may not pass while its holder is
+    active). Returns outcome='blocked' via the same _blocked()/
+    TransitionRecord convention advance() uses — never raises for this
+    case. tick is left completely untouched, regardless of ticks
+    requested. reason names every blocking burden and its holder.
 
     Returns (new_state, record). record.effects holds a single line
-    documenting the jump, e.g. "clock advanced 8 tick(s): 0 → 8". outcome
-    is always 'ok' — nothing here is ever 'blocked' or 'violation', the
-    same convention fire_violation_responses() follows.
+    documenting the jump, e.g. "clock advanced 8 tick(s): 0 → 8", when
+    outcome == 'ok'. outcome is 'blocked' for the strict-burden case
+    above, 'ok' otherwise — never 'violation', that part of the original
+    convention is unchanged.
     """
     if ticks < 1:
         raise ValueError(f"ticks must be >= 1, got {ticks}")
 
     tick = state.tick
+
+    blocking = _strict_actionable_burdens(state)
+    if blocking:
+        parts = [f"'{name}' (held by '{holder}')" for name, holder in blocking]
+        noun = "strict burden" if len(parts) == 1 else "strict burdens"
+        verb = "is" if len(parts) == 1 else "are"
+        reason = (
+            f"{noun} {_list_and(parts)} {verb} actionable and must be "
+            f"discharged before time can advance"
+        )
+        return _blocked(state, "system", "advance_clock", reason, tick)
+
     new_tick = tick + ticks
     new_state = state.with_tick(new_tick)
     record = TransitionRecord(

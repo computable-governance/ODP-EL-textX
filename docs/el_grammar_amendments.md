@@ -3097,3 +3097,86 @@ registration). `tests/test_v17_burden_embargo_conflict.py` (new file, 2
 tests: fires on matching active `for_action`; does not fire when the
 Embargo is `pending` or the `for_action` values differ). Full suite: 92
 pre-existing tests pass unchanged, plus 2 new (94 total).
+
+---
+
+## AM-49 (2026-08-21) — Enforce `discharge_mode: strict` in the live runtime; `advance_clock()` blocks on an actionable strict Burden
+
+**Status:** IMPLEMENTED (2026-08-21).
+
+**Problem:** closes the `discharge_mode: strict` OPEN FINDING logged in
+`docs/CONCEPTS_INDEX.md` (2026-08-20). The paper's central claim
+(EDOC26final.tex, reviewer_response.md) is that the runtime blocks time
+advancement when a strict obligation is actionable — but `el_engine.py`/
+`el_runtime.py` never branched on `discharge_mode` anywhere; the only real
+tick-suppression logic lived entirely inside `el_kripke.py`'s Rule T3
+(BFS world-expansion), with no connection to a live `WorldState.tick` or
+any `advance()`/`advance_clock()` call.
+
+**What changed:** `advance_clock()` (`el_engine.py`) now scans
+`state.tokens` directly, before advancing tick, via a new private helper
+`_strict_actionable_burdens()`, for any token with `kind=="burden"`,
+`discharge_mode=="strict"`, `state=="active"` (never `"pending"` —
+§7.8.7's masked/suspended state is a different thing), holder currently
+enrolled. If one or more exist, `advance_clock()` returns
+`outcome="blocked"` via the same `_blocked()`/`TransitionRecord`
+convention `advance()` already uses — it never raises for this case —
+and leaves tick completely untouched, not partially advanced by any of
+the ticks requested. `reason` names every blocking burden and its
+holder, joined by a small serial-comma helper (`_list_and()`) so the
+message reads correctly whether one or several burdens are blocking
+(e.g. `"strict burden 'x' (held by 'y') is actionable..."` vs.
+`"strict burdens 'x' (held by 'y') and 'z' (held by 'w') are
+actionable..."`).
+
+**Direct raw-field check, not Kripke/`ObligationState`-coupled:** the
+predicate reads `TokenInstance.state`/`.discharge_mode`/`.kind`/`.holder`
+directly off the live `WorldState` — no dependency on `el_kripke.py`'s
+`ObligationState`/`ActorStatus` types, so Layers 3 and 4 independently
+enforce the same rule without either importing the other's types.
+
+**API:** `AdvanceClockResponse` (`el_api.py`) gains `outcome: str` and
+`reason: Optional[str] = None`, mirroring `ExecuteActionResponse`'s
+existing convention. A blocked call is a normal 200 with `outcome`/
+`reason` in the body, not an `HTTPException` — 400 remains reserved for
+the pre-existing `ticks < 1` case.
+
+**Standard reference(s):** none new — this closes an enforcement gap on
+the existing `discharge_mode: strict` toolchain extension (AM-13); §6.4.3
+(Burden), §7.8.7 (token state).
+
+**Empirical verification against the real scenario** (not just the probe
+fixtures): fresh `_build_referral_runtime()` → `advance_clock(5)` →
+`blocked`, reason `"strict burden 'referralInitiationBurden' (held by
+'GPClinician') is actionable and must be discharged before time can
+advance"`, tick stays `0`. Then `initiateReferral` discharges
+`referralInitiationBurden`. Then `advance_clock(5)` → `ok`, tick == `6`.
+Confirms the paper's claim now holds in the running system, not only in
+the verifier's model of it.
+
+**Not in scope, deliberately:** `advance()` itself is unaffected — this
+closes the gap only for the "let time pass" primitive, since that is the
+specific mechanism the paper's claim and reviewer-response commitments
+named. Whether `advance()` needs an analogous guard for unrelated
+actions while a strict burden sits actionable is a separate question, not
+addressed here.
+
+**Known follow-up, not fixed here:** `computable-governance-ui`'s
+`referral-board-view.html` `advanceClock()` handler (separate repo)
+discards the `/advance-clock` response body entirely
+(`await resp.json()`, unused) and unconditionally shows a "time advanced"
+success message on any HTTP 200 — confirmed today by direct read, not
+yet updated. A blocked call from a cold reset will now show a **false
+success message** in the UI. Flagged, deliberately not fixed in this
+commit — pending a decision on whether to land it together with this
+backend change for a cleaner demo story.
+
+**Files changed:** `toolchain/el_engine.py` (`_strict_actionable_burdens()`,
+`_list_and()`, `advance_clock()` blocking branch + updated docstring),
+`toolchain/el_api.py` (`AdvanceClockResponse.outcome`/`.reason`,
+`advance_clock_endpoint()`, endpoint description text), `tests/test_advance_clock.py`
+(two new probes `_STRICT_PROBE`/`_TWO_STRICT_PROBE`; three new tests:
+blocks when a strict burden is active and actionable; unblocks once
+discharged; reason names every blocking burden with correct plural
+wording). Full suite: 156 pre-existing tests pass unchanged, plus 3 new
+(159 total).

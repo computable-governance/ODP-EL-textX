@@ -493,7 +493,9 @@ class AdvanceClockRequest(BaseModel):
 
 class AdvanceClockResponse(BaseModel):
     tick: int
+    outcome: str
     effects: List[str]              # single line, e.g. "clock advanced 8 tick(s): 0 → 8"
+    reason: Optional[str] = None    # set when outcome == 'blocked' (AM-49)
     updated_world: dict
     new_objective_score: float
     objective_reachable: bool
@@ -1253,9 +1255,13 @@ def fire_violation_responses_endpoint() -> FireViolationResponsesResponse:
         "honest alternative to burning ticks via unrelated no-op actions "
         "(e.g. N repeated /authorizations/{name}/reinstate calls), which "
         "would pollute the ledger with events that never really happened. "
-        "400 if ticks < 1. Then re-queries the Kripke model for the updated "
-        "world state, objective score, and reachability, mirroring the "
-        "other mutating endpoints."
+        "outcome is 'ok' or 'blocked' (AM-49) — 'blocked' when one or more "
+        "discharge_mode: strict Burdens are currently active and actionable; "
+        "reason then names the blocking burden(s) and holder(s), and "
+        "tick/world state are left unchanged. 400 if ticks < 1. Then "
+        "re-queries the Kripke model for the updated world state, "
+        "objective score, and reachability, mirroring the other mutating "
+        "endpoints."
     ),
 )
 def advance_clock_endpoint(body: AdvanceClockRequest) -> AdvanceClockResponse:
@@ -1280,7 +1286,9 @@ def advance_clock_endpoint(body: AdvanceClockRequest) -> AdvanceClockResponse:
 
     return AdvanceClockResponse(
         tick=tr.tick,
+        outcome=tr.outcome,
         effects=list(tr.effects),
+        reason=tr.reason,
         updated_world=updated_world,
         new_objective_score=round(score, 4),
         objective_reachable=reachable,
