@@ -2312,11 +2312,23 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
     principal_of+delegated_from relationships are NOT added here (see
     _is_standing_affiliation) — parent.setdefault() below means a
     Delegation-derived entry always wins if one already exists for that
-    node."""
+    node.
+
+    A Delegation matches a token via EITHER of its two mutually-exclusive
+    transfer fields (V-NEW-10): a direct `burden` reference, or the token's
+    membership in `token_group`'s member list (§6.4.2/§7.8.7 NOTE) — both
+    are genuine delegation-transfer signals, not just the first."""
     parent: Dict[str, str] = {}
     for d in _collect(spec, "Delegation"):  # AM-18: DelegationDecl → Delegation
         b = getattr(d, "burden", None)
-        if b and _obj_name(b) == token_name:
+        matches = bool(b) and _obj_name(b) == token_name
+        if not matches:
+            group = getattr(d, "token_group", None)
+            if group is not None:
+                matches = any(
+                    _obj_name(t) == token_name for t in getattr(group, "tokens", [])
+                )
+        if matches:
             frm, to = _obj_name(d.delegator), _obj_name(d.delegate)
             if frm and to:
                 parent[to] = frm

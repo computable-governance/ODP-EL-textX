@@ -34,6 +34,9 @@ Rules implemented
   V-15  DelegationDecl.obligation text must match the obligation
         of a CommitmentDecl or a prior DelegationDecl (chain
         continuity check).                                       §7.10.1
+  V-NEW-10  transfers_burden and transfers_token_group on a
+        DelegationDecl are mutually exclusive — a delegation
+        transfers a single burden or a token group, not both.   §6.6.6, §7.10.1
   V-NEW-19  CommunityObject.abstracts must reference a declared
         Community or Domain.                                     §6.2.2, §7.8.3
   V-NEW-21  Every Domain must have at least one controlling and
@@ -307,6 +310,16 @@ def _validate_delegations(
                     f"attempts to sub-delegate but parent delegation "
                     f"'{parent_delegation.name}' has sub_delegation_allowed=false. (§7.10.1)"
                 )
+
+        # V-NEW-10: transfers_burden and transfers_token_group are mutually
+        # exclusive — a delegation either transfers a single burden or a
+        # token group, not both. (§6.6.6, §7.10.1)
+        if getattr(d, "burden", None) and getattr(d, "token_group", None):
+            errors.append(
+                f"[V-NEW-10] Delegation '{dname}' declares both "
+                f"'transfers_burden' and 'transfers_token_group' "
+                f"— these are mutually exclusive."
+            )
 
     return errors
 

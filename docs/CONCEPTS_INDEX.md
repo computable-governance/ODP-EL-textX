@@ -3589,3 +3589,67 @@ attaching to an object outside a role. Usable as support for a defensible
 "grammar respects ISO 15414" conformance claim in the position paper.
 
 **`emits` considered and deliberately not added to `notify_gp_of_non_response` (2026-08-20):** X.902 §8.4 defines event notification as a communication to objects *not participating* in the action — which is conceptually exactly the "notify GP practice" (`escalate_to`) signal. However, this toolchain's `emits` construct (`grammar/v2/el_grammar.tx` `EmitsDecl`) does NOT implement §8.4 outbound notification — it implements intra-spec token choreography: an emitted event makes a burden dischargeable (`discharged_by` match, `el_engine.py` `advance()` Step 3) or transitions a `triggered_by` token WAITING→active (Step 7c; mirrored in `el_kripke.py`'s P6a cascade). No token today has `discharged_by`/`triggered_by` pointing at a notification event from this action, so adding `emits` would declare an inert `EventDecl` with no consumer — the opposite of `favoured_by_burden`, whose governance-lookup consumer genuinely exists. The genuine §8.4 GP-practice notification belongs on the `escalate_to` side of the still-open `ViolationResponse` wiring task; revisit `emits` there only if/when a GP-side waiting-token or notification-consumer actually exists. (Grammar v1 confirmed inert: `el_parser.py` hardcodes `grammar/v2/el_grammar.tx`, zero functional v1 references. `setup.cfg`/`setup.py` reference a dead nonexistent `odpel` package — documented cleanup, not blocking.)
+
+---
+
+## Delegation holder/chain resolution, Problem 1 — RESOLVED (2026-08-22, AM-51)
+
+**FINDING (2026-08-22), closes Problem 1 of the 2026-08-19 paused finding above.**
+
+`transfers_token_group`'s two-purposes conflation (objective-satisfaction
+target vs. delegation-transfer signal, no distinguishing field — Problem 1
+above) is fixed. `referral_scenario.el`'s `gpToSpecialistDelegation` no
+longer declares `transfers_burden: referralResponseBurden` alongside
+`transfers_token_group: referralBurdenGroup`; it now declares only
+`transfers_token_group: specialistBurdenGroup` (a 2-member group already
+declared for this purpose). `referralBurdenGroup` (5 members) is untouched
+and remains solely the episode objective's `all_discharged` target — the
+two groups are no longer the same object, so the conflation this Problem
+named no longer exists for this delegation.
+
+**This surfaced, and required fixing first, a real but latent gap in
+AM-50's own walker:** `el_kripke.py::_delegation_chain_for_token()`
+(the function AM-50 extended to bridge `principal_of`) only ever matched a
+Delegation via a direct `.burden` reference — never via `token_group`
+membership. Dropping `transfers_burden` from `gpToSpecialistDelegation`
+without fixing this first would have silently broken AM-50's own
+regression test (`test_delegation_chain_for_token_mirrors_reasoner_for_referral_response`):
+the `GPClinician → SpecialistClinician` hop for `referralResponseBurden` is
+a *paired* `principal_of`+`delegated_from` relationship, deliberately
+excluded from AM-50's structural-edge mechanism, so `.burden`/`token_group`
+matching on the `Delegation` itself is the *only* way that hop enters this
+function's chain. Checked whether the gap was general before fixing it:
+grepped every scenario file for a `Delegation` declaring
+`transfers_token_group` with no `transfers_burden` — none existed anywhere
+in the repo until this change deliberately created one. The gap was real
+and general, just never previously exercised.
+
+V-NEW-10 (documented, previously unregistered — mutual exclusion of
+`transfers_burden`/`transfers_token_group`) is now registered in
+`el_validator.py`. `gp_referral_scenario.el`'s own `gpToSpecialistDelegation`
+still declares both fields (same conflation, out of scope for this fix) —
+confirmed this doesn't regress anything today only because that file is
+always parsed with `validate=False` in `el_api.py`, and no test in the
+suite validates it directly. **Left as a known, named gap, not silently
+fixed** — worth returning to.
+
+Full detail, including the exact order fixes had to land in and why:
+`docs/el_grammar_amendments.md`, AM-51.
+
+**Process note, for the record:** a same-session pass the day before
+(2026-08-21, in conversation, not written down) concluded a narrower
+version of this fix — redirect the group only, keep `transfers_burden` —
+was "confirmed safe." That conclusion never made it into this file; it
+existed only in that session's conversation state. It did not survive a
+fresh verification pass the next session, which is what actually found the
+V-NEW-10 dual-declaration tension and the `_delegation_chain_for_token()`
+gap above — both missed by the earlier, unwritten reasoning. Recording this
+plainly because the failure mode is generic and worth naming: a
+"confirmed safe" conclusion that lives only in a conversation, not in a
+written repo record, gives the next session nothing to build on or check
+against — it has to be re-derived from scratch, and there's no guarantee
+the re-derivation catches what the original pass missed (this time, it
+happened to; that's luck, not process). Findings that will matter to a
+later session belong here, not just in the transcript that produced them.
+
+---

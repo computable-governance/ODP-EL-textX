@@ -727,8 +727,7 @@ delegation gpToSpecialistDelegation {
     from: GPClinician
     to: SpecialistClinician
     obligation: "Respond to the specialist referral within the agreed timeframe and schedule assessment"
-    transfers_burden: referralResponseBurden
-    transfers_token_group: referralBurdenGroup
+    transfers_token_group: specialistBurdenGroup
     creates_reporting_burden: true
     duration: "referral episode"
     conditions: "Active GP referral transmitted and received by specialist community"

@@ -767,6 +767,16 @@ def check_embedded_commitment_actors(spec):
 
 ## V-NEW-10 — Mutual exclusion of `transfers_burden` and `transfers_token_group` in `DelegationDecl`
 
+**Status:** IMPLEMENTED (2026-08-22, AM-51). Registered in
+`el_validator.py::_validate_delegations()`, wired into `validate_spec()`'s
+existing dispatch (already called for V-07/V-08). Message text matches the
+proposed rule below verbatim, as an appended error string (this validator's
+established convention — no rule here raises `TextXSemanticError` directly,
+including the pre-existing V-07/V-08 in the same function) rather than the
+raise-based pseudocode. See AM-51 for the accompanying `el_kripke.py` fix
+this rule's registration depended on, and `docs/CONCEPTS_INDEX.md`'s AM-51
+entry for the full causal story.
+
 **Location:** `el_validator.py` (not a grammar change)
 
 **Issue:**
@@ -3285,3 +3295,109 @@ pass), `tests/test_am50_accountability_chain_principal_of.py` (new file,
 mirrors `el_reasoner`'s result for the same scenario; a
 no-`principal_of`-at-all probe is a pure regression guard). Full suite:
 159 pre-existing tests pass unchanged, plus 5 new (164 total).
+
+---
+
+## AM-51 (2026-08-22) — Complete `_delegation_chain_for_token()`'s token_group-membership match; redirect `gpToSpecialistDelegation`; register V-NEW-10
+
+**Status:** IMPLEMENTED (2026-08-22).
+
+**Problem:** closes Problem 1 of the paused "Delegation holder/chain
+resolution" finding (`docs/CONCEPTS_INDEX.md`, 2026-08-19) —
+`transfers_token_group` conflating two unrelated purposes with no
+distinguishing field. `referral_scenario.el`'s `gpToSpecialistDelegation`
+declared both `transfers_burden: referralResponseBurden` and
+`transfers_token_group: referralBurdenGroup` simultaneously — the latter a
+5-member group that also served as the episode objective's
+`all_discharged` satisfaction target, with no signal distinguishing "these
+burdens transfer together" from "these burdens together satisfy the
+objective." This also meant the delegation tripped the (until now,
+unregistered) V-NEW-10 mutual-exclusion rule.
+
+**What changed, and why in this order:**
+
+1. **`el_kripke.py::_delegation_chain_for_token()` extended to match a
+   Delegation via `token_group` membership, not just a direct `burden`
+   reference** (parallel to the existing `.burden` check, same
+   `parent[to] = frm` outcome either way). This was done *first*,
+   independently, because simply redirecting the group and dropping
+   `transfers_burden` would otherwise silently regress AM-50's own fix:
+   `_delegation_chain_for_token()` is the sole path by which the
+   `GPClinician → SpecialistClinician` hop enters the Kripke-facing chain
+   for `referralResponseBurden` (that hop is a *paired*
+   `principal_of`+`delegated_from` relationship, deliberately excluded from
+   AM-50's structural-edge mechanism — see AM-50's own writeup). Confirmed
+   via `tests/test_am50_accountability_chain_principal_of.py::test_delegation_chain_for_token_mirrors_reasoner_for_referral_response`,
+   which reads `Delegation.burden` directly and would have silently lost
+   the hop had `transfers_burden` been dropped without this extension.
+   **Generality check performed first:** grepped every `.el` scenario file
+   for a `Delegation` declaring `transfers_token_group` with no
+   `transfers_burden` — none exists today (every current
+   `transfers_token_group` declaration, in both `referral_scenario.el` and
+   `gp_referral_scenario.el`, is paired with a `transfers_burden` that
+   already provided a direct match). The gap in the walker was real and
+   general — it just hadn't been exercised by any committed scenario until
+   this change deliberately exposes it. New isolated test file
+   `tests/test_delegation_chain_token_group_match.py` (3 tests, synthetic
+   fixture, no real scenario file) confirms the new match path in
+   isolation, including a scoping-safety check (a non-member token must not
+   be pulled into the chain).
+
+2. **`gpToSpecialistDelegation` redirected**: `transfers_burden:
+   referralResponseBurden` removed entirely; `transfers_token_group` now
+   points at `specialistBurdenGroup` (a 2-member group — `referralResponseBurden`
+   + `assessmentSchedulingBurden` — already declared for this purpose, not
+   new). `referralBurdenGroup` (5 members, the episode objective's
+   `all_discharged` target) is untouched, resolving the two-purposes
+   conflation: the group named on the objective and the group named on the
+   delegation are no longer the same object.
+
+3. **V-NEW-10 registered** in `el_validator.py::_validate_delegations()`
+   (already dispatched from `validate_spec()` alongside V-07/V-08), message
+   text matching the proposed rule in this file verbatim. Confirmed
+   `gpToSpecialistDelegation` no longer trips it post-redirect (0 validator
+   errors against `referral_scenario.el`). Confirmed, deliberately, that
+   `gp_referral_scenario.el`'s own `gpToSpecialistDelegation` — same
+   dual-declaration shape, out of scope for this fix — now *would* trip
+   V-NEW-10 if validated; traced every `parse(..., validate=True)` call
+   against a real scenario file in the test suite and confirmed none target
+   `gp_referral_scenario.el` (it is always parsed with `validate=False` in
+   `el_api.py`), so nothing in the current suite regresses. Left as a
+   known, named gap for `gp_referral_scenario.el` rather than silently
+   fixed alongside this one — out of this task's scope.
+
+**Confirmed unaffected:** `_build_obligation_descriptors()`
+(`el_engine.py`) output for `referralResponseBurden` and
+`assessmentSchedulingBurden` — both already have their own `Commitment`
+(`referralResponseCommitment`, `assessmentSchedulingCommitment`), so the
+function's `Delegation.token_group` second pass (guarded by `if burden_name
+in descriptors: continue`) was already fully inert for this delegation
+*before* today's change too, regardless of which group it named. Verified
+directly rather than assumed. Separately worth noting for a future reader:
+this function's own `holder`/`chain` for `referralResponseBurden`
+(`GPPractice`, unextended) differs from `_delegation_chain_for_token()`'s
+(`GPPractice → GPClinician → SpecialistClinician`) — a pre-existing,
+unrelated discrepancy, since `el_engine.py`'s `walk_chain()` is a separate
+implementation (obligation-text matching only, no AM-50 `principal_of`
+bridge) that this change does not touch.
+
+**Files changed:** `toolchain/el_kripke.py`
+(`_delegation_chain_for_token()`), `scenarios/referral/referral_scenario.el`
+(`gpToSpecialistDelegation`), `toolchain/el_validator.py`
+(`_validate_delegations()`, V-NEW-10), `tests/test_delegation_chain_token_group_match.py`
+(new, 3 tests), `tests/test_v_new_10_delegation_transfer_exclusivity.py`
+(new, 2 tests). Full suite: 164 pre-existing tests pass unchanged, plus 5
+new (169 total).
+
+**A note on process, for the record:** an earlier pass in this same session
+(2026-08-21, in conversation) concluded a narrower version of this fix
+(redirect the group only, keep `transfers_burden`) was "confirmed safe" —
+but that reasoning was never written into `docs/CONCEPTS_INDEX.md` at the
+time, only carried in conversation state. It did not survive a fresh
+verification pass in this later session, which found the dual-declaration
+tension with V-NEW-10 that the earlier pass had missed. The lesson isn't
+the specific miss — it's that a "confirmed safe" conclusion that exists
+only in session memory, and not as a written repo record, does not actually
+protect the next session (or the next agent) from re-deriving it, or from
+missing what it missed. Written the causal story out in full above
+specifically so that doesn't recur here.
