@@ -2303,6 +2303,23 @@ def _is_standing_affiliation(principal_name: str, agent: Any) -> bool:
     return delegated_from is None or _obj_name(delegated_from) != principal_name
 
 
+def _commitment_root_for_token(spec: Any, token_name: str) -> Optional[Tuple[str, str]]:
+    """Returns (actor_name, obligation_text) for token_name's own Commitment,
+    if one exists, else None. Mirrors el_reasoner.py's `ultimate_accountability()`
+    root extraction (`root_name = _obj_name(c.actor)`) and el_engine.py's
+    `_build_obligation_descriptors()` (`obl_text = getattr(c, "obligation", ...)`)
+    — duplicated, not imported, per the established Layer 2/3/4 no-cross-import
+    convention `_find_action_for_burden`/`_is_standing_affiliation` already
+    follow (AM-52)."""
+    for c in _collect(spec, "Commitment"):
+        burden_ref = getattr(c, "burden", None)
+        if burden_ref and _obj_name(burden_ref) == token_name:
+            actor_name = _obj_name(getattr(c, "actor", None))
+            if actor_name:
+                return actor_name, c.obligation
+    return None
+
+
 def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List[str]:
     """Walk Delegation back-links to build [root, …, holder] for a token,
     then extend further back through any one-sided principal_of standing
@@ -2316,23 +2333,27 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
 
     A Delegation matches a token via EITHER of its two mutually-exclusive
     transfer fields (V-NEW-10): a direct `burden` reference, or the token's
-    membership in `token_group`'s member list (§6.4.2/§7.8.7 NOTE) — both
-    are genuine delegation-transfer signals, not just the first."""
-    parent: Dict[str, str] = {}
-    for d in _collect(spec, "Delegation"):  # AM-18: DelegationDecl → Delegation
-        b = getattr(d, "burden", None)
-        matches = bool(b) and _obj_name(b) == token_name
-        if not matches:
-            group = getattr(d, "token_group", None)
-            if group is not None:
-                matches = any(
-                    _obj_name(t) == token_name for t in getattr(group, "tokens", [])
-                )
-        if matches:
-            frm, to = _obj_name(d.delegator), _obj_name(d.delegate)
-            if frm and to:
-                parent[to] = frm
+    membership in `token_group`'s member list (§6.4.2/§7.8.7 NOTE).
 
+    The `token_group` match is guarded (AM-52): group co-membership alone
+    does not mean *this* Delegation is the genuine transfer path for *this*
+    token — a member can have its own, independently-declared Commitment
+    root that this Delegation has nothing to do with (confirmed happening
+    for `assessmentSchedulingBurden` in both referral_scenario.el and
+    gp_referral_scenario.el — see docs/CONCEPTS_INDEX.md, AM-52). Where the
+    token has its own Commitment, the group match is only trusted if BOTH:
+    (a) the Delegation's delegator is reachable from the Commitment's actor
+    via the same one-sided principal_of structural edges used below
+    (reachability), and (b) the Commitment's own obligation text is
+    consistent with the Delegation's obligation text, mirroring
+    el_reasoner.py's `_walk_chain()` matching (text relevance). A token with
+    no Commitment at all (fully delegation-sourced) is unaffected — the
+    group match is trusted unconditionally, as before. The direct `.burden`
+    match is unconditional and unaffected either way — an explicit
+    single-token reference is unambiguous, unlike group membership."""
+    # Structural principal_of edges (AM-50), built first so the token_group
+    # guard below can check delegator reachability against them.
+    structural_parent: Dict[str, str] = {}
     for principal in _collect(spec, "EnterpriseObject"):
         principal_name = _obj_name(principal)
         if not principal_name:
@@ -2340,7 +2361,46 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
         for agent in getattr(principal, "principal_of", []):
             agent_name = _obj_name(agent)
             if agent_name and _is_standing_affiliation(principal_name, agent):
-                parent.setdefault(agent_name, principal_name)
+                structural_parent.setdefault(agent_name, principal_name)
+
+    def _reachable(descendant: str, ancestor: str) -> bool:
+        """True if ancestor == descendant, or ancestor is found by walking
+        structural_parent pointers upward from descendant."""
+        cur = descendant
+        seen = {cur}
+        while cur != ancestor and cur in structural_parent:
+            cur = structural_parent[cur]
+            if cur in seen:
+                return False
+            seen.add(cur)
+        return cur == ancestor
+
+    commitment_root = _commitment_root_for_token(spec, token_name)
+
+    parent: Dict[str, str] = {}
+    for d in _collect(spec, "Delegation"):  # AM-18: DelegationDecl → Delegation
+        b = getattr(d, "burden", None)
+        matches = bool(b) and _obj_name(b) == token_name
+        if not matches:
+            group = getattr(d, "token_group", None)
+            if group is not None and any(
+                _obj_name(t) == token_name for t in getattr(group, "tokens", [])
+            ):
+                if commitment_root is None:
+                    matches = True
+                else:
+                    actor_name, commitment_obligation = commitment_root
+                    delegator_name = _obj_name(getattr(d, "delegator", None))
+                    reachable = bool(delegator_name) and _reachable(delegator_name, actor_name)
+                    text_relevant = commitment_obligation.lower() in d.obligation.lower()
+                    matches = reachable and text_relevant
+        if matches:
+            frm, to = _obj_name(d.delegator), _obj_name(d.delegate)
+            if frm and to:
+                parent[to] = frm
+
+    for agent_name, principal_name in structural_parent.items():
+        parent.setdefault(agent_name, principal_name)
 
     chain, cur = [holder], holder
     while cur in parent:

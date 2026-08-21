@@ -3653,3 +3653,58 @@ happened to; that's luck, not process). Findings that will matter to a
 later session belong here, not just in the transcript that produced them.
 
 ---
+
+## Delegation holder/chain resolution, Problem 2 — RESOLVED (2026-08-22, ground-truth check); surfaced a real AM-51 regression, closed as AM-52
+
+**FINDING (2026-08-22), closes Problem 2 of the 2026-08-19 paused finding above, same causal thread as the Problem-1/AM-51 entry directly above.**
+
+Asked, as a read-only ground-truth check: is Problem 2 ("no clean
+discriminator exists over `Commitment.actor`/`Delegation.delegator` — a
+naive `actor == delegator` test fails in opposite directions against the
+two scenario files") closed as a side effect of AM-50/AM-51, or still open?
+
+**Problem 2 itself: confirmed closed.** Grepped `el_reasoner.py`,
+`el_kripke.py`, `el_engine.py`, `el_validator.py` for any direct
+`Commitment.actor`/`Delegation.delegator` (or `.delegate`) equality
+comparison — none exists anywhere. Re-ran the original failing test case
+directly against both files and reproduced the exact opposite-direction
+failure the 2026-08-19 write-up described — confirming it was accurately
+recorded — but confirmed this comparison was never implemented as code,
+only explored as a hypothesis in investigation. `ultimate_accountability()`/
+`_walk_chain()`/`_delegation_chain_for_token()` resolve every burden in
+`referral_scenario.el` end-to-end via pure graph traversal (`Delegation`
+edges, `principal_of` structural edges, `token_group` membership) — no
+equality shortcut needed anywhere.
+
+**But that same check surfaced a real, distinct problem: a regression
+AM-51 itself introduced**, closed same-day as **AM-52** (full detail:
+`docs/el_grammar_amendments.md`). `_delegation_chain_for_token()`'s
+`token_group`-membership match (added by AM-51) had no awareness of a
+token's own `Commitment` at all — so a token sharing a `token_group` with a
+genuinely-delegated token, but with its own independent `Commitment` root,
+got silently misattributed to the wrong delegation. Checked systematically,
+not just the one case already known: **4 conflicts found**, across both
+`referral_scenario.el` (`assessmentSchedulingBurden`) and
+`gp_referral_scenario.el` (`assessmentSchedulingBurden`,
+`referralInitiationBurden`, `clinicalHandoverBurden` — the latter two
+excluded only by obligation-text mismatch, not reachability, since their
+`Commitment.actor` trivially equals the delegator; a reachability-only fix
+would have missed them). AM-52 guards the `token_group` match with both a
+reachability check (delegator reachable from the Commitment's actor via
+AM-50's structural edges) and a text-relevance check (Commitment obligation
+text consistent with the Delegation's own text, mirroring
+`el_reasoner.py`'s own matching) — closing the full risk class, confirmed
+against all 4 conflicts plus the 2 already-correct cases (including
+`referralResponseBurden`, the case AM-51 was built for — no regression).
+
+**Worth naming plainly:** this is the second time in two days a fix in this
+delegation-chain area has needed its own follow-up fix the same session
+(AM-51 needed the token_group-match extension before its own redirect could
+land safely; AM-52 needed guarding the very extension AM-51 just added).
+Both times the follow-up was caught by deliberately re-verifying against
+the full scenario set rather than trusting the one case already in view —
+worth continuing to check systematically (every scenario file, every group
+member) rather than only the specific instance a task names, since that's
+exactly what caught 3 of these 4 conflicts.
+
+---

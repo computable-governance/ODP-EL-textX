@@ -3401,3 +3401,130 @@ only in session memory, and not as a written repo record, does not actually
 protect the next session (or the next agent) from re-deriving it, or from
 missing what it missed. Written the causal story out in full above
 specifically so that doesn't recur here.
+
+---
+
+## AM-52 (2026-08-22) — Guard `_delegation_chain_for_token()`'s token_group match against a token's own Commitment root
+
+**Status:** IMPLEMENTED (2026-08-22).
+
+**Problem:** a direct regression AM-51 itself introduced, found the same day
+during a ground-truth re-verification of the 2026-08-19 paused finding's
+Problem 2 ("no clean discriminator exists over `Commitment.actor`/
+`Delegation.delegator`"). That re-verification confirmed Problem 2 itself is
+closed (no live code anywhere compares `Commitment.actor` to
+`Delegation.delegator`/`.delegate` by equality; it was only ever a
+hypothesis tested in investigation, never implemented) — but while
+confirming that, it surfaced that AM-51's `token_group`-membership match is
+keyed purely on group co-membership, with **no awareness of the token's own
+`Commitment` at all**. That's correct when every group member is genuinely
+covered by the delegation (`referralResponseBurden` in
+`referral_scenario.el`, the case AM-51 was built for), but wrong when a
+member has its own, independently-declared `Commitment` root the delegation
+has nothing to do with.
+
+**Systematic check performed before fixing (not just the one known case):**
+every `token_group` member referenced by a `Delegation`, across every
+scenario file with such a delegation (only two exist —
+`referral_scenario.el` and `gp_referral_scenario.el`), checked against
+whether `ultimate_accountability()`'s forward walk for that member's own
+`Commitment.obligation` text actually passes through the delegation's
+`(delegator, delegate)` edge. Found **4 conflicts, not 1**:
+
+| Scenario | Token | Commitment.actor | Delegator | Conflict cause |
+|---|---|---|---|---|
+| referral_scenario.el | `assessmentSchedulingBurden` | `SpecialistPractice` | `GPClinician` | actor unreachable from delegator |
+| gp_referral_scenario.el | `assessmentSchedulingBurden` | `SpecialistParty` | `GPPracticeParty` | actor unreachable from delegator |
+| gp_referral_scenario.el | `referralInitiationBurden` | `GPPracticeParty` | `GPPracticeParty` | actor == delegator (reachable), but obligation text irrelevant |
+| gp_referral_scenario.el | `clinicalHandoverBurden` | `GPPracticeParty` | `GPPracticeParty` | actor == delegator (reachable), but obligation text irrelevant |
+
+The `gp_referral_scenario.el` cases matter for design, not just count: a
+bare reachability check (`Commitment.actor` reachable from the delegator)
+would have caught only the two `assessmentSchedulingBurden` cases and
+missed `referralInitiationBurden`/`clinicalHandoverBurden` entirely, since
+their actor trivially equals the delegator. Those two are excluded only by
+obligation-text mismatch — the same failure shape Problem 2's original
+`actor == delegator` hypothesis produced as a false positive, now
+resurfacing through a different mechanism (`gp_referral_scenario.el`'s own
+Problem-1 conflation — `gpToSpecialistDelegation` there still points its
+`transfers_token_group` at `referralBurdenGroup`, the 4-member
+objective-satisfaction group, not a correctly-scoped transfer group — is
+already a known, explicitly out-of-scope gap in that file per AM-51's own
+write-up; this is a second, independent symptom of that same unfixed root
+cause, not a new discovery about the file).
+
+**What changed:** `el_kripke.py::_delegation_chain_for_token()`'s
+`token_group`-membership match branch is now guarded. New helper
+`_commitment_root_for_token(spec, token_name)` returns the token's own
+`(Commitment.actor, Commitment.obligation)` if a `Commitment` exists for
+it, mirroring `el_reasoner.py`'s `ultimate_accountability()` root
+extraction and `el_engine.py`'s `_build_obligation_descriptors()` — a third
+duplicate of the same small pattern, per this codebase's established
+Layer 2/3/4 no-cross-import convention (`_find_action_for_burden`,
+`_is_standing_affiliation`).
+
+Where a `Commitment` exists, a `token_group` match is trusted only if
+**both**:
+- **Reachability** — the Delegation's `delegator` equals the Commitment's
+  `actor`, or is reachable from it by walking the same one-sided
+  `principal_of` structural edges AM-50 already established (the structural
+  map is now built *before* the Delegation loop, reordered specifically so
+  this check can consult it).
+- **Text relevance** — the Commitment's own `obligation` text is a
+  substring of the Delegation's `obligation` text, mirroring
+  `el_reasoner.py`'s `_walk_chain()` matching (`obligation.lower() in
+  link.obligation.lower()`) and `el_engine.py`'s equivalent, so the same
+  notion of "this delegation is about this obligation" is applied
+  consistently across all three files.
+
+A token with **no** `Commitment` at all (fully delegation-sourced — see
+`tests/test_delegation_chain_token_group_match.py`'s `burdenTwo` fixture)
+is unaffected — the group match is trusted unconditionally, exactly as
+AM-51 left it. **The direct `.burden` match is unconditional and untouched
+either way** — an explicit single-token reference is unambiguous, unlike
+group co-membership, and nothing found any evidence of it ever being wrong.
+
+**Confirmed against all 4 known conflicts, and the two already-correct
+cases, directly (not assumed):**
+
+```
+referral_scenario.el
+  assessmentSchedulingBurden  -> [SpecialistPractice, SpecialistClinician]   (was: [GPPractice, GPClinician, SpecialistClinician] — now matches ultimate_accountability() and the live runtime holder)
+  referralResponseBurden      -> [GPPractice, GPClinician, SpecialistClinician]   (unchanged — the case AM-51 was built for)
+
+gp_referral_scenario.el
+  assessmentSchedulingBurden  -> [SpecialistParty, SpecialistClinician]   (now matches its own Commitment root)
+  referralInitiationBurden    -> [GPClinician]   (no longer wrongly extends; see note below)
+  clinicalHandoverBurden      -> [GPClinician]   (no longer wrongly extends; see note below)
+  referralResponseBurden      -> [GPPracticeParty, SpecialistClinician]   (unchanged — direct .burden match, unaffected by this guard)
+```
+
+**Reported as found, not forced, per instruction:** `referralInitiationBurden`/
+`clinicalHandoverBurden`'s corrected chains do **not** reach
+`GPPracticeParty` even though that's their true `Commitment` root — they
+stay at the queried holder (`GPClinician`). This is a separate, pre-existing
+property of `gp_referral_scenario.el` itself, not introduced by this fix:
+`GPPracticeParty { principal_of GPClinician }` there is **paired** with
+`GPClinician`'s own `delegated_from GPPracticeParty` — a paired
+`principal_of`+`delegated_from` relationship, which AM-50 deliberately
+excludes from its structural-edge mechanism (paired relationships are
+already a genuine `Delegation`/`Commitment` pairing with their own scoped
+text; see AM-50's own write-up and `_is_standing_affiliation()`). With this
+guard now correctly refusing the group-derived shortcut, there is simply no
+edge left — of any kind — connecting `GPClinician` back to `GPPracticeParty`
+for these two specific tokens. Left exactly as found; not this fix's scope
+to address.
+
+**Files changed:** `toolchain/el_kripke.py` (`_commitment_root_for_token()`
+new; `_delegation_chain_for_token()` reordered and guarded),
+`tests/test_am52_token_group_commitment_guard.py` (new, 7 tests: the 4
+known conflicts corrected, 2 no-regression checks on the already-correct
+cases, 1 synthetic probe isolating text-relevance as an independent
+discriminator from reachability). Full suite: 169 pre-existing tests pass
+unchanged, plus 7 new (176 total).
+
+**Causal thread, for the record:** AM-51 → committed → this session's
+Problem-2 ground-truth re-verification (same day) → surfaced this as a
+direct regression AM-51 itself introduced, not an unrelated new finding →
+AM-52 closes it. See `docs/CONCEPTS_INDEX.md`'s AM-52 entry for the
+narrative version of this same thread.
