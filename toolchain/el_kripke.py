@@ -2294,8 +2294,25 @@ class ObligationVerdict:
 # Hybrid mode bridge: Layer 3 (Runtime/WorldState) → Layer 4 (Kripke)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _is_standing_affiliation(principal_name: str, agent: Any) -> bool:
+    """Mirrors el_reasoner.py's helper of the same name (duplicated, not
+    imported — same Layer 3/4 no-cross-import convention
+    _find_action_for_burden already follows). See that copy's docstring
+    for the full rationale (AM-50)."""
+    delegated_from = getattr(agent, "delegated_from", None)
+    return delegated_from is None or _obj_name(delegated_from) != principal_name
+
+
 def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List[str]:
-    """Walk DelegationDecl back-links to build [root, …, holder] for a token."""
+    """Walk Delegation back-links to build [root, …, holder] for a token,
+    then extend further back through any one-sided principal_of standing
+    affiliation (AM-50) — e.g. GPPractice → GPClinician in
+    referral_scenario.el, a structural relationship with no matching
+    Delegation.burden, otherwise invisible to this walk. Paired
+    principal_of+delegated_from relationships are NOT added here (see
+    _is_standing_affiliation) — parent.setdefault() below means a
+    Delegation-derived entry always wins if one already exists for that
+    node."""
     parent: Dict[str, str] = {}
     for d in _collect(spec, "Delegation"):  # AM-18: DelegationDecl → Delegation
         b = getattr(d, "burden", None)
@@ -2303,6 +2320,16 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
             frm, to = _obj_name(d.delegator), _obj_name(d.delegate)
             if frm and to:
                 parent[to] = frm
+
+    for principal in _collect(spec, "EnterpriseObject"):
+        principal_name = _obj_name(principal)
+        if not principal_name:
+            continue
+        for agent in getattr(principal, "principal_of", []):
+            agent_name = _obj_name(agent)
+            if agent_name and _is_standing_affiliation(principal_name, agent):
+                parent.setdefault(agent_name, principal_name)
+
     chain, cur = [holder], holder
     while cur in parent:
         cur = parent[cur]

@@ -57,6 +57,7 @@ class DelegationLink:
     duration: Optional[str]
     conditions: Optional[str]
     creates_reporting_burden: bool
+    structural: bool = False   # AM-50: principal_of-derived, not a genuine Delegation
 
 
 @dataclass
@@ -152,11 +153,56 @@ def _obj_name(ref) -> Optional[str]:
 
 # ── Graph builder ─────────────────────────────────────────────────────────────
 
+def _is_standing_affiliation(principal_name: str, agent: Any) -> bool:
+    """A principal_of entry is a standing (structural) affiliation edge —
+    not already represented by a genuine Delegation — when the agent's own
+    delegated_from is absent, or points to a different principal than this
+    one.
+
+    Grounded in §7.10.1 alone ("by each such delegation, that active
+    enterprise object becomes an agent of the parties delegating, and the
+    parties (collectively) become principal of that object") — once a
+    principal-agent relationship is established, by whatever mechanism,
+    the principal is accountable for the agent's acts. The paired-vs-
+    one-sided split itself is NOT something the standard's text draws;
+    it is this scenario's own documented modelling convention — see
+    referral_scenario.el's header comment (lines 41-84): one-sided
+    principal_of is "organisational affiliation only... deliberately NOT
+    full subordinate agency", while paired principal_of+delegated_from is
+    "a GENUINE, if temporary, delegated principal-agent relationship".
+    §6.6.8 NOTE 3 was considered and rejected as a citation for this
+    specific discriminator — it licenses the delegated_from construct
+    itself ("a specification may state that, in its initial state, an
+    active enterprise object is an agent of a party", grammar/v2/
+    el_grammar.tx:112-114) but says nothing about pairing being required
+    for genuineness. See docs/CONCEPTS_INDEX.md's 2026-08-19/08-21
+    delegation-chain findings and the AM-50 entry for the full rationale.
+
+    A paired relationship is always already covered by an explicit
+    Delegation with its own obligation-scoped text, so it is deliberately
+    NOT added again here as an unconditionally-matching edge — doing so
+    would let an unrelated obligation ride along a hop that was never
+    actually delegated for it (e.g. clinicalHandoverBurden riding through
+    GPClinician → SpecialistClinician, which is real only for
+    referralResponseBurden)."""
+    delegated_from = getattr(agent, "delegated_from", None)
+    return delegated_from is None or _obj_name(delegated_from) != principal_name
+
+
 def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
     """
     Build adjacency list: delegator_name → [DelegationLink, ...]
 
     Suitable for graph traversal and for export to visualisation tools.
+
+    AM-50: also includes one-sided principal_of edges (structural=True) —
+    a standing organisational affiliation with no reciprocal
+    delegated_from, per §7.10.1 ("the parties (collectively) become
+    principal of that object"). These edges match any obligation (see
+    _walk_chain's structural check) — unlike genuine Delegation edges,
+    scoped to their own obligation text. Paired principal_of +
+    delegated_from relationships are NOT duplicated here; see
+    _is_standing_affiliation().
     """
     graph: Dict[str, List[DelegationLink]] = {}
 
@@ -178,6 +224,28 @@ def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
             creates_reporting_burden=getattr(d, "creates_reporting_burden", False),
         )
         graph.setdefault(from_name, []).append(link)
+
+    for principal in _collect(model, "EnterpriseObject"):
+        principal_name = _obj_name(principal)
+        if not principal_name:
+            continue
+        for agent in getattr(principal, "principal_of", []):
+            agent_name = _obj_name(agent)
+            if not agent_name or not _is_standing_affiliation(principal_name, agent):
+                continue
+            link = DelegationLink(
+                delegation_name=f"principal_of:{principal_name}->{agent_name}",
+                from_obj=principal_name,
+                to_obj=agent_name,
+                obligation="",
+                sub_delegation_allowed=False,
+                revocable=False,
+                duration=None,
+                conditions=None,
+                creates_reporting_burden=False,
+                structural=True,
+            )
+            graph.setdefault(principal_name, []).append(link)
 
     return graph
 
@@ -294,7 +362,9 @@ def _walk_chain(
 ) -> List[DelegationLink]:
     """
     Depth-first walk of the delegation graph from 'start', collecting
-    only links whose obligation matches.
+    only links whose obligation matches (or structural links — AM-50
+    principal_of-derived standing affiliation, which apply regardless of
+    the specific obligation being searched for).
     Returns the path to the deepest leaf.
     """
     if visited is None:
@@ -305,7 +375,7 @@ def _walk_chain(
 
     outgoing = [
         link for link in graph.get(start, [])
-        if obligation.lower() in link.obligation.lower()
+        if link.structural or obligation.lower() in link.obligation.lower()
     ]
 
     if not outgoing:

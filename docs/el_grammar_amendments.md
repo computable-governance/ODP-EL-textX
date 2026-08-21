@@ -3180,3 +3180,108 @@ blocks when a strict burden is active and actionable; unblocks once
 discharged; reason names every blocking burden with correct plural
 wording). Full suite: 156 pre-existing tests pass unchanged, plus 3 new
 (159 total).
+
+---
+
+## AM-50 (2026-08-21) — Bridge one-sided `principal_of` standing affiliation into the delegation-chain walk
+
+**Status:** IMPLEMENTED (2026-08-21).
+
+**Problem:** closes Problem 3 of the paused "Delegation holder/chain
+resolution" finding (`docs/CONCEPTS_INDEX.md`, 2026-08-19).
+`el_reasoner.py`'s `_walk_chain()`/`delegation_graph()` and
+`el_kripke.py`'s `_delegation_chain_for_token()` only ever traversed
+`Delegation` elements — never `principal_of`. `referral_scenario.el`'s
+`GPPractice { principal_of GPClinician }` link is declared as a bare,
+deliberately one-sided `principal_of` (no reciprocal `delegated_from` —
+see that file's own header comment, lines 41-84: "organisational
+affiliation of an independently-accountable party... deliberately NOT
+full subordinate agency"). Confirmed by direct empirical re-run before
+this fix: `ultimate_accountability(model, "...referralResponseBurden
+obligation...")` stopped dead at `GPPractice`, `current_holder ==
+"GPPractice"`, despite `gpToSpecialistDelegation` (`GPClinician →
+SpecialistClinician`, matching obligation text) existing one hop
+further down — structurally unreachable because the walk starts at
+`Commitment.actor` ("GPPractice") and the Delegation graph is keyed by
+`"GPClinician"`, with no bridge between the two.
+
+**What changed:** a new predicate, `_is_standing_affiliation(principal_name,
+agent)` (duplicated in both files — same Layer 3/4 no-cross-import
+convention `_find_action_for_burden` already follows), returns `True`
+when a `principal_of` entry is **one-sided**: the agent's own
+`delegated_from` is absent, or points to a *different* principal than
+this one. Only one-sided entries are added as new, unconditionally-
+matching ("structural") edges:
+
+- `el_reasoner.py`: `DelegationLink` gains `structural: bool = False`.
+  `delegation_graph()` adds a second pass over every `EnterpriseObject`'s
+  `principal_of` list, appending a `structural=True` link (empty
+  `obligation`, no `sub_delegation_allowed`/`revocable`/etc.) for each
+  one-sided entry. `_walk_chain()`'s filter becomes `link.structural or
+  obligation.lower() in link.obligation.lower()` — structural edges
+  match any obligation being searched for, since they represent a
+  standing relationship, not an obligation-specific transfer.
+- `el_kripke.py`: `_delegation_chain_for_token()` gets the same second
+  pass, adding parent-pointers via `parent.setdefault(agent_name,
+  principal_name)` — `setdefault` means any `Delegation`-derived parent
+  (the more specific signal, already correctly obligation-scoped by
+  `transfers_burden`) always wins if one exists for that node.
+
+**Why paired `principal_of`+`delegated_from` is deliberately NOT
+duplicated as a structural edge:** a paired relationship (e.g.
+`GPClinician → SpecialistClinician`) is already an explicit `Delegation`
+with its own obligation-scoped text (`gpToSpecialistDelegation`).
+Duplicating it as an unconditionally-matching structural edge would let
+an *unrelated* obligation ride along that hop — confirmed this would
+actually happen: `clinicalHandoverBurden` (held by `GPClinician` alone,
+never delegated further) would incorrectly extend to
+`SpecialistClinician` too, since `GPClinician.principal_of` includes
+`SpecialistClinician` regardless of which obligation is being asked
+about. Excluding paired entries, and relying on `setdefault` ordering in
+the Kripke-side chain, closes this off. Verified directly via
+`test_clinical_handover_burden_does_not_over_extend_to_specialist`.
+
+**Standard reference(s):** §7.10.1 alone ("by each such delegation, that
+active enterprise object becomes an agent of the parties delegating,
+and the parties (collectively) become principal of that object") —
+already directly verified against this repo's own citation of the
+clause. **§6.6.8 NOTE 3 was considered and rejected** as a citation for
+the paired-vs-one-sided discriminator specifically: the only record of
+its actual text in this repo (`grammar/v2/el_grammar.tx:112-114`) reads
+"A specification may state that, in its initial state, an active
+enterprise object is an agent of a party" — it licenses the
+`delegated_from` construct itself, but says nothing about pairing with
+`principal_of` being required for a "genuine" relationship. That
+distinction is this scenario's own documented modelling convention
+(`referral_scenario.el`'s header comment), not something the standard's
+text draws — worth being explicit about that distinction rather than
+overclaiming standard grounding for it.
+
+**Root principal unaffected, chain extended/corrected:** traced against
+every `Commitment` in `referral_scenario.el` — `Commitment.actor` is
+unchanged in every case (`GPPractice` stays root for
+`referralInitiationBurden`/`referralResponseBurden`/`clinicalHandoverBurden`;
+`SpecialistPractice` for `assessmentSchedulingBurden`;
+`SpecialistClinician` for `aiExaminationBurden`, already correct and
+untouched). Only `current_holder`/the discovered chain changes.
+**One correction surfaced along the way, not a new one introduced:**
+`referralInitiationBurden`'s previously-reported holder (`GPPractice`)
+was already wrong against the live runtime — `_build_referral_runtime()`
+(`el_api.py`) grants `referralInitiationBurden` to `referring_practitioner`,
+which defaults to `"GPClinician"`, not `"GPPractice"`. This fix corrects
+that pre-existing inaccuracy as a side effect, bringing the static
+reasoner's inferred holder into alignment with the real runtime grant.
+
+**Files changed:** `toolchain/el_reasoner.py` (`DelegationLink.structural`,
+`_is_standing_affiliation()`, `delegation_graph()` second pass,
+`_walk_chain()` filter), `toolchain/el_kripke.py` (mirrored
+`_is_standing_affiliation()`, `_delegation_chain_for_token()` second
+pass), `tests/test_am50_accountability_chain_principal_of.py` (new file,
+5 tests: `referralResponseBurden` chain now reaches
+`SpecialistClinician` via the `GPPractice → GPClinician` bridge;
+`referralInitiationBurden` holder corrected to `GPClinician`;
+`clinicalHandoverBurden` does NOT over-extend to `SpecialistClinician`
+— the discriminator-safety check; `el_kripke._delegation_chain_for_token()`
+mirrors `el_reasoner`'s result for the same scenario; a
+no-`principal_of`-at-all probe is a pure regression guard). Full suite:
+159 pre-existing tests pass unchanged, plus 5 new (164 total).
