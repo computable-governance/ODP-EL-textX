@@ -3625,3 +3625,153 @@ path this fix doesn't cover), and `_walk_chain()`'s obligation-text
 matching does not survive wording drift across multiple delegation hops,
 independent of the Commitment-vs-role-conferred question entirely. Both
 confirmed real by direct construction, both open.
+
+---
+
+## AM-54 (2026-08-22) — Structural-first matching in `_walk_chain()`/`_find_roots_from_delegations()`; root-grounding check before wrapping in `AccountabilityChain`
+
+**Status:** IMPLEMENTED (2026-08-22).
+
+**Problem:** closes both open findings logged the same day, immediately
+above (following the AM-52 Problem-2 entry) — surfaced during
+ground-truth re-verification the day AM-53 landed. `el_kripke.py`'s
+`_delegation_chain_for_token()` was already fixed (AM-51/52) to match
+structurally (`Delegation.burden`/`.token_group`) rather than by free
+obligation text; `el_reasoner.py`'s `_walk_chain()`/
+`_find_roots_from_delegations()` still relied on obligation-text matching
+alone, which is not standard-grounded to begin with — §6.4.7 NOTE 1
+describes delegation as literal token transfer, never as matching
+descriptive text. This produced two distinct, confirmed-real failure
+modes:
+
+1. `_find_roots_from_delegations()` could present a role-conferred root
+   (no `Commitment`, held only via a `Role`'s `holds`) as a fully
+   resolved `AccountabilityChain`, with only `root_commitment=None` as
+   the easy-to-miss signal it wasn't real — AM-53's `StaticRoleAnchor`
+   fallback never covered this code path (it only fires when *nothing*
+   matches at the top level; this root was found via a matching
+   `Delegation`). Confirmed by construction
+   (`MultiHopRoleConferredProbe`): a role-conferred burden delegated
+   A→B→C came back as `AccountabilityChain(root_party='A', ...)`.
+2. `_walk_chain()`'s recursive text match used the *original* query
+   string unchanged at every recursion depth, never the current hop's
+   own text — so a later hop whose wording drifted from the original
+   silently truncated the walk, independent of the Commitment-vs-
+   role-conferred question entirely. Confirmed by construction
+   (`TextDriftProbe`): a genuinely `Commitment`-backed 2-hop chain
+   P→Q→R reported `current_holder='Q'`, silently missing R.
+
+**Ground-truth performed before designing the fix:**
+- Checked every `Delegation` in every scenario file (`referral_scenario.el`,
+  `gp_referral_scenario.el`, `consent_scenario.el`,
+  `federation_consent_scenario.el`, `generated_governance.el`,
+  `industrial_procedure_scenario.el`) — every single one already declares
+  `transfers_burden` or `transfers_token_group`. Zero exceptions.
+  `ereferral_model.el` has no `Delegation` at all. Text-only delegations
+  are grammar-legal but do not exist live today — the fallback is kept
+  available (per the design), not eliminated.
+- Checked the "residual" case this design's own open question named —
+  a delegation-chain root neither `Commitment`-backed nor role-`holds`-
+  grounded — against the hypothesis that it corresponds to a party
+  directly holding the token via `EnterpriseObject.holds_tokens` (the
+  same `HoldsToken` rule shared with `Role` bodies, but declared on the
+  object directly — no filler ambiguity at all, unlike a `Role`).
+  **Result: negative.** Cross-referenced `Commitment`/`Role.holds`/direct
+  `EnterpriseObject.holds` for every burden in every scenario file: direct
+  holds is used exactly once in the corpus
+  (`gp_referral_scenario.el`'s `agent GPClinician { holds
+  referralInitiationBurden; holds clinicalHandoverBurden }`), and in that
+  one case it is always redundant with an already-existing `Commitment`
+  (already on record as dead code — `docs/CONCEPTS_INDEX.md`, 2026-08-13)
+  — never the sole grounding for anything. More directly: the residual
+  case itself has **zero live occurrences** in the corpus at all — every
+  non-`Commitment` burden today is either role-held (AM-53's case) or
+  entirely ungrounded and never delegated (`escalationNoticeBurden`,
+  which never reaches `_find_roots_from_delegations()` in the first place
+  since it's never named by any `Delegation`). No fourth path added —
+  writing code for a case with no live or constructed example would be
+  designing for a hypothetical, not a confirmed need. The residual case
+  keeps its pre-AM-54 `AccountabilityChain`/`root_commitment=None`
+  behaviour, explicitly documented as a deliberate simplification.
+
+**What changed:**
+- `DelegationLink` gains `burden_name: Optional[str]` and
+  `token_group_members: FrozenSet[str]` (plus a `has_structural_ref`
+  property), populated in `delegation_graph()` from each `Delegation`'s
+  own `.burden`/`.token_group` — field names and semantics deliberately
+  mirror `el_kripke.py`'s AM-51/52 fields, duplicated rather than shared,
+  per the established Layer 2/4 no-cross-import convention. The two
+  functions' matching logic now converges conceptually.
+- `_walk_chain()` takes an optional `token_name`. Matching becomes
+  structural-first: a link with a structural reference is matched (or
+  rejected) by that signal alone, regardless of its own obligation text —
+  free-text matching applies only to a link with no structural reference
+  at all (inspectable per-hop via `has_structural_ref`, so a text-matched
+  hop is never silently indistinguishable from a structural one).
+  Structural (AM-50 `principal_of`) links are unaffected, still always
+  match.
+- `_find_roots_from_delegations()` now returns `{root_name:
+  (obligation_text, token_name)}` instead of just text — root-finding
+  itself was already purely graph-topological (a set difference over the
+  whole model, not text-based, no recursion needed to reach an arbitrarily
+  distant true origin); the change is only that the matched delegation's
+  own token reference now travels with the root.
+- `ultimate_accountability()`: the `Commitment` path derives `token_name`
+  directly from `c.burden` (already had it) and passes it into
+  `_walk_chain()`. The delegation-only path now checks the inferred
+  root's grounding — via `_find_role_anchors_for_obligation()`, reused
+  rather than duplicated — before deciding whether to return an
+  `AccountabilityChain` or a `StaticRoleAnchor` for that root.
+- `StaticRoleAnchor` gains optional `chain: List[DelegationLink]` and
+  `current_holder: Optional[str]` (both default empty/`None`, additive —
+  AM-53's original `ereferral_model.el` cases, which have no further
+  delegation, are unaffected) so a role-conferred root that IS further
+  delegated onward doesn't silently lose the onward chain/current holder
+  the walk already discovered.
+
+**Confirmed against both constructions directly:**
+```
+MultiHopRoleConferredProbe (A role-conferred, no Commitment; A→B→C, transfers_burden: burdenX both hops):
+  ultimate_accountability(model, "Do the thing") ->
+    StaticRoleAnchor(role_name='roleA', community_name='SomeCommunity',
+      chain=[A→B, B→C], current_holder='C')
+    -- was: AccountabilityChain(root_party='A', root_commitment=None, ...)
+
+TextDriftProbe (P Commitment-backed; P→Q text-matching, Q→R text drifted; transfers_burden: burdenY both hops):
+  ultimate_accountability(model, "Deliver the report") ->
+    AccountabilityChain(root_party='P', current_holder='R', chain=[P→Q, Q→R])
+    -- was: current_holder='Q', R silently missing
+```
+Text-fallback path re-confirmed still working for a Delegation genuinely
+lacking any structural reference (new `NoStructuralRefProbe`), with
+`chain[0].has_structural_ref == False` as the inspectable signal.
+
+**Note on test fixtures:** both new probes trip `V-15`
+(`el_validator.py`) when parsed with `validate=True` — V-15 requires
+every `Delegation`'s obligation to trace back to a `CommitmentDecl` by
+text match, which has the same conceptual blind spot as pre-AM-54
+`_walk_chain()` (role-conferred roots, drifted text) in a different
+layer. Parsed with `validate=False` for these two fixtures instead,
+matching the established pattern for probes exercising cases the
+validator doesn't support yet. V-15's own gap is not fixed here — logged
+separately (see `docs/CONCEPTS_INDEX.md`).
+
+**Files changed:** `toolchain/el_reasoner.py` (`DelegationLink` extended;
+`StaticRoleAnchor` extended; `delegation_graph()` populates the new
+structural fields; `_walk_chain()` structural-first with `token_name`
+parameter; `_find_roots_from_delegations()` returns token_name alongside
+each root; `ultimate_accountability()` derives and threads `token_name`
+through both paths, checks delegation-only root grounding),
+`tests/test_am54_structural_matching_and_root_grounding.py` (new, 4
+tests: role-conferred root → `StaticRoleAnchor` not `AccountabilityChain`;
+onward chain/holder preserved on that anchor; text-drift survived via
+structural match; text-only fallback still works, flagged
+lower-confidence). Full suite: 184 pre-existing tests pass unchanged,
+plus 4 new (188 total).
+
+**Causal thread, for the record:** AM-53 → committed → this session's
+follow-up ground-truth check (same day) asking whether Commitment is the
+only possible delegation-chain root → surfaced both findings above →
+AM-54 closes them, plus resolves its own open question (residual-case
+hypothesis) with a negative, evidence-based result rather than an assumed
+fourth path. See `docs/CONCEPTS_INDEX.md` for the narrative version.

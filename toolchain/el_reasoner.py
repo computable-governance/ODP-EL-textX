@@ -40,7 +40,7 @@ Usage
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 
 # ── Data structures ───────────────────────────────────────────────────────────
@@ -58,6 +58,16 @@ class DelegationLink:
     conditions: Optional[str]
     creates_reporting_burden: bool
     structural: bool = False   # AM-50: principal_of-derived, not a genuine Delegation
+    # AM-54: structural transfer signals, mirroring el_kripke.py's
+    # _delegation_chain_for_token() (AM-51/52) — a link "has a structural
+    # reference" when either is set. Deliberately duplicated, not shared,
+    # per the established Layer 2/4 no-cross-import convention.
+    burden_name: Optional[str] = None
+    token_group_members: FrozenSet[str] = field(default_factory=frozenset)
+
+    @property
+    def has_structural_ref(self) -> bool:
+        return self.burden_name is not None or bool(self.token_group_members)
 
 
 @dataclass
@@ -123,30 +133,49 @@ class StaticRoleAnchor:
     the static spec alone can honestly go. "Who actually holds it" is a
     runtime question this function cannot answer; ask the live Runtime/
     WorldState instead.
+
+    AM-54: chain/current_holder are optional extensions for the case
+    where a role-conferred token IS further delegated onward (e.g. A's
+    role-conferred burden delegated A→B→C) — the root (A) still isn't a
+    resolved party, but the onward delegation hops and current holder are
+    real, structurally-confirmed facts the static spec does know, and
+    dropping them would silently lose information the walk already found.
+    Both default empty for the plain no-further-delegation case (e.g.
+    ereferral_model.el's 4 burdens), so this extension is additive and
+    does not change AM-53's original cases.
     """
     obligation: str
     token_name: str
     role_name: str
     community_name: str
+    chain: List["DelegationLink"] = field(default_factory=list)
+    current_holder: Optional[str] = None
 
     def describe(self) -> str:
         """Human-readable description — deliberately NOT named render(),
         so it can't be called interchangeably with AccountabilityChain's
         render() by a caller iterating a mixed list without branching on
         type first."""
-        return (
-            f"Obligation : '{self.obligation}'\n"
-            f"Token      : {self.token_name}\n"
-            f"Static spec has no Commitment or Delegation naming an\n"
-            f"accountable party for this obligation. Nearest static\n"
-            f"anchor: role '{self.role_name}' in community\n"
-            f"'{self.community_name}' declares 'holds {self.token_name}'.\n"
-            f"This is NOT a resolved accountable party — §6.4.3: tokens\n"
-            f"are held by active enterprise objects filling roles, never\n"
-            f"by roles or communities directly. The actual holder is a\n"
-            f"runtime fact (who fills '{self.role_name}', established via\n"
-            f"enroll()) that this static reasoner has no access to."
-        )
+        lines = [
+            f"Obligation : '{self.obligation}'",
+            f"Token      : {self.token_name}",
+            f"Static spec has no Commitment or Delegation naming an",
+            f"accountable party for this obligation. Nearest static",
+            f"anchor: role '{self.role_name}' in community",
+            f"'{self.community_name}' declares 'holds {self.token_name}'.",
+            f"This is NOT a resolved accountable party — §6.4.3: tokens",
+            f"are held by active enterprise objects filling roles, never",
+            f"by roles or communities directly. The actual holder is a",
+            f"runtime fact (who fills '{self.role_name}', established via",
+            f"enroll()) that this static reasoner has no access to.",
+        ]
+        if self.chain:
+            lines.append("Further delegated onward (still not a resolved root):")
+            for i, link in enumerate(self.chain, 1):
+                prefix = "  " * i
+                lines.append(f"{prefix}[{link.delegation_name}] {link.from_obj} ──► {link.to_obj}")
+            lines.append(f"Current holder (structurally confirmed): {self.current_holder}")
+        return "\n".join(lines)
 
 
 @dataclass
@@ -254,6 +283,14 @@ def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
     scoped to their own obligation text. Paired principal_of +
     delegated_from relationships are NOT duplicated here; see
     _is_standing_affiliation().
+
+    AM-54: each link also carries its structural transfer signal
+    (burden_name / token_group_members, mirroring el_kripke.py's AM-51/52
+    _delegation_chain_for_token()) so _walk_chain() can match structurally
+    first and treat free-text obligation matching as a fallback only for
+    links with no structural reference at all (confirmed by ground-truth
+    scan: every Delegation in every current scenario file has one — see
+    AM-54's amendment entry).
     """
     graph: Dict[str, List[DelegationLink]] = {}
 
@@ -262,6 +299,11 @@ def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
         to_name   = _obj_name(d.delegate)
         if not from_name or not to_name:
             continue
+
+        group = getattr(d, "token_group", None)
+        token_group_members = frozenset(
+            n for n in (_obj_name(t) for t in getattr(group, "tokens", [])) if n
+        ) if group is not None else frozenset()
 
         link = DelegationLink(
             delegation_name=d.name,
@@ -272,6 +314,8 @@ def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
             revocable=getattr(d, "revocable", False),
             duration=getattr(d, "duration", None),
             conditions=getattr(d, "conditions", None),
+            burden_name=_obj_name(getattr(d, "burden", None)),
+            token_group_members=token_group_members,
             creates_reporting_burden=getattr(d, "creates_reporting_burden", False),
         )
         graph.setdefault(from_name, []).append(link)
@@ -379,6 +423,18 @@ def ultimate_accountability(
        Delegation blocks at all). This fallback returns StaticRoleAnchor
        results, NOT AccountabilityChain — see that class's docstring for
        why the distinction matters and must not be collapsed.
+    7. AM-54: a Delegation-only root (step 4 territory, no Commitment at
+       all) is itself checked for grounding before being wrapped in an
+       AccountabilityChain — a role-conferred root (no Commitment, but
+       held via Role.holds) is reported as a StaticRoleAnchor instead,
+       with the onward delegation chain/current_holder preserved on it
+       (confirmed by construction: MultiHopRoleConferredProbe,
+       docs/CONCEPTS_INDEX.md, 2026-08-22). A root that is neither
+       Commitment- nor role-grounded (confirmed to have zero live or
+       constructed examples — see AM-54's amendment entry) keeps the
+       pre-AM-54 AccountabilityChain/root_commitment=None behaviour
+       unchanged; this is a deliberate, documented simplification, not an
+       oversight.
 
     §7.10.1: "A principal is responsible for the acts of an object
               acting as its agent."
@@ -399,7 +455,7 @@ def ultimate_accountability(
     found: no Commitment, no Delegation, and no Role declares 'holds' on
     anything matching this obligation.
     """
-    chains: List[AccountabilityChain] = []
+    chains: List[Union[AccountabilityChain, StaticRoleAnchor]] = []
     graph = delegation_graph(model)
 
     # Index commitments by obligation text
@@ -429,11 +485,16 @@ def ultimate_accountability(
             continue
         processed_roots.add(root_name)
 
+        # AM-54: track the Commitment's own token structurally so the
+        # walk trusts a hop's .burden/.token_group over its free text.
+        token_name = _obj_name(getattr(c, "burden", None))
+
         # Walk the delegation chain forward from root_name
         chain_links = _walk_chain(
             graph,
             start=root_name,
             obligation=obligation,
+            token_name=token_name,
         )
 
         current_holder = chain_links[-1].to_obj if chain_links else root_name
@@ -450,14 +511,39 @@ def ultimate_accountability(
     # — walk backwards to find the root delegator
     if not matching_commitments:
         roots = _find_roots_from_delegations(matching_delegations, all_delegations)
-        for root_name, root_obligation in roots.items():
+        for root_name, (root_obligation, token_name) in roots.items():
             if root_name in processed_roots:
                 continue
             processed_roots.add(root_name)
 
-            chain_links = _walk_chain(graph, start=root_name, obligation=obligation)
+            chain_links = _walk_chain(
+                graph, start=root_name, obligation=obligation, token_name=token_name,
+            )
             current_holder = chain_links[-1].to_obj if chain_links else root_name
 
+            # AM-54: is this root actually grounded? No Commitment (we're
+            # in the no-matching_commitments branch already), so check
+            # role-holds grounding via the same fallback AM-53 uses — a
+            # root name is not, by itself, evidence of a resolved party.
+            anchors = (
+                _find_role_anchors_for_obligation(model, token_name)
+                if token_name else []
+            )
+            if anchors:
+                for anchor in anchors:
+                    chains.append(StaticRoleAnchor(
+                        obligation=root_obligation,
+                        token_name=anchor.token_name,
+                        role_name=anchor.role_name,
+                        community_name=anchor.community_name,
+                        chain=chain_links,
+                        current_holder=current_holder,
+                    ))
+                continue
+
+            # Neither Commitment- nor role-grounded (confirmed: zero live
+            # or constructed examples today — see AM-54's amendment
+            # entry). Deliberately unchanged pre-AM-54 behaviour.
             chains.append(AccountabilityChain(
                 obligation=root_obligation,
                 root_party=root_name,
@@ -473,14 +559,26 @@ def _walk_chain(
     graph: Dict[str, List[DelegationLink]],
     start: str,
     obligation: str,
+    token_name: Optional[str] = None,
     visited: Optional[Set[str]] = None,
 ) -> List[DelegationLink]:
     """
     Depth-first walk of the delegation graph from 'start', collecting
-    only links whose obligation matches (or structural links — AM-50
-    principal_of-derived standing affiliation, which apply regardless of
-    the specific obligation being searched for).
-    Returns the path to the deepest leaf.
+    matching outgoing links. Returns the path to the deepest leaf.
+
+    AM-54: matching is structural-first when token_name is known — a link
+    that declares a structural transfer signal (burden_name /
+    token_group_members) is matched (or rejected) by that signal alone,
+    regardless of its own obligation text; free-text obligation matching
+    is used only as a fallback for a link with NO structural reference at
+    all (ground-truth confirmed: none exist in any current scenario file,
+    but the grammar permits it). This closes a real fragility: obligation
+    text drifting across hops (e.g. re-worded at a later delegation) no
+    longer silently truncates the walk, since a structurally-confirmed
+    hop is trusted even when its own wording doesn't echo the original
+    query text (see docs/CONCEPTS_INDEX.md's TextDriftProbe finding,
+    2026-08-22). Structural (AM-50 principal_of) links always match,
+    same as before.
     """
     if visited is None:
         visited = set()
@@ -488,10 +586,16 @@ def _walk_chain(
         return []   # cycle guard
     visited.add(start)
 
-    outgoing = [
-        link for link in graph.get(start, [])
-        if link.structural or obligation.lower() in link.obligation.lower()
-    ]
+    def _matches(link: DelegationLink) -> bool:
+        if link.structural:
+            return True
+        if link.has_structural_ref:
+            if token_name is None:
+                return False
+            return link.burden_name == token_name or token_name in link.token_group_members
+        return obligation.lower() in link.obligation.lower()
+
+    outgoing = [link for link in graph.get(start, []) if _matches(link)]
 
     if not outgoing:
         return []
@@ -499,29 +603,41 @@ def _walk_chain(
     # Follow the first matching outgoing link (obligations form a tree
     # per §7.10.1; cycles are structurally invalid and caught by V-08)
     link = outgoing[0]
-    rest = _walk_chain(graph, link.to_obj, obligation, visited)
+    rest = _walk_chain(graph, link.to_obj, obligation, token_name, visited)
     return [link] + rest
 
 
 def _find_roots_from_delegations(
     matching: List[Any],
     all_delegations: List[Any],
-) -> Dict[str, str]:
+) -> Dict[str, Tuple[str, Optional[str]]]:
     """
     Given a set of matching delegations, find those whose 'from'
     object does not appear as 'to' in any other delegation
-    (i.e., the root of the chain).
-    Returns {root_name: obligation_text}.
+    (i.e., the root of the chain). This root-finding step is already
+    purely graph-topological (a set difference over the whole model),
+    not text-based — it correctly finds the true origin regardless of
+    how many hops separate it, no recursion needed.
+
+    Returns {root_name: (obligation_text, token_name)}. AM-54:
+    token_name is the matched delegation's own structural transfer
+    reference (Delegation.burden, if set) — None if the delegation only
+    declares transfers_token_group (ambiguous which specific member to
+    track for the onward walk) or neither field at all. The caller uses
+    token_name to drive _walk_chain()'s structural-first matching and to
+    check the root's own grounding via _find_role_anchors_for_obligation()
+    before deciding whether this root is a resolved party or a
+    role-conferred one (AM-54 — see ultimate_accountability()).
     """
     all_delegates: Set[str] = {
         _obj_name(d.delegate) for d in all_delegations
         if _obj_name(d.delegate)
     }
-    roots: Dict[str, str] = {}
+    roots: Dict[str, Tuple[str, Optional[str]]] = {}
     for d in matching:
         from_name = _obj_name(d.delegator)
         if from_name and from_name not in all_delegates:
-            roots[from_name] = d.obligation
+            roots[from_name] = (d.obligation, _obj_name(getattr(d, "burden", None)))
     return roots
 
 

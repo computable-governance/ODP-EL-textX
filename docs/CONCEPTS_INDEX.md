@@ -3709,9 +3709,9 @@ exactly what caught 3 of these 4 conflicts.
 
 ---
 
-## `ultimate_accountability()`'s delegation-fallback path can present a role-conferred root as a resolved party — AM-53 does not reach it
+## `ultimate_accountability()`'s delegation-fallback path can present a role-conferred root as a resolved party — RESOLVED (2026-08-22, AM-54)
 
-**OPEN FINDING (2026-08-22)**
+**FINDING (2026-08-22), RESOLVED same day**
 
 Surfaced asking whether `Commitment` is the only possible root of a
 delegation chain — it isn't, structurally. `_find_roots_from_delegations()`
@@ -3750,18 +3750,26 @@ communities directly — a role-conferred root is not a resolved party any
 more than a role-conferred leaf burden is), reoccurring through a second,
 independent code path AM-53 doesn't cover.
 
-**Status:** open, not fixed. `_find_roots_from_delegations()` (or its
-caller) would need to check the inferred root against `Commitment` and,
-failing that, against role-`holds` membership (reusing or extending
-`_find_role_anchors_for_obligation()`) before deciding whether to return
-an `AccountabilityChain` or a `StaticRoleAnchor`-shaped result for that
-root. Not designed here — ground-truth only, per instruction.
+**Status:** RESOLVED (2026-08-22, AM-54). `ultimate_accountability()`'s
+delegation-only path now checks the inferred root's grounding via
+`_find_role_anchors_for_obligation()` (reused, not duplicated) before
+deciding whether to return an `AccountabilityChain` or a
+`StaticRoleAnchor` — a role-conferred root now correctly returns a
+`StaticRoleAnchor` with the onward delegation chain/current holder
+preserved (extended with two new optional fields for exactly this case).
+Confirmed directly against `MultiHopRoleConferredProbe` (with a realistic
+`transfers_burden` field added, per AM-54's own ground-truth finding that
+every live scenario always declares one):
+`StaticRoleAnchor(role_name='roleA', community_name='SomeCommunity',
+chain=[A→B, B→C], current_holder='C')`, no longer a bare
+`AccountabilityChain`. Full detail: `docs/el_grammar_amendments.md`,
+AM-54.
 
 ---
 
-## `_walk_chain()`'s obligation-text matching does not survive text drift across multiple delegation hops — general, independent of Commitment vs. role-conferred
+## `_walk_chain()`'s obligation-text matching does not survive text drift across multiple delegation hops — RESOLVED (2026-08-22, AM-54)
 
-**OPEN FINDING (2026-08-22)**
+**FINDING (2026-08-22), RESOLVED same day**
 
 Checked separately, since it's independent of the finding above: does
 `_walk_chain()`'s recursive obligation-text matching reliably survive
@@ -3795,13 +3803,50 @@ Affects both `ultimate_accountability()`'s entry paths equally (the
 `Commitment` branch and the delegation-fallback branch above both call
 this same `_walk_chain()`).
 
-**Status:** open, not fixed. Any fix would need `_walk_chain()` to match
-each hop against something more stable than a fixed substring carried
-unchanged across arbitrarily many hops — e.g. re-deriving a per-hop query
-from each link's own obligation text, or matching via a structural
-signal (a shared burden/token reference) rather than free text alone,
-similar in spirit to how AM-51/AM-52 moved `_delegation_chain_for_token()`
-off pure text-matching for the token_group case. Not designed here —
-ground-truth only, per instruction.
+**Status:** RESOLVED (2026-08-22, AM-54). `_walk_chain()` now matches
+structurally first — a hop that declares `transfers_burden`/
+`transfers_token_group` is matched (or rejected) by that signal alone,
+regardless of its own obligation wording; free-text matching applies only
+to a hop with no structural reference at all, exactly the "matching via a
+structural signal" direction sketched here, mirroring how AM-51/52 moved
+`_delegation_chain_for_token()` off pure text-matching. Confirmed directly
+against `TextDriftProbe` (with realistic `transfers_burden` fields added):
+`current_holder='R'`, chain `[P→Q, Q→R]` — no longer silently stopping at
+`Q`. Full detail: `docs/el_grammar_amendments.md`, AM-54.
+
+---
+
+## V-15's obligation-text matching has the same conceptual gap as pre-AM-54 `_walk_chain()` — flagged, not fixed
+
+**OPEN FINDING (2026-08-22)**
+
+Surfaced as a side effect of writing AM-54's test fixtures, not a
+targeted investigation — worth recording rather than letting it disappear
+into a test-file comment. `el_validator.py`'s V-15 ("DelegationDecl.obligation
+text must match the obligation of a CommitmentDecl or a prior
+DelegationDecl — chain continuity check") rejected both of AM-54's new
+probe fixtures (`MultiHopRoleConferredProbe`, a role-conferred delegation
+root with no `Commitment` at all; `TextDriftProbe`, a later hop's
+obligation text deliberately reworded) when parsed with `validate=True`:
+
+```
+[V-15] Delegation 'aToB': obligation 'Do the thing' does not match any CommitmentDecl. Delegation chain has no commitment root. (§7.10.1)
+[V-15] Delegation 'qToR': obligation 'Q hands off report duties to R entirely' does not match any CommitmentDecl. Delegation chain has no commitment root. (§7.10.1)
+```
+
+This is the same conceptual gap AM-54 just closed in `el_reasoner.py`,
+recurring in a different layer: V-15 also assumes every genuine
+delegation chain traces back to a `Commitment` via text matching, with no
+awareness of role-conferred origins (§B.2.4) and no structural
+(`transfers_burden`/`transfers_token_group`) matching option at all —
+just a stricter validator-time version of the same text-matching
+assumption. Not exercised by any live scenario today (both fixtures were
+parsed with `validate=False` specifically to route around this, per
+AM-54's own test file), so no committed scenario is currently
+misvalidated by it — but the same class of false-positive/false-negative
+risk AM-54 found in `_walk_chain()` likely applies here too, unverified.
+
+**Status:** open, not fixed. Flagged for the record, same treatment as
+the other deferred items logged today — not designed or scoped here.
 
 ---
