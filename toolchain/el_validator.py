@@ -31,9 +31,12 @@ Rules implemented
   V-13  Policed-pessimistic policies must declare a mechanism.  §7.9.4
   V-14  A PolicyRef target must resolve to a declared role,
         community, process, action, or object in scope.         §7.9.1
-  V-15  DelegationDecl.obligation text must match the obligation
-        of a CommitmentDecl or a prior DelegationDecl (chain
-        continuity check).                                       §7.10.1
+  V-15  DelegationDecl's referenced token (transfers_burden /
+        transfers_token_group) must have a resolvable origin — a
+        Commitment naming it, or a Role 'holds' naming it (AM-55,
+        structural-first). Falls back to free-text obligation
+        matching only for a delegation with no structural
+        reference at all (chain continuity check).                §7.10.1
   V-NEW-10  transfers_burden and transfers_token_group on a
         DelegationDecl are mutually exclusive — a delegation
         transfers a single burden or a token group, not both.   §6.6.6, §7.10.1
@@ -173,7 +176,7 @@ def validate_spec(model) -> List[str]:
         errors.extend(_validate_policy_refs(community))
 
     # V-15 — delegation obligation chain continuity
-    errors.extend(_validate_obligation_chain(commitments, delegations))
+    errors.extend(_validate_obligation_chain(commitments, delegations, model))
 
     # V-NEW-19 — CommunityObject.abstracts must resolve (AM-26)
     errors.extend(_validate_community_objects(model, all_communities))
@@ -668,18 +671,63 @@ def _validate_domain_controlling_controlled(model) -> List[str]:
 def _validate_obligation_chain(
     commitments: List[Any],
     delegations: List[Any],
+    model: Any,
 ) -> List[str]:
     """
-    V-15: Delegation obligation text must trace back to a Commitment.
+    V-15: a Delegation's transfer must trace back to a resolvable origin.
 
-    Each delegation's obligation must appear in at least one CommitmentDecl,
-    forming a chain root.  Mid-chain delegations that don't directly match
-    a commitment are still valid as long as the chain root does.
+    AM-55: structural-first, mirroring AM-54's el_reasoner.py fix (same
+    conceptual gap in a different layer — free-text obligation matching
+    alone is not standard-grounded; §6.4.7 NOTE 1 describes delegation as
+    literal token transfer). A Delegation with a structural reference
+    (transfers_burden / transfers_token_group) is checked by that alone:
+    is at least one referenced token's origin resolvable via a Commitment
+    naming it, or a Role's 'holds' naming it (AM-53-style role-conferred
+    grounding)? "Delegation-continuation" (a mid-chain delegation passing
+    along an already-grounded token) needs no separate case — grounding
+    is checked per TOKEN NAME, not per delegation-chain-position, so any
+    delegation moving an already-grounded token is automatically valid.
+    Per-token-group-member auditing is V-16a's job, not this rule's — V-15
+    only needs at least one referenced token grounded to confirm this
+    Delegation isn't wholly obligation-orphaned.
+
+    A Delegation with NO structural reference at all (grammar-legal, but
+    ground-truth confirmed zero live examples across every scenario file —
+    see AM-54's amendment entry) falls back to the original free-text
+    check: its obligation text must exactly match some Commitment's.
     """
     errors: List[str] = []
+    committed_token_names = {
+        _obj_name(getattr(c, "burden", None)) for c in commitments
+    } - {""}
+    role_held_token_names = {
+        _obj_name(tok)
+        for community in _collect(model, "Community") + _collect(model, "Federation")
+        for role in getattr(community, "roles", [])
+        for tok in getattr(role, "holds_tokens", [])
+    } - {""}
+    grounded_token_names = committed_token_names | role_held_token_names
     committed_obligations = {c.obligation for c in commitments}
 
     for d in delegations:
+        burden_name = _obj_name(getattr(d, "burden", None))
+        group = getattr(d, "token_group", None)
+        group_names = (
+            {_obj_name(t) for t in getattr(group, "tokens", [])} - {""}
+            if group is not None else set()
+        )
+        referenced = ({burden_name} if burden_name else set()) | group_names
+
+        if referenced:
+            if not (referenced & grounded_token_names):
+                errors.append(
+                    f"[V-15] Delegation '{d.name}': none of its referenced "
+                    f"token(s) ({sorted(referenced)}) has a resolvable "
+                    f"origin — no Commitment names it and no Role 'holds' "
+                    f"it. (§7.10.1)"
+                )
+            continue
+
         if d.obligation not in committed_obligations:
             errors.append(
                 f"[V-15] Delegation '{d.name}': obligation '{d.obligation}' "

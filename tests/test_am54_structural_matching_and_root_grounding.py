@@ -102,12 +102,11 @@ def test_role_conferred_delegation_root_returns_static_role_anchor_not_chain():
     must be a StaticRoleAnchor (root grounded via Role.holds, not a
     resolved party), not a bare AccountabilityChain.
 
-    validate=False: V-15 (el_validator.py) requires every Delegation's
-    obligation to trace back to a CommitmentDecl -- it has the same
-    conceptual blind spot as pre-AM-54 _walk_chain() for role-conferred
-    roots, in a different layer, out of scope here. Parsing (not
-    validating) is what this test needs."""
-    result = parse_string(_MULTI_HOP_ROLE_CONFERRED_PROBE, validate=False)
+    validate=True: AM-55 gave V-15 (el_validator.py) the same
+    structural-first fix -- burdenX is role-held, so this now validates
+    cleanly (previously needed validate=False to route around V-15's
+    pre-AM-55 text-only check, which had the same blind spot)."""
+    result = parse_string(_MULTI_HOP_ROLE_CONFERRED_PROBE, validate=True)
     assert result.ok, result.errors
     model = result.model
 
@@ -124,7 +123,7 @@ def test_role_conferred_delegation_root_preserves_onward_chain_and_holder():
     """The onward delegation hops and current holder are real,
     structurally-confirmed facts -- must not be silently dropped just
     because the root itself isn't a resolved party."""
-    result = parse_string(_MULTI_HOP_ROLE_CONFERRED_PROBE, validate=False)
+    result = parse_string(_MULTI_HOP_ROLE_CONFERRED_PROBE, validate=True)
     assert result.ok, result.errors
     model = result.model
 
@@ -176,11 +175,12 @@ def test_structural_match_survives_obligation_text_drift_across_hops():
     -- pre-AM-54, the walk silently stopped at Q. Structural matching
     (transfers_burden: burdenY on both hops) must reach R regardless.
 
-    validate=False: this fixture's whole point is drifted obligation text
-    on qToR, which V-15 (el_validator.py) rejects for the same reason
-    _walk_chain() used to fail -- a separate, text-matching-based
-    validator rule with its own analogous gap, out of scope here."""
-    result = parse_string(_TEXT_DRIFT_PROBE, validate=False)
+    validate=True: AM-55 gave V-15 the same structural-first fix -- both
+    hops reference burdenY, which is Commitment-backed (pCommitment), so
+    this now validates cleanly despite qToR's drifted wording (previously
+    needed validate=False, since V-15's pre-AM-55 text-only check
+    rejected qToR for the same reason _walk_chain() used to fail)."""
+    result = parse_string(_TEXT_DRIFT_PROBE, validate=True)
     assert result.ok, result.errors
     model = result.model
 

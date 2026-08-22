@@ -3816,9 +3816,9 @@ against `TextDriftProbe` (with realistic `transfers_burden` fields added):
 
 ---
 
-## V-15's obligation-text matching has the same conceptual gap as pre-AM-54 `_walk_chain()` — flagged, not fixed
+## V-15's obligation-text matching has the same conceptual gap as pre-AM-54 `_walk_chain()` — RESOLVED (2026-08-22, AM-55)
 
-**OPEN FINDING (2026-08-22)**
+**FINDING (2026-08-22), RESOLVED same day**
 
 Surfaced as a side effect of writing AM-54's test fixtures, not a
 targeted investigation — worth recording rather than letting it disappear
@@ -3846,7 +3846,18 @@ AM-54's own test file), so no committed scenario is currently
 misvalidated by it — but the same class of false-positive/false-negative
 risk AM-54 found in `_walk_chain()` likely applies here too, unverified.
 
-**Status:** open, not fixed. Flagged for the record, same treatment as
-the other deferred items logged today — not designed or scoped here.
+**Status:** RESOLVED (2026-08-22, AM-55), applying AM-54's exact pattern
+one layer over. V-15 now checks a `Delegation`'s structural reference
+first (`transfers_burden`/`transfers_token_group`) — at least one
+referenced token grounded via a `Commitment` naming it or a `Role`
+`holds`-ing it (AM-53-style) — falling back to the original exact-text
+check only for a `Delegation` with no structural reference at all.
+"Delegation-continuation" needed no separate case: grounding by token
+name, not chain position, covers it for free. Confirmed directly: both
+fixtures above now validate cleanly (`validate=True`, no more
+`validate=False` workaround needed — `tests/test_am54_structural_matching_and_root_grounding.py`
+updated accordingly); a genuine orphaned-token violation
+(`OrphanedTokenProbe` — no Commitment, no Role holds it) still correctly
+fires. Full detail: `docs/el_grammar_amendments.md`, AM-55.
 
 ---

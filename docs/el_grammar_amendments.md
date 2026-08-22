@@ -3775,3 +3775,90 @@ only possible delegation-chain root → surfaced both findings above →
 AM-54 closes them, plus resolves its own open question (residual-case
 hypothesis) with a negative, evidence-based result rather than an assumed
 fourth path. See `docs/CONCEPTS_INDEX.md` for the narrative version.
+
+---
+
+## AM-55 (2026-08-22) — Structural-first matching for V-15 (`el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-08-22).
+
+**Problem:** the same conceptual gap AM-54 closed in `el_reasoner.py`,
+recurring in the validator layer — surfaced as a side effect of writing
+AM-54's own test fixtures (both tripped V-15, logged as its own open
+finding, `docs/CONCEPTS_INDEX.md`, 2026-08-22) rather than a targeted
+investigation. V-15 (`el_validator.py::_validate_obligation_chain()`)
+checked every `Delegation`'s own `obligation` text for **exact string
+equality** against the flat set of every `Commitment.obligation` in the
+whole model — free-text matching alone, no structural option, no
+role-conferred-origin awareness, and (worth noting, uncovered while
+reading the existing code) weaker than its own docstring claimed: the
+docstring described chain-tracing ("mid-chain delegations... valid as
+long as the chain root does"), but the code had no such logic — every
+delegation's own text needed an exact match, regardless of chain
+position.
+
+**Ground-truth performed first:**
+1. Read V-15's exact implementation (above) — confirmed it produced the
+   exact "obligation 'Do the thing' does not match any CommitmentDecl"
+   errors from AM-54's open finding.
+2. Confirmed `_validate_obligation_chain()` receives the same parsed
+   `Commitment`/`Delegation` domain objects AM-54 worked with — `.burden`/
+   `.token_group` directly accessible, `model` available at the call site
+   in `validate_spec()` (just needed threading through). `el_validator.py`
+   imports nothing from `el_reasoner.py`/`el_kripke.py`/`el_engine.py` —
+   same established no-cross-import convention, duplicated logic, not
+   shared.
+3. Re-ran both of AM-54's probe fixtures with `validate=True` post-fix —
+   both now pass cleanly (see below).
+
+**What changed:** `_validate_obligation_chain()` now checks a
+`Delegation`'s structural reference first — is at least one referenced
+token (via `transfers_burden` or `transfers_token_group`) grounded, by
+name, via a `Commitment` naming it or a `Role`'s `holds` naming it
+(AM-53-style)? A design simplification worth being explicit about:
+"delegation-continuation" (a mid-chain delegation validly passing along
+an already-grounded token) needs no separate case — grounding is checked
+per **token name**, not per delegation-chain-position, so any delegation
+moving an already-grounded token is automatically valid without walking
+the chain. Per-token-group-member auditing is already V-16a's job, kept
+separate — V-15 only needs *at least one* referenced token grounded to
+confirm a `Delegation` isn't wholly obligation-orphaned. A `Delegation`
+with no structural reference at all (grammar-legal, zero live examples —
+AM-54's own ground-truth finding) falls back to the original exact-text
+check, unchanged.
+
+**Confirmed directly:**
+```
+MultiHopRoleConferredProbe (AM-54's fixture, role-conferred, no Commitment):
+  parse_string(..., validate=True) -> OK  (was: 2× V-15 errors)
+
+TextDriftProbe (AM-54's fixture, Commitment-backed, qToR's text reworded):
+  parse_string(..., validate=True) -> OK  (was: 1× V-15 error on qToR)
+
+OrphanedTokenProbe (new — burdenOrphan has no Commitment AND no Role holds it):
+  parse_string(..., validate=True) -> ["[V-15] Delegation 'xToY': none of
+    its referenced token(s) (['burdenOrphan']) has a resolvable origin
+    — no Commitment names it and no Role 'holds' it. (§7.10.1)"]
+  -- a genuine violation, confirmed still firing.
+```
+
+**Follow-on:** `tests/test_am54_structural_matching_and_root_grounding.py`
+updated — its two probes now use `validate=True` directly, the
+`validate=False` workaround (and the reasoning comment explaining it) no
+longer needed.
+
+**Files changed:** `toolchain/el_validator.py`
+(`_validate_obligation_chain()` rewritten; `validate_spec()`'s call site
+now threads `model` through; module docstring's V-15 description
+updated), `tests/test_am55_v15_structural_matching.py` (new, 5 tests:
+both AM-54 fixtures now validate cleanly; a genuine structural-orphan
+violation still fires; the text-only fallback still works and still
+fires on a genuine mismatch), `tests/test_am54_structural_matching_and_root_grounding.py`
+(2 `validate=False` → `validate=True`, no logic change). Full suite: 188
+pre-existing tests pass unchanged, plus 5 new (193 total).
+
+**Causal thread, for the record:** AM-54 → committed → writing AM-54's
+own tests surfaced V-15 tripping on both fixtures → logged as an open
+finding the same day → AM-55 closes it, applying the identical
+structural-first pattern AM-54 established, one layer over. See
+`docs/CONCEPTS_INDEX.md` for the narrative version.
