@@ -84,6 +84,10 @@ class AccountabilityChain:
     root_commitment: Optional[str]           # Commitment name, if any
     chain: List[DelegationLink]              # ordered from root → current holder
     current_holder: str                      # who currently holds the obligation
+    # AM-56: set instead of root_commitment when the root was found via
+    # ViolationResponse.creates_burden rather than a Commitment — the two
+    # are mutually exclusive origins, never both set on one chain.
+    root_violation_response: Optional[str] = None
 
     def render(self) -> str:
         """Human-readable chain description."""
@@ -93,6 +97,8 @@ class AccountabilityChain:
         ]
         if self.root_commitment:
             lines.append(f"Origin     : commitment '{self.root_commitment}'")
+        if self.root_violation_response:
+            lines.append(f"Origin     : violation_response '{self.root_violation_response}'")
         if self.chain:
             lines.append("Chain      :")
             for i, link in enumerate(self.chain):
@@ -435,6 +441,17 @@ def ultimate_accountability(
        pre-AM-54 AccountabilityChain/root_commitment=None behaviour
        unchanged; this is a deliberate, documented simplification, not an
        oversight.
+    8. AM-56: if steps 6/7 also find nothing (no Commitment, no
+       Delegation, no Role.holds), check whether the queried token is
+       named by some ViolationResponse.creates_burden (§7.8.6 NOTE 2: a
+       rule prescribing actions to be taken on violation is itself an
+       obligation applying to that object). ViolationResponse's
+       responding_actor is an already-resolved [EnterpriseObject]
+       cross-reference — unlike Role.holds there is no filler ambiguity
+       to flag — so a match is reported as a genuine AccountabilityChain
+       (root_violation_response set, root_commitment left None), not a
+       StaticRoleAnchor. Matched structurally on creates_burden's token
+       identity, never free text (AM-54 precedent).
 
     §7.10.1: "A principal is responsible for the acts of an object
               acting as its agent."
@@ -451,9 +468,12 @@ def ultimate_accountability(
     List of AccountabilityChain and/or StaticRoleAnchor. Never a mix of
     both in one call — the Commitment/Delegation path and the role-anchor
     fallback are mutually exclusive (the fallback only runs when the
-    primary path found nothing at all). An empty list means genuinely not
-    found: no Commitment, no Delegation, and no Role declares 'holds' on
-    anything matching this obligation.
+    primary path found nothing at all). AM-56's ViolationResponse fallback
+    is likewise only reached when both the Commitment/Delegation path and
+    the role-anchor fallback find nothing, and always returns
+    AccountabilityChain, never StaticRoleAnchor. An empty list means
+    genuinely not found: no Commitment, no Delegation, no Role declares
+    'holds', and no ViolationResponse.creates_burden names this token.
     """
     chains: List[Union[AccountabilityChain, StaticRoleAnchor]] = []
     graph = delegation_graph(model)
@@ -474,7 +494,10 @@ def ultimate_accountability(
     ]
 
     if not matching_commitments and not matching_delegations:
-        return _find_role_anchors_for_obligation(model, obligation)
+        role_anchors = _find_role_anchors_for_obligation(model, obligation)
+        if role_anchors:
+            return role_anchors
+        return _find_violation_response_roots(model, obligation)
 
     # Collect root parties: from commitments
     processed_roots: Set[str] = set()
@@ -639,6 +662,44 @@ def _find_roots_from_delegations(
         if from_name and from_name not in all_delegates:
             roots[from_name] = (d.obligation, _obj_name(getattr(d, "burden", None)))
     return roots
+
+
+def _find_violation_response_roots(model, token_name: str) -> List[AccountabilityChain]:
+    """
+    AM-56: ViolationResponse.creates_burden as a fourth, fully-resolved
+    root — last resort, only reached from ultimate_accountability() when
+    neither Commitment/Delegation nor the AM-53 role-anchor fallback found
+    anything for token_name.
+
+    §7.8.6 NOTE 2: "A rule prescribing types of actions to be taken by an
+    object in the event of certain types of violations. That rule is an
+    obligation, which applies to that object." ViolationResponse's
+    responding_actor is an already-resolved [EnterpriseObject] cross-
+    reference (grammar keyword 'obligates'; el_domain.py attribute
+    'responding_actor') — unlike Role.holds there is no filler ambiguity
+    to flag, so a match is reported as a genuine AccountabilityChain, not
+    a StaticRoleAnchor.
+
+    Matched structurally on creates_burden's own token identity (AM-54
+    precedent: never free-text) — does not scan description/response_kind
+    prose.
+    """
+    chains: List[AccountabilityChain] = []
+    for vr in _collect(model, "ViolationResponse"):
+        if _obj_name(getattr(vr, "creates_burden", None)) != token_name:
+            continue
+        root_name = _obj_name(getattr(vr, "responding_actor", None))
+        if not root_name:
+            continue
+        chains.append(AccountabilityChain(
+            obligation=token_name,
+            root_party=root_name,
+            root_commitment=None,
+            chain=[],
+            current_holder=root_name,
+            root_violation_response=vr.name,
+        ))
+    return chains
 
 
 # ── Secondary query: can_perform ─────────────────────────────────────────────

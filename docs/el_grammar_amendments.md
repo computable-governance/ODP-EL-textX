@@ -3862,3 +3862,91 @@ own tests surfaced V-15 tripping on both fixtures → logged as an open
 finding the same day → AM-55 closes it, applying the identical
 structural-first pattern AM-54 established, one layer over. See
 `docs/CONCEPTS_INDEX.md` for the narrative version.
+
+---
+
+## AM-56 (2026-08-22) — `ViolationResponse.creates_burden` as a fourth accountability root in `ultimate_accountability()`
+
+**Problem:** §7.8.6 NOTE 2 ("a rule prescribing types of actions to be
+taken... in the event of... violations... is an obligation, which applies
+to that object") was already used to justify `violation_response` as a
+top-level grammar declaration, specifically so violation-conferred
+obligations would participate in accountability-chain reasoning. That
+intent was never implemented in `el_reasoner.py`:
+`ultimate_accountability()` had exactly three paths to a root (matching
+Commitment, matching Delegation, AM-53's role-anchor fallback) and
+returned `[]` for a token originating purely from a
+`ViolationResponse.creates_burden` field — confirmed live:
+`escalationNoticeBurden` (`referral_scenario.el`, `gp_referral_scenario.el`)
+is created only this way, and `ultimate_accountability(model,
+"escalationNoticeBurden")` returned `[]` even though the specification
+already names who's accountable (`obligates: SpecialistPractice` /
+`SpecialistParty`). This exact gap was logged as an open finding in
+`docs/CONCEPTS_INDEX.md` ("`escalationNoticeBurden` has no
+ObligationDescriptor — invisible to Layer 4") for the Layer-4
+(`el_kripke.py`) side of the same hole; this amendment closes only the
+Layer-2 side.
+
+**Ground-truth performed first:**
+1. Confirmed `ViolationResponse`'s grammar shape
+   (`grammar/v2/el_grammar.tx:1089-1098`) and that its Python attribute is
+   `responding_actor` (el_domain.py:1253) — `obligates` is only the
+   grammar keyword. `creates_burden` (el_domain.py:1255) is a plain
+   resolved `Optional[DeonticToken]`. No object processor wraps or
+   renames either field.
+2. Confirmed `escalationNoticeBurden`/`referralNoResponseViolation`'s
+   declaration unchanged in both `referral_scenario.el:775-782` and
+   `gp_referral_scenario.el:505-512`.
+3. Confirmed V-NEW-15/V-NEW-16 (`on_violation_of` must be a burden;
+   `escalate_to` must be a party when `response_kind: escalate`) are
+   designed (this file, above) but **not registered** in
+   `el_validator.py` — same "designed, never implemented" gap as V-NEW-10
+   before AM-51. Left unimplemented here, logged for the record only.
+4. Checked every scenario file for `violation_response` declarations:
+   `ecommerce_scenario.el`'s three blocks use a stale pre-AM-17 body
+   syntax (`triggered_by`/`violated_by`/`condition`/...) that doesn't
+   match the current grammar at all — consistent with that file's
+   already-documented pre-existing syntax error, out of scope.
+   `ereferral_model.el`'s three blocks all omit `creates_burden`. So in
+   practice this fix affects exactly `escalationNoticeBurden` in the two
+   referral scenarios today, though the code is general.
+
+**What changed:** `ultimate_accountability()` gains a fourth, last-resort
+matching pass: when neither Commitment/Delegation nor the AM-53
+role-anchor fallback finds anything for the queried token, check whether
+some `ViolationResponse.creates_burden` names it (`_find_violation_response_roots()`,
+new). Matched structurally on `creates_burden`'s own token identity —
+never free text, consistent with AM-54's established precedent. Because
+`ViolationResponse.responding_actor` is an already-resolved
+`[EnterpriseObject]` cross-reference (no filler ambiguity, unlike
+`Role.holds`), a match is reported as a genuine `AccountabilityChain`,
+not a `StaticRoleAnchor` — there is nothing runtime-only left to flag.
+`AccountabilityChain` gains a new `root_violation_response: Optional[str]`
+field (mutually exclusive with `root_commitment`), surfaced in `render()`
+exactly as `root_commitment` already is.
+
+**Confirmed directly:** `escalationNoticeBurden` now resolves to a real
+`AccountabilityChain` rooted at `SpecialistPractice`
+(`referral_scenario.el`) / `SpecialistParty` (`gp_referral_scenario.el`),
+with `root_violation_response == "referralNoResponseViolation"`. All
+existing Commitment/Delegation/Role.holds/AM-53/AM-54 cases unaffected —
+the new pass is gated behind both prior fallbacks finding nothing.
+
+**Test-contract update:** `tests/test_am53_static_role_anchor_fallback.py`'s
+`test_escalation_notice_burden_not_fixed_by_this_path_still_empty` — which
+explicitly asserted this gap stayed open — rewritten (name, docstring,
+first assertion) to assert the resolved chain for both scenario files;
+its free-text `"notify GP practice"` assertion is unchanged (still `[]`,
+matching still structural-only).
+
+**Layer-4 side explicitly not touched:** `el_kripke.py`'s
+`_build_obligation_descriptors()` has the identical hole (only iterates
+`Commitment`) — `escalationNoticeBurden` remains structurally absent from
+`km.obligation_descriptors`, invisible to AF/EF checks and Bellman
+planning. Cross-referenced in `docs/CONCEPTS_INDEX.md`'s existing entry
+for that finding; not implemented here.
+
+**Files changed:** `toolchain/el_reasoner.py` (`AccountabilityChain`
+gains `root_violation_response`; `ultimate_accountability()`'s docstring
+and fallback branch; new `_find_violation_response_roots()`),
+`tests/test_am53_static_role_anchor_fallback.py` (one test rewritten).

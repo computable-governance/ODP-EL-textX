@@ -25,13 +25,13 @@ role-filling for an ordinary Community role is a runtime-only fact
 (enroll()), not expressible in the static .el spec, and this function has
 no access to it.
 
-Deliberately NOT closed by this fix: escalationNoticeBurden
-(referral_scenario.el / gp_referral_scenario.el) -- its origination is
-ViolationResponse.obligates (an already-resolved EnterpriseObject
-reference), a different, still-open gap (ultimate_accountability() never
-reads ViolationResponse at all) that happens to produce the same []
-symptom. Confirmed still returns [] below -- not silently treated as
-fixed.
+NOT closed by this fix: escalationNoticeBurden (referral_scenario.el /
+gp_referral_scenario.el) -- its origination is ViolationResponse.obligates
+(an already-resolved EnterpriseObject reference), a different gap
+(ultimate_accountability() never read ViolationResponse at all) that
+happened to produce the same [] symptom as the role-anchor gap this file
+otherwise covers. Closed separately by AM-56 -- see
+test_escalation_notice_burden_resolves_via_violation_response_root below.
 """
 from el_reasoner import AccountabilityChain, StaticRoleAnchor, ultimate_accountability
 from el_parser import parse
@@ -45,6 +45,12 @@ def _ereferral_model():
 
 def _referral_model():
     result = parse("scenarios/referral/referral_scenario.el", validate=False)
+    assert result.ok, result.errors
+    return result.model
+
+
+def _gp_referral_model():
+    result = parse("scenarios/gp_referral/gp_referral_scenario.el", validate=False)
     assert result.ok, result.errors
     return result.model
 
@@ -100,14 +106,35 @@ def test_static_role_anchor_describe_states_it_is_not_a_resolved_party():
     assert "ReferralEpisodeCommunity" in text
 
 
-def test_escalation_notice_burden_not_fixed_by_this_path_still_empty():
-    """escalationNoticeBurden's gap is a DIFFERENT, still-open root cause
-    (ViolationResponse.obligates, not Role.holds) -- confirming this fix
-    does not silently paper over it. Reported honestly as still returning
-    [], not treated as closed."""
-    model = _referral_model()
-    assert ultimate_accountability(model, "escalationNoticeBurden") == []
-    assert ultimate_accountability(model, "notify GP practice") == []
+def test_escalation_notice_burden_resolves_via_violation_response_root():
+    """escalationNoticeBurden's origin is ViolationResponse.obligates
+    (an already-resolved EnterpriseObject reference), a DIFFERENT root
+    cause from Role.holds -- this file's earlier tests confirmed this
+    path (AM-53's role-anchor fallback) correctly does NOT resolve it.
+    AM-56 closes it separately, via ViolationResponse.creates_burden as a
+    fourth root: a real AccountabilityChain, not a StaticRoleAnchor,
+    since responding_actor carries no filler ambiguity to flag."""
+    referral = _referral_model()
+    results = ultimate_accountability(referral, "escalationNoticeBurden")
+    assert len(results) == 1
+    chain = results[0]
+    assert isinstance(chain, AccountabilityChain)
+    assert not isinstance(chain, StaticRoleAnchor)
+    assert chain.root_party == "SpecialistPractice"
+    assert chain.current_holder == "SpecialistPractice"
+    assert chain.root_commitment is None
+    assert chain.root_violation_response == "referralNoResponseViolation"
+
+    gp_referral = _gp_referral_model()
+    gp_results = ultimate_accountability(gp_referral, "escalationNoticeBurden")
+    assert len(gp_results) == 1
+    gp_chain = gp_results[0]
+    assert isinstance(gp_chain, AccountabilityChain)
+    assert gp_chain.root_party == "SpecialistParty"
+    assert gp_chain.root_violation_response == "referralNoResponseViolation"
+
+    # Free-text queries stay structural-only -- never matched by prose.
+    assert ultimate_accountability(referral, "notify GP practice") == []
 
 
 def test_genuinely_nonexistent_obligation_still_returns_not_found():

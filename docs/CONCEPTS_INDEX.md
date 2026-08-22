@@ -1917,6 +1917,18 @@ to" — the file already answers that — it's narrower:
   `Commitment` and `ViolationResponse`, since each would have the same
   blind spot.
 
+**Cross-reference (2026-08-22):** AM-56 closes the Layer-2 side of this
+same gap — `el_reasoner.py`'s `ultimate_accountability()` now treats
+`ViolationResponse.creates_burden` as a fourth accountability root,
+resolving `escalationNoticeBurden` to a real `AccountabilityChain` rooted
+at `SpecialistPractice`/`SpecialistParty`. The Layer-4 gap described
+above (`_build_obligation_descriptors()` in `el_kripke.py`, still only
+iterating `Commitment`) is **unaffected and remains open** —
+`escalationNoticeBurden` is still structurally absent from
+`km.obligation_descriptors`, still invisible to AF/EF checks and Bellman
+planning. `el_kripke.py` was deliberately not touched by AM-56. See
+`docs/el_grammar_amendments.md`'s AM-56 entry.
+
 ---
 
 ## Governance-engine builder accountability gap
