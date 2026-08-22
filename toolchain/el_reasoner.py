@@ -40,7 +40,7 @@ Usage
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 # ── Data structures ───────────────────────────────────────────────────────────
@@ -96,6 +96,57 @@ class AccountabilityChain:
                 )
         lines.append(f"Holder now : {self.current_holder}")
         return "\n".join(lines)
+
+
+@dataclass
+class StaticRoleAnchor:
+    """
+    AM-53: the static spec's honest limit for an obligation with no
+    Commitment and no matching Delegation — NOT a resolved accountable
+    party, and structurally distinct from AccountabilityChain so a caller
+    cannot mistake one for the other without an explicit isinstance()
+    check (there is no shared "is this final" boolean field to forget).
+
+    This is deliberately NOT a claim about who the standard says holds
+    the token. §6.4.3 is explicit that deontic tokens are held by active
+    enterprise objects filling roles, never by roles or communities
+    directly (see docs/CONCEPTS_INDEX.md, "WorldState scope" finding,
+    2026-08-20) — role-filling for an ordinary Community role is a
+    runtime-only fact, established via enroll() in the Python builder,
+    not expressible anywhere in the static .el spec (confirmed empirically
+    against grammar/v2/el_grammar.tx and el_api.py's scenario builders,
+    AM-53). ultimate_accountability() operates on the static spec alone
+    and has no access to that runtime fact.
+
+    This result reports the nearest static anchor — the Role that
+    declares 'holds' on the token, and its owning Community — as far as
+    the static spec alone can honestly go. "Who actually holds it" is a
+    runtime question this function cannot answer; ask the live Runtime/
+    WorldState instead.
+    """
+    obligation: str
+    token_name: str
+    role_name: str
+    community_name: str
+
+    def describe(self) -> str:
+        """Human-readable description — deliberately NOT named render(),
+        so it can't be called interchangeably with AccountabilityChain's
+        render() by a caller iterating a mixed list without branching on
+        type first."""
+        return (
+            f"Obligation : '{self.obligation}'\n"
+            f"Token      : {self.token_name}\n"
+            f"Static spec has no Commitment or Delegation naming an\n"
+            f"accountable party for this obligation. Nearest static\n"
+            f"anchor: role '{self.role_name}' in community\n"
+            f"'{self.community_name}' declares 'holds {self.token_name}'.\n"
+            f"This is NOT a resolved accountable party — §6.4.3: tokens\n"
+            f"are held by active enterprise objects filling roles, never\n"
+            f"by roles or communities directly. The actual holder is a\n"
+            f"runtime fact (who fills '{self.role_name}', established via\n"
+            f"enroll()) that this static reasoner has no access to."
+        )
 
 
 @dataclass
@@ -250,12 +301,64 @@ def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
     return graph
 
 
+# ── Last-resort fallback: static role anchor ───────────────────────────────────
+
+def _find_role_anchors_for_obligation(model, obligation: str) -> List[StaticRoleAnchor]:
+    """AM-53: last-resort path when neither a Commitment nor a Delegation
+    names the obligation at all. Checks whether the query matches a bare
+    Burden (by exact token name, or by substring against its own
+    description) that some Role.holds_tokens declares — and if so,
+    reports that Role and its owning Community as the nearest static
+    anchor. See StaticRoleAnchor's docstring for why this is not a claim
+    about who holds the token.
+
+    Scope note: searches Community.roles and Federation.roles (both
+    populated post-parse — AM-26/AM-25). Domain's role mechanism
+    (controlling_role/controlled_role, AM-40) is a structurally different,
+    singular-field shape, not a List[Role] — not covered here; no live
+    scenario needs it for this path today."""
+    query = obligation.lower()
+    matching_tokens = [
+        t for t in _collect(model, "DeonticToken")
+        if getattr(t, "kind", None) == "burden"
+        and (
+            query == t.name.lower()
+            or (t.description and query in t.description.lower())
+        )
+    ]
+    if not matching_tokens:
+        return []
+    matching_names = {t.name for t in matching_tokens}
+
+    anchors: List[StaticRoleAnchor] = []
+    seen: Set[Tuple[str, str]] = set()
+    for community in _collect(model, "Community") + _collect(model, "Federation"):
+        community_name = _name(community)
+        if not community_name:
+            continue
+        for role in getattr(community, "roles", []):
+            role_name = _name(role)
+            if not role_name:
+                continue
+            for tok in getattr(role, "holds_tokens", []):
+                tok_name = _obj_name(tok)
+                if tok_name in matching_names and (community_name, role_name) not in seen:
+                    seen.add((community_name, role_name))
+                    anchors.append(StaticRoleAnchor(
+                        obligation=obligation,
+                        token_name=tok_name,
+                        role_name=role_name,
+                        community_name=community_name,
+                    ))
+    return anchors
+
+
 # ── Primary query: ultimate_accountability ────────────────────────────────────
 
 def ultimate_accountability(
     model,
     obligation: str,
-) -> List[AccountabilityChain]:
+) -> List[Union[AccountabilityChain, StaticRoleAnchor]]:
     """
     Find which party is ultimately accountable for a named obligation.
 
@@ -268,6 +371,14 @@ def ultimate_accountability(
        the current holder (the leaf node — no outgoing delegations
        for this obligation).
     5. Return one AccountabilityChain per root found.
+    6. AM-53: if NEITHER a Commitment nor a Delegation names this
+       obligation at all, fall back to _find_role_anchors_for_obligation()
+       — a Burden can be conferred purely by 'holds' inside a Role body
+       with no Commitment anywhere (§B.2.4's own worked example; confirmed
+       live in this repo — ereferral_model.el has zero Commitment/
+       Delegation blocks at all). This fallback returns StaticRoleAnchor
+       results, NOT AccountabilityChain — see that class's docstring for
+       why the distinction matters and must not be collapsed.
 
     §7.10.1: "A principal is responsible for the acts of an object
               acting as its agent."
@@ -281,8 +392,12 @@ def ultimate_accountability(
 
     Returns
     -------
-    List of AccountabilityChain (may be multiple if the obligation
-    is committed by / delegated through several independent chains).
+    List of AccountabilityChain and/or StaticRoleAnchor. Never a mix of
+    both in one call — the Commitment/Delegation path and the role-anchor
+    fallback are mutually exclusive (the fallback only runs when the
+    primary path found nothing at all). An empty list means genuinely not
+    found: no Commitment, no Delegation, and no Role declares 'holds' on
+    anything matching this obligation.
     """
     chains: List[AccountabilityChain] = []
     graph = delegation_graph(model)
@@ -303,7 +418,7 @@ def ultimate_accountability(
     ]
 
     if not matching_commitments and not matching_delegations:
-        return []
+        return _find_role_anchors_for_obligation(model, obligation)
 
     # Collect root parties: from commitments
     processed_roots: Set[str] = set()
@@ -579,13 +694,19 @@ if __name__ == "__main__":
         sys.exit(0)
 
     obligation = " ".join(sys.argv[2:])
-    chains = ultimate_accountability(spec, obligation)
+    results = ultimate_accountability(spec, obligation)
 
-    if not chains:
+    if not results:
         print(f"No accountability chain found for obligation: '{obligation}'")
     else:
-        print(f"Found {len(chains)} accountability chain(s):\n")
-        for i, chain in enumerate(chains, 1):
-            print(f"── Chain {i} ──")
-            print(chain.render())
+        print(f"Found {len(results)} result(s):\n")
+        for i, result in enumerate(results, 1):
+            print(f"── Result {i} ──")
+            # AM-53: each result is either an AccountabilityChain (resolved
+            # party) or a StaticRoleAnchor (static spec's honest limit, not
+            # a resolved party) — branch explicitly, never duck-type.
+            if isinstance(result, StaticRoleAnchor):
+                print(result.describe())
+            else:
+                print(result.render())
             print()

@@ -3708,3 +3708,100 @@ member) rather than only the specific instance a task names, since that's
 exactly what caught 3 of these 4 conflicts.
 
 ---
+
+## `ultimate_accountability()`'s delegation-fallback path can present a role-conferred root as a resolved party — AM-53 does not reach it
+
+**OPEN FINDING (2026-08-22)**
+
+Surfaced asking whether `Commitment` is the only possible root of a
+delegation chain — it isn't, structurally. `_find_roots_from_delegations()`
+(`el_reasoner.py`) is the path `ultimate_accountability()` uses when no
+`Commitment` matches the query but some `Delegation`'s obligation text
+does: it treats any delegator absent from `all_delegates` (the set of
+every `Delegation.delegate` in the whole model) as an authoritative root,
+and always wraps the result in a plain `AccountabilityChain` —
+**it never checks whether that inferred root actually has any grounding
+at all** (a `Commitment`, or, since AM-53, a role-conferred
+`StaticRoleAnchor`). AM-53's fallback only fires from
+`ultimate_accountability()`'s top-level `if not matching_commitments and
+not matching_delegations` branch — it is never consulted from inside
+`_find_roots_from_delegations()`'s own branch, which fires whenever *any*
+delegation text matches, independent of whether its root is grounded.
+
+**Confirmed by construction** (`MultiHopRoleConferredProbe`, no matching
+scenario file exercises this today): `role roleA { holds burdenX }` (no
+`Commitment` anywhere) in some community; `A →(aToB, obligation="Do the
+thing")→ B →(bToC, obligation="Do the thing")→ C`. The multi-hop *walk*
+itself is correct — it does reach back to `A` and forward to `C`, no
+under- or over-walking:
+
+```
+ultimate_accountability(model, "Do the thing") ->
+  AccountabilityChain(obligation='Do the thing', root_party='A',
+    root_commitment=None, chain=[A→B, B→C], current_holder='C')
+```
+
+`root_party='A'` is presented exactly the way a genuine Commitment-backed
+party would be — the only signal that `A` isn't actually resolved is
+`root_commitment=None`, a field nothing forces a caller to check. This is
+precisely the §6.4.3 conflation AM-53 exists to prevent (deontic tokens
+are held by active enterprise objects filling roles, never by roles or
+communities directly — a role-conferred root is not a resolved party any
+more than a role-conferred leaf burden is), reoccurring through a second,
+independent code path AM-53 doesn't cover.
+
+**Status:** open, not fixed. `_find_roots_from_delegations()` (or its
+caller) would need to check the inferred root against `Commitment` and,
+failing that, against role-`holds` membership (reusing or extending
+`_find_role_anchors_for_obligation()`) before deciding whether to return
+an `AccountabilityChain` or a `StaticRoleAnchor`-shaped result for that
+root. Not designed here — ground-truth only, per instruction.
+
+---
+
+## `_walk_chain()`'s obligation-text matching does not survive text drift across multiple delegation hops — general, independent of Commitment vs. role-conferred
+
+**OPEN FINDING (2026-08-22)**
+
+Checked separately, since it's independent of the finding above: does
+`_walk_chain()`'s recursive obligation-text matching reliably survive
+being passed through two or more delegation hops at all, even in an
+all-`Commitment`, no-role-conferred scenario? It does not.
+`_walk_chain()` matches each hop against the *original* top-level query
+string, unchanged at every recursion depth (`obligation.lower() in
+link.obligation.lower()`, `obligation` never updated to the current hop's
+own text) — so as soon as one hop's own obligation text stops containing
+that original substring, the walk stops there, silently, with full-
+confidence output and no error.
+
+**Confirmed by construction** (`TextDriftProbe`, no matching scenario file
+exercises this today — checked: `referral_scenario.el`'s and
+`consent_scenario.el`'s existing multi-delegation chains all use
+*different* obligation text per burden, never the same burden delegated
+twice with drifting wording, so this has never actually been hit by a
+committed scenario): `P` has a real `Commitment` (`obligation="Deliver
+the report"`); `P →(pToQ, obligation="Deliver the report")→ Q
+→(qToR, obligation="Q hands off report duties to R entirely")→ R`.
+
+```
+ultimate_accountability(model, "Deliver the report") ->
+  AccountabilityChain(root_party='P', current_holder='Q', chain=[P→Q])
+```
+
+`R` is silently missing — the true current holder is `R` (`qToR` is a
+genuine, existing `Delegation`), but the second hop's wording doesn't
+contain the original query substring, so the walk never reaches it.
+Affects both `ultimate_accountability()`'s entry paths equally (the
+`Commitment` branch and the delegation-fallback branch above both call
+this same `_walk_chain()`).
+
+**Status:** open, not fixed. Any fix would need `_walk_chain()` to match
+each hop against something more stable than a fixed substring carried
+unchanged across arbitrarily many hops — e.g. re-deriving a per-hop query
+from each link's own obligation text, or matching via a structural
+signal (a shared burden/token reference) rather than free text alone,
+similar in spirit to how AM-51/AM-52 moved `_delegation_chain_for_token()`
+off pure text-matching for the token_group case. Not designed here —
+ground-truth only, per instruction.
+
+---

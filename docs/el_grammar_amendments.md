@@ -3528,3 +3528,100 @@ Problem-2 ground-truth re-verification (same day) → surfaced this as a
 direct regression AM-51 itself introduced, not an unrelated new finding →
 AM-52 closes it. See `docs/CONCEPTS_INDEX.md`'s AM-52 entry for the
 narrative version of this same thread.
+
+---
+
+## AM-53 (2026-08-22) — Static-role-anchor fallback in `ultimate_accountability()`
+
+**Status:** IMPLEMENTED (2026-08-22).
+
+**Problem:** standard-conformance gap. ISO/IEC 15414's own library annex
+example (§B.2.4) shows a Burden originating purely from filling a role —
+"the action of filling a borrower role is therefore a speech act,
+resulting in a burden representing the obligation to obey the
+regulations" — with no `Commitment` speech act at all, distinct from
+§B.2.6.2's borrowing example, which does originate via `Commitment`.
+`el_reasoner.py::ultimate_accountability()` previously had exactly two
+paths to a root — a matching `Commitment`, or a matching `Delegation`
+whose obligation text names the burden — and silently returned `[]` for
+everything else. Confirmed live, not theoretical: checked every burden
+against every `Commitment` in every scenario file; `ereferral_model.el`
+has **zero** `commitment`/`delegation` blocks anywhere — all 4 of its
+burdens are conferred purely via `holds` inside a `Role` body.
+
+**What changed:** a new dataclass, `StaticRoleAnchor`, and a new
+last-resort path, `_find_role_anchors_for_obligation()`, invoked only when
+neither a `Commitment` nor a `Delegation` names the obligation at all.
+`ultimate_accountability()`'s return type becomes
+`List[Union[AccountabilityChain, StaticRoleAnchor]]` — the two are never
+mixed within one call (the fallback only runs when the primary path found
+nothing), and an empty list retains its existing meaning: genuinely not
+found.
+
+`StaticRoleAnchor` is deliberately **not** a claim about who the standard
+says holds the token. `docs/CONCEPTS_INDEX.md`'s "WorldState scope"
+finding (2026-08-20) already establishes, citing §6.4.3 directly, that
+deontic tokens are held by active enterprise objects filling roles, never
+by roles or communities directly — role-filling for an ordinary Community
+role is confirmed (grammar + `el_api.py` builder inspection) to be a
+runtime-only fact, established via `enroll()`, not expressible anywhere in
+the static `.el` spec. `StaticRoleAnchor` reports the nearest static
+anchor — the `Role` and its owning `Community` — as far as the static
+spec alone can honestly go, structurally distinct from
+`AccountabilityChain` (different dataclass, `describe()` not `render()`)
+specifically so a caller cannot mistake a non-final answer for a resolved
+party without an explicit `isinstance()` check.
+
+**Confirmed against both live triggers, concretely:**
+```
+ereferral_model.el, all 4 burdens -> StaticRoleAnchor, e.g.
+  referralBurden -> StaticRoleAnchor(token_name='referralBurden',
+    role_name='referringClinicianRole', community_name='ReferralEpisodeCommunity')
+
+escalationNoticeBurden (referral_scenario.el, gp_referral_scenario.el) -> still []
+```
+`escalationNoticeBurden` is **not** fixed by this change, deliberately —
+its origination is `ViolationResponse.obligates` (a typed, already-
+resolved `[EnterpriseObject]` cross-reference — `SpecialistPractice`), not
+a `Role.holds` situation at all (confirmed: zero `holds
+escalationNoticeBurden` anywhere in either file). That's a different,
+still-open gap (`ultimate_accountability()` never reads `ViolationResponse`
+at all), already on record as its own open question in
+`docs/CONCEPTS_INDEX.md`. Reported honestly as still returning `[]`, not
+silently treated as closed by this fix.
+
+**Caller-safety check performed before committing:** grepped every call
+site of `ultimate_accountability(` in the repo. `el_api.py`: zero
+references, not a caller. `el_reasoner.py`'s own `__main__` CLI block:
+updated to `isinstance(result, StaticRoleAnchor)`-branch rather than
+duck-type `.render()`. `tests/test_am50_accountability_chain_principal_of.py`:
+4 call sites access `AccountabilityChain`-specific fields
+(`.root_party`/`.current_holder`/`.chain`) unconditionally, with no
+`isinstance()` guard — not structurally safe, but every one of its
+queried obligation texts matches an existing `Commitment` in
+`referral_scenario.el`, so the new fallback path is never reached for any
+of them; confirmed by re-running that file directly (5/5 pass) rather than
+inferring safety from the full-suite result alone. No caller required a
+diff.
+
+**Files changed:** `toolchain/el_reasoner.py` (`StaticRoleAnchor` new;
+`_find_role_anchors_for_obligation()` new;
+`ultimate_accountability()`'s early-return wired to it, return type and
+docstring updated; `__main__` CLI block updated to branch on type),
+`tests/test_am53_static_role_anchor_fallback.py` (new, 8 tests: the 4
+`ereferral_model.el` burdens resolving to `StaticRoleAnchor`, `describe()`
+content, `escalationNoticeBurden` confirmed still `[]`, a genuinely-
+nonexistent-obligation regression guard, a Commitment-rooted no-regression
+check). Full suite: 176 pre-existing tests pass unchanged, plus 8 new
+(184 total).
+
+**Known, explicitly out-of-scope gaps surfaced by ground-truth checks
+during this same work, logged separately (not fixed here):** see
+`docs/CONCEPTS_INDEX.md`'s two entries dated 2026-08-22 immediately
+following the AM-52 Problem-2 entry — `_find_roots_from_delegations()`
+can present a role-conferred root as a resolved `AccountabilityChain`
+without ever routing through this fallback (a second, independent code
+path this fix doesn't cover), and `_walk_chain()`'s obligation-text
+matching does not survive wording drift across multiple delegation hops,
+independent of the Commitment-vs-role-conferred question entirely. Both
+confirmed real by direct construction, both open.
