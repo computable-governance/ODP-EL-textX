@@ -280,7 +280,7 @@ scenario. Nothing currently blocking; simply hasn't come up.
 
 **OPEN FINDING**
 
-**Status:** Deliberately deferred. Not present in any scenario, including `referral_scenario.el` (Reference).
+**Status:** AM-40's grammar/parser/validator prerequisite landed 2026-07-21 (dual-syntax, unit-tested). The two-construct shape is now demonstrated in `scenarios/vendor/ai_vendor_probe.el` (AM-59) — see update below.
 
 **The gap:** The scenario currently conflates "the AI vendor" with "the deployed AI agent" —
 only `SpecialistAIAgent` exists as a party/agent. Privacy and AI regulation treats these as
@@ -393,8 +393,22 @@ Three motivating cases this mechanism is meant to generalize across, with
   vendor conformance agreements; `kind: standard`/`legislation` for in-use
   machinery-safety obligations.
 
-Not yet written to any scenario file. Depends on AM-40 (Domain role-filling
-syntax — see the Domain entry) landing first.
+**Update 2026-08-23 — probe scenario built, AM-40 loop closed.**
+
+`scenarios/vendor/ai_vendor_probe.el` demonstrates the full two-construct
+shape: two independent peer contract federations (AIVendorAlphaSupplyFederation,
+AIVendorBetaSupplyFederation) each carrying the pre-deployment provider
+duty, feeding into one shared subordination domain
+(AIVendorGovernanceDomain) using AM-40's role-based syntax exclusively.
+Each deployed agent's `via=[Federation]` correctly traces back to its
+originating vendor federation, confirmed against the real parsed model
+(not just a parse-success check) in `tests/test_ai_vendor_probe_scenario.py`.
+
+Deliberately structural only (no burdens/commitments/Kripke) — the gap
+was always about provenance and role correctness, not discharge
+semantics. `PatientDataAuthorshipDomain`/`PatientDataConsentDomain`'s
+migration to the new syntax remains separately deferred, unaffected by
+this probe.
 
 **Cross-reference (2026-07-19):** each peer federation's pre-deployment
 `NormativePolicy` and the shared domain's in-use `NormativePolicy` are
