@@ -12,6 +12,12 @@ Per CLAUDE.md §7.3/§8: this toolchain is domain-specific (FHIR/clinical);
 none of these entries touch Layers 2-4 (`el_validator.py`, `el_reasoner.py`,
 `el_kripke.py`).
 
+**Note (2026-08-23):** AM-34 through AM-37's content below is now also
+mirrored into the main `docs/el_grammar_amendments.md`, per CLAUDE.md's
+Key Invariant #3 ("every grammar amendment must be logged in
+`docs/el_grammar_amendments.md`"). This file is retained as a
+FHIR-toolchain-scoped index, not the sole source of record.
+
 ---
 
 ## AM-34 (2026-07-09) — fhir_event_handler.py: R31 Consent revoke + R30 bootstrap note

@@ -1722,22 +1722,25 @@ before any implementation decision.
 
 ## Amendments-log gap — AM-34 through AM-37 missing; dangling AM-34 reference
 
-**OPEN FINDING**
+**RESOLVED 2026-08-23**
 
-`docs/el_grammar_amendments.md` has no entries for AM-34 through AM-37 —
-AM-33 is the last logged entry before AM-38 (which, per its own commit
+`docs/el_grammar_amendments.md` had no entries for AM-34 through AM-37 —
+AM-33 was the last logged entry before AM-38 (which, per its own commit
 96b7795, only ever touched `toolchain/fhir_mapping_table.md` and was never
-meant to be logged here) and AM-39 (this session, commit `7699baa`).
-Despite this, `toolchain/fhir_event_handler.py`'s own module docstring
-references "AM-34 in docs/el_grammar_amendments.md" (in the R30 section) —
-a currently dangling pointer to an entry that was never written. Per
-CLAUDE.md's Key Invariant #3 (every grammar amendment must be logged),
-this is a real, pre-existing gap, surfaced while adding AM-39, not
-introduced by it. Not fixed as part of this session — worth either
-backfilling AM-34–37 from git history if their content can be
-reconstructed, or correcting the dangling reference in
-fhir_event_handler.py to point somewhere accurate, whenever there's
-bandwidth.
+meant to be logged here) and AM-39 (commit `7699baa`). Per CLAUDE.md's
+Key Invariant #3 (every grammar amendment must be logged in
+`docs/el_grammar_amendments.md`), this was a real, pre-existing gap.
+
+Resolved by (a) merging AM-34 through AM-37's full content, verbatim,
+from `docs/fhir_toolchain_amendments.md` into `docs/el_grammar_amendments.md`,
+inserted in chronological order between AM-33 and AM-39; the companion
+file is retained as a FHIR-toolchain-scoped index, not the sole source,
+with a note added at its top pointing to the merge. And (b) re-checking
+the dangling docstring reference this finding originally flagged in
+`fhir_event_handler.py`: it turned out to already be fixed
+independently — the docstring currently reads "Scope (rule numbers per
+FHIR_ODP_EL_Positioning_Notes):" with zero AM-34 references (confirmed
+via `grep -n "AM-34" toolchain/fhir_event_handler.py`, zero matches).
 
 ---
 

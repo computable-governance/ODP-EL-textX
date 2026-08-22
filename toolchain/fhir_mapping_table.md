@@ -1,6 +1,7 @@
 # FHIR R4 → DSL-EL Governance Mapping Specification
 
-**Version:** 1.0 — May 2026  
+**Version:** 1.1 — August 2026 (R23-R32 sections added; ground-truthed against
+live code and full commit history)  
 **Authors:** ComputableGovernance Research Programme  
 **Status:** Draft — for inclusion in EDOC 2026 submission
 
@@ -126,11 +127,78 @@ declaration discharges the accountability obligation to maintain consent.
 
 ---
 
-### 3.5 Deferred Rules
+### 3.5 Contract → Federation (R23+R24, merged)
+
+| ID  | FHIR Element | DSL-EL Target | Notes |
+|-----|--------------|----------------|-------|
+| R23+R24 | Contract.signer[]/.term[]/.rule[] | `contract federation` block + `community_object` declarations | Merged rule, supersedes earlier OrganizationAffiliation-/Consent.policyRule-based proposals |
+
+**Elaboration:** implemented as `extract_federation_from_contract()`
+(AM-35). `Contract.signer[]` → `member:`/`represented_by`;
+`Contract.term[]`/`.rule[]` → commented `normative_policy` stubs (not
+auto-resolved to full `NormativePolicy` declarations). Standalone
+extraction, deliberately not wired into `el_api.py`'s runtime bootstrap —
+federation membership is standing structure, not a runtime event.
+
+---
+
+### 3.6 Domain — the R25 non-mappable case
+
+| ID  | FHIR Element | DSL-EL Target | Notes |
+|-----|--------------|----------------|-------|
+| R25 | Organization.partOf | `DomainDecl` | Not mappable — see elaboration |
+
+**Elaboration:** `Organization.partOf` expresses hierarchy;
+`PatientDataDomain`-style domains model controller/controlled
+relationships ACROSS independent legal entities — not a hierarchy. No
+FHIR-side interface exists for this relationship shape at all — nothing
+to map from, not merely unimplemented. Confirmed 2026-07-09; never given
+a standalone write-up until this document.
+
+---
+
+### 3.7 Encounter → Episode Grounding (R26-R29)
+
+| ID  | FHIR Element | DSL-EL Target | Notes |
+|-----|--------------|----------------|-------|
+| R26 | Encounter.participant[type=ATND] | `referring_practitioner` | AM-37 |
+| R27 | Encounter.serviceProvider | `gp_practice` | AM-37 |
+| R28 | Encounter.episodeOfCare[0] | `episode_reference` | Traceability only; AM-37 |
+| R29 | Encounter.status=finished | fires `encounterConcluded` event via `Runtime.fire_event()`, activating `triggered_by`-gated tokens | AM-39 |
+
+**Elaboration:** delivered in two parts. AM-37 grounds actor identity (GP
+side only — `SpecialistClinician`/`SpecialistAIAgent`/`Patient`
+untouched). AM-39 separately grounds token lifecycle state, reusing the
+AM-22 `triggered_by` mechanism via a new direct-call `Runtime.fire_event()`
+path. Flag explicitly: `handle_encounter_event()`
+(`fhir_event_handler.py`) is real and unit-tested, but has NO wired API
+endpoint — unlike R30/R31, there is no `/fhir/encounter-events` route in
+`el_api.py`. State this as an open integration point, not as complete.
+
+---
+
+### 3.8 Consent lifecycle at runtime (R30/R31)
+
+| ID  | FHIR Element | DSL-EL Target | Notes |
+|-----|--------------|----------------|-------|
+| R31 | Consent.status active→inactive | `Runtime.revoke_authorization()` | AM-34, fully implemented |
+| R30 | Consent.status active, post-bootstrap | `Runtime.reinstate_authorization()` | originally bootstrap-only no-op (AM-34), Option B (live grant/reinstate) fully implemented 2026-08-13 |
+
+**Elaboration:** both wired to `POST /fhir/consent-events`, and
+independently reachable via `POST /authorizations/{name}/revoke` and
+`.../reinstate`. R30's live-grant path was for a time a documented no-op;
+resolved by extending hybrid-mode Kripke construction to read live
+Permit/Embargo state, closing a structural gap that had made BOTH grant
+and revoke unverifiable by either Kripke builder — not an R30-only fix.
+106/106 tests passing at landing.
+
+---
+
+### 3.9 Deferred Rules
 
 | ID  | FHIR Resource | Rationale for deferral |
 |-----|---------------|------------------------|
-| R32 | AuditEvent | Belongs to the governance ledger (future work) |
+| R32 | AuditEvent | Renamed from the original R23 (see AM-38, a pure `fhir_mapping_table.md` renumbering with no code change). Belongs to the governance ledger (future work) |
 | —   | Bidirectional mapping | DSL speech act → FHIR update requires running FHIR server |
 | —   | FHIR R5 differences | R4 is current HL7 Australia eRequesting target |
 
