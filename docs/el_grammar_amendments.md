@@ -3950,3 +3950,68 @@ for that finding; not implemented here.
 gains `root_violation_response`; `ultimate_accountability()`'s docstring
 and fallback branch; new `_find_violation_response_roots()`),
 `tests/test_am53_static_role_anchor_fallback.py` (one test rewritten).
+
+---
+
+## AM-57 (2026-08-23) — Live `any_discharged` sibling supersession in `el_engine.py`, parity with `el_kripke.py`'s P6b
+
+**Problem:** `el_kripke.py` (Layer 4, the verifier) already implements
+P6b — when one member of an `any_discharged` `TokenGroup` discharges, its
+remaining PENDING/WAITING siblings transition to `SUPERSEDED`, since the
+group's objective is already satisfied by that one discharge.
+`el_engine.py` (Layer 3, the live runtime) had no equivalent at all —
+confirmed by grep: zero references to `SUPERSEDED`/`any_discharged`/
+`TokenGroup` anywhere in the file. A live sibling burden in an
+`any_discharged` group stayed `active` forever after a peer discharged,
+with nothing to stop it later being flagged VIOLATED by
+`check_live_violations()` despite the group's purpose already being
+fulfilled.
+
+**Ground-truth performed first:** re-read `el_engine.py`'s Step 7a
+discharge block (confirmed at the described location, no drift) and
+`el_kripke.py`'s `_build_group_index`/`_build_any_discharged_groups`/P6b
+block (confirmed at the described location, no drift). Also confirmed:
+no currently committed scenario declares `any_discharged` at all
+(`referral_scenario.el`/`gp_referral_scenario.el` both use
+`all_discharged`; `gp_referral_scenario.el`'s header comment documents an
+earlier `any_discharged`→`all_discharged` correction, §13.1b) — so this
+change has zero live scenario impact today, confirmed empirically (both
+scenario files parse/validate identically before and after; full test
+suite unchanged in count beyond the 4 new tests).
+
+**What changed:** `el_engine.py` gains `_build_group_index()` and
+`_build_any_discharged_groups()`, ported (duplicated, not imported) from
+their `el_kripke.py` namesakes — Layer 3/Layer 4 architectural
+independence, per CLAUDE.md. `advance()`'s Step 7a gains a 7a-cont block:
+after a burden discharges, any `active`-state sibling in the same
+`any_discharged` group (matched across all holders, not just the
+discharging actor) transitions to `superseded`, logged in `effects`.
+Deliberately scoped to `active` siblings only, not `pending` (masked) —
+logged as an open gap in `docs/CONCEPTS_INDEX.md` rather than guessed at,
+since no scenario exercises that combination.
+`TokenInstance.state`'s comment now flags that `'superseded'` has two
+unrelated live meanings (Permit-superseded-by-Embargo via
+`revoke_authorization()`, AM-31; and this one) so a future reader isn't
+confused. `check_live_violations()` needed no change — confirmed directly
+(not assumed): its existing `tok.state != "active"` guard already
+excludes `superseded` burdens.
+
+**Confirmed directly**, via a standalone two-actor/two-Commitment minimal
+spec (not a change to any real scenario file):
+- Actor A discharging `burdenA` supersedes Actor B's `burdenB` sibling;
+  `effects` names both.
+- The superseded sibling never violates via `check_live_violations()`,
+  even 1000 ticks past its deadline.
+- A structurally identical `all_discharged` control group is unaffected
+  (regression guard: the P6b-equivalent must not fire there).
+- A sibling already `discharged` (not `active`) when its peer discharges
+  is left alone, not overwritten to `superseded`.
+
+**Files changed:** `toolchain/el_engine.py` (`TokenInstance.state`
+comment; new `_build_group_index()`/`_build_any_discharged_groups()`;
+`advance()`'s 7a-cont block; `check_live_violations()` confirmation
+comment), `tests/test_any_discharged_sibling_supersession.py` (new, 4
+tests). Full suite: 193 pre-existing tests pass unchanged, plus 4 new
+(197 total). `docs/CONCEPTS_INDEX.md` gains the masked-sibling gap note
+and a V-16a/V-16b stale-status correction surfaced during the same
+ground-truth pass.

@@ -36,6 +36,12 @@ class TokenInstance:
     kind: str                       # 'burden' | 'permit' | 'embargo'
     holder: str                     # actor name
     state: str                      # 'active' | 'pending' | 'discharged' | 'violated' | 'superseded'
+                                     # NOTE: 'superseded' has two unrelated live meanings:
+                                     # (1) a Permit that lost governance to an Embargo via
+                                     #     revoke_authorization() (AM-31); (2) AM-57: a Burden
+                                     #     sibling in an any_discharged TokenGroup, relieved
+                                     #     because another member discharged. Same word,
+                                     #     different mechanisms — do not conflate.
     discharge_mode: str             # 'eventual' | 'strict'
     priority: str                   # 'critical' | 'high' | 'normal' | 'low'
     granted_at_tick: int            # tick at which this instance was created; required, no
@@ -180,6 +186,65 @@ def _activate_triggered_tokens(spec, tokens: list, event_name: str) -> tuple[lis
     return new_tokens, log_lines
 
 
+# AM-57: ported from el_kripke.py's _build_group_index/_build_any_discharged_groups
+# (Layer 4) — duplicated deliberately, not imported, per the Layer 3/Layer 4
+# independence architecture (CLAUDE.md). Keep both copies in sync manually if
+# the TokenGroup grammar rule changes.
+def _build_group_index(spec) -> Dict[str, List[str]]:
+    """
+    AM-57: Build a group membership index from all TokenGroup declarations
+    in the spec. Returns {group_name: [token_name, ...]}.
+
+    Ported from el_kripke.py's _build_group_index (Layer 4) — duplicated
+    deliberately, not imported, per the Layer 3/Layer 4 independence
+    architecture (CLAUDE.md). Keep both copies in sync manually if the
+    TokenGroup grammar rule changes.
+    """
+    index: Dict[str, List[str]] = {}
+    for el in spec.elements:
+        if type(el).__name__ != "TokenGroup":
+            continue
+        member_ids = [
+            getattr(tok, "name", None) for tok in getattr(el, "tokens", [])
+        ]
+        member_ids = [n for n in member_ids if n]
+        if member_ids:
+            index[el.name] = member_ids
+    return index
+
+
+def _build_any_discharged_groups(spec) -> Set[str]:
+    """
+    AM-57: Return the set of group identifiers whose Community/Federation/
+    Domain objective satisfaction operator is 'any_discharged'.
+
+    Ported from el_kripke.py's _build_any_discharged_groups (Layer 4) —
+    same duplication rationale as _build_group_index above. Supports both
+    forms: AM-27 (single TokenGroup ref, indexed by group name) and AM-29
+    (inline comma-separated DeonticToken names, indexed by community name).
+    """
+    group_index = _build_group_index(spec)
+    result: Set[str] = set()
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Federation", "Domain"):
+            continue
+        obj = getattr(el, "objective", None)
+        if obj is None:
+            continue
+        sat = getattr(obj, "satisfaction", None)
+        if sat is None:
+            continue
+        if getattr(sat, "operator", None) != "any_discharged":
+            continue
+        raw_args = getattr(sat, "raw_args", [])
+        arg_names = [a.name for a in raw_args if getattr(a, "name", None)]
+        if len(arg_names) == 1 and arg_names[0] in group_index:
+            result.add(arg_names[0])
+        elif arg_names:
+            result.add(el.name)
+    return result
+
+
 # ── Core engine function ──────────────────────────────────────────────────────
 
 def advance(
@@ -291,6 +356,41 @@ def advance(
     for name in dischargeable:
         discharged_names.append(name)
         effects_log.append(f"discharged burden '{name}'")
+
+    # 7a-cont — AM-57: any_discharged sibling supersession, mirroring
+    # el_kripke.py's P6b transition. Scope: 'active'-state siblings only
+    # (the plain un-discharged live-obligation state). Deliberately does
+    # NOT touch 'pending' (masked, NOTE 5/6) siblings — no current or
+    # planned scenario exercises a masked sibling inside an any_discharged
+    # group, and guessing at that interaction without a test case to
+    # validate against would be exactly the kind of unverified design this
+    # project avoids. See docs/CONCEPTS_INDEX.md for the logged gap.
+    #
+    # Siblings are matched by token_name across ALL holders, not just
+    # actor_name — the whole point is that a sibling burden is held by a
+    # different peer than the one who just discharged.
+    if dischargeable:
+        group_index = _build_group_index(spec)
+        any_discharged_groups = _build_any_discharged_groups(spec)
+        superseded_names: list[str] = []
+        for discharged_name in dischargeable:
+            for group_name, members in group_index.items():
+                if group_name not in any_discharged_groups:
+                    continue
+                if discharged_name not in members:
+                    continue
+                for sibling_name in members:
+                    if sibling_name == discharged_name:
+                        continue
+                    for i, t in enumerate(tokens):
+                        if t.token_name == sibling_name and t.state == "active":
+                            tokens[i] = _transition(t, "superseded")
+                            superseded_names.append(sibling_name)
+                            effects_log.append(
+                                f"superseded burden '{sibling_name}' held by "
+                                f"'{t.holder}' (sibling '{discharged_name}' "
+                                f"discharged, group '{group_name}')"
+                            )
 
     # 7b — Grammar DeonticEffect operations
     if grammar_action:
@@ -1033,6 +1133,8 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     effects_log: List[str] = []
 
     for i, tok in enumerate(tokens):
+        # AM-57: superseded burdens are already excluded here (state != "active"
+        # required above) — no change needed for sibling-supersession parity.
         if tok.kind != "burden" or tok.state != "active" or tok.discharge_mode != "eventual":
             continue
 

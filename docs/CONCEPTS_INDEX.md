@@ -3873,3 +3873,53 @@ updated accordingly); a genuine orphaned-token violation
 fires. Full detail: `docs/el_grammar_amendments.md`, AM-55.
 
 ---
+
+### V-16a/V-16b status correction (2026-08-23)
+
+Prior notes (including a same-day session brief) described V-16
+("TokenGroup members should have a backing Commitment") as still deferred
+and unregistered. Ground-truth check of `el_validator.py` on `main` shows
+this is stale: **V-16a and V-16b are both implemented and registered**,
+confirmed CONFIRMED in `el_grammar_amendments.md`:
+
+- V-16a (`_validate_token_group_provenance`) — every `TokenGroup` member
+  must be backed by a top-level `Commitment`, a `Delegation.transfers_token_group`,
+  or a role `holds` — dispatched in `validate_spec` immediately before V-16b.
+- V-16b (`_validate_satisfaction_singleton`) — warns when a
+  `SatisfactionCondition` has only one effective member.
+
+No action needed. Recorded here so this doesn't get re-flagged as open in
+a future session.
+
+---
+
+### Masked (`pending`) sibling gap in `any_discharged` supersession (AM-57)
+
+AM-57's live sibling-supersession in `el_engine.py` is scoped to
+`active`-state siblings only — not `pending`. This matters more than a
+remote edge case: `pending` is dual-purpose at the engine level (NOTE
+5/6 delegation-retention masking, AND the live representation of a
+`triggered_by`-gated burden before its event fires). `referral_scenario.el`'s
+`referralInitiationBurden` (`triggered_by: encounterConcluded`, line 216)
+is a real, committed example of the latter mechanism — though the
+scenario declares it `state: active` by default; `test_referral_event_triggers.py`'s
+`_with_pending_referral_burden()` helper is what actually exercises its
+`pending`→`active` transition, by overriding that default. `el_kripke.py`'s
+P6b supersedes both PENDING and WAITING siblings (WAITING = Kripke's term
+for the not-yet-triggered case); the live engine currently only covers
+the PENDING-equivalent (`active`).
+
+Net effect: if an `any_discharged` group member is a `triggered_by`-gated
+burden currently sitting `pending`, and its sibling discharges first,
+Kripke would supersede it but the live engine won't — it stays inert and
+could later resurface as a live obligation once triggered, with no
+memory that the group's objective was already met.
+
+**Constraint on future `any_discharged` scenario design** (not just a
+documentation note): until this is built, any `any_discharged`
+`TokenGroup`'s members should avoid `triggered_by`/`state: pending`
+declarations — including the standalone two-peer demo scenario planned
+next. Revisit building the full mechanism only if a real scenario needs
+a triggered_by-gated peer inside an any_discharged group.
+
+---
