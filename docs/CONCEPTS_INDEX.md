@@ -1609,6 +1609,25 @@ matching `emits` in a way that exercises either path with non-empty data
 mechanism (e.g. item #1's Encounter.status gating), first tests for Step 3/7c
 should be added as part of that work, not assumed correct from authorship alone.
 
+**Status: PARTIALLY RESOLVED 2026-08-23.** The `triggered_by`/Step 7c side
+is now resolved: AM-39 gave it a real scenario pairing
+(`encounterConcluded` → `referralInitiationBurden` in
+`referral_scenario.el`) and `tests/test_referral_event_triggers.py` now
+covers it directly (10 tests: token activation on a matching event and
+no-op on a non-matching one, `Runtime.fire_event()` transitioning a
+pending burden to active plus its no-match case, Step 7c activation via
+an action's `emits`, and four `handle_encounter_event()` cases covering
+the finished-status activation path and its error/no-match branches).
+The `discharged_by`/`event_discharged` side (Step 3) remains genuinely
+untested — confirmed via grep, 2026-08-23: `discharged_by` appears only
+in `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_parser.py`, `toolchain/el_engine.py`, and
+`toolchain/el_kripke.py` — all grammar/engine/verifier code, zero
+scenario files and zero tests anywhere in the repo. Do not treat this
+finding as closed — half of it still needs the same treatment
+`triggered_by` just got, whenever `discharged_by`/`event_discharged` work
+is next picked up.
+
 ## Engine/Kripke event-model symmetry gap — undocumented, not deliberately designed
 
 **OPEN FINDING**
