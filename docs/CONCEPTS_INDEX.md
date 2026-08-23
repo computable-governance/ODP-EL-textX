@@ -1737,6 +1737,40 @@ Not scheduled for implementation — logging only. Checking current
 scenarios for actual `any_discharged` usage is a reasonable next step
 before any implementation decision.
 
+**Status: RESOLVED 2026-08-23.** The core gap — the live engine having
+zero `any_discharged`/`SUPERSEDED` handling — is resolved by AM-57
+(`docs/el_grammar_amendments.md`): `el_engine.py` gained
+`_build_group_index()`/`_build_any_discharged_groups()` (ported from
+`el_kripke.py`) and a 7a-cont block in `advance()` that supersedes
+`active`-state siblings in an `any_discharged` group when one member
+discharges. Confirmed via grep, 2026-08-23: `el_engine.py` now contains
+extensive `TokenGroup`/`any_discharged`/`superseded` references (group
+indexing, the 7a-cont supersession block, and a `check_live_violations()`
+comment confirming superseded burdens are already excluded).
+
+This finding's own "Not yet checked" question — whether any current
+`.el` scenario actually declares an `any_discharged` `TokenGroup` — is
+now directly answered: `scenarios/specialist_pool/specialist_pool_scenario.el`
+(commit `aa26e3a`, "AM-58"; not a grammar/domain/parser change, so
+correctly absent from `docs/el_grammar_amendments.md` itself — documented
+instead in `tests/test_specialist_pool_scenario.py`'s docstring) is
+exactly that scenario, and its live-demo behavior is confirmed correct,
+not "silently non-functional" as this finding originally warned it would
+be. Independently re-verified against the real parsed model this
+session, both checks passing: Q1, `EF(objective_satisfied:
+OnCallConsultCommunity)` holds at the Kripke layer
+(`test_ef_objective_satisfied_holds`); Q2, live discharge of
+`specialistAResponseBurden` via the engine correctly transitions
+`specialistBResponseBurden` to `superseded`, never violating
+(`test_live_discharge_of_specialist_a_supersedes_specialist_b`).
+
+**Paper relevance note carried forward, not resolved:** the "Paper
+relevance" paragraph above proposed this gap as a candidate Limitations-
+section addition to the arXiv revision. That gap is now closed, so the
+proposed addition may need revisiting — flagging this for Zoran's
+judgment, not editing `reviewer_response.md` or any paper file as part of
+this doc-cleanup fix.
+
 ---
 
 ## Amendments-log gap — AM-34 through AM-37 missing; dangling AM-34 reference
