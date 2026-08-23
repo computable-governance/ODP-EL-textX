@@ -2236,6 +2236,18 @@ shape is chosen.
 naturally falls — not blocking on FTI's calendar, since this is buildable
 independent of any specific meeting date.
 
+**Status update (2026-08-23):** item 4's "no UI surface... exists
+anywhere" is no longer accurate. A witness-path panel was added to
+computable-governance-ui's `coordination-simulator.html` (commit
+`5782595`) — dropdown of propositions, chain rendering of the witness
+path (worlds + edge labels), explicit UNREACHABLE state, consuming
+`GET /kripke/witness`. This repo's own docs were never positioned to
+track that repo's completion, which is why this went unflagged for a
+while — noting it here since the finding's own wording made a
+whole-system claim, not a this-repo-only one. Items 1-3, the "Decision,"
+and the R30 Option B live-grant work below remain unaffected and still
+open — this update is scoped to item 4 only.
+
 ---
 
 ## R30 Option B design blocked on a deeper gap: runtime events invisible to both Kripke builders
