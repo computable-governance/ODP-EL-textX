@@ -163,7 +163,12 @@ DeonticToken:
 ;
 
 DeonticKind    : 'burden' | 'permit' | 'embargo' ;
-TokenState     : 'active' | 'pending' ;
+// TokenState is the set of states an author may DECLARE. 'claimable'
+// (AM-60 — see DN_003) is authorable: a burden offered
+// to an any_discharged pool, awaiting an accept/reject Evaluation.
+// Runtime-only outcome states (discharged/violated/superseded/lapsed)
+// are deliberately NOT authorable and remain absent here.
+TokenState     : 'active' | 'pending' | 'claimable' ;
 DischargeMode  : 'eventual' | 'strict' ;
 PriorityLevel  : 'critical' | 'high' | 'normal' | 'low' ;
 
@@ -1055,16 +1060,37 @@ Declaration:
 /*
  * Evaluation — §6.6.7
  * Assesses value (credit rating, system state, behaviour preference, etc.)
+ *
+ * Extended (AM-60 — see DN_003) to
+ * additionally support a structured, engine-actionable form: of_target
+ * may reference a [DeonticToken] directly, and result may be the
+ * structured AcceptabilityResult (accept/reject) rather than only
+ * free text. Both forms remain valid — the original free-text
+ * credit-rating-style use (STRING/STRING) is untouched and continues
+ * to have no engine effect, exactly as before. Only the structured
+ * form (token-ref target + accept/reject result) is recognised by
+ * the engine's new claim-evaluation logic (el_engine.py).
  */
 Evaluation:
     'evaluation' name=ID '{'
         'by'          ':' evaluator=[EnterpriseObject]
-        'of_target'   ':' target=STRING
-        'result'      ':' result=STRING
+        'of_target'   ':' target=EvaluationTarget
+        'result'      ':' result=EvaluationResult
         ('description' ':' description=STRING)?
     '}'
 ;
 
+EvaluationTarget:
+    target_token=[DeonticToken] | target_text=STRING
+;
+
+EvaluationResult:
+    result_code=AcceptabilityResult | result_text=STRING
+;
+
+AcceptabilityResult:
+    'accept' | 'reject'
+;
 
 // ================================================================
 // §6.3.8, §7.8.6  — VIOLATION RESPONSE

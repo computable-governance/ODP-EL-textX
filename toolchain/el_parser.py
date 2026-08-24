@@ -247,6 +247,34 @@ def process_token_group(group):
     group.members = []
 
 
+def process_evaluation(ev):
+    """P12: flatten the structured EvaluationTarget/EvaluationResult match
+    rules (AM-60 grammar extension — see DN_003)
+    into flat Evaluation fields. Backward compatible: the pre-existing
+    free-text form (STRING/STRING) still populates target/result as
+    plain strings exactly as before, with target_token/result_code left
+    None so the engine's claim logic correctly treats it as inert,
+    matching current behaviour for any existing credit-rating-style
+    evaluation.
+    """
+    raw_target = ev.target
+    if getattr(raw_target, "target_token", None) is not None:
+        ev.target_token = raw_target.target_token
+        ev.target = getattr(raw_target.target_token, "name", str(raw_target.target_token))
+    else:
+        ev.target = getattr(raw_target, "target_text", "") or ""
+        ev.target_token = None
+
+    raw_result = ev.result
+    result_code = getattr(raw_result, "result_code", None)
+    if result_code:
+        ev.result_code = result_code
+        ev.result = result_code
+    else:
+        ev.result = getattr(raw_result, "result_text", "") or ""
+        ev.result_code = None
+
+
 def process_federation(fed):
     """P9: split body_items into typed sublists; unwrap thin wrappers.
 
@@ -306,6 +334,7 @@ def _build_metamodel():
         'Federation':         process_federation,          # P9
         'TokenGroup':         process_token_group,         # P10 (AM-26)
         'Community':          process_community,           # P11 (AM-41)
+        'Evaluation':         process_evaluation,          # P12 (AM-60)
     })
     return mm
 

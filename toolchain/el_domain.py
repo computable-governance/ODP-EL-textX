@@ -1226,12 +1226,24 @@ class Evaluation(_ELParentable):
     """§6.6.7 — assessment of value or system state.
 
     Grammar rule: EvaluationDecl
+
+    Extended (AM-60 — see DN_003): of_target may
+    reference a [DeonticToken] directly (target_token, resolved via
+    process_evaluation P12) instead of only free text; result may be
+    the structured accept/reject AcceptabilityResult (result_code)
+    instead of only free text. target/result remain populated as
+    flat strings for backward compatibility with any existing
+    free-text consumer — target_token/result_code are None unless the
+    structured form was used, and are what the engine's claim logic
+    (el_engine.py) actually checks.
     """
-    name:        str            = ""
-    evaluator:   Optional[object] = None   # → EnterpriseObject
-    target:      str            = ""
-    result:      str            = ""
-    description: Optional[str] = None
+    name:         str            = ""
+    evaluator:    Optional[object] = None   # → EnterpriseObject
+    target:       str            = ""       # flat string form, either branch
+    target_token: Optional[object] = None   # → DeonticToken, only if structured form used
+    result:       str            = ""       # flat string form, either branch
+    result_code:  Optional[str] = None      # 'accept' | 'reject', only if structured form used
+    description:  Optional[str] = None
 
 
 @dataclass

@@ -130,6 +130,24 @@ class ObligationState(Enum):
     WAITING    = auto()   # triggered_by event has not yet fired; not eligible for
                           # T1 discharge or T2 violation. Transitions to PENDING
                           # when its trigger event fires (P6 cascade).
+    CLAIMABLE  = auto()   # AM-61 (see DN_003): masked pending an
+                          # accept/reject Evaluation, distinct from WAITING's
+                          # trigger-based masking. Only assigned at world
+                          # construction to obligations that are members of an
+                          # any_discharged TokenGroup AND have an associated
+                          # structured Evaluation (see _build_claim_evaluations).
+                          # Transitions to PENDING via C1 when a matching accept
+                          # Evaluation exists for the holder; a reject Evaluation
+                          # is a no-op (leaves the obligation CLAIMABLE, still
+                          # available to the pool) — see C1 in successors().
+    LAPSED     = auto()   # AM-61: a sibling CLAIMABLE obligation
+                          # in the same any_discharged group whose claim
+                          # opportunity was overtaken when a peer claimed first
+                          # (C1). Distinct from SUPERSEDED (which marks a peer
+                          # relieved because another member DISCHARGED, not
+                          # merely claimed) — see DN_003 §5.3's rejected-vs-
+                          # lapsed distinction, itself grounded in AU eRequesting's
+                          # own rejected/cancelled split (DN_003 §1).
 
 
 class ActorStatus(Enum):
@@ -743,7 +761,12 @@ class KripkeModel:
         # Exclude SUPERSEDED and WAITING obligations from both numerator and
         # denominator. SUPERSEDED: purpose fulfilled by a group sibling.
         # WAITING: trigger not yet fired; obligation not yet in play.
-        _excluded = (ObligationState.SUPERSEDED, ObligationState.WAITING)
+        # CLAIMABLE: offered to a pool, accept not yet made —
+        # not yet in play, excluded like WAITING. LAPSED: a peer
+        # claimed first — non-completion is not a failure, excluded like
+        # SUPERSEDED. (Both AM-61 — see DN_003.)
+        _excluded = (ObligationState.SUPERSEDED, ObligationState.WAITING,
+                     ObligationState.CLAIMABLE, ObligationState.LAPSED)
         active_items = [
             (oid, desc)
             for oid, desc in self.obligation_descriptors.items()
@@ -784,9 +807,10 @@ class KripkeModel:
             ObligationState.DISCHARGED: +1.0,
             ObligationState.PENDING:    +0.3,
             ObligationState.WAITING:     0.0,
+            ObligationState.CLAIMABLE:   0.0,   # AM-61: offered, accept not yet made — neutral like WAITING
             ObligationState.EXPIRED:     0.0,
             ObligationState.VIOLATED:   -1.0,
-            # SUPERSEDED intentionally absent — handled by exclusion below
+            # SUPERSEDED and LAPSED intentionally absent — handled by exclusion below
         }
 
         cond = self.satisfaction_conditions.get(community_name)
@@ -808,6 +832,12 @@ class KripkeModel:
             if state == ObligationState.SUPERSEDED:
                 any_superseded = True
                 continue  # excluded from scoring and denominator
+            if state == ObligationState.LAPSED:
+                # AM-61: peer claimed first — non-completion
+                # is not a failure. Excluded like SUPERSEDED, but does NOT
+                # set any_superseded (a lapse is not an objective achievement;
+                # the claiming peer's own burden carries that).
+                continue
             desc = self.obligation_descriptors.get(oid)
             weight = desc.priority_weight if desc else 0.5
             weighted_sum += outcome_scores.get(state, 0.0) * weight
@@ -1680,6 +1710,34 @@ def _build_any_discharged_groups(model: Any) -> Set[str]:
     return result
 
 
+def _build_claim_evaluations(model: Any) -> Dict[str, List[Any]]:
+    """
+    AM-61 (see DN_003): map each DeonticToken name to the
+    list of structured Evaluation objects targeting it (target_token set,
+    result_code set to 'accept' or 'reject' — the pre-existing free-text
+    form, target_text/result_text, is never included here and remains
+    fully inert, exactly as before this extension).
+
+    Used by world construction to decide which any_discharged-group
+    members start CLAIMABLE rather than PENDING/WAITING, and by C1
+    (successors()) to determine whether a given holder has an accept
+    Evaluation unlocking the CLAIMABLE → PENDING transition.
+    """
+    result: Dict[str, List[Any]] = {}
+    for el in model.elements:
+        if type(el).__name__ != "Evaluation":
+            continue
+        if getattr(el, "target_token", None) is None:
+            continue
+        if not getattr(el, "result_code", None):
+            continue
+        token_name = getattr(el.target_token, "name", None)
+        if not token_name:
+            continue
+        result.setdefault(token_name, []).append(el)
+    return result
+
+
 def _build_satisfaction_conditions(
     model: Any,
 ) -> Dict[str, Tuple[str, List[str]]]:
@@ -1745,6 +1803,8 @@ def _build_propositions(
         ObligationState.EXPIRED:    "expired",
         ObligationState.SUPERSEDED: "superseded",
         ObligationState.WAITING:    "waiting",
+        ObligationState.CLAIMABLE:  "claimable",   # AM-61 — see DN_003
+        ObligationState.LAPSED:     "lapsed",       # AM-61 — see DN_003
     }
     obl_dict: Dict[str, ObligationState] = {}
     for oid, state in world.obligation_states:
@@ -1848,6 +1908,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     embargo_holder_index = _build_embargo_holder_index(model)
     group_index = _build_group_index(model)
     any_discharged_groups = _build_any_discharged_groups(model)
+    claim_evaluations = _build_claim_evaluations(model)  # AM-61 — see DN_003
     satisfaction_conditions = _build_satisfaction_conditions(model)
 
     # A permit/embargo-only spec (no burdens) must not hit the trivial-model
@@ -1889,9 +1950,35 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         all_actors.add(pdesc.holder)
 
     # Build initial world: obligations with triggered_by start WAITING (trigger
-    # not yet fired); all others start PENDING. All actors start ACTIVE.
+    # not yet fired); obligations that are any_discharged-group members with an
+    # associated structured Evaluation (accept/reject) start CLAIMABLE
+    # (AM-61 — see DN_003); all others start PENDING.
+    # All actors start ACTIVE.
+    # A pool member is CLAIMABLE if it belongs to an any_discharged group
+    # in which at least one member has an associated structured Evaluation
+    # (AM-61 — see DN_003). The offer is to the whole pool,
+    # not gated per-member: all siblings start CLAIMABLE together, and C1
+    # resolves exactly one to PENDING (the accepting holder) while lapsing
+    # the rest. Requiring the group to have >=1 claim Evaluation keeps
+    # ordinary any_discharged groups (no Evaluations, e.g.
+    # specialist_pool_scenario.el) on the existing PENDING/active path with
+    # no behaviour change — confirmed by the unchanged full test suite.
+    claimable_group_members: Set[str] = set()
+    for group_name, group_members in group_index.items():
+        if group_name not in any_discharged_groups:
+            continue
+        if any(m in claim_evaluations for m in group_members):
+            claimable_group_members.update(group_members)
+
+    def _initial_obligation_state(oid: str, desc: Any) -> "ObligationState":
+        if oid in claimable_group_members:
+            return ObligationState.CLAIMABLE
+        if desc.triggered_by:
+            return ObligationState.WAITING
+        return ObligationState.PENDING
+
     init_obligs = {
-        oid: (ObligationState.WAITING if desc.triggered_by else ObligationState.PENDING)
+        oid: _initial_obligation_state(oid, desc)
         for oid, desc in descriptors.items()
     }
     init_actors = {actor: ActorStatus.ACTIVE for actor in all_actors}
@@ -1967,7 +2054,60 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             labels[(w, w_prime)] = label
             successors_for_w.add(w_prime)
 
-        # ── Rule T2: DEADLINE VIOLATION ───────────────────────────────────────
+        # ── Rule C1: CLAIM (AM-61 — see DN_003) ─────────────────
+        # For each CLAIMABLE obligation O held by an ACTIVE actor A, if a
+        # structured Evaluation exists with by=A, target_token=O's token,
+        # result_code='accept', add an edge w -> w' where O transitions
+        # CLAIMABLE -> PENDING (now genuinely live — existing T1/P6b then
+        # apply exactly as for any other PENDING obligation) and every
+        # sibling in the same any_discharged group still CLAIMABLE
+        # transitions to LAPSED (claim-time exclusivity — distinct from
+        # P6b's SUPERSEDED, which fires on a peer's DISCHARGE, not claim;
+        # see DN_003 §5.3's rejected-vs-lapsed distinction). A reject
+        # Evaluation is deliberately a no-op here — the obligation remains
+        # CLAIMABLE, still available to the rest of the pool.
+        for oid, desc in descriptors.items():
+            if current_obligs.get(oid) != ObligationState.CLAIMABLE:
+                continue
+            if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
+                continue
+
+            evals = claim_evaluations.get(oid, [])
+            accepted = any(
+                getattr(ev, "result_code", None) == "accept"
+                and _obj_name(getattr(ev, "evaluator", None)) == desc.holder
+                for ev in evals
+            )
+            if not accepted:
+                continue
+
+            new_obligs = dict(current_obligs)
+            new_obligs[oid] = ObligationState.PENDING
+
+            for group_name, group_members in group_index.items():
+                if group_name not in any_discharged_groups:
+                    continue
+                if oid not in group_members:
+                    continue
+                for sibling_oid in group_members:
+                    if sibling_oid == oid:
+                        continue
+                    if new_obligs.get(sibling_oid) == ObligationState.CLAIMABLE:
+                        new_obligs[sibling_oid] = ObligationState.LAPSED
+
+            w_prime = _make_world(new_obligs, current_actors, current_occurred, w.step)
+            label = f"claim:{oid} by {desc.holder}"
+
+            if w_prime not in worlds:
+                worlds.add(w_prime)
+                if w_prime.step < horizon:
+                    queue.append(w_prime)
+
+            edges.setdefault(w, set()).add(w_prime)
+            labels[(w, w_prime)] = label
+            successors_for_w.add(w_prime)
+
+        # ── Rule T2: DEADLINE VIOLATION ─────────────────────────────────────────
         for oid, desc in descriptors.items():
             if current_obligs.get(oid) != ObligationState.PENDING:
                 continue

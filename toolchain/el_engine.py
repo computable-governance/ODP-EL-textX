@@ -36,12 +36,17 @@ class TokenInstance:
     kind: str                       # 'burden' | 'permit' | 'embargo'
     holder: str                     # actor name
     state: str                      # 'active' | 'pending' | 'discharged' | 'violated' | 'superseded'
+                                     # | 'claimable' | 'lapsed'  (AM-62 — see DN_003)
                                      # NOTE: 'superseded' has two unrelated live meanings:
                                      # (1) a Permit that lost governance to an Embargo via
                                      #     revoke_authorization() (AM-31); (2) AM-57: a Burden
                                      #     sibling in an any_discharged TokenGroup, relieved
                                      #     because another member discharged. Same word,
                                      #     different mechanisms — do not conflate.
+                                     # NOTE: 'lapsed' is distinct from 'superseded':
+                                     # a lapsed sibling made no decision and was overtaken by a
+                                     # peer CLAIMING first; superseded fires on a peer's
+                                     # DISCHARGE. Do not conflate these either.
     discharge_mode: str             # 'eventual' | 'strict'
     priority: str                   # 'critical' | 'high' | 'normal' | 'low'
     granted_at_tick: int            # tick at which this instance was created; required, no
@@ -314,6 +319,33 @@ def advance(
                     or tok.token_name in event_discharged):
                 dischargeable.append(tok.token_name)
 
+    # Burdens claimable by this action (AM-62 — see DN_003):
+    # actor must hold them, state == 'claimable' (distinct from 'active' —
+    # claiming precedes and is separate from discharging), for_action
+    # matches, AND a structured accept Evaluation exists for this actor
+    # against this token. A reject Evaluation, or no Evaluation at all, is
+    # a no-op here — the burden simply remains 'claimable', consistent with
+    # the design's original no-op behavior for reject/absent Evaluations
+    # (empirically verified, 2026-08-24, in referral_claiming_scenario.el:
+    # outcome 'ok', zero effects). The free-text Evaluation form (no
+    # target_token/result_code) is never matched here and remains fully
+    # inert, exactly as before.
+    accept_evaluations: set[tuple] = {
+        (getattr(el.target_token, "name", None), getattr(el.evaluator, "name", None))
+        for el in getattr(spec, "elements", [])
+        if type(el).__name__ == "Evaluation"
+        and getattr(el, "target_token", None) is not None
+        and getattr(el, "result_code", None) == "accept"
+    }
+    claimable_now: list[str] = []
+    for tok in state.tokens:
+        if (tok.holder == actor_name
+                and tok.kind == "burden"
+                and tok.state == "claimable"
+                and tok.for_action == action_name
+                and (tok.token_name, actor_name) in accept_evaluations):
+            claimable_now.append(tok.token_name)
+
     # ── Step 4: Preconditions ─────────────────────────────────────────────────
     if grammar_action:
         for precond in grammar_action.preconditions:
@@ -390,6 +422,50 @@ def advance(
                                 f"superseded burden '{sibling_name}' held by "
                                 f"'{t.holder}' (sibling '{discharged_name}' "
                                 f"discharged, group '{group_name}')"
+                            )
+
+    # 7a-claim — AM-62 (see DN_003): CLAIM transitions
+    # ('claimable' -> 'active'). Distinct from discharge above — claiming
+    # makes a masked, pool-offered burden live; it does not complete it. A
+    # later advance() call on the now-'active' token discharges it via the
+    # existing 7a logic above, exactly like any other active burden.
+    tokens = [
+        _transition(t, "active")
+        if t.token_name in claimable_now and t.holder == actor_name
+        else t
+        for t in tokens
+    ]
+    for name in claimable_now:
+        effects_log.append(f"claimed burden '{name}'")
+
+    # 7a-claim-cont — AM-62: sibling LAPSE, mirroring the
+    # any_discharged sibling-supersession pattern above, but triggered by
+    # CLAIM rather than DISCHARGE and marking 'lapsed' rather than
+    # 'superseded' — a deliberately distinct state (DN_003 §5.3): a lapsed
+    # sibling made no decision and was overtaken by a peer claiming first,
+    # unlike 'superseded' (peer's purpose fulfilled by a DISCHARGE) or a
+    # genuine reject (an accept/reject Evaluation existing with
+    # result_code='reject', which is a no-op here by design — the burden
+    # stays 'claimable', still available to the rest of the pool).
+    if claimable_now:
+        group_index = _build_group_index(spec)
+        any_discharged_groups = _build_any_discharged_groups(spec)
+        for claimed_name in claimable_now:
+            for group_name, members in group_index.items():
+                if group_name not in any_discharged_groups:
+                    continue
+                if claimed_name not in members:
+                    continue
+                for sibling_name in members:
+                    if sibling_name == claimed_name:
+                        continue
+                    for i, t in enumerate(tokens):
+                        if t.token_name == sibling_name and t.state == "claimable":
+                            tokens[i] = _transition(t, "lapsed")
+                            effects_log.append(
+                                f"lapsed burden '{sibling_name}' held by "
+                                f"'{t.holder}' (sibling '{claimed_name}' "
+                                f"claimed, group '{group_name}')"
                             )
 
     # 7b — Grammar DeonticEffect operations
