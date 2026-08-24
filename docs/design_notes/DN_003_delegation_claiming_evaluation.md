@@ -4,7 +4,7 @@
 structured `Evaluation`, `claimable` `TokenState`), AM-61 (Layer 4
 `el_kripke.py`: `CLAIMABLE`/`LAPSED` states, C1 claim transition), AM-62
 (Layer 3 `el_engine.py`: `claimable → active` activation, sibling lapse),
-and AM-63 (`referral_claiming_scenario.el`, the first named demonstration
+and AM-63 (`erequesting_claiming_scenario.el`, the first named demonstration
 scenario). See `docs/el_grammar_amendments.md` for the four log entries.
 The evaluative pool-accept mechanism designed below (§5, the fork
 resolved in favour of `Evaluation`-gated claiming) is what was built; the
@@ -427,7 +427,7 @@ activation step **at all** — not merely an absent sibling-supersession
 step layered on top of an otherwise-working activation path. Acting on a
 masked burden was a silent, effect-free no-op (`outcome: "ok"`,
 `effects: ()`), confirmed directly against an early draft of
-`referral_claiming_scenario.el` before AM-62 landed. Separately: the
+`erequesting_claiming_scenario.el` before AM-62 landed. Separately: the
 Kripke/verifier layer never had this gap at all — `el_kripke.py`'s
 initial-world construction ignores the DSL's declared `state:` field and
 starts every non-`triggered_by` obligation `PENDING`, so P6b already
@@ -508,7 +508,7 @@ from the general pattern discussed, not from any citable specification:
 Per process discipline (worked example before touching semantics), the
 first artefact is a scenario, not code.
 
-**Proposed: `scenarios/referral_claiming/referral_claiming_scenario.el`** —
+**Proposed: `scenarios/erequesting_claiming/erequesting_claiming_scenario.el`** —
 a Filler claiming a delegated diagnostic referral, modelled on
 `specialist_pool_scenario.el` but accept-side:
 

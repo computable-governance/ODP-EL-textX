@@ -4163,7 +4163,7 @@ when the free-text form is used, `target_token`/`result_code` stay
 Kripke layer's claim-evaluation lookup (AM-61) check to distinguish a
 live claim decision from an inert credit-rating-style evaluation.
 
-**Confirmed directly:** `referral_claiming_scenario.el`'s structured
+**Confirmed directly:** `erequesting_claiming_scenario.el`'s structured
 `evaluation providerAAcceptsReferral { of_target: providerAClaimBurden
 result: accept }` resolves to `target_token.name ==
 'providerAClaimBurden'` and `result_code == 'accept'`, with `target`/
@@ -4210,7 +4210,7 @@ supersession, since the claiming peer's own burden carries that.
 `_build_propositions()` emits `claimable:<token>`/`lapsed:<token>`
 labels.
 
-**Confirmed directly:** `referral_claiming_scenario.el`'s Kripke model —
+**Confirmed directly:** `erequesting_claiming_scenario.el`'s Kripke model —
 both pool members start `CLAIMABLE`
 (`test_both_pool_members_start_claimable`);
 `EF(objective_satisfied:DiagnosticReferralPoolCommunity)` holds (Q1);
@@ -4231,7 +4231,7 @@ engine had no `claimable`/`pending → active` activation step at all —
 broader than "sibling supersession is skipped" — acting on a burden
 that starts masked was a silent, effect-free no-op
 (`outcome: "ok"`, `effects: ()`), confirmed directly against
-`referral_claiming_scenario.el` before this change landed.
+`erequesting_claiming_scenario.el` before this change landed.
 
 **What changed:** `toolchain/el_engine.py`'s `TokenInstance.state`
 docstring/comment documents the two new state strings `'claimable'`/
@@ -4269,14 +4269,14 @@ Evaluation to `reject` leaves both burdens `claimable`, with
 
 ---
 
-## AM-63 (2026-08-24) — `referral_claiming_scenario.el`: first named pool-claiming demonstration scenario
+## AM-63 (2026-08-24) — `erequesting_claiming_scenario.el`: first named pool-claiming demonstration scenario
 
 **Not a grammar/domain/parser change** — a named scenario + test file,
 logged per the same convention already established for AM-58
 (`specialist_pool_scenario.el`) and AM-59 (`ai_vendor_probe.el`): this
 entry documents the scenario's role as the accept-side demonstration of
 AM-60–62, cross-referenced from the scenario file's own header and from
-`tests/test_referral_claiming_scenario.py`'s docstring rather than
+`tests/test_erequesting_claiming_scenario.py`'s docstring rather than
 requiring a separate log entry format.
 
 **What it demonstrates:** `DiagnosticReferralPoolCommunity` governs two
@@ -4288,8 +4288,8 @@ lapsing `providerBClaimBurden` — the accept-side sibling of
 `specialist_pool_scenario.el`'s discharge-side `any_discharged`/
 `SUPERSEDED` demonstration (AM-58).
 
-**Files changed:** `scenarios/referral_claiming/referral_claiming_scenario.el`,
-`tests/test_referral_claiming_scenario.py` (new, 9 tests: parser
+**Files changed:** `scenarios/erequesting_claiming/erequesting_claiming_scenario.el`,
+`tests/test_erequesting_claiming_scenario.py` (new, 9 tests: parser
 structured-form resolution, both pool members start `CLAIMABLE`, Q1/Qc/Ql
 Kripke reachability, live claim+lapse, live claimed-then-discharge, live
 reject no-op). Full suite: 203 pre-existing tests pass unchanged, plus 9

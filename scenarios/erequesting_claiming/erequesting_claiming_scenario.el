@@ -1,6 +1,6 @@
 /*
  * ================================================================
- * referral_claiming_scenario.el
+ * erequesting_claiming_scenario.el
  * ODP Enterprise Language DSL — pool claiming of a delegated
  * diagnostic referral (accept-side sibling of
  * specialist_pool_scenario.el's discharge-side any_discharged
@@ -25,7 +25,7 @@
  * `pending -> active` activation step at all — broader than AM-57's
  * stated scope (which only covered `active`-state sibling
  * supersession). Both are now closed on the accept/claiming side by
- * this scenario's mechanism; see tests/test_referral_claiming_scenario.py
+ * this scenario's mechanism; see tests/test_erequesting_claiming_scenario.py
  * for the empirical checks (both layers, real parsed model / real
  * engine, not asserted from design).
  *
@@ -184,7 +184,7 @@ commitment providerBClaimCommitment {
 // by a real engine mechanism (2026-08-24): the structured accept form
 // (target_token + result_code, both new grammar) actually unlocks the
 // claimable -> active transition for DiagnosticProviderA, and lapses
-// providerBClaimBurden. See tests/test_referral_claiming_scenario.py
+// providerBClaimBurden. See tests/test_erequesting_claiming_scenario.py
 // for the empirical verification (Layer 3 live engine and Layer 4
 // Kripke model, both checked directly, not merely asserted).
 // ================================================================

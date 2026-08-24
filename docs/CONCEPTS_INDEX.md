@@ -4006,7 +4006,7 @@ a triggered_by-gated peer inside an any_discharged group.
 
 **Update (2026-08-24): `claimable` (AM-60–63) is deliberately outside
 the scope of this constraint — recorded explicitly, not left implicit.**
-`referral_claiming_scenario.el` is a new `any_discharged` scenario and
+`erequesting_claiming_scenario.el` is a new `any_discharged` scenario and
 sits adjacent to this exact area, so the relationship must not be
 assumed obvious: `claimable` is a new author-facing `TokenState`,
 introduced specifically so pool-claiming does NOT fall inside this
@@ -4026,7 +4026,7 @@ scenario that is not using the claiming mechanism.
 
 Design source: `docs/design_notes/DN_003_delegation_claiming_evaluation.md`.
 Implementation landed 2026-08-24: AM-60 (grammar/parser/domain), AM-61
-(Kripke), AM-62 (live engine), AM-63 (`referral_claiming_scenario.el`,
+(Kripke), AM-62 (live engine), AM-63 (`erequesting_claiming_scenario.el`,
 the accept-side sibling of AM-58's `specialist_pool_scenario.el`).
 
 **1. Claiming = evaluative pool-accept, distinct from declarative/atomic
@@ -4056,7 +4056,7 @@ simply no longer needed.
 **3. The masked-sibling gap finding (immediately above) is now resolved
 on the accept side, but the underlying empirical finding was broader
 than DN_003's original framing.** AM-62's ground-truth check (performed
-before implementation, recorded in `referral_claiming_scenario.el`'s
+before implementation, recorded in `erequesting_claiming_scenario.el`'s
 scenario header and in AM-62's amendments-log entry) found that the
 pre-AM-62 live engine had **no `pending`/`claimable` → `active`
 activation step at all** — not merely an absent sibling-supersession
@@ -4076,7 +4076,7 @@ commitment.** Per §6.2.2/§7.4, a `CommunityObject` (composite ActiveEO
 representing a community) is the standards-correct target for
 "delegated to the pool as a whole," which would let a single
 `Delegation` name the pool rather than requiring one `Commitment` per
-member (as `referral_claiming_scenario.el` currently does). The grammar
+member (as `erequesting_claiming_scenario.el` currently does). The grammar
 currently types `Delegation.delegator`/`.delegate` as
 `[EnterpriseObject]` only (CLAUDE.md §5.4) and would need extending
 to accept `[CommunityObject]` — see also the existing open finding

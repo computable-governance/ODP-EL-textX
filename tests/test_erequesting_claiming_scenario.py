@@ -1,6 +1,6 @@
 """
 AM-63: scenario-level confirmation for
-referral_claiming_scenario.el, the first named scenario demonstrating pool
+erequesting_claiming_scenario.el, the first named scenario demonstrating pool
 CLAIMING — the accept-side mirror of specialist_pool_scenario.el's
 discharge-side any_discharged/SUPERSEDED demonstration (AM-58).
 
@@ -34,7 +34,7 @@ from el_engine import TokenInstance, advance, enroll, grant_token, initial_state
 from el_kripke import build_kripke_model
 from el_parser import parse
 
-SCENARIO = "scenarios/referral_claiming/referral_claiming_scenario.el"
+SCENARIO = "scenarios/erequesting_claiming/erequesting_claiming_scenario.el"
 
 
 def _spec():
@@ -43,7 +43,7 @@ def _spec():
     return result.model
 
 
-def test_referral_claiming_scenario_parses_and_validates_cleanly():
+def test_erequesting_claiming_scenario_parses_and_validates_cleanly():
     result = parse(SCENARIO, validate=True)
     assert result.ok, result.errors
 

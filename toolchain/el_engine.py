@@ -326,7 +326,7 @@ def advance(
     # against this token. A reject Evaluation, or no Evaluation at all, is
     # a no-op here — the burden simply remains 'claimable', consistent with
     # the design's original no-op behavior for reject/absent Evaluations
-    # (empirically verified, 2026-08-24, in referral_claiming_scenario.el:
+    # (empirically verified, 2026-08-24, in erequesting_claiming_scenario.el:
     # outcome 'ok', zero effects). The free-text Evaluation form (no
     # target_token/result_code) is never matched here and remains fully
     # inert, exactly as before.
