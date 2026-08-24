@@ -147,3 +147,74 @@ mechanism rather than two philosophically different ones coexisting.
    design note, addressing actor-resolution and the businessStatus-code
    mapping (candidate material: the O-05 row already sketched in
    `fhir_obligation_token_mapping.md`).
+
+---
+
+## Addendum (2026-08-24) — A second, prior gap confirmed empirically: `fhir_mapper.py` doesn't see claims at all
+
+*Added after live-testing DN_004/DN_005 territory against real, public
+AU eRequesting terminology — not assumed, run through the actual mapper.*
+
+### What was tested
+
+Confirmed via the IG's own public `ValueSet-au-erequesting-task-businessstatus`
+(`terminology.hl7.org.au/CodeSystem/task-business-status`, genuinely public,
+fetched directly from `build.fhir.org`) that AU eRequesting already defines
+the exact claim/cancellation pattern this project has been reasoning about,
+under real, citable public codes:
+- `request-claimed` — "Task has been cancelled as the request has been
+  claimed by another filler."
+- `cancel-handled` — "Cancelled task has been handled by the filler."
+
+None of the five officially published Task examples happen to demonstrate
+these codes in context (checked directly — the published Task Group example
+shows the ordinary happy path, `businessStatus: Service booked`). So a
+synthetic-but-conformant pair of `Task` resources was constructed (real
+public code system, real codes, real published example organisations as
+anchors — clearly not an official IG example) and run through the actual
+`FHIRConsentMapper.map_bundle()`.
+
+### What it found
+
+The mapper (R09, `_map_task`) produced **two entirely independent
+`delegation` constructs** — one for the original filler's now-`cancelled`
+Task, one for the alternate filler's new `requested` Task — with **no
+relationship between them at all**. Nothing in the generated spec reflects
+that the second superseded the first; `businessStatus` is not read by
+`_map_task` anywhere (confirmed by inspection — only `Task.status` appears,
+and only as a plain-text fragment in the generated description, never
+acted on).
+
+### Why this matters — a second, separate, and prior gap
+
+This is **not** the same gap DN_005's main text covers. There are now two
+distinct, stacked gaps between "a real FHIR claim event happens" and "the
+governance layer correctly reflects it":
+
+1. **Mapper-level (this addendum, new finding):** `fhir_mapper.py`'s R09
+   task-mapping rule has no concept of `businessStatus`, no concept of
+   claim/cancellation, and treats every `Task` as independent. Two Tasks
+   that are, in reality, the same request's before/after claim state
+   produce two unrelated `delegation` declarations.
+2. **Runtime-level (DN_005's main finding, unchanged):** even given a
+   correctly-linked pair of constructs, there is still no dynamic
+   `runtime.claim()`-style mechanism (§3) to actually drive a live
+   `claimable → active`/`lapsed` transition from an external event.
+
+**Sequencing consequence:** gap 1 sits *before* gap 2, not after it. A
+future FHIR Task-event bridge needs `_map_task` (or a dedicated
+claim-aware mapping rule — call it R09a or similar, TBD at implementation)
+to first recognise `businessStatus: request-claimed`/`cancel-handled` and
+correctly link the two Task resources as one request's before/after state,
+*before* the dynamic runtime mechanism in §3 has anything coherent to be
+called with. Both are real, both are scoped-out here, but the ordering
+matters for whoever picks this up.
+
+### Test fixture preserved
+
+The synthetic pair (`Task-original-filler-now-claimed.json`,
+`Task-alternate-filler-claimed.json`) is saved separately as a small,
+clearly-labeled-as-constructed fixture for whenever this gap is picked up
+— see the companion file note. Not an official IG example; safe to treat
+as a synthetic conformance test case only.
+
