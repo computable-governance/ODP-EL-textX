@@ -4126,3 +4126,172 @@ tests). Full suite: 193 pre-existing tests pass unchanged, plus 4 new
 (197 total). `docs/CONCEPTS_INDEX.md` gains the masked-sibling gap note
 and a V-16a/V-16b stale-status correction surfaced during the same
 ground-truth pass.
+
+---
+
+## AM-60 (2026-08-24) — `Evaluation` structured form + `claimable` `TokenState` (grammar/parser/domain layer)
+
+**Problem:** delegation claiming (DN_003) needs a burden offered to an
+`any_discharged` pool to sit in a distinct, authorable "offered, not yet
+accepted" state, and needs the holder's accept/reject decision to be a
+real, engine-checkable structure rather than free text. Neither existed:
+`TokenState` only authored `active`/`pending`, and `Evaluation` (§6.6.7)
+was target/result STRING/STRING only — confirmed decorative, with zero
+runtime handlers (grep, `el_engine.py`/`el_reasoner.py`).
+
+**What changed:** `grammar/v2/el_grammar.tx` — `TokenState` gains
+`claimable` (authorable; the runtime-only outcome state `lapsed`,
+AM-61/AM-62, is deliberately NOT added here — outcome states stay
+absent from the author-facing enum, matching `discharged`/`violated`/
+`superseded`'s existing precedent). `Evaluation` gains a structured
+alternative: `of_target` may resolve `EvaluationTarget` to either
+`target_token=[DeonticToken]` or the pre-existing `target_text=STRING`;
+`result` may resolve `EvaluationResult` to either
+`result_code=AcceptabilityResult` (`accept`/`reject`) or the
+pre-existing `result_text=STRING`. Backward compatible: the free-text
+form still parses and stays fully inert.
+
+`toolchain/el_domain.py`'s `Evaluation` dataclass gains `target_token`/
+`result_code` fields alongside the existing flat `target`/`result`
+strings. `toolchain/el_parser.py` gains `process_evaluation` (**P12**),
+registered in `_build_metamodel`, which flattens the structured match
+rules into the flat fields: when the structured form is used,
+`target`/`result` are still populated (backward compatibility for any
+existing free-text consumer) and `target_token`/`result_code` are set;
+when the free-text form is used, `target_token`/`result_code` stay
+`None`, which is exactly what the engine's claim logic (AM-62) and the
+Kripke layer's claim-evaluation lookup (AM-61) check to distinguish a
+live claim decision from an inert credit-rating-style evaluation.
+
+**Confirmed directly:** `referral_claiming_scenario.el`'s structured
+`evaluation providerAAcceptsReferral { of_target: providerAClaimBurden
+result: accept }` resolves to `target_token.name ==
+'providerAClaimBurden'` and `result_code == 'accept'`, with `target`/
+`result` still populated as flat strings
+(`test_evaluation_structured_form_resolves`).
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_parser.py`. ISO grounding: §6.6.6 (Delegation), §6.6.7
+(Evaluation), Annex B.1.9.6 (acceptance-as-evaluation worked example).
+Design source: `docs/design_notes/DN_003_delegation_claiming_evaluation.md`.
+
+---
+
+## AM-61 (2026-08-24) — Kripke layer: `CLAIMABLE`/`LAPSED` `ObligationState` and the C1 claim transition
+
+**Problem:** with AM-60's grammar in place, the Layer 4 verifier needed
+its own representation of "offered to a pool, not yet claimed" and
+"peer claimed first" — distinct from the existing `PENDING`/`WAITING`
+(triggered_by-gated) and `SUPERSEDED` (peer discharged first) states —
+plus a transition rule for the claim itself.
+
+**What changed:** `toolchain/el_kripke.py` gains
+`ObligationState.CLAIMABLE` and `ObligationState.LAPSED`. World
+construction: a new `_build_claim_evaluations()` helper maps each
+`DeonticToken` name to its structured accept/reject `Evaluation`
+objects; an `any_discharged` group's members start `CLAIMABLE` (instead
+of `PENDING`/`WAITING`) only if at least one member has an associated
+structured Evaluation — ordinary `any_discharged` groups with no
+Evaluations (e.g. `specialist_pool_scenario.el`) are unaffected, keeping
+this change zero-impact on existing scenarios. `successors()` gains
+**Rule C1 (CLAIM)**: for a `CLAIMABLE` obligation held by an `ACTIVE`
+actor with a matching accept Evaluation, one edge transitions that
+obligation `CLAIMABLE → PENDING` (after which existing T1/P6b logic
+applies unchanged) while every other still-`CLAIMABLE` sibling in the
+same `any_discharged` group transitions to `LAPSED`. A reject
+Evaluation is deliberately not wired into any transition — the
+obligation simply has no outgoing C1 edge and stays `CLAIMABLE`.
+`CLAIMABLE`/`LAPSED` are both excluded from `utility()`'s numerator/
+denominator (not yet in play / non-completion is not a failure,
+respectively) and scored neutral (`CLAIMABLE`) or skipped without
+setting `any_superseded` (`LAPSED`) in `utility_for_objective()` —
+`LAPSED` is deliberately not treated as an objective-achieving
+supersession, since the claiming peer's own burden carries that.
+`_build_propositions()` emits `claimable:<token>`/`lapsed:<token>`
+labels.
+
+**Confirmed directly:** `referral_claiming_scenario.el`'s Kripke model —
+both pool members start `CLAIMABLE`
+(`test_both_pool_members_start_claimable`);
+`EF(objective_satisfied:DiagnosticReferralPoolCommunity)` holds (Q1);
+`EF(discharged:providerAClaimBurden)` holds — full claim→discharge path
+reachable (Qc); `EF(lapsed:providerBClaimBurden)` holds — sibling
+correctly lapses when a peer claims first (Ql).
+
+**Files changed:** `toolchain/el_kripke.py`. Design source:
+`docs/design_notes/DN_003_delegation_claiming_evaluation.md`.
+
+---
+
+## AM-62 (2026-08-24) — Live engine: `claimable → active` activation and sibling lapse
+
+**Problem:** parity with AM-61 on the live-runtime side, mirroring
+AM-57's P6b/live-engine parity pattern. Empirically, the pre-AM-62 live
+engine had no `claimable`/`pending → active` activation step at all —
+broader than "sibling supersession is skipped" — acting on a burden
+that starts masked was a silent, effect-free no-op
+(`outcome: "ok"`, `effects: ()`), confirmed directly against
+`referral_claiming_scenario.el` before this change landed.
+
+**What changed:** `toolchain/el_engine.py`'s `TokenInstance.state`
+docstring/comment documents the two new state strings `'claimable'`/
+`'lapsed'`, and notes `'lapsed'` is distinct from the two existing
+`'superseded'` meanings (AM-31 permit-superseded-by-embargo; AM-57
+any_discharged sibling supersession-by-discharge) — a lapsed sibling
+made no decision and was overtaken by a peer *claiming* first, not by a
+peer *discharging*. `advance()` gains: a claimability check (actor
+holds the token, `state == 'claimable'`, `for_action` matches, and a
+structured accept Evaluation exists for this actor against this token —
+a reject Evaluation or no Evaluation is a no-op, confirmed empirically
+leaving the burden `claimable`); **7a-claim**, which transitions a
+claimed token `claimable → active` (claiming activates a masked,
+pool-offered burden — it does not discharge it; a later `advance()`
+call discharges the now-`active` token via the existing 7a discharge
+logic, unchanged); and **7a-claim-cont**, which mirrors AM-57's
+sibling-supersession pattern but is triggered by CLAIM rather than
+DISCHARGE and marks siblings `lapsed` rather than `superseded`.
+
+**Confirmed directly:** claiming `providerAClaimBurden` via
+`DiagnosticProviderA`'s accept Evaluation activates it
+(`claimable → active`) and lapses `providerBClaimBurden`
+(`claimable → lapsed`) in the same `advance()` call, with both effects
+named in `record.effects`
+(`test_live_claim_activates_holder_and_lapses_sibling`); a second
+`advance()` call then discharges the now-active burden normally via the
+existing pathway, leaving the lapsed sibling untouched
+(`test_live_claimed_burden_then_discharges_normally`); flipping the
+Evaluation to `reject` leaves both burdens `claimable`, with
+`record.effects == ()` — a deliberate no-op, not an error
+(`test_live_reject_evaluation_is_a_no_op`).
+
+**Files changed:** `toolchain/el_engine.py`. Design source:
+`docs/design_notes/DN_003_delegation_claiming_evaluation.md`.
+
+---
+
+## AM-63 (2026-08-24) — `referral_claiming_scenario.el`: first named pool-claiming demonstration scenario
+
+**Not a grammar/domain/parser change** — a named scenario + test file,
+logged per the same convention already established for AM-58
+(`specialist_pool_scenario.el`) and AM-59 (`ai_vendor_probe.el`): this
+entry documents the scenario's role as the accept-side demonstration of
+AM-60–62, cross-referenced from the scenario file's own header and from
+`tests/test_referral_claiming_scenario.py`'s docstring rather than
+requiring a separate log entry format.
+
+**What it demonstrates:** `DiagnosticReferralPoolCommunity` governs two
+equally-eligible diagnostic providers (`DiagnosticProviderA`/`B`) over
+an `any_discharged(referralClaimGroup)` objective. Both providers'
+claim burdens start `claimable`; `DiagnosticProviderA`'s structured
+accept `Evaluation` claims `providerAClaimBurden`, activating it and
+lapsing `providerBClaimBurden` — the accept-side sibling of
+`specialist_pool_scenario.el`'s discharge-side `any_discharged`/
+`SUPERSEDED` demonstration (AM-58).
+
+**Files changed:** `scenarios/referral_claiming/referral_claiming_scenario.el`,
+`tests/test_referral_claiming_scenario.py` (new, 9 tests: parser
+structured-form resolution, both pool members start `CLAIMABLE`, Q1/Qc/Ql
+Kripke reachability, live claim+lapse, live claimed-then-discharge, live
+reject no-op). Full suite: 203 pre-existing tests pass unchanged, plus 9
+new (212 total). Design source:
+`docs/design_notes/DN_003_delegation_claiming_evaluation.md`.

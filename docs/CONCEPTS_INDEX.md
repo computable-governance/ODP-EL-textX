@@ -4004,4 +4004,84 @@ declarations — including the standalone two-peer demo scenario planned
 next. Revisit building the full mechanism only if a real scenario needs
 a triggered_by-gated peer inside an any_discharged group.
 
+**Update (2026-08-24): `claimable` (AM-60–63) is deliberately outside
+the scope of this constraint — recorded explicitly, not left implicit.**
+`referral_claiming_scenario.el` is a new `any_discharged` scenario and
+sits adjacent to this exact area, so the relationship must not be
+assumed obvious: `claimable` is a new author-facing `TokenState`,
+introduced specifically so pool-claiming does NOT fall inside this
+constraint. AM-61's C1 (claim) transition and AM-62's 7a-claim-cont
+lapse mechanism operate on `CLAIMABLE`-state siblings — entirely
+separate from P6b's `PENDING`/`WAITING`-sibling supersession logic that
+this finding leaves incomplete. **Claiming (AM-60–63) does not close
+this gap and does not depend on it being closed — they are parallel
+mechanisms over different states, not sequential.** The constraint
+above (avoid `triggered_by`/`state: pending` siblings in an
+`any_discharged` group) still stands, unchanged, for any future
+scenario that is not using the claiming mechanism.
+
+---
+
+## Delegation claiming (AM-60–63) — scope, distinctions, and open design options
+
+Design source: `docs/design_notes/DN_003_delegation_claiming_evaluation.md`.
+Implementation landed 2026-08-24: AM-60 (grammar/parser/domain), AM-61
+(Kripke), AM-62 (live engine), AM-63 (`referral_claiming_scenario.el`,
+the accept-side sibling of AM-58's `specialist_pool_scenario.el`).
+
+**1. Claiming = evaluative pool-accept, distinct from declarative/atomic
+transfer — only the evaluative shape is implemented.** DN_003 §5.0
+establishes two speech-act shapes for delegation claiming: an
+*evaluative* one (a structured `Evaluation` gates the transition, as
+built here) and a *declarative/atomic transfer* one (DN_003 §5.4). Only
+the evaluative path is implemented by AM-60–63.
+
+**OPEN FINDING** — The declarative/atomic transfer path (DN_003 §5.4) is
+explicitly NOT implemented and is not scheduled — flagged here so no
+future session assumes `claimable`/`Evaluation` covers it. If a scenario
+later needs one-shot, non-evaluated transfer semantics, that is new
+design work, not a variant of AM-60–63.
+
+**2. `lapsed` vs `superseded` are distinct and must not be conflated.**
+`lapsed` (AM-61 C1 / AM-62 7a-claim-cont) marks a sibling whose claim
+opportunity was overtaken because a peer *claimed* first — no decision
+was made, the obligation was never live. `superseded` (AM-57, P6b) marks
+a sibling relieved because a peer *discharged* first — the group's
+purpose was already fulfilled by a completed obligation. Same shape
+(peer-driven, non-failure exclusion from utility scoring) but different
+triggers and different standing: a `lapsed` obligation's holder never
+had the chance to act; a `superseded` obligation's holder's action was
+simply no longer needed.
+
+**3. The masked-sibling gap finding (immediately above) is now resolved
+on the accept side, but the underlying empirical finding was broader
+than DN_003's original framing.** AM-62's ground-truth check (performed
+before implementation, recorded in `referral_claiming_scenario.el`'s
+scenario header and in AM-62's amendments-log entry) found that the
+pre-AM-62 live engine had **no `pending`/`claimable` → `active`
+activation step at all** — not merely an absent sibling-supersession
+step. Acting on a masked burden was a silent, effect-free no-op
+(`outcome: "ok"`, `effects: ()`). Separately: **the Kripke layer never
+had this gap.** `el_kripke.py`'s initial-world construction does not
+read the DSL's declared `state:` field at all — every non-`triggered_by`
+obligation starts `PENDING` regardless of whether the author wrote
+`state: pending` or `state: active`, so P6b already covered PENDING/
+WAITING siblings symmetrically before AM-61. AM-61 only needed to add
+the new `CLAIMABLE`/`LAPSED` states and the C1 rule, not fix an
+existing Kripke gap.
+
+**4. `CommunityObject`-as-`Delegation`-target is a live, standards-
+grounded design option not yet acted on — logged as an option, not a
+commitment.** Per §6.2.2/§7.4, a `CommunityObject` (composite ActiveEO
+representing a community) is the standards-correct target for
+"delegated to the pool as a whole," which would let a single
+`Delegation` name the pool rather than requiring one `Commitment` per
+member (as `referral_claiming_scenario.el` currently does). The grammar
+currently types `Delegation.delegator`/`.delegate` as
+`[EnterpriseObject]` only (CLAUDE.md §5.4) and would need extending
+to accept `[CommunityObject]` — see also the existing open finding
+"Finding 2" above (`CommunityObject` should satisfy `EnterpriseObject`'s
+interface) which this option would depend on. Not scheduled; revisit if
+a future pool-delegation scenario needs single-target delegation syntax.
+
 ---
