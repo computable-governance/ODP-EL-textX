@@ -178,6 +178,7 @@ def _build_ereferral_runtime() -> Runtime:
 
 
 _REFERRAL_SCENARIO = _REPO_ROOT / "scenarios" / "referral" / "referral_scenario.el"
+_EREQUESTING_CLAIMING_SCENARIO = _REPO_ROOT / "scenarios" / "erequesting_claiming" / "erequesting_claiming_scenario.el"
 
 
 def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None) -> Runtime:
@@ -279,10 +280,43 @@ def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None
 
 
 # Scenario registry — maps scenario name to its builder function
+def _build_erequesting_claiming_runtime() -> Runtime:
+    """
+    Parse erequesting_claiming_scenario.el (AM-60-63) and initialise a
+    Runtime with both diagnostic providers enrolled and both claim burdens
+    granted, states pulled from the spec's own DeonticToken declarations
+    via token_from_spec() (both 'claimable' in the .el file) — matching
+    the other three builders' pattern exactly, not hand-duplicated.
+
+    NOTE: same drift risk as the other three builders (CLAUDE.md §6.1) —
+    these actor/token name string literals must be kept in sync by hand
+    with scenarios/erequesting_claiming/erequesting_claiming_scenario.el.
+    Covered by tests/test_scenario_builders.py once registered below.
+    """
+    result = parse(_EREQUESTING_CLAIMING_SCENARIO, validate=False)
+    if not result.ok:
+        raise RuntimeError(f"erequesting_claiming parse failed: {result.errors}")
+
+    spec = result.model
+    state = initial_state()
+
+    state = enroll(state, "DiagnosticProviderA", role_name="eligibleProviderA")
+    state = enroll(state, "DiagnosticProviderB", role_name="eligibleProviderB")
+
+    for token_name, holder in [
+        ("providerAClaimBurden", "DiagnosticProviderA"),
+        ("providerBClaimBurden", "DiagnosticProviderB"),
+    ]:
+        state = grant_token(state, token_from_spec(spec, token_name, holder, state.tick))
+
+    return Runtime(state, spec)
+
+
 _SCENARIO_BUILDERS = {
     "gp_referral": _build_gp_referral_runtime,
     "ereferral":   _build_ereferral_runtime,
     "referral":    _build_referral_runtime,
+    "erequesting_claiming": _build_erequesting_claiming_runtime,
 }
 
 # Scenario registry — maps scenario name to its .el file path, for
@@ -293,6 +327,7 @@ _SCENARIO_PATHS = {
     "gp_referral": _SCENARIO,
     "ereferral":   _EREFERRAL_SCENARIO,
     "referral":    _REFERRAL_SCENARIO,
+    "erequesting_claiming": _EREQUESTING_CLAIMING_SCENARIO,
 }
 
 # Active scenario name and community name for objective queries
@@ -1442,6 +1477,7 @@ _COMMUNITY_FOR_SCENARIO = {
     "gp_referral": "ReferralFederation",
     "ereferral":   "ReferralEpisodeCommunity",
     "referral":    "ReferralEpisodeCommunity",
+    "erequesting_claiming": "DiagnosticReferralPoolCommunity",
 }
 
 
