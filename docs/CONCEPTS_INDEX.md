@@ -4085,3 +4085,37 @@ interface) which this option would depend on. Not scheduled; revisit if
 a future pool-delegation scenario needs single-target delegation syntax.
 
 ---
+
+## `Composition`-based document bundles have no mapping rule in `fhir_mapper.py` — OPEN FINDING (2026-08-28)
+
+**Status: OPEN, not scheduled.** Full write-up: `docs/design_notes/DN_008_composition_mapping_gap.md`.
+Fixture: `tests/fixtures/aups_referral_example/` (`Composition-roberts-fred-summary.json`,
+`ServiceRequest-referral-endocrinology.json`).
+
+Confirmed empirically, not assumed: a minimal but genuinely valid AU
+Patient Summary referral (`ServiceRequest.supportingInfo` → `Composition`,
+matching AU PS's own "Referral to Specialist and Allied Health" use case)
+run through the real `FHIRConsentMapper.map_bundle()` maps the
+`ServiceRequest` correctly (R05 `Commitment`, R07 `Burden`) and produces
+**zero** references to the `Composition` anywhere in the output or
+provenance table. Confirmed by direct inspection of `fhir_mapper.py`:
+there is no mapping rule for `Composition` today. Reproduced independently
+against the committed repo state (not just the sandbox that produced the
+original finding).
+
+**Direct connection to DN_004:** the `au-ps-composition` `StructureDefinition`
+carries real, structured FHIR Obligation extensions per element
+(`SHALL:populate` for the producer actor, `SHALL:handle`/`SHOULD:display`
+for the consumer actor). None of this is visible to governance today —
+a concrete, data-backed instance of the "declare vs verify" gap DN_004
+already argues about in the abstract: FHIR Obligations declare what an
+actor must do with an element but don't express whether that handling
+actually happened, or what follows if it didn't.
+
+DN_008 §5 sketches two implementation options (attach `Composition` as
+evidence on the existing `ServiceRequest` burden, vs. a new construct
+mapping the `Composition`'s own per-section obligations onto the
+receiving clinician) but commits to neither. Not scheduled; revisit when
+a future session picks up `Composition` mapping.
+
+---

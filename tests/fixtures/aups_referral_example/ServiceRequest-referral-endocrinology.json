@@ -1,0 +1,14 @@
+{
+  "resourceType": "ServiceRequest",
+  "id": "173",
+  "meta": {"versionId": "1", "lastUpdated": "2026-08-28T08:50:59.326+00:00"},
+  "status": "active",
+  "intent": "order",
+  "category": [{"coding": [{"system": "http://snomed.info/sct", "code": "306206005", "display": "Referral to service"}]}],
+  "code": {"coding": [{"system": "http://snomed.info/sct", "code": "394583002", "display": "Endocrinology"}], "text": "Referral to Endocrinology"},
+  "subject": {"reference": "Patient/roberts-fred"},
+  "encounter": {"reference": "Encounter/gp-consultation"},
+  "authoredOn": "2024-05-11",
+  "requester": {"reference": "PractitionerRole/generalpractitioner-guthridge-jarred"},
+  "supportingInfo": [{"reference": "Composition/171", "display": "Patient Summary for Fred Roberts"}]
+}
