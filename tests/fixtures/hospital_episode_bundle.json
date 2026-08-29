@@ -1,0 +1,141 @@
+{
+  "resourceType": "Bundle",
+  "id": "hospital-episode-bundle-001",
+  "type": "collection",
+  "timestamp": "2024-06-10T15:00:00Z",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/hospital-org-001",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "hospital-org-001",
+        "name": "Riverside Day Surgery Hospital",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/patient-jordan-lee",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-jordan-lee",
+        "name": [{"family": "Lee", "given": ["Jordan"]}],
+        "birthDate": "1985-03-14"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/dr-morgan",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "dr-morgan",
+        "name": [{"family": "Morgan", "given": ["Sam"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "62247001", "display": "General practitioner"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/role-dr-morgan",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "role-dr-morgan",
+        "practitioner": {"reference": "Practitioner/dr-morgan"},
+        "organization": {"reference": "Organization/hospital-org-001"}
+      }
+    },
+
+    {
+      "fullUrl": "Encounter/556",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "556",
+        "status": "finished",
+        "subject": {"reference": "Patient/patient-jordan-lee"},
+        "period": {
+          "start": "2024-06-10T08:00:00+10:00",
+          "end": "2024-06-10T14:00:00+10:00"
+        }
+      }
+    },
+
+    {
+      "fullUrl": "Encounter/557",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "557",
+        "status": "in-progress",
+        "subject": {"reference": "Patient/patient-jordan-lee"},
+        "period": {
+          "start": "2024-06-12T08:00:00+10:00"
+        }
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/558",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "558",
+        "status": "active",
+        "intent": "order",
+        "subject": {"reference": "Patient/patient-jordan-lee"},
+        "requester": {"reference": "Practitioner/dr-morgan"},
+        "encounter": {"reference": "Encounter/556"},
+        "authoredOn": "2024-06-10T14:00:00+10:00",
+        "priority": "routine",
+        "code": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "390906007", "display": "Follow-up visit"}],
+          "text": "Follow-up visit"
+        },
+        "note": [{"text": "Generated automatically on discharge from day-surgery encounter"}],
+        "reasonCode": [{"text": "Post-discharge follow-up"}]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/559",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "559",
+        "status": "active",
+        "intent": "order",
+        "subject": {"reference": "Patient/patient-jordan-lee"},
+        "requester": {"reference": "Practitioner/dr-morgan"},
+        "encounter": {"reference": "Encounter/556"},
+        "authoredOn": "2024-06-11T09:00:00+10:00",
+        "priority": "routine",
+        "code": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "225338004", "display": "Wound review"}],
+          "text": "Wound review"
+        },
+        "note": [{"text": "Generated automatically on discharge from day-surgery encounter"}],
+        "reasonCode": [{"text": "Post-discharge wound check"}]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/560",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "560",
+        "status": "active",
+        "intent": "order",
+        "subject": {"reference": "Patient/patient-jordan-lee"},
+        "requester": {"reference": "Practitioner/dr-morgan"},
+        "encounter": {"reference": "Encounter/557"},
+        "authoredOn": "2024-06-12T09:00:00+10:00",
+        "priority": "routine",
+        "code": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "710841007", "display": "Assessment during encounter"}],
+          "text": "Assessment during encounter"
+        },
+        "note": [{"text": "Ordered while patient still admitted, not discharge-triggered"}],
+        "reasonCode": [{"text": "In-encounter assessment"}]
+      }
+    }
+
+  ]
+}

@@ -67,6 +67,7 @@ Usage
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import textwrap
@@ -149,6 +150,14 @@ class ELToken:
     priority: str = "normal"
     description: str = ""
     fhir_ref: str = ""
+    triggered_by: str = ""        # R33a — el_id of an ELEvent, provenance only
+
+@dataclass
+class ELEvent:
+    """Corresponds to EventDecl in the grammar (AM-22). R33a."""
+    el_id: str
+    description: str = ""
+    fhir_ref: str = ""
 
 @dataclass
 class ELCommitment:
@@ -205,6 +214,7 @@ class ELSpec:
     fhir_bundle_id: str
     objects: List[ELObject] = field(default_factory=list)
     tokens: List[ELToken] = field(default_factory=list)
+    events: List[ELEvent] = field(default_factory=list)
     commitments: List[ELCommitment] = field(default_factory=list)
     delegations: List[ELDelegation] = field(default_factory=list)
     authorizations: List[ELAuthorization] = field(default_factory=list)
@@ -363,6 +373,22 @@ def _period_to_deadline(period: Optional[dict]) -> str:
     if start:
         return f"from {start}"
     return ""
+
+
+def _parse_fhir_datetime(value: str) -> Optional[datetime.datetime]:
+    """
+    [R33a] Parse a FHIR dateTime/instant string, tolerating a trailing "Z"
+    (datetime.fromisoformat only accepts "+00:00" before Python 3.11).
+    Returns None on missing or unparseable input rather than raising —
+    R33a is provenance enrichment, not load-bearing, so a malformed
+    timestamp should silently skip the rule rather than crash mapping.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 _VALID_TEXTX_ID_RE = re.compile(r"^[^\d\W]\w*$")
@@ -679,6 +705,40 @@ class FHIRConsentMapper:
             description=token_description,
             fhir_ref=fhir_ref,
         )
+
+        # R33a — static triggered_by provenance: was this ServiceRequest
+        # authored at/after a referenced Encounter's discharge? Provenance
+        # only — does not change token.state (see design note's R33a/R33b
+        # split; R33b, the live/masking variant, is out of scope here).
+        encounter_ref = sr.get("encounter", {}).get("reference", "")
+        encounter = by_ref.get(encounter_ref) if encounter_ref else None
+        if (
+            encounter
+            and encounter.get("resourceType") == "Encounter"
+            and encounter.get("status") == "finished"
+        ):
+            period_end  = encounter.get("period", {}).get("end", "")
+            end_dt      = _parse_fhir_datetime(period_end)
+            authored_dt = _parse_fhir_datetime(sr.get("authoredOn", ""))
+            if end_dt is not None and authored_dt is not None:
+                try:
+                    triggered = authored_dt >= end_dt
+                except TypeError:
+                    # Mixed naive/aware datetimes — cannot compare safely.
+                    triggered = False
+                if triggered:
+                    encounter_id = encounter.get("id", "")
+                    event_el_id  = f"{_sanitize_id(f'Encounter/{encounter_id}')}Discharge"
+                    if not any(e.el_id == event_el_id for e in spec.events):
+                        spec.events.append(ELEvent(
+                            el_id=event_el_id,
+                            description=f"Encounter/{encounter_id} discharged (period.end: {period_end})",
+                            fhir_ref=f"Encounter/{encounter_id}",
+                        ))
+                    token.triggered_by = event_el_id
+                    token.description += f" [R33] triggered by discharge of Encounter/{encounter_id}"
+                    spec.log("R33", f"Encounter/{encounter_id}", event_el_id)
+
         spec.tokens.append(token)
         spec.log("R07", fhir_ref, burden_id)
 
@@ -1009,6 +1069,12 @@ class FHIRConsentMapper:
             lines.append("    }")
         return lines
 
+    def _render_event(self, ev: ELEvent, indent: str = "        ") -> List[str]:
+        lines = [f"{indent}event {ev.el_id}"]
+        if ev.description:
+            lines.append(f'{indent}    description: "{ev.description}"')
+        return lines
+
     def _render_token(self, tok: ELToken) -> List[str]:
         lines = [f"{tok.kind} {tok.el_id} {{"]
         if tok.for_action:
@@ -1017,6 +1083,8 @@ class FHIRConsentMapper:
         # clause has no valid "not yet active" state in the current grammar;
         # 'pending' is used as the nearest fit (see AM-31, gp_referral_scenario.el).
         lines.append(f'    state: {"pending" if tok.kind == "embargo" else "active"}')
+        if tok.triggered_by:
+            lines.append(f'    triggered_by: {tok.triggered_by}')
         if tok.deadline:
             lines.append(f'    deadline: "{tok.deadline}"')
         if tok.kind == "burden":
@@ -1046,6 +1114,16 @@ class FHIRConsentMapper:
             "    {",
             f'        objective: "{objective[:120]}"',
             "",
+        ]
+
+        # R33a — events (must precede invariants: grammar body order is
+        # objective, events, invariants, assignment_policies, ... — see
+        # Community rule, grammar/v2/el_grammar.tx)
+        for ev in spec.events:
+            lines += self._render_event(ev)
+            lines.append("")
+
+        lines += [
             '        invariant consentBeforeAnalysis:',
             '            "AI diagnostic analysis must not proceed without documented patient consent"',
         ]
