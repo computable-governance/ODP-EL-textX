@@ -204,6 +204,27 @@ and revoke unverifiable by either Kripke builder — not an R30-only fix.
 
 ---
 
+### 3.10 ServiceRequest triggered by Encounter discharge (R33)
+
+| ID  | FHIR Element | DSL-EL Target | Notes |
+|-----|--------------|----------------|-------|
+| R33 | ServiceRequest.encounter (→ Encounter.status=finished, .period.end) + ServiceRequest.authoredOn | `Burden.triggered_by` → new `EventDecl` | Specified, not yet implemented — R33a (static) only; R33b (live) explicitly out of scope |
+
+**Elaboration:** when a `ServiceRequest`'s `.encounter` reference resolves
+to an `Encounter` already `status: finished` at or before the
+`ServiceRequest`'s own `authoredOn` timestamp, the `Burden` R07 already
+generates for that `ServiceRequest` gains a `triggered_by` reference to a
+newly-emitted `EventDecl` representing the discharge — provenance
+recording *why* the burden exists, not masking (the burden stays
+`state: active`, unchanged). Restores the causality DN_008 flagged as
+lost: today's R07-only output gives no trace of why a follow-up
+obligation was created. Full worked example, grounding in the actual
+grammar syntax, and the static (R33a, specified here) vs. live (R33b,
+direct structural sibling of R31, not scoped for implementation)
+sub-case distinction: `docs/design_notes/R33_triggered_by_rule_spec.md`.
+
+---
+
 ## 4. Validation Pipeline
 
 The generated `.el` specification is validated at three levels:
