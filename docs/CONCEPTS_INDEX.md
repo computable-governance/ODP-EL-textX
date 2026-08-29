@@ -3531,7 +3531,7 @@ acknowledge as future work") already anticipates this exact gap; fold this
 finding in as a concrete instance of that caveat when finalizing
 `reviewer_response.md`.
 
-**Convergence with live-violation-detection design (2026-08-20):**
+**Convergence with live-violation-detection design (2026-08-20) — bucket-collision RESOLVED 2026-08-29, see below:**
 attempting to design the trigger mechanism for live violation detection on
 `referralResponseBurden`/`assessmentSchedulingBurden` (both `discharge_mode:
 eventual`) surfaced that this finding's tick-vs-wall-clock ambiguity is not
@@ -3564,6 +3564,58 @@ in one dedicated design session — not piecemeal:
    tick-steps) or wall-clock-based (would require a real duration parser,
    which does not exist today — `_parse_deadline_steps()` is a coarse
    verification-time bucket mapping, not a duration parser)?
+
+**RESOLVED (2026-08-29) — the identical-bucket-value claim, specifically.**
+Questions 1 and 2 above were already settled by later, separately-logged
+work under "Live violation triggering..." earlier in this same
+`discharge_mode: strict` section's timeline: `check_live_violations()`
+(`el_engine.py`) is tick-based and `TokenInstance` does now carry a real
+`granted_at_tick` field — this doc entry had simply not been updated to
+say so. What remained genuinely unresolved after that work was exactly the
+sentence above: the *bucket-collision* itself, empirically confirmed live
+via a CC investigation (`CC_INVESTIGATION_premature_violation.md`,
+2026-08-29) that reproduced the referral-board-view.html "Assessment
+Scheduling violates at the same tick as Referral Response" symptom against
+the running server and root-caused it to `_parse_deadline_steps()`
+matching only the unit word, never the leading magnitude.
+
+Fixed the same day in `_parse_deadline_steps()` (`toolchain/el_engine.py`):
+now extracts the leading number adjacent to the unit word and multiplies
+it by that unit's existing per-unit step value, instead of using the flat
+per-unit bucket unconditionally. `referralResponseBurden` ("5 working
+days") → 40 steps; `assessmentSchedulingBurden` ("14 days") → 112 steps —
+proportional to the real 14/5 = 2.8x ratio, no longer identical. A
+magnitude-less deadline string (e.g. a word-form magnitude, or a bare unit
+word with no digit) still falls back to the original flat bucket,
+unchanged.
+
+Regression-checked, not just diffed: full suite was 213/213 before this
+change; added 10 new tests locking in the fix
+(`tests/test_parse_deadline_steps.py`, including the magnitude-1 case
+matching the original flat-bucket value exactly, so the two existing
+`check_live_violations()`/endpoint tests that hardcode `deadline_steps ==
+5` for `"1 hour"` stay correct); 223/223 after, zero regressions. Then
+re-verified live against the running `referral` scenario server (not just
+unit-tested): Reset → `initiateReferral` → repeated `/advance-clock` →
+`/check-violations` now shows `referralResponseBurden` violating at tick
+41 ("elapsed 41 >= deadline 40 steps") while `assessmentSchedulingBurden`
+stays PENDING until tick 113 ("elapsed 113 >= deadline 112 steps") — the
+two burdens no longer violate together.
+
+Known, disclosed (not hidden) consequence of the fix: `deadline_steps`
+also gates the Kripke verifier's Rule T2 (`el_kripke.py`, `w.step >=
+desc.deadline_steps`) within the default horizon (10,
+`el_api.py:_KRIPKE_HORIZON`). A large multi-day `deadline_steps` (e.g.
+112) now exceeds that horizon, so the verifier can no longer witness a
+`"violate:<burden>"` transition for such a burden within the default
+horizon-bounded search — it could before this fix, at the old flat value
+of 8. Checked directly: no test in the suite asserts EF/AF over a
+`"violate:"` proposition (grepped), and discharge reachability (Rule T1)
+is unaffected since it fires independently of `deadline_steps` at any
+step — so this doesn't regress anything today, but a future scenario
+wanting "eventually witnessed as violated within N steps" for a
+long-deadline eventual Burden would need a larger horizon, not a further
+change to this function.
 
 **Companion, smaller decision surfaced in the same session:** wiring a
 proper `Action` declaration for `notify_gp_of_non_response` (held by

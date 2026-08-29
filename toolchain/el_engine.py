@@ -23,6 +23,7 @@ Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, §7.8, §7.10
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -701,38 +702,92 @@ class ObligationDescriptor:
     # _find_action_for_burden() when not set directly on the DeonticToken.
 
 
+_DEADLINE_UNIT_STEPS = {
+    "second": 2,   # very tight
+    "minute": 3,
+    "hour":   5,
+    "day":    8,
+    "week":   12,
+    "month":  20,
+}
+
+# Leading number attached to a unit word, e.g. "5" in "5 working days" or "48"
+# in "48 hours from clinical decision" — the digits and the unit need not be
+# adjacent (an intervening word like "working" is common in these strings),
+# so allow a short run of non-digit characters between them. Bounded at 20
+# chars so an unrelated number elsewhere in a long description (or in a
+# different unit's word) can't accidentally pair with this one.
+_DEADLINE_MAGNITUDE_RE = re.compile(
+    r"(\d+)\D{0,20}?(" + "|".join(_DEADLINE_UNIT_STEPS) + r")"
+)
+
+
 def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
     """
     Convert a natural-language deadline string to a finite step count.
 
     The mapping is necessarily approximate because the DSL deadline is
-    expressed in domain time (seconds, days, etc.) while our step model
-    is abstract. The goal is to preserve the relative ordering of deadlines.
+    expressed in domain time (seconds, days, etc.) while our step model is
+    abstract — there is no claim of a real-world-accurate step==duration
+    correspondence. The goal is to preserve the relative ordering of
+    deadlines, now including relative ordering *within* a unit, not just
+    across units.
 
-    Heuristics:
-      "… second …"        → 2 steps   (very tight)
-      "… minute …"        → 3 steps
-      "… hour …"          → 5 steps
-      "… day …"           → 8 steps
-      "… week …"          → 12 steps
-      "… month …"         → 20 steps
-      anything else       → default
+    Bug fixed here (found live via referral-board-view.html, CC investigation
+    2026-08-29): the previous version matched only the unit word and ignored
+    any magnitude, so "5 working days from referral receipt"
+    (referralResponseBurden) and "14 days from referral receipt"
+    (assessmentSchedulingBurden) both resolved to the same flat 8 steps —
+    both burdens then went VIOLATED at the identical elapsed tick in
+    check_live_violations(), even though the 14-day deadline should take
+    materially longer to elapse than the 5-day one. Also logged as the
+    still-open "Convergence with live-violation-detection design" finding in
+    docs/CONCEPTS_INDEX.md's discharge_mode: strict entry (2026-08-20).
+
+    Fix: when a leading number is present alongside a recognised unit word
+    (magnitude * that unit's per-unit step value — see
+    _DEADLINE_UNIT_STEPS), use it. "5 working days" → 5 * 8 = 40; "14 days" →
+    14 * 8 = 112 — now genuinely distinguishable, and proportional to the
+    real ratio (14/5 = 2.8x) the two deadlines actually encode. Confirmed
+    against check_live_violations()'s only consumption of this value —
+    `elapsed = tick - tok.granted_at_tick; if elapsed >= deadline_steps` — a
+    plain elapsed-ticks-vs-threshold comparison, so scaling the threshold
+    linearly with the stated magnitude is the semantically correct fix for
+    that call site, not just a plausible-looking formula.
+
+    A magnitude-less deadline (no digit found alongside a unit word — e.g. a
+    word-form magnitude like "thirty days", which this parser does not
+    attempt to spell out, or a bare unit-only phrase) falls back to the
+    original flat per-unit bucket below, unchanged from before this fix.
+    "referral episode", "end of session", and other non-unit deadlines fall
+    through to `default`, also unchanged.
+
+    Known consequence, not a defect: the Kripke verifier (el_kripke.py)
+    reuses this same function and gates its Rule T2 (deadline violation)
+    transition on `w.step >= desc.deadline_steps` within a bounded horizon
+    (10 by default, el_api.py's _KRIPKE_HORIZON). A large multi-day
+    deadline_steps value (e.g. assessmentSchedulingBurden's new 112) now
+    exceeds that horizon, so the verifier can no longer witness a "violate:"
+    transition for it within the default horizon — it could before this fix,
+    at the flat value of 8. This does not affect any current test (no test
+    asserts EF/AF over a "violate:" proposition, checked directly) and does
+    not affect discharge reachability (Rule T1 fires independently of
+    deadline_steps at any step), but is worth knowing if a future scenario
+    needs "eventually witnessed as violated within N steps" for a
+    long-deadline eventual Burden — that would need a larger horizon, not a
+    change to this function.
     """
     if not deadline_str:
         return default
     s = deadline_str.lower()
-    if "second" in s:
-        return 2
-    if "minute" in s:
-        return 3
-    if "hour"   in s:
-        return 5
-    if "day"    in s:
-        return 8
-    if "week"   in s:
-        return 12
-    if "month"  in s:
-        return 20
+    match = _DEADLINE_MAGNITUDE_RE.search(s)
+    if match:
+        magnitude = int(match.group(1))
+        unit = match.group(2)
+        return magnitude * _DEADLINE_UNIT_STEPS[unit]
+    for unit, steps in _DEADLINE_UNIT_STEPS.items():
+        if unit in s:
+            return steps
     return default
 
 
