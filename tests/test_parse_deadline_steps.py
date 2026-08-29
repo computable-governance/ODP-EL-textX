@@ -13,8 +13,18 @@ deadline should take materially longer to elapse than the 5-day one. Also
 logged as the still-open "Convergence with live-violation-detection design"
 finding in docs/CONCEPTS_INDEX.md's discharge_mode: strict entry
 (2026-08-20), closed by this fix.
+
+Also covers _has_deadline_magnitude() — the sibling function added
+2026-08-29 to close a distinct, older gap this fix's own investigation
+surfaced: deadline strings with no genuine elapsed-time magnitude at all
+(e.g. "referral episode") were falling through to _parse_deadline_steps()'s
+bare default (5) and getting tick-violated almost immediately in
+check_live_violations() — see docs/CONCEPTS_INDEX.md's "referral episode"
+finding (2026-08-29) and tests/test_check_live_violations.py's
+test_no_magnitude_deadline_never_violates_* tests for the integration-level
+coverage of that fix.
 """
-from el_engine import _parse_deadline_steps
+from el_engine import _has_deadline_magnitude, _parse_deadline_steps
 
 
 # ── The exact regression this fix closes ────────────────────────────────────
@@ -104,3 +114,57 @@ def test_distant_unrelated_number_does_not_pair_with_a_later_unit():
     # "day" is present with no adjacent digit within the window -> falls
     # back to the flat per-unit bucket, not 12345 * 8.
     assert steps == 8
+
+
+# ── _has_deadline_magnitude() — the 2026-08-29 sibling function ────────────
+
+def test_has_magnitude_true_for_every_magnitude_bearing_deadline():
+    assert _has_deadline_magnitude("5 working days from referral receipt") is True
+    assert _has_deadline_magnitude("14 days from referral receipt") is True
+    assert _has_deadline_magnitude("48 hours from clinical decision") is True
+    assert _has_deadline_magnitude("1 hour") is True
+    assert _has_deadline_magnitude("10 minutes") is True
+
+
+def test_has_magnitude_false_for_the_reported_referral_episode_case():
+    """The exact string this finding is about: no digit, no unit keyword."""
+    assert _has_deadline_magnitude("referral episode") is False
+
+
+def test_has_magnitude_false_for_every_no_digit_deadline_found_across_scenarios():
+    """Every no-digit deadline: string found by grepping every .el scenario
+    file in the repo (2026-08-29 scope check), not just referral_scenario.el's
+    "referral episode" -- ecommerce_scenario.el and consent_scenario.el each
+    contribute distinct cases."""
+    assert _has_deadline_magnitude("invoice due date") is False
+    assert _has_deadline_magnitude("agreed delivery date") is False
+    assert _has_deadline_magnitude("reorder point") is False
+    assert _has_deadline_magnitude("clinical session") is False
+    assert _has_deadline_magnitude("end of session") is False
+
+
+def test_has_magnitude_false_for_word_form_magnitude():
+    """"thirty days" has a unit word but no digit -- _parse_deadline_steps()
+    still falls back to its flat per-unit bucket for this case (unchanged
+    behaviour, see test_word_form_magnitude_falls_back_to_flat_bucket
+    above), but _has_deadline_magnitude() must say False: a flat bucket is
+    exactly the kind of guessed value check_live_violations() should not
+    tick-violate on for a burden whose real deadline it cannot compute."""
+    assert _has_deadline_magnitude("thirty days from cancellation") is False
+
+
+def test_has_magnitude_false_for_digit_with_no_adjacent_unit():
+    """"by 2026-05-20" contains digits, but none adjacent to a recognised
+    unit word -- an absolute calendar date is exactly as unusable for an
+    elapsed-time magnitude as no digit at all, and must be treated the same
+    way, not merely "contains a digit character somewhere" (this deadline
+    string appears only on a permit today, not a burden, so this doesn't
+    currently change check_live_violations()' behaviour -- but the function
+    must still get it right in case a future burden ever uses a similarly-
+    shaped deadline)."""
+    assert _has_deadline_magnitude("by 2026-05-20") is False
+
+
+def test_has_magnitude_false_for_none_and_empty():
+    assert _has_deadline_magnitude(None) is False
+    assert _has_deadline_magnitude("") is False

@@ -4172,14 +4172,20 @@ a future session picks up `Composition` mapping.
 
 ---
 
-## `deadline: "referral episode"` has no valid tick-count — falls through to the bare default, now the fastest-violating deadline in the scenario — OPEN FINDING (2026-08-29)
+## `deadline: "referral episode"` has no valid tick-count — falls through to the bare default, now the fastest-violating deadline in the scenario — MITIGATED (2026-08-29), underlying gap still OPEN
 
-**Status: OPEN, not fixed. Distinct from, and older than, the now-resolved
-bucket-collision finding** (2026-08-20, resolved 2026-08-29 — see the
-`discharge_mode: strict` section's "Convergence with live-violation-detection
-design" entry above). That fix corrected magnitude handling for numeric
-deadlines; this finding is about a deadline string that carries no numeric
-magnitude to correct in the first place.
+**Status: MITIGATED same day it was logged.** Burdens with a no-magnitude
+deadline no longer falsely tick-violate (direction 1 below, implemented) —
+see "Mitigated (2026-08-29)" at the end of this entry. **The underlying
+modelling gap remains OPEN and unscheduled**: nothing tracks "has this
+episode concluded" as a checkable condition, so direction 2 below (a real
+episode-conclusion-based check) is still undesigned. Distinct from, and
+older than, the separately-resolved bucket-collision finding (2026-08-20,
+resolved 2026-08-29 — see the `discharge_mode: strict` section's
+"Convergence with live-violation-detection design" entry above). That fix
+corrected magnitude handling for numeric deadlines; this finding is about
+a deadline string that carries no numeric magnitude to correct in the
+first place.
 
 `clinicalHandoverBurden` and `aiExaminationBurden` (both
 `discharge_mode: eventual`, `referral_scenario.el`) declare
@@ -4249,5 +4255,71 @@ operationally — a Community lifecycle transition? every member burden
 discharged? an explicit close action?), not a one-line patch. Not
 scheduled; revisit when live violation detection for episode-scoped
 deadlines is prioritised.
+
+**Mitigated (2026-08-29), same day — direction 1 above, implemented
+generally, not as a narrow string match.** Grepped every `deadline:`
+string across every `.el` scenario file in the repo (not just
+`referral_scenario.el`) before scoping the fix: seven deadline strings
+repo-wide carry no digit at all — `"referral episode"`
+(`referral_scenario.el` ×2, `gp_referral_scenario.el` ×1),
+`"invoice due date"`, `"agreed delivery date"`, `"reorder point"`,
+`"thirty days from cancellation"` (all `ecommerce_scenario.el` — itself
+currently unparseable, pre-existing syntax error, so moot in practice
+today), and `"clinical session"`/`"end of session"` (`consent_scenario.el`
+— `seekConsentObligation`'s `"clinical session"` is `discharge_mode:
+strict`, already excluded from `check_live_violations()` regardless;
+`reportingObligation`'s `"end of session"` is `eventual` and was affected).
+None of `erequesting_claiming_scenario.el`, `specialist_pool_scenario.el`,
+or `industrial_procedure_scenario.el` have a no-digit deadline.
+
+New function `_has_deadline_magnitude()` (`toolchain/el_engine.py`,
+alongside `_parse_deadline_steps()`) answers "does this deadline string
+carry a real, computable elapsed-time magnitude" as a `bool`, distinctly
+from `_parse_deadline_steps()`'s `int`-only return, which cannot tell "we
+computed 5 because the deadline genuinely means 5" from "we returned the
+bare default because there was nothing to compute." `check_live_violations()`
+now calls it before resolving `deadline_steps` for each active `eventual`
+burden (both Tier 1/Commitment-derived and Tier 2/bare-token paths — the
+raw deadline string lookup is now shared between them) and `continue`s
+(never touches, never transitions) when it returns `False` — a general
+condition based on whether `_DEADLINE_MAGNITUDE_RE` actually matched, not
+a literal check against the string `"referral episode"`, so it also
+correctly covers `"during the episode"`, `"throughout treatment"`, or any
+similarly-shaped deadline a future scenario author writes, without a
+separate fix each time.
+
+One deliberate refinement beyond the literal "no digit at all" framing:
+the condition is "no digit *adjacent to a recognised unit word*", not "no
+digit character anywhere in the string" — `scenarios/fhir/
+generated_governance.el`'s `"by 2026-05-20"` contains digits but no usable
+elapsed-time magnitude (an absolute calendar date, structurally as
+unusable as no digit at all); treating "has digits somewhere" as
+sufficient would have left that shape of deadline exploitable by the same
+bug. Confirmed this makes no behavioural difference across any deadline
+declared today — `"by 2026-05-20"` is declared on a `permit`, not a
+`burden`, so `check_live_violations()` (which only ever sweeps burdens)
+was never going to touch it regardless — but the function is written to
+get the general case right rather than the case that happens not to
+matter yet.
+
+Kripke verifier (`el_kripke.py`) behaviour is unchanged — this fix is
+scoped to `check_live_violations()`'s live tick-sweep only, per its own
+request; `ObligationDescriptor.deadline_steps` and Rule T2 still compute
+and use the plain `int` value (`5`, unchanged) exactly as before for these
+burdens, since nothing about the verifier's bounded-horizon model was
+asked to change here.
+
+10 new tests (2 integration-level in
+`tests/test_check_live_violations.py`, exercising both Tier 1 and Tier 2;
+8 unit-level in `tests/test_parse_deadline_steps.py` covering
+`_has_deadline_magnitude()` directly, including every no-digit deadline
+string found in the repo-wide grep above and the `"by 2026-05-20"` edge
+case). Full suite: 223/223 before this change (the `5b21dc9` baseline),
+231/231 after, zero regressions. Re-verified live: reset →
+`initiateReferral` → `/advance-clock` past tick 10,000 → `/check-violations`
+— `clinicalHandoverBurden`/`aiExaminationBurden` remain `PENDING`
+throughout (never violate, at any tick tested), while
+`referralResponseBurden`/`assessmentSchedulingBurden` violate exactly as
+`5b21dc9` already established (elapsed ≥ 40 / ≥ 112 respectively).
 
 ---

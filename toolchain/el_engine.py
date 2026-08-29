@@ -791,6 +791,45 @@ def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
     return default
 
 
+def _has_deadline_magnitude(deadline_str: Optional[str]) -> bool:
+    """
+    True if `deadline_str` contains a genuine elapsed-time magnitude
+    _parse_deadline_steps() can compute a value *from* — a leading number
+    adjacent to a recognised unit word (`_DEADLINE_MAGNITUDE_RE`). False for
+    every case where that function would fall back to its bare `default`
+    instead: no digit at all (e.g. "referral episode", a word-form
+    magnitude like "thirty days", a bare unit word with no digit, or no
+    deadline string at all).
+
+    Exists because _parse_deadline_steps() always returns a plain `int` —
+    it cannot distinguish "we computed 5 because the deadline genuinely
+    means 5 steps" from "we returned the bare default because there was
+    nothing to compute from at all." check_live_violations() needs exactly
+    that distinction (see its docstring and
+    docs/CONCEPTS_INDEX.md's "referral episode" finding, 2026-08-29): a
+    burden whose deadline carries no real magnitude must never be
+    tick-violated on a guessed value, so it has to know *before* calling
+    _parse_deadline_steps() whether a real value exists to compute.
+
+    Deliberately checks for "any digit adjacent to a unit word" rather than
+    "the string contains a digit character anywhere" — a digit that isn't
+    part of a genuine magnitude (e.g. an absolute calendar date like
+    "by 2026-05-20", which appears only on a permit today, not a burden,
+    so this distinction doesn't currently change any behaviour, but would
+    if a future burden ever used a deadline shaped like that) is exactly
+    as unusable as no digit at all, and should be treated the same way.
+    _parse_deadline_steps() itself does not make this distinction — it
+    only has an int to return — so this sibling function exists to make it
+    without changing that function's return type or its many other
+    callers (el_kripke.py's Kripke world-expansion in particular, which is
+    unaffected by this fix — see check_live_violations()'s docstring for
+    why that's a deliberately separate, still-open question).
+    """
+    if not deadline_str:
+        return False
+    return bool(_DEADLINE_MAGNITUDE_RE.search(deadline_str.lower()))
+
+
 def _priority_weight(priority_str: Optional[str]) -> float:
     """
     §C.3: Convert a PriorityLevel string (AM-15) to a numeric weight.
@@ -1213,6 +1252,20 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     explicit "check deadlines" endpoint) rather than it firing silently on
     unrelated actions.
 
+    Also (2026-08-29) deliberately excludes any Burden whose deadline string
+    carries no genuine elapsed-time magnitude — see _has_deadline_magnitude()
+    — e.g. "referral episode" (clinicalHandoverBurden/aiExaminationBurden in
+    referral_scenario.el/gp_referral_scenario.el). Before this exclusion,
+    such a Burden silently fell back to _parse_deadline_steps()'s bare
+    default (5) and violated almost immediately — confirmed live and logged
+    in docs/CONCEPTS_INDEX.md ("referral episode" finding, 2026-08-29) as a
+    genuine modelling gap, not a parsing bug: nothing in
+    WorldState/TokenInstance represents "has this episode concluded" as a
+    checkable condition, so no fixed tick-count can ever be conceptually
+    correct for such a deadline. This mitigates the wrong-answer symptom
+    (never falsely violates) without solving that underlying gap, which
+    stays open and unscheduled.
+
     Deliberately excludes discharge_mode: strict Burdens entirely — not
     checked, not transitioned, regardless of elapsed time. Strict-mode
     enforcement is itself a live-runtime gap (see docs/CONCEPTS_INDEX.md,
@@ -1269,16 +1322,25 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
         if tok.kind != "burden" or tok.state != "active" or tok.discharge_mode != "eventual":
             continue
 
+        spec_tok = next(
+            (e for e in spec.elements
+             if type(e).__name__ == "DeonticToken" and e.name == tok.token_name),
+            None,
+        )
+        raw_deadline = getattr(spec_tok, "deadline", None)
+        if not _has_deadline_magnitude(raw_deadline):
+            # No genuine elapsed-time magnitude to check against (e.g.
+            # "referral episode" — see docs/CONCEPTS_INDEX.md, 2026-08-29).
+            # Deliberately never tick-violates rather than falling back to
+            # _parse_deadline_steps()'s arbitrary numeric default — see
+            # _has_deadline_magnitude()'s docstring.
+            continue
+
         spec_desc = spec_descriptors.get(tok.token_name)
         if spec_desc is not None:
             deadline_steps = spec_desc.deadline_steps
         else:
-            spec_tok = next(
-                (e for e in spec.elements
-                 if type(e).__name__ == "DeonticToken" and e.name == tok.token_name),
-                None,
-            )
-            deadline_steps = _parse_deadline_steps(getattr(spec_tok, "deadline", None), default=5)
+            deadline_steps = _parse_deadline_steps(raw_deadline, default=5)
 
         elapsed = tick - tok.granted_at_tick
         if elapsed >= deadline_steps:

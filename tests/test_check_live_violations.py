@@ -36,6 +36,8 @@ enterprise specification CheckLiveViolationsProbe
 party Holder {
     holds eventualBurden
     holds strictBurden
+    holds episodeScopedBurden
+    holds bareEpisodeScopedBurden
 }
 
 burden eventualBurden {
@@ -50,6 +52,26 @@ burden strictBurden {
     discharge_mode: strict
 }
 
+// No genuine elapsed-time magnitude in this deadline string (no digit
+// adjacent to a unit word) -- matches referralResponseBurden's real-world
+// counterpart, clinicalHandoverBurden/aiExaminationBurden's
+// deadline: "referral episode" (see docs/CONCEPTS_INDEX.md's 2026-08-29
+// finding). Wired through a real Commitment, matching Tier 1 -- the same
+// path those real burdens use.
+burden episodeScopedBurden {
+    state: active
+    deadline: "referral episode"
+    discharge_mode: eventual
+}
+
+// Same no-magnitude deadline, but with NO Commitment -- exercises Tier 2
+// (the bare-DeonticToken fallback path) rather than Tier 1.
+burden bareEpisodeScopedBurden {
+    state: active
+    deadline: "referral episode"
+    discharge_mode: eventual
+}
+
 commitment eventualCommitment {
     by: Holder
     obligation: "Discharge the eventual burden"
@@ -60,6 +82,12 @@ commitment strictCommitment {
     by: Holder
     obligation: "Discharge the strict burden"
     creates_burden: strictBurden
+}
+
+commitment episodeScopedCommitment {
+    by: Holder
+    obligation: "Discharge the episode-scoped burden"
+    creates_burden: episodeScopedBurden
 }
 """
 
@@ -142,6 +170,44 @@ def test_tick_does_not_advance_on_no_op():
     new_state, record = check_live_violations(state, rt._spec)
     assert record.outcome == "ok"
     assert new_state.tick == 4
+
+
+def test_no_magnitude_deadline_never_violates_regardless_of_elapsed_time():
+    """episodeScopedBurden ("referral episode", Tier 1/Commitment-backed):
+    a deadline with no genuine elapsed-time magnitude must never tick-
+    violate, no matter how far past any plausible threshold the clock
+    advances -- see docs/CONCEPTS_INDEX.md's 2026-08-29 finding and
+    _has_deadline_magnitude()'s docstring. Wildly past even the largest
+    numeric deadline anywhere in the real scenarios (assessmentScheduling-
+    Burden's 112, post-5b21dc9) to make sure this isn't just "hasn't
+    reached some large threshold yet."""
+    rt = _build_probe_runtime()
+    state = rt.current_state()
+
+    way_past_due = state.with_tick(10_000)
+    new_state, record = check_live_violations(way_past_due, rt._spec)
+
+    assert "episodeScopedBurden" not in record.violations
+    assert _token(new_state, "episodeScopedBurden").state == "active"
+    # eventualBurden, by contrast, does violate at the same tick -- confirms
+    # episodeScopedBurden's exclusion is deadline-shape-specific, not an
+    # accident of the fixture never reaching any check at all.
+    assert "eventualBurden" in record.violations
+
+
+def test_no_magnitude_deadline_never_violates_via_bare_token_fallback():
+    """Same as above, but for bareEpisodeScopedBurden -- no Commitment, so
+    this exercises Tier 2 (the bare-DeonticToken fallback path) rather than
+    Tier 1. The magnitude gate must apply identically regardless of which
+    tier resolves the burden's deadline."""
+    rt = _build_probe_runtime()
+    state = rt.current_state()
+
+    way_past_due = state.with_tick(10_000)
+    new_state, record = check_live_violations(way_past_due, rt._spec)
+
+    assert "bareEpisodeScopedBurden" not in record.violations
+    assert _token(new_state, "bareEpisodeScopedBurden").state == "active"
 
 
 def test_runtime_wrapper_appends_to_ledger():
