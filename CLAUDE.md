@@ -594,3 +594,17 @@ metadata, commit messages, or comments.
 Correct format: "AM-XX: brief description of change"
 
 Never add lines like: "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+
+**Never run `git commit` unless Zoran's message contains an explicit,
+unambiguous instruction to commit** — the literal word "commit" (or
+equivalent — "commit now", "go ahead and commit", "please commit") used
+as a directive, not merely present incidentally. A request for a diff, a
+review, an answer to a question, or a vague "continue"/"ok" does not
+count, even if it follows a discussion that made committing seem like
+the obvious next step. If a message is garbled, truncated, or looks like
+a paste/rendering artifact (stray prompt characters, repeated tokens),
+do not treat it as approval on the strength of a keyword match alone —
+confirm first. If in doubt at all, treat it as "no" and ask.
+
+`git add`, `git status`, `git diff`, and `git log` remain fine to run
+freely without asking.
