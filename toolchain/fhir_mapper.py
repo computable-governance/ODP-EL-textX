@@ -525,6 +525,17 @@ class FHIRConsentMapper:
         for sr in by_type.get("ServiceRequest", []):
             self._map_service_request(sr, spec, by_ref)  # R05–R08
 
+        # 2b — DiagnosticReport.basedOn → artefact provenance (R34, DN_008
+        # Option A). Reverse link direction from Composition's
+        # supportingInfo — DiagnosticReport has no supportingInfo field at
+        # all (confirmed against the real hl7.fhir.au.ereq DiagnosticReport
+        # profile and the base R4 element list, 2026-08-29); it references
+        # the ServiceRequest it fulfils via .basedOn instead. Must run
+        # after ServiceRequest mapping above — it enriches a burden that
+        # has to already exist.
+        for dr in by_type.get("DiagnosticReport", []):
+            self._map_diagnostic_report(dr, spec, by_ref)  # R34
+
         # 3 — Tasks → delegation chain
         # Sort: parent tasks (no partOf) first, then sub-tasks
         tasks = by_type.get("Task", [])
@@ -739,6 +750,33 @@ class FHIRConsentMapper:
                     token.description += f" [R33] triggered by discharge of Encounter/{encounter_id}"
                     spec.log("R33", f"Encounter/{encounter_id}", event_el_id)
 
+        # R34 (DN_008 Option A) — Composition supportingInfo → artefact
+        # provenance. When this ServiceRequest's supportingInfo references a
+        # Composition (AU PS's own "referral carries a patient summary"
+        # mechanism), declare a standalone artefact_object for it and
+        # enrich this burden's description — provenance only, exactly like
+        # R33a: does not change token.state, does not invent an ArtefactRef
+        # (that construct only exists inside an Action, which this
+        # ServiceRequest pipeline never emits — see DN_009 §2.1-2.2
+        # correction).
+        for info_ref in sr.get("supportingInfo", []):
+            comp_ref = info_ref.get("reference", "")
+            comp = by_ref.get(comp_ref) if comp_ref else None
+            if not comp or comp.get("resourceType") != "Composition":
+                continue
+            comp_id = comp.get("id", "")
+            artefact_el_id = _sanitize_id(f"Composition/{comp_id}")
+            title = comp.get("title", "") or "Patient summary"
+            if not any(o.el_id == artefact_el_id for o in spec.objects):
+                spec.objects.append(ELObject(
+                    el_id=artefact_el_id,
+                    kind="artefact_object",
+                    description=f"[R34] {title} (Composition/{comp_id})",
+                    fhir_ref=f"Composition/{comp_id}",
+                ))
+            token.description += f" [R34] Referral accompanied by Composition/{comp_id} (patient summary)"
+            spec.log("R34", f"Composition/{comp_id}", artefact_el_id)
+
         spec.tokens.append(token)
         spec.log("R07", fhir_ref, burden_id)
 
@@ -756,6 +794,40 @@ class FHIRConsentMapper:
         )
         spec.commitments.append(commitment)
         spec.log("R05", fhir_ref, commitment.el_id)
+
+    # ── R34 — DiagnosticReport.basedOn → artefact provenance ───────────────────
+    # (DN_008 Option A). See _map_service_request's R34 block for the
+    # Composition-linked, forward-direction sibling case.
+
+    def _map_diagnostic_report(self, dr: dict, spec: ELSpec, by_ref: Dict[str, dict]) -> None:
+        dr_id = dr.get("id", "dr")
+        for ref_dict in dr.get("basedOn", []):
+            sr_ref = ref_dict.get("reference", "")
+            sr = by_ref.get(sr_ref) if sr_ref else None
+            if not sr or sr.get("resourceType") != "ServiceRequest":
+                continue
+
+            sr_id = sr.get("id", "sr")
+            burden_id = f"{_sanitize_id(f'ServiceRequest/{sr_id}')}Obligation"
+            token = next((t for t in spec.tokens if t.el_id == burden_id), None)
+            if token is None:
+                # The ServiceRequest this report is based on never produced
+                # a burden (e.g. not present in this bundle at all) —
+                # nothing to enrich.
+                continue
+
+            artefact_el_id = _sanitize_id(f"DiagnosticReport/{dr_id}")
+            code_display = _coding_display(dr.get("code", {}).get("coding", []))
+            title = code_display or dr.get("code", {}).get("text", "") or "Diagnostic report"
+            if not any(o.el_id == artefact_el_id for o in spec.objects):
+                spec.objects.append(ELObject(
+                    el_id=artefact_el_id,
+                    kind="artefact_object",
+                    description=f"[R34] {title} (DiagnosticReport/{dr_id})",
+                    fhir_ref=f"DiagnosticReport/{dr_id}",
+                ))
+            token.description += f" [R34] Fulfilled by DiagnosticReport/{dr_id}"
+            spec.log("R34", f"DiagnosticReport/{dr_id}", artefact_el_id)
 
     # ── R09–R15 — Task → DelegationDecl ───────────────────────────────────────
 
