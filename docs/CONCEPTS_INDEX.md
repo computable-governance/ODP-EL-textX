@@ -4177,15 +4177,26 @@ a future session picks up `Composition` mapping.
 **Status: MITIGATED same day it was logged.** Burdens with a no-magnitude
 deadline no longer falsely tick-violate (direction 1 below, implemented) —
 see "Mitigated (2026-08-29)" at the end of this entry. **The underlying
-modelling gap remains OPEN and unscheduled**: nothing tracks "has this
-episode concluded" as a checkable condition, so direction 2 below (a real
-episode-conclusion-based check) is still undesigned. Distinct from, and
-older than, the separately-resolved bucket-collision finding (2026-08-20,
-resolved 2026-08-29 — see the `discharge_mode: strict` section's
-"Convergence with live-violation-detection design" entry above). That fix
-corrected magnitude handling for numeric deadlines; this finding is about
-a deadline string that carries no numeric magnitude to correct in the
-first place.
+modelling gap remains OPEN and unscheduled, but is now properly scoped,
+not undesigned**: `DN_010_episode_conclusion_deadline_checking.md`
+(2026-08-29, same day) corrects the framing this finding originally used
+— the concept of "episode concluded" already exists, declared explicitly
+in `ReferralEpisodeCommunity`'s own `objective: ... satisfaction:
+all_discharged(referralBurdenGroup)` and its description ("dissolved on
+objective achievement"); what's missing is that the live engine never
+implements it (confirmed by grep, zero references to community
+dissolution/termination anywhere in `el_engine.py` — the same
+declare-vs-verify gap `DN_004` already names, one layer up). DN_010
+scopes direction 2 below into two concrete pieces (live
+community-conclusion tracking, then wiring episode-scoped deadline
+checking to it) and flags one deliberately deferred sub-question
+(successful vs. unsuccessful episode conclusion). No code written; not
+scheduled. Distinct from, and older than, the separately-resolved
+bucket-collision finding (2026-08-20, resolved 2026-08-29 — see the
+`discharge_mode: strict` section's "Convergence with live-violation-
+detection design" entry above). That fix corrected magnitude handling for
+numeric deadlines; this finding is about a deadline string that carries
+no numeric magnitude to correct in the first place.
 
 `clinicalHandoverBurden` and `aiExaminationBurden` (both
 `discharge_mode: eventual`, `referral_scenario.el`) declare
@@ -4248,7 +4259,19 @@ underlying question isn't "how many ticks have elapsed" at all.
    exists.
 2. A structurally different check tied to episode state (e.g. some future
    "has `ReferralEpisodeCommunity` concluded" condition) rather than
-   elapsed ticks.
+   elapsed ticks. **Now scoped, not just gestured at** — see
+   `DN_010_episode_conclusion_deadline_checking.md`: the "episode
+   concluded" condition is `ReferralEpisodeCommunity`'s own declared
+   `objective: ... satisfaction: all_discharged(referralBurdenGroup)`,
+   which both affected burdens (`clinicalHandoverBurden`,
+   `aiExaminationBurden`) are already members of — no new group needed.
+   Two concrete pieces: (b-1) live community-conclusion tracking in the
+   engine (declared in the grammar, never implemented at runtime —
+   confirmed by grep, zero hits for dissolution/termination in
+   `el_engine.py`), then (b-2) wiring `check_live_violations()`'s
+   no-magnitude-deadline burdens to it. DN_010 also flags successful vs.
+   unsuccessful episode conclusion as a deliberately deferred
+   sub-question, not yet folded into this scoping.
 
 Both require a design decision (what does "episode concluded" even mean
 operationally — a Community lifecycle transition? every member burden
