@@ -208,7 +208,8 @@ and revoke unverifiable by either Kripke builder — not an R30-only fix.
 
 | ID  | FHIR Element | DSL-EL Target | Notes |
 |-----|--------------|----------------|-------|
-| R33 | ServiceRequest.encounter (→ Encounter.status=finished, .period.end) + ServiceRequest.authoredOn | `Burden.triggered_by` → new `EventDecl` | Specified, not yet implemented — R33a (static) only; R33b (live) explicitly out of scope |
+
+| R33 | ServiceRequest.encounter (→ Encounter.status=finished, .period.end) + ServiceRequest.authoredOn | `Burden.triggered_by` → new `EventDecl` | R33a (static provenance) implemented 2026-08-29 — see tests/test_fhir_mapper_r33_triggered_by.py. R33b (live/masking variant) remains out of scope, future work |
 
 **Elaboration:** when a `ServiceRequest`'s `.encounter` reference resolves
 to an `Encounter` already `status: finished` at or before the
