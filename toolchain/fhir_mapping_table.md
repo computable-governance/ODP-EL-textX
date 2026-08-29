@@ -226,6 +226,14 @@ sub-case distinction: `docs/design_notes/R33_triggered_by_rule_spec.md`.
 
 ---
 
+### 3.11 Composition/DiagnosticReport → Artefact Provenance (R34)
+
+| Rule | FHIR source | DSL-EL target | Notes |
+|------|-------------|----------------|-------|
+| R34 | ServiceRequest.supportingInfo → Composition (forward direction) / DiagnosticReport.basedOn → ServiceRequest (reverse direction — DiagnosticReport has no supportingInfo field) | `artefact_object` declaration + enrichment of the existing R07 burden's description | DN_008 Option A implemented 2026-08-29 — see tests/test_fhir_mapper_r34_artefact_provenance.py. Provenance only; does not wire `ArtefactRef` (that construct only exists inside an Action, which this ServiceRequest pipeline never emits — corrects DN_009 §2.1-2.2's stated approach). DN_008 Option B (mapping Composition's SHALL:handle/SHOULD:display FHIR Obligation extensions into new Burden/Permit tokens on the receiving clinician) remains out of scope, future work. |
+
+---
+
 ## 4. Validation Pipeline
 
 The generated `.el` specification is validated at three levels:
