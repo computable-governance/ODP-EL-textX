@@ -17,6 +17,7 @@ from el_engine import (
     advance as _engine_advance,
     advance_clock as _engine_advance_clock,
     check_live_violations as _engine_check_live_violations,
+    discharge_burden as _engine_discharge_burden,
     enroll,
     fire_event as _engine_fire_event,
     fire_violation_responses as _engine_fire_violation_responses,
@@ -230,6 +231,18 @@ class Runtime:
         to the ledger. (R30 Option B)"""
         new_state, record = _engine_reinstate_authorization(
             self._state, self._spec, authorization_name
+        )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def discharge_burden(self, burden_name: str) -> TransitionRecord:
+        """Directly discharge a Burden by name — no Action, no actor-initiated
+        step — and append the event to the ledger. Idempotent on an
+        already-discharged burden; see el_engine.discharge_burden()'s
+        docstring."""
+        new_state, record = _engine_discharge_burden(
+            self._state, self._spec, burden_name
         )
         self._state = new_state
         self._ledger.append(record)

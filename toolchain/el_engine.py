@@ -1309,6 +1309,82 @@ def reinstate_authorization(
     return new_state, record
 
 
+def discharge_burden(
+    state: WorldState, spec, burden_name: str
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    Directly discharge a Burden token by name — no Action, no actor-initiated
+    step. For callers (e.g. a future FHIR bridge) that need to mark an
+    obligation fulfilled based on an external signal with no corresponding
+    modelled Action, the same relationship fire_event() has to advance().
+
+    Unlike revoke_authorization()/reinstate_authorization(), a Burden's
+    TokenInstance carries .holder directly — no Authorization-style
+    permit/authority indirection to resolve first.
+
+    Raises KeyError if burden_name is not declared as a DeonticToken in
+    spec.elements, or is declared with a kind other than 'burden'.
+
+    Idempotent: discharging an already-'discharged' burden, or one with no
+    live TokenInstance at all (declared but never granted), is a no-op —
+    outcome stays 'ok', effects and discharged both stay empty (the same
+    signal reinstate_authorization() uses for its "already_active" case —
+    outcome alone never distinguishes a no-op, callers must inspect
+    effects). tick still advances by 1 regardless — matches revoke/
+    reinstate's unconditional-advance convention, not check_live_violations'
+    poll-safe exception (this is a real external call, not a repeatable
+    poll). When multiple TokenInstances share burden_name (e.g. cloned to
+    several holders), all non-discharged ones are discharged together;
+    actor_name attributes to the first holder found, mirroring
+    revoke_authorization's holders[0] convention.
+    """
+    token_el = None
+    for el in spec.elements:
+        if type(el).__name__ == "DeonticToken" and el.name == burden_name:
+            token_el = el
+            break
+    if token_el is None:
+        raise KeyError(f"DeonticToken '{burden_name}' not found in spec")
+    if token_el.kind != "burden":
+        raise KeyError(
+            f"DeonticToken '{burden_name}' is a '{token_el.kind}', not a burden"
+        )
+
+    tick = state.tick
+    effects_log: list[str] = []
+    discharged_names: list[str] = []
+
+    matching = [
+        t for t in state.tokens
+        if t.token_name == burden_name and t.kind == "burden"
+    ]
+    holder = matching[0].holder if matching else "system"
+
+    tokens = [
+        _transition(t, "discharged")
+        if t.token_name == burden_name and t.kind == "burden" and t.state != "discharged"
+        else t
+        for t in state.tokens
+    ]
+    newly_discharged = [t for t in matching if t.state != "discharged"]
+    if newly_discharged:
+        discharged_names.append(burden_name)
+        holders = sorted({t.holder for t in newly_discharged})
+        effects_log.append(f"discharged burden '{burden_name}' (holder(s): {', '.join(holders)})")
+
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=holder,
+        action_name=f"discharge:{burden_name}",
+        outcome="ok",
+        discharged=tuple(discharged_names),
+        effects=tuple(effects_log),
+        violations=(),
+    )
+    return new_state, record
+
+
 def fire_event(
     state: WorldState, spec, event_name: str, source: str = "external"
 ) -> Tuple[WorldState, TransitionRecord]:
