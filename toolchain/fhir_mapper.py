@@ -802,6 +802,29 @@ class FHIRConsentMapper:
             token.description += f" [R34] Referral accompanied by Composition/{comp_id} (patient summary)"
             spec.log("R34", f"Composition/{comp_id}", artefact_el_id)
 
+        # R36 (DN_009 §2.4) — reasonReference → Condition, description
+        # enrichment only. A Condition is a proposition (X.902 §6.2), not
+        # an object filling any action role — no artefact_object, no new
+        # dataclass, just naming the diagnosis in the burden's description
+        # (same target as R33a/R34's token.description, deliberately not
+        # Commitment.description — Commitment's is provenance-only text,
+        # never an accumulation point like the burden's). Scoped to
+        # ServiceRequest.reasonReference only: this mapper has no
+        # _map_procedure yet (Procedure-discharge, DN_009 §2.5, remains
+        # future work), so there is no other burden anywhere to enrich.
+        # reasonCode (inline CodeableConcept, no resource to resolve) is
+        # out of scope.
+        for reason_ref in sr.get("reasonReference", []):
+            cond_ref = reason_ref.get("reference", "")
+            condition = by_ref.get(cond_ref) if cond_ref else None
+            if not condition or condition.get("resourceType") != "Condition":
+                continue
+            cond_id = condition.get("id", "")
+            code_display = _coding_display(condition.get("code", {}).get("coding", []))
+            title = code_display or condition.get("code", {}).get("text", "") or "Diagnosis"
+            token.description += f" [R36] Referral reason: {title} (Condition/{cond_id})"
+            spec.log("R36", f"Condition/{cond_id}", burden_id)
+
         spec.tokens.append(token)
         spec.log("R07", fhir_ref, burden_id)
 

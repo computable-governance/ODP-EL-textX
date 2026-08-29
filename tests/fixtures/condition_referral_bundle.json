@@ -1,0 +1,95 @@
+{
+  "resourceType": "Bundle",
+  "id": "condition-referral-bundle-001",
+  "type": "collection",
+  "timestamp": "2024-07-02T09:15:00+10:00",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/lakeside-practice-001",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "lakeside-practice-001",
+        "name": "Lakeside Family Practice",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/patient-amelia-ng",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-amelia-ng",
+        "name": [{"family": "Ng", "given": ["Amelia"]}],
+        "birthDate": "1972-11-03"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/dr-osei",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "dr-osei",
+        "name": [{"family": "Osei", "given": ["Kwame"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "62247001", "display": "General practitioner"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/role-dr-osei",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "role-dr-osei",
+        "practitioner": {"reference": "Practitioner/dr-osei"},
+        "organization": {"reference": "Organization/lakeside-practice-001"}
+      }
+    },
+
+    {
+      "fullUrl": "Condition/300",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "300",
+        "clinicalStatus": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/condition-clinical", "code": "active"}]},
+        "code": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "44054006", "display": "Type 2 diabetes mellitus"}],
+          "text": "Type 2 diabetes mellitus"
+        },
+        "subject": {"reference": "Patient/patient-amelia-ng"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/301",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "301",
+        "status": "active",
+        "intent": "order",
+        "category": [{"coding": [{"system": "http://snomed.info/sct", "code": "306206005", "display": "Referral to service"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "394582007", "display": "Endocrinology"}], "text": "Referral to Endocrinology"},
+        "subject": {"reference": "Patient/patient-amelia-ng"},
+        "authoredOn": "2024-07-02",
+        "requester": {"reference": "Practitioner/dr-osei"},
+        "reasonReference": [{"reference": "Condition/300", "display": "Type 2 diabetes mellitus"}]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/302",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "302",
+        "status": "active",
+        "intent": "order",
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "104177005", "display": "Blood test"}], "text": "Full blood count"},
+        "subject": {"reference": "Patient/patient-amelia-ng"},
+        "authoredOn": "2024-07-02",
+        "requester": {"reference": "Practitioner/dr-osei"}
+      }
+    }
+
+  ]
+}

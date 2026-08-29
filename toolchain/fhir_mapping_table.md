@@ -241,6 +241,14 @@ sub-case distinction: `docs/design_notes/R33_triggered_by_rule_spec.md`.
 
 ---
 
+### 3.13 Condition → Description Enrichment (R36)
+
+| Rule | FHIR source | DSL-EL target | Notes |
+|------|-------------|----------------|-------|
+| R36 | ServiceRequest.reasonReference → Condition | Enrichment of the existing R07 burden's `description` — no new object, no new dataclass | DN_009 §2.4 implemented 2026-08-30 — see tests/test_fhir_mapper_r36_condition_enrichment.py. Condition is a proposition (X.902 §6.2), not an object filling any action role — deliberately no `artefact_object` declaration, unlike R34. Enriches `token.description` (the burden), not `Commitment.description`, for consistency with R33a/R34's established enrichment target — diverges from DN_009 §2.4's literal wording, which named "Commitment" loosely. Scoped to `ServiceRequest.reasonReference` only: this mapper has no `_map_procedure` (Procedure-discharge, DN_009 §2.5, remains future work), so there is no other burden to enrich. `reasonCode` (inline `CodeableConcept`, no resource to resolve) is out of scope. |
+
+---
+
 ## 4. Validation Pipeline
 
 The generated `.el` specification is validated at three levels:
