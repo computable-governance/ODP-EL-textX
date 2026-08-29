@@ -4171,3 +4171,83 @@ receiving clinician) but commits to neither. Not scheduled; revisit when
 a future session picks up `Composition` mapping.
 
 ---
+
+## `deadline: "referral episode"` has no valid tick-count — falls through to the bare default, now the fastest-violating deadline in the scenario — OPEN FINDING (2026-08-29)
+
+**Status: OPEN, not fixed. Distinct from, and older than, the now-resolved
+bucket-collision finding** (2026-08-20, resolved 2026-08-29 — see the
+`discharge_mode: strict` section's "Convergence with live-violation-detection
+design" entry above). That fix corrected magnitude handling for numeric
+deadlines; this finding is about a deadline string that carries no numeric
+magnitude to correct in the first place.
+
+`clinicalHandoverBurden` and `aiExaminationBurden` (both
+`discharge_mode: eventual`, `referral_scenario.el`) declare
+`deadline: "referral episode"` — no digit, no unit keyword
+(`second`/`minute`/`hour`/`day`/`week`/`month`). Confirmed directly against
+`_parse_deadline_steps()` (`toolchain/el_engine.py:704`): neither the
+magnitude-matching branch nor the unit-keyword fallback loop fires, so it
+falls straight through to the function's own bare `default` parameter,
+`5`. Both burdens reach this via Tier 1 (`_build_obligation_descriptors()`,
+`el_engine.py:914-927` — each has a real Commitment,
+`clinicalHandoverCommitment`/`aiExaminationCommitment`), which calls
+`_parse_deadline_steps(deadline_str)` with no explicit default override,
+landing on the same bare `5`.
+
+**Confirmed pre-existing, not a side effect of `5b21dc9`.** Extracted the
+exact pre-fix function body (`git show 5b21dc9^:toolchain/el_engine.py`) and
+traced it by hand against `"referral episode"`: same six substring checks,
+same "none match," same `return default` (`5` at that call site too, then
+as now). `5b21dc9` only added a magnitude-aware branch ahead of the
+existing fallback loop — it never touched what happens when neither a
+digit+unit pair nor a bare unit keyword is found. This string hits neither,
+before or after.
+
+**Made materially worse by `5b21dc9`, though not caused by it.** Before the
+fix, every day-based deadline flattened to the same bucket (8), so the
+episode-scoped burdens' `5` was merely the *tightest* among several
+similar values. After the fix, numeric deadlines now get their own
+proportional values (`referralResponseBurden` → 40,
+`assessmentSchedulingBurden` → 112), while the episode-scoped burdens'
+value is untouched at `5` — now the *lowest* `deadline_steps` of any
+eventual burden in the scenario. Confirmed live: reset →
+`initiateReferral` → advance 4 ticks → `/check-violations` at elapsed
+tick 5 violates both `clinicalHandoverBurden` and `aiExaminationBurden`
+("elapsed 5 >= deadline 5 steps") — before `referralResponseBurden` (needs
+40) or `assessmentSchedulingBurden` (needs 112) are anywhere close to
+violating. The two vaguest, most open-ended deadlines in the system —
+"sometime during this episode" — are currently the *fastest* to falsely
+violate, the inverse of their intended meaning.
+
+`check_live_violations()` (`el_engine.py:1140-1251`) applies zero
+special-casing here: it sweeps every `discharge_mode: eventual` active
+burden with one uniform check, `elapsed = tick - granted_at_tick >=
+deadline_steps`, regardless of what the deadline string conceptually
+means. There is no code path anywhere that distinguishes an elapsed-time
+deadline from an episode-scoped one.
+
+**Root cause is a genuine modelling gap, not a parsing bug.** A deadline
+like "5 working days" has a literal tick-equivalent to parse toward.
+"Referral episode" does not — it means "bounded by this episode's own
+conclusion," and nothing in `WorldState`/`TokenInstance` today represents
+"has this episode concluded" as a checkable condition. No fixed
+tick-count can ever be conceptually correct here: too tight (today's `5`)
+or too loose (any larger chosen default), arbitrarily, because the
+underlying question isn't "how many ticks have elapsed" at all.
+
+**Two possible directions, neither decided:**
+1. Exclude episode-scoped deadline strings from
+   `check_live_violations()`'s sweep entirely — burdens tagged this way
+   simply never tick-violate — until genuine episode-conclusion tracking
+   exists.
+2. A structurally different check tied to episode state (e.g. some future
+   "has `ReferralEpisodeCommunity` concluded" condition) rather than
+   elapsed ticks.
+
+Both require a design decision (what does "episode concluded" even mean
+operationally — a Community lifecycle transition? every member burden
+discharged? an explicit close action?), not a one-line patch. Not
+scheduled; revisit when live violation detection for episode-scoped
+deadlines is prioritised.
+
+---
