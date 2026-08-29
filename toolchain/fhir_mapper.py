@@ -160,6 +160,24 @@ class ELEvent:
     fhir_ref: str = ""
 
 @dataclass
+class ELStep:
+    """Corresponds to Step in the grammar (§6.3.7). R35."""
+    name: str
+    actor_role: str
+    artefact_ref: str = ""
+    description: str = ""
+
+@dataclass
+class ELProcess:
+    """Corresponds to Process in the grammar (§7.8.5). R35."""
+    el_id: str
+    initiation: str
+    termination: str
+    steps: List[ELStep] = field(default_factory=list)
+    description: str = ""
+    fhir_ref: str = ""
+
+@dataclass
 class ELCommitment:
     """Corresponds to CommitmentDecl."""
     el_id: str
@@ -215,6 +233,7 @@ class ELSpec:
     objects: List[ELObject] = field(default_factory=list)
     tokens: List[ELToken] = field(default_factory=list)
     events: List[ELEvent] = field(default_factory=list)
+    processes: List[ELProcess] = field(default_factory=list)
     commitments: List[ELCommitment] = field(default_factory=list)
     delegations: List[ELDelegation] = field(default_factory=list)
     authorizations: List[ELAuthorization] = field(default_factory=list)
@@ -536,6 +555,12 @@ class FHIRConsentMapper:
         for dr in by_type.get("DiagnosticReport", []):
             self._map_diagnostic_report(dr, spec, by_ref)  # R34
 
+        # 2c — Encounter → Process/Step (R35, DN_009 §2.3). Resource-agnostic:
+        # scans all bundle resources for an .encounter.reference match, so a
+        # future Procedure resource picks up a Step with no code change.
+        for enc in by_type.get("Encounter", []):
+            self._map_encounter(enc, spec, resources)  # R35
+
         # 3 — Tasks → delegation chain
         # Sort: parent tasks (no partOf) first, then sub-tasks
         tasks = by_type.get("Task", [])
@@ -828,6 +853,85 @@ class FHIRConsentMapper:
                 ))
             token.description += f" [R34] Fulfilled by DiagnosticReport/{dr_id}"
             spec.log("R34", f"DiagnosticReport/{dr_id}", artefact_el_id)
+
+    # ── R35 — Encounter → Process/Step ──────────────────────────────────────
+    # (DN_009 §2.3). Only "finished" and "in-progress" Encounters with a
+    # period.start qualify — a Process (§7.8.5) is "steps taking place",
+    # which applies once the encounter has actually begun, independent of
+    # whether it has concluded. "cancelled"/"entered-in-error" never took
+    # place as a real process instance; the remaining FHIR states
+    # (planned/arrived/triaged/onleave/unknown) are pre-occurrence or
+    # transient and out of scope for this rule.
+
+    def _map_encounter(self, enc: dict, spec: ELSpec, resources: List[dict]) -> None:
+        status = enc.get("status", "")
+        if status not in ("finished", "in-progress"):
+            return
+
+        period = enc.get("period", {})
+        period_start = period.get("start", "")
+        if not period_start:
+            return
+
+        encounter_id = enc.get("id", "")
+        encounter_ref = f"Encounter/{encounter_id}"
+        el_id = f"{_sanitize_id(encounter_ref)}Process"
+        if any(p.el_id == el_id for p in spec.processes):
+            return
+
+        # initiates/terminates are free-text STRING fields in the grammar
+        # (not typed timestamps) — narrative text embedding the raw FHIR
+        # value, mirroring R33a's established event-description convention
+        # (see _map_service_request's Encounter-discharge event text).
+        initiation = f"Encounter/{encounter_id} begins (period.start: {period_start})"
+        period_end = period.get("end", "")
+        if status == "finished" and period_end:
+            termination = f"Encounter/{encounter_id} concludes (period.end: {period_end})"
+        else:
+            # In-progress (or finished with no period.end recorded, which
+            # should not happen but is handled the same honest way): V-04
+            # requires a non-empty 'terminates' string, so this states the
+            # gap explicitly rather than fabricating a timestamp.
+            termination = f"Encounter/{encounter_id} not yet concluded (status: {status})"
+
+        # Steps — any bundle resource whose .encounter.reference names this
+        # Encounter, regardless of resourceType (ServiceRequest today;
+        # Procedure or others need no mapper change to pick up). Confirmed
+        # DiagnosticReport carries no .encounter field at all (R34 finding),
+        # so it can never spuriously match here.
+        steps: List[ELStep] = []
+        for r in resources:
+            if r is enc:
+                continue
+            if r.get("encounter", {}).get("reference", "") != encounter_ref:
+                continue
+            rt = r.get("resourceType", "")
+            rid = r.get("id", "")
+            res_el_id = _sanitize_id(f"{rt}/{rid}")
+            role_name = f"{res_el_id[0].lower()}{res_el_id[1:]}ParticipantRole"
+            steps.append(ELStep(
+                name=f"{res_el_id}Step",
+                actor_role=role_name,
+                artefact_ref=res_el_id,
+                description=f"[R35] {rt}/{rid} occurring within Encounter/{encounter_id}",
+            ))
+
+        if not steps:
+            # Grammar requires steps+=Step+ (at least one) — a Process with
+            # zero steps fails to parse, not just V-02. Nothing in the
+            # bundle references this Encounter, so there is no Process to
+            # emit for it.
+            return
+
+        spec.processes.append(ELProcess(
+            el_id=el_id,
+            initiation=initiation,
+            termination=termination,
+            steps=steps,
+            description=f"[R35] Process derived from Encounter/{encounter_id}",
+            fhir_ref=encounter_ref,
+        ))
+        spec.log("R35", encounter_ref, el_id)
 
     # ── R09–R15 — Task → DelegationDecl ───────────────────────────────────────
 
@@ -1147,6 +1251,28 @@ class FHIRConsentMapper:
             lines.append(f'{indent}    description: "{ev.description}"')
         return lines
 
+    def _render_step(self, step: ELStep, indent: str = "            ") -> List[str]:
+        lines = [f"{indent}step {step.name} {{"]
+        if step.description:
+            lines.append(f'{indent}    description: "{step.description}"')
+        lines.append(f"{indent}    actor: {step.actor_role}")
+        if step.artefact_ref:
+            lines.append(f"{indent}    artefact: {step.artefact_ref}")
+        lines.append(f"{indent}}}")
+        return lines
+
+    def _render_process(self, proc: ELProcess, indent: str = "        ") -> List[str]:
+        lines = [f"{indent}process {proc.el_id}"]
+        if proc.description:
+            lines.append(f'{indent}    description: "{proc.description}"')
+        lines.append(f"{indent}{{")
+        lines.append(f'{indent}    initiates: "{proc.initiation}"')
+        lines.append(f'{indent}    terminates: "{proc.termination}"')
+        for step in proc.steps:
+            lines += self._render_step(step)
+        lines.append(f"{indent}}}")
+        return lines
+
     def _render_token(self, tok: ELToken) -> List[str]:
         lines = [f"{tok.kind} {tok.el_id} {{"]
         if tok.for_action:
@@ -1223,6 +1349,13 @@ class FHIRConsentMapper:
                     f'            description: "Role for {obj.el_id}"',
                     "            {}",
                 ]
+
+        # R35 — processes (must follow roles, precede policy_refs: grammar
+        # body order is ... roles, processes, policy_refs, ... — see
+        # Community rule, grammar/v2/el_grammar.tx)
+        for proc in spec.processes:
+            lines.append("")
+            lines += self._render_process(proc)
 
         lines.append("    }")
         return lines

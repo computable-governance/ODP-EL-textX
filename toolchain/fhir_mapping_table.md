@@ -233,6 +233,14 @@ sub-case distinction: `docs/design_notes/R33_triggered_by_rule_spec.md`.
 
 ---
 
+### 3.12 Encounter → Process/Step (R35)
+
+| Rule | FHIR source | DSL-EL target | Notes |
+|------|-------------|----------------|-------|
+| R35 | Encounter.period.start/.end + any bundle resource's `.encounter.reference` naming the Encounter (ServiceRequest today; resource-type-agnostic, so Procedure or others pick up a Step with no mapper change) | `Process` (§7.8.5) — `initiates`/`terminates` narrative text embedding the raw timestamps, one `Step` per referencing resource (`actor`/`artefact` free-text refs) | DN_009 §2.3 implemented 2026-08-30 — see tests/test_fhir_mapper_r35_process.py. Only `status: finished` and `status: in-progress` Encounters with a `period.start` qualify (the other FHIR statuses are pre-occurrence, transient, or never actually occurred); an Encounter with no referencing resource in the bundle emits no `Process` at all (grammar requires `steps+=Step+`, at least one). An in-progress Encounter (no `period.end`) still emits a `Process`, with `terminates` set to explicit "not yet concluded" phrasing rather than a fabricated or empty value. |
+
+---
+
 ## 4. Validation Pipeline
 
 The generated `.el` specification is validated at three levels:
