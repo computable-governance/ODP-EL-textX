@@ -25,7 +25,7 @@ referralResponseBurden/assessmentSchedulingBurden use in the real
 scenarios (see docs/CONCEPTS_INDEX.md's double-grant/pre-seed finding for
 why that path matters, not just the bare-string fallback).
 """
-from el_engine import check_live_violations
+from el_engine import _transition, check_live_violations
 from el_parser import parse_string
 from el_runtime import Runtime
 
@@ -219,3 +219,174 @@ def test_runtime_wrapper_appends_to_ledger():
     assert record.outcome == "violation"
     assert record in rt._ledger
     assert _token(rt.current_state(), "eventualBurden").state == "violated"
+
+
+# ── DN_010, option (b): episode-conclusion-based deadline checking ────────────
+#
+# episodeScopedBurden (above) never tick-violates regardless of elapsed time —
+# that's the 2026-08-29 mitigation (a), unchanged. This second probe exercises
+# the DN_010 (b) extension on top of it: a no-magnitude burden that IS a
+# member of its owning element's declared satisfaction-condition group
+# violates once every OTHER member of that group has resolved, but ONLY when
+# the owning element opted in via lifecycle { terminating {
+# on_objective_achieved: true } }.
+#
+# ConcludingCommunity opts in; NonConcludingCommunity declares the same
+# shape of satisfaction condition but withholds the terminating block —
+# isolating the opt-in gate itself, not just the group-conclusion logic.
+
+_CONCLUSION_PROBE = """
+enterprise specification CheckLiveViolationsConclusionProbe
+
+party Holder {
+    holds siblingBurden
+    holds episodeScopedBurden
+}
+
+party OptOutHolder {
+    holds optOutSiblingBurden
+    holds optOutEpisodeScopedBurden
+}
+
+burden siblingBurden {
+    state: active
+    deadline: "1 hour"
+    discharge_mode: eventual
+}
+
+// No genuine elapsed-time magnitude -- the DN_010 (b-2) target, same shape
+// as clinicalHandoverBurden/aiExaminationBurden's "referral episode".
+burden episodeScopedBurden {
+    state: active
+    deadline: "referral episode"
+    discharge_mode: eventual
+}
+
+burden optOutSiblingBurden {
+    state: active
+    deadline: "1 hour"
+    discharge_mode: eventual
+}
+
+burden optOutEpisodeScopedBurden {
+    state: active
+    deadline: "referral episode"
+    discharge_mode: eventual
+}
+
+commitment siblingCommitment {
+    by: Holder
+    obligation: "Discharge the sibling burden"
+    creates_burden: siblingBurden
+}
+
+commitment episodeScopedCommitment {
+    by: Holder
+    obligation: "Discharge the episode-scoped burden"
+    creates_burden: episodeScopedBurden
+}
+
+commitment optOutSiblingCommitment {
+    by: OptOutHolder
+    obligation: "Discharge the opt-out sibling burden"
+    creates_burden: optOutSiblingBurden
+}
+
+commitment optOutEpisodeScopedCommitment {
+    by: OptOutHolder
+    obligation: "Discharge the opt-out episode-scoped burden"
+    creates_burden: optOutEpisodeScopedBurden
+}
+
+token_group episodeGroup {
+    member: siblingBurden
+    member: episodeScopedBurden
+}
+
+token_group optOutGroup {
+    member: optOutSiblingBurden
+    member: optOutEpisodeScopedBurden
+}
+
+community ConcludingCommunity
+    description: "Opts into DN_010 conclusion-based checking"
+    {
+        objective: "Conclude once both burdens are discharged"
+            satisfaction: all_discharged(episodeGroup)
+
+        lifecycle {
+            terminating {
+                on_objective_achieved: true
+            }
+        }
+    }
+
+community NonConcludingCommunity
+    description: "Has a satisfaction condition but does NOT opt in via terminating"
+    {
+        objective: "Conclude once both burdens are discharged"
+            satisfaction: all_discharged(optOutGroup)
+    }
+"""
+
+
+def _build_conclusion_probe_runtime() -> Runtime:
+    result = parse_string(_CONCLUSION_PROBE, validate=True)
+    assert result.ok, result.errors
+    return Runtime.build_from_spec(result.model)
+
+
+def _with_token_state(state, token_name, new_state_str):
+    tokens = [
+        _transition(t, new_state_str) if t.token_name == token_name else t
+        for t in state.tokens
+    ]
+    return state.with_tokens(tokens)
+
+
+def test_episode_scoped_burden_violates_once_owning_community_concludes():
+    """Positive case. siblingBurden (episodeGroup's other member) discharged
+    -- ConcludingCommunity's all_discharged(episodeGroup) is now true
+    excluding episodeScopedBurden itself, and ConcludingCommunity opted in
+    via terminating: on_objective_achieved: true. episodeScopedBurden must
+    violate, even though tick is unchanged from 0 and it has no elapsed-time
+    magnitude to check against."""
+    rt = _build_conclusion_probe_runtime()
+    state = _with_token_state(rt.current_state(), "siblingBurden", "discharged")
+
+    new_state, record = check_live_violations(state, rt._spec)
+
+    assert record.outcome == "violation"
+    assert "episodeScopedBurden" in record.violations
+    assert _token(new_state, "episodeScopedBurden").state == "violated"
+
+
+def test_episode_scoped_burden_stays_active_while_sibling_still_active():
+    """Negative case. siblingBurden left active -- ConcludingCommunity has
+    NOT concluded. episodeScopedBurden must not violate via the conclusion
+    path, no matter how far past any plausible threshold the clock
+    advances -- confirms this path checks conclusion, not elapsed time."""
+    rt = _build_conclusion_probe_runtime()
+    state = rt.current_state().with_tick(10_000)
+
+    new_state, record = check_live_violations(state, rt._spec)
+
+    assert "episodeScopedBurden" not in record.violations
+    assert _token(new_state, "episodeScopedBurden").state == "active"
+
+
+def test_episode_scoped_burden_in_non_concluding_community_never_violates_via_conclusion():
+    """Opt-out case. NonConcludingCommunity declares the same shape of
+    satisfaction condition (all_discharged(optOutGroup)) as
+    ConcludingCommunity, and its other group member (optOutSiblingBurden) IS
+    discharged here -- but NonConcludingCommunity has no lifecycle {
+    terminating { on_objective_achieved: true } }. optOutEpisodeScopedBurden
+    must NOT violate via the conclusion path -- confirms the opt-in gate is
+    actually consulted, not just that group-membership resolution works."""
+    rt = _build_conclusion_probe_runtime()
+    state = _with_token_state(rt.current_state(), "optOutSiblingBurden", "discharged")
+
+    new_state, record = check_live_violations(state, rt._spec)
+
+    assert "optOutEpisodeScopedBurden" not in record.violations
+    assert _token(new_state, "optOutEpisodeScopedBurden").state == "active"

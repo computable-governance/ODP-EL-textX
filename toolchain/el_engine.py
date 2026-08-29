@@ -251,6 +251,117 @@ def _build_any_discharged_groups(spec) -> Set[str]:
     return result
 
 
+def _resolve_sat_member_ids(sat, group_index: Dict[str, List[str]]) -> List[str]:
+    """
+    DN_010, option (b). Ported from el_kripke.py's _resolve_sat_member_ids —
+    duplicated deliberately, not imported, per the Layer 3/Layer 4
+    independence architecture (AM-57 precedent).
+
+    Resolve a SatisfactionCondition's raw_args to a flat list of DeonticToken
+    names (AM-29): a single arg naming a TokenGroup (AM-27 form) expands to
+    that group's members; otherwise every arg is treated as a direct
+    DeonticToken name.
+    """
+    raw_args = getattr(sat, "raw_args", [])
+    arg_names = [a.name for a in raw_args if getattr(a, "name", None)]
+    if not arg_names:
+        return []
+    if len(arg_names) == 1 and arg_names[0] in group_index:
+        return group_index[arg_names[0]]
+    return arg_names
+
+
+def _build_satisfaction_conditions(spec) -> Dict[str, Tuple[str, List[str]]]:
+    """
+    DN_010, option (b). Ported from el_kripke.py's
+    _build_satisfaction_conditions — duplicated deliberately, not imported,
+    per the Layer 3/Layer 4 independence architecture (AM-57 precedent).
+
+    Returns {element_name: (operator, [token_name, ...])} for every
+    Community/Federation/Domain whose objective carries a
+    SatisfactionCondition. operator is 'all_discharged' or 'any_discharged'.
+
+    Used by _owning_group_concluded() (below) to answer "has the community/
+    federation this burden belongs to concluded?" for check_live_violations().
+    """
+    group_index = _build_group_index(spec)
+    conditions: Dict[str, Tuple[str, List[str]]] = {}
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Federation", "Domain"):
+            continue
+        obj = getattr(el, "objective", None)
+        if obj is None:
+            continue
+        sat = getattr(obj, "satisfaction", None)
+        if sat is None:
+            continue
+        member_ids = _resolve_sat_member_ids(sat, group_index)
+        if member_ids:
+            conditions[el.name] = (sat.operator, member_ids)
+    return conditions
+
+
+def _concludes_on_objective_achieved(el) -> bool:
+    """
+    DN_010 (b-1). True if `el` (a Community/Federation/Domain) declares
+    lifecycle { terminating { on_objective_achieved: true } } — opting into
+    conclusion-based deadline checking is the scenario author's explicit
+    decision, not inferred just from having a satisfaction condition.
+    """
+    terminating = getattr(getattr(el, "lifecycle", None), "terminating", None)
+    return bool(getattr(terminating, "on_objective", False))
+
+
+def _owning_group_concluded(
+    tokens: List[TokenInstance],
+    token_name: str,
+    satisfaction_conditions: Dict[str, Tuple[str, List[str]]],
+    concludes_by_element: Dict[str, bool],
+) -> bool:
+    """
+    DN_010, option (b), corrected scoping (2026-08-29 design-note review).
+
+    True if `token_name` is a member of at least one Community/Federation/
+    Domain's declared satisfaction condition, that element opted in via
+    lifecycle { terminating { on_objective_achieved: true } }
+    (_concludes_on_objective_achieved), and — EXCLUDING token_name itself —
+    every other member of that condition's group is currently DISCHARGED or
+    SUPERSEDED (all_discharged), or at least one other member is
+    (any_discharged).
+
+    Excluding token_name from its own group's membership check is
+    deliberate, not an oversight: this is only ever called (from
+    check_live_violations(), below) for a burden with no elapsed-time
+    deadline magnitude — see _has_deadline_magnitude(), the gating check at
+    the only call site — and both such burdens in referral_scenario.el
+    (clinicalHandoverBurden, aiExaminationBurden) are themselves members of
+    the exact group (referralBurdenGroup) whose all_discharged defines
+    ReferralEpisodeCommunity's conclusion. Without this exclusion,
+    "concluded AND token_name still undischarged" would be permanently
+    unreachable — token_name is one of the tokens all_discharged is
+    counting.
+    """
+    tokens_by_name = {t.token_name: t for t in tokens}
+
+    def _resolved(name: str) -> bool:
+        tok = tokens_by_name.get(name)
+        return tok is not None and tok.state in ("discharged", "superseded")
+
+    for el_name, (operator, member_ids) in satisfaction_conditions.items():
+        if token_name not in member_ids or not concludes_by_element.get(el_name):
+            continue
+        others = [m for m in member_ids if m != token_name]
+        if not others:
+            continue  # token_name is the group's only member — nothing to conclude around
+        if operator == "all_discharged":
+            if all(_resolved(m) for m in others):
+                return True
+        else:  # any_discharged
+            if any(_resolved(m) for m in others):
+                return True
+    return False
+
+
 # ── Core engine function ──────────────────────────────────────────────────────
 
 def advance(
@@ -1252,19 +1363,27 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     explicit "check deadlines" endpoint) rather than it firing silently on
     unrelated actions.
 
-    Also (2026-08-29) deliberately excludes any Burden whose deadline string
-    carries no genuine elapsed-time magnitude — see _has_deadline_magnitude()
-    — e.g. "referral episode" (clinicalHandoverBurden/aiExaminationBurden in
-    referral_scenario.el/gp_referral_scenario.el). Before this exclusion,
-    such a Burden silently fell back to _parse_deadline_steps()'s bare
-    default (5) and violated almost immediately — confirmed live and logged
-    in docs/CONCEPTS_INDEX.md ("referral episode" finding, 2026-08-29) as a
-    genuine modelling gap, not a parsing bug: nothing in
-    WorldState/TokenInstance represents "has this episode concluded" as a
-    checkable condition, so no fixed tick-count can ever be conceptually
-    correct for such a deadline. This mitigates the wrong-answer symptom
-    (never falsely violates) without solving that underlying gap, which
-    stays open and unscheduled.
+    A Burden whose deadline string carries no genuine elapsed-time
+    magnitude — see _has_deadline_magnitude() — e.g. "referral episode"
+    (clinicalHandoverBurden/aiExaminationBurden in referral_scenario.el) —
+    is never checked against elapsed ticks (2026-08-29 mitigation: before
+    this, such a Burden silently fell back to _parse_deadline_steps()'s bare
+    default (5) and violated almost immediately — logged in
+    docs/CONCEPTS_INDEX.md, "referral episode" finding). Instead, DN_010
+    option (b) (2026-08-29, corrected scoping same day): such a Burden is
+    checked against _owning_group_concluded() — has every OTHER member of
+    its owning Community/Federation/Domain's declared satisfaction-condition
+    group (all_discharged) or at least one other member (any_discharged)
+    already resolved, AND did that element opt in via lifecycle {
+    terminating { on_objective_achieved: true } }? If so, the episode has
+    concluded around this Burden and it violates; otherwise it remains
+    exactly as the (a) mitigation left it — never tick-violating. This is a
+    strict extension of (a), not a replacement: a Burden whose owning
+    element has no satisfaction condition, or didn't opt in via
+    terminating, still never violates via this path. Only the successful-
+    conclusion path (all_discharged/any_discharged) is covered here;
+    unsuccessful conclusion (patient withdrawal, abandonment) is explicitly
+    out of scope (DN_010 §3).
 
     Deliberately excludes discharge_mode: strict Burdens entirely — not
     checked, not transitioned, regardless of elapsed time. Strict-mode
@@ -1312,6 +1431,12 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     """
     tick = state.tick
     spec_descriptors = _build_obligation_descriptors(spec)
+    satisfaction_conditions = _build_satisfaction_conditions(spec)
+    concludes_by_element = {
+        el.name: _concludes_on_objective_achieved(el)
+        for el in spec.elements
+        if type(el).__name__ in ("Community", "Federation", "Domain")
+    }
     tokens = list(state.tokens)
     violated_names: List[str] = []
     effects_log: List[str] = []
@@ -1331,9 +1456,19 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
         if not _has_deadline_magnitude(raw_deadline):
             # No genuine elapsed-time magnitude to check against (e.g.
             # "referral episode" — see docs/CONCEPTS_INDEX.md, 2026-08-29).
-            # Deliberately never tick-violates rather than falling back to
-            # _parse_deadline_steps()'s arbitrary numeric default — see
-            # _has_deadline_magnitude()'s docstring.
+            # DN_010 option (b): fall back to episode-conclusion checking
+            # instead of leaving this Burden permanently non-violatable —
+            # see _owning_group_concluded()'s docstring for why token_name
+            # is excluded from its own group's membership check.
+            if _owning_group_concluded(tokens, tok.token_name,
+                                        satisfaction_conditions, concludes_by_element):
+                tokens[i] = _transition(tok, "violated")
+                violated_names.append(tok.token_name)
+                effects_log.append(
+                    f"violated '{tok.token_name}' held by '{tok.holder}' "
+                    f"(owning community/federation concluded; no elapsed-time "
+                    f"magnitude to check against)"
+                )
             continue
 
         spec_desc = spec_descriptors.get(tok.token_name)
