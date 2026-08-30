@@ -541,8 +541,9 @@ class FHIRConsentMapper:
             self._map_device(dev, spec)             # R04
 
         # 2 — ServiceRequest → commitment + burden
+        procedures = by_type.get("Procedure", [])
         for sr in by_type.get("ServiceRequest", []):
-            self._map_service_request(sr, spec, by_ref)  # R05–R08
+            self._map_service_request(sr, spec, by_ref, procedures)  # R05–R08
 
         # 2b — DiagnosticReport.basedOn → artefact provenance (R34, DN_008
         # Option A). Reverse link direction from Composition's
@@ -658,7 +659,9 @@ class FHIRConsentMapper:
 
     # ── R05–R08 — ServiceRequest → CommitmentDecl + burden token ──────────────
 
-    def _map_service_request(self, sr: dict, spec: ELSpec, by_ref: Dict[str, dict]) -> None:
+    def _map_service_request(
+        self, sr: dict, spec: ELSpec, by_ref: Dict[str, dict], procedures: List[dict]
+    ) -> None:
         sr_id       = sr.get("id", "sr")
         el_id       = _sanitize_id(f"ServiceRequest/{sr_id}")
         fhir_ref    = f"ServiceRequest/{sr_id}"
@@ -824,6 +827,29 @@ class FHIRConsentMapper:
             title = code_display or condition.get("code", {}).get("text", "") or "Diagnosis"
             token.description += f" [R36] Referral reason: {title} (Condition/{cond_id})"
             spec.log("R36", f"Condition/{cond_id}", burden_id)
+
+        # R37a (DN_009 §2.5, static half) — Procedure.basedOn → fulfilment
+        # provenance. Description enrichment only, exactly like R33a/R34/R36
+        # — no token.state change. The grammar's TokenState rule (§7.8.7)
+        # only permits 'active' | 'pending' | 'claimable' as an AUTHORED
+        # state; 'discharged' is a runtime-only outcome state and cannot be
+        # written into generated .el source at all, so there is no static
+        # mechanism to pre-discharge a burden from map_bundle(). The actual
+        # state transition is R37b (live, future work): a bridge endpoint
+        # calling Runtime.discharge_burden() (AM-68) against a live
+        # WorldState — disjoint from this static code path.
+        # Only status: "completed" qualifies (confirmed against the real AU
+        # Procedure profile's event-status binding); "not-done" is the
+        # explicit negative and the rest are incomplete/erroneous states.
+        for proc in procedures:
+            if proc.get("status") != "completed":
+                continue
+            based_on_refs = [r.get("reference", "") for r in proc.get("basedOn", [])]
+            if fhir_ref not in based_on_refs:
+                continue
+            proc_id = proc.get("id", "")
+            token.description += f" [R37a] Fulfilled by Procedure/{proc_id}"
+            spec.log("R37a", f"Procedure/{proc_id}", burden_id)
 
         spec.tokens.append(token)
         spec.log("R07", fhir_ref, burden_id)

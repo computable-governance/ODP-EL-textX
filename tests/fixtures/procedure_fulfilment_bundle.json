@@ -1,0 +1,119 @@
+{
+  "resourceType": "Bundle",
+  "id": "procedure-fulfilment-bundle-001",
+  "type": "collection",
+  "timestamp": "2024-08-01T10:00:00+10:00",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/riverbend-clinic-001",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "riverbend-clinic-001",
+        "name": "Riverbend Clinic",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/patient-noah-clarke",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-noah-clarke",
+        "name": [{"family": "Clarke", "given": ["Noah"]}],
+        "birthDate": "1990-05-22"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/dr-vance",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "dr-vance",
+        "name": [{"family": "Vance", "given": ["Priya"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "62247001", "display": "General practitioner"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/role-dr-vance",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "role-dr-vance",
+        "practitioner": {"reference": "Practitioner/dr-vance"},
+        "organization": {"reference": "Organization/riverbend-clinic-001"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/401",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "401",
+        "status": "active",
+        "intent": "order",
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "26782000", "display": "Cryotherapy"}], "text": "Cryotherapy"},
+        "subject": {"reference": "Patient/patient-noah-clarke"},
+        "authoredOn": "2024-08-01",
+        "requester": {"reference": "Practitioner/dr-vance"}
+      }
+    },
+
+    {
+      "fullUrl": "Procedure/501",
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "501",
+        "status": "completed",
+        "basedOn": [{"reference": "ServiceRequest/401"}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "26782000", "display": "Cryotherapy"}]},
+        "subject": {"reference": "Patient/patient-noah-clarke"},
+        "performedDateTime": "2024-08-05T09:00:00+10:00"
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/402",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "402",
+        "status": "active",
+        "intent": "order",
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "104177005", "display": "Blood test"}], "text": "Full blood count"},
+        "subject": {"reference": "Patient/patient-noah-clarke"},
+        "authoredOn": "2024-08-01",
+        "requester": {"reference": "Practitioner/dr-vance"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/403",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "403",
+        "status": "active",
+        "intent": "order",
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "398224005", "display": "Wound debridement"}], "text": "Wound debridement"},
+        "subject": {"reference": "Patient/patient-noah-clarke"},
+        "authoredOn": "2024-08-01",
+        "requester": {"reference": "Practitioner/dr-vance"}
+      }
+    },
+
+    {
+      "fullUrl": "Procedure/502",
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "502",
+        "status": "stopped",
+        "basedOn": [{"reference": "ServiceRequest/403"}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "398224005", "display": "Wound debridement"}]},
+        "subject": {"reference": "Patient/patient-noah-clarke"},
+        "performedDateTime": "2024-08-05T09:00:00+10:00"
+      }
+    }
+
+  ]
+}

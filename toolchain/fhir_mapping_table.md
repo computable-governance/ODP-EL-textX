@@ -249,6 +249,14 @@ sub-case distinction: `docs/design_notes/R33_triggered_by_rule_spec.md`.
 
 ---
 
+### 3.14 Procedure → Fulfilment Provenance (R37a, static half of DN_009 §2.5)
+
+| Rule | FHIR source | DSL-EL target | Notes |
+|------|-------------|----------------|-------|
+| R37a | Procedure.status=completed + Procedure.basedOn → ServiceRequest | Enrichment of the existing R07 burden's `description` — no new object, no new dataclass, **no `token.state` change** | DN_009 §2.5 (static half) implemented 2026-08-30 — see tests/test_fhir_mapper_r37a_procedure_fulfilment.py. Corrects DN_009 §2.5's literal wording ("a mapper rule connecting Procedure.status: completed to a discharge call"): confirmed via grep that `grammar/v2/el_grammar.tx`'s `TokenState` rule permits only `active`\|`pending`\|`claimable` as an AUTHORED state — `discharged` is a runtime-only outcome state and cannot be written into generated `.el` source at all, so no static mechanism can pre-discharge a burden from `map_bundle()`. R37a is therefore pure provenance, the same shape as R33a/R34/R36. Only `status: "completed"` qualifies (confirmed against the real AU Procedure profile's `event-status` binding — `not-done` is the explicit negative; the rest are incomplete/erroneous states). **R37b** (the actual state transition, live, future work): a bridge endpoint calling `Runtime.discharge_burden()` (AM-68) against a live `WorldState` — entirely disjoint from this static code path, mirroring R33a/R33b's established static-vs-live split. |
+
+---
+
 ## 4. Validation Pipeline
 
 The generated `.el` specification is validated at three levels:
