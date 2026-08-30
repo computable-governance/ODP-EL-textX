@@ -75,6 +75,27 @@ acting on behalf of the requesting party.
 and `priority: critical`. This implements the governance intent that consent
 obligations are non-deferrable.
 
+**R06 elaboration (fixed 2026-08-30):** ODP-EL accountability convention
+puts `commitment.by` at the organisational/practice level, not the
+individual clinician — `_resolve_commitment_accountable_party`
+(`fhir_mapper.py`) resolves `ServiceRequest.requester` accordingly. A
+`requester` referencing a `PractitionerRole` directly (standard AU Core
+practice) is looked up via a direct `by_ref` dict lookup and resolved in
+three tiers: (a) `PractitionerRole.organization` set — resolves cleanly
+to that organisation, no warning; (b) no `.organization` — falls back to
+the `PractitionerRole`'s own `.practitioner` reference, with a warning
+(safe: R03 declares every `Practitioner` present in the bundle as an
+object regardless of role); (c) the `PractitionerRole` isn't in the
+bundle at all, or has neither field set — falls back to the raw
+reference, with a warning that it may not resolve to any declared
+object (same worst-case risk the pre-existing `Practitioner`-only
+fallback already accepted). A `requester` referencing a `Practitioner`
+directly is resolved via a bundle-wide `PractitionerRole` search
+(unchanged). See `docs/CONCEPTS_INDEX.md`'s "PractitionerRole-as-
+requester crashes validation entirely" (2026-08-30) for the real
+ConnectedCare data that surfaced the original gap — see
+`tests/test_fhir_mapper_practitioner_role_requester.py`.
+
 ---
 
 ### 3.3 Task → Delegation Chain

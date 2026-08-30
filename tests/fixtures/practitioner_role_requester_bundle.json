@@ -1,0 +1,111 @@
+{
+  "resourceType": "Bundle",
+  "id": "practitioner-role-requester-bundle-001",
+  "type": "collection",
+  "timestamp": "2024-05-25T09:30:00+10:00",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/brisbane-endocrinology",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "brisbane-endocrinology",
+        "name": "Brisbane Endocrinology Specialists",
+        "type": [{"coding": [{"system": "http://snomed.info/sct", "code": "394583002", "display": "Endocrinology"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/roberts-fred",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "roberts-fred",
+        "name": [{"family": "Roberts", "given": ["Fred"]}],
+        "birthDate": "1958-02-19"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/lindqvist-anya",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "lindqvist-anya",
+        "name": [{"use": "official", "family": "Lindqvist", "given": ["Anya"], "prefix": ["Dr"]}]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/endocrinologist-lindqvist-anya",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "endocrinologist-lindqvist-anya",
+        "practitioner": {"reference": "Practitioner/lindqvist-anya"},
+        "organization": {"reference": "Organization/brisbane-endocrinology"},
+        "code": [{"coding": [{"system": "http://snomed.info/sct", "code": "36682004", "display": "Physician specialised in endocrinology"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/554",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "554",
+        "status": "active",
+        "intent": "order",
+        "category": [{"coding": [{"system": "http://snomed.info/sct", "code": "387713003", "display": "Surgical procedure"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "112956000", "display": "Thyroidectomy"}]},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "authoredOn": "2024-05-25",
+        "requester": {"reference": "PractitionerRole/endocrinologist-lindqvist-anya"}
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/oconnor-liam",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "oconnor-liam",
+        "name": [{"use": "official", "family": "O'Connor", "given": ["Liam"], "prefix": ["Dr"]}]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/locum-oconnor-liam",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "locum-oconnor-liam",
+        "practitioner": {"reference": "Practitioner/oconnor-liam"},
+        "code": [{"coding": [{"system": "http://snomed.info/sct", "code": "36682004", "display": "Physician specialised in endocrinology"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/555",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "555",
+        "status": "active",
+        "intent": "order",
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "104177005", "display": "Blood test"}], "text": "Full blood count"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "authoredOn": "2024-05-25",
+        "requester": {"reference": "PractitionerRole/locum-oconnor-liam"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/560",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "560",
+        "status": "active",
+        "intent": "order",
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "225338004", "display": "Wound review"}], "text": "Wound review"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "authoredOn": "2024-05-25",
+        "requester": {"reference": "PractitionerRole/dangling-not-in-bundle"}
+      }
+    }
+
+  ]
+}

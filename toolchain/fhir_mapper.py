@@ -319,9 +319,31 @@ def _resolve_commitment_accountable_party(
     the clinician's standing employer, not the individual.
 
     Resolution:
-      1. requester does not reference a Practitioner (already an
-         Organization, or some other resource type) — return its el_id
-         unchanged. No resolution needed.
+      0. requester references a PractitionerRole directly (standard AU
+         Core practice — confirmed 2026-08-30 against real ConnectedCare
+         data, see docs/CONCEPTS_INDEX.md's "PractitionerRole-as-requester
+         crashes validation entirely" finding). Direct dict lookup (the
+         reference already names the exact resource, no search needed):
+           a. Found, with .organization.reference set — return that
+              organisation's el_id. No resolution needed beyond the
+              lookup.
+           b. Found, but no .organization — fall back to its own
+              .practitioner.reference and resolve that Practitioner's
+              el_id instead, with a warning. Safe specifically because
+              _map_practitioner (R03) declares every Practitioner
+              resource present in the bundle as an ELObject
+              unconditionally, independent of its role — the same
+              blanket-declare behaviour that already makes case 1 below
+              work for Organization references.
+           c. Not found in the bundle at all, or found but has neither
+              .organization nor .practitioner — fall back to the raw
+              PractitionerRole reference, with a warning that it may not
+              resolve to any declared object. This can still fail
+              validation downstream — same worst-case risk tier case 3
+              below already accepts, not a new category of risk.
+      1. requester does not reference a Practitioner or PractitionerRole
+         (already an Organization, or some other resource type) — return
+         its el_id unchanged. No resolution needed.
       2. requester references a Practitioner — look for a
          PractitionerRole resource in the bundle whose
          .practitioner.reference matches that Practitioner and whose
@@ -333,11 +355,35 @@ def _resolve_commitment_accountable_party(
          organisational affiliation that isn't in the bundle.
 
     Returns (el_id, warning). warning is None on a clean resolution
-    (cases 1, 2); a human-readable string on the case-3 fallback, meant
-    to be surfaced in the generated commitment's description rather than
-    silently misattributing accountability.
+    (cases 0a, 1, 2); a human-readable string on the case 0b/0c/3
+    fallbacks, meant to be surfaced in the generated commitment's
+    description rather than silently misattributing accountability.
     """
     ref = (requester or {}).get("reference", "")
+
+    if ref.startswith("PractitionerRole/"):
+        practitioner_role = by_ref.get(ref)
+        if practitioner_role:
+            org_ref = practitioner_role.get("organization", {}).get("reference", "")
+            if org_ref:
+                return _ref_id({"reference": org_ref}), None
+            prac_ref = practitioner_role.get("practitioner", {}).get("reference", "")
+            if prac_ref:
+                return _ref_id({"reference": prac_ref}), (
+                    f"[R06] UNRESOLVED organisational affiliation for {ref} "
+                    f"— PractitionerRole has no .organization set; "
+                    f"commitment.by falls back to its .practitioner "
+                    f"reference directly. Verify accountability manually."
+                )
+        return _ref_id(requester), (
+            f"[R06] UNRESOLVED organisational affiliation for {ref} — "
+            f"PractitionerRole not found in bundle, or has neither "
+            f".organization nor .practitioner set; commitment.by falls "
+            f"back to the PractitionerRole reference directly, which may "
+            f"not resolve to any declared object. Verify accountability "
+            f"manually."
+        )
+
     if not ref.startswith("Practitioner/"):
         return _ref_id(requester), None
 
