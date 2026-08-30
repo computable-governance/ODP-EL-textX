@@ -299,6 +299,18 @@ sub-case distinction: `docs/design_notes/R33_triggered_by_rule_spec.md`.
 
 ---
 
+### 3.15 MedicationRequest → Commitment + Burden, MedicationDispense → Fulfilment (R38, R38a, R38b)
+
+| Rule | FHIR source | DSL-EL target | Notes |
+|------|-------------|----------------|-------|
+| R38 | MedicationRequest | `CommitmentDecl` + `burden` token + `holds` clause | Touchpoint 5 (medicines management) implemented 2026-08-30 — see tests/test_fhir_mapper_r38_medication_request.py. Mirrors R05-R08's `ServiceRequest` pipeline exactly, under one rule number rather than four (mirrors the R37a/R37b precedent of no bare intermediate number for a single resource type's mapping). `.requester` resolved via `_resolve_commitment_accountable_party` (AM-71) unchanged — confirmed against the real `au-medicationrequest` profile that its target types (`Practitioner`\|`PractitionerRole`\|`Organization`\|`Patient`\|`RelatedPerson`\|`Device`) are identical to `ServiceRequest.requester`'s, `PractitionerRole` included. Burden granted via the AM-72 holds-clause pattern unchanged. Obligation text from `medicationCodeableConcept` (`medicationReference`, a separate `Medication` resource, not handled). No deadline mapping — no FHIR-side field expresses an SLA-style discharge deadline for a `MedicationRequest` either (`dispenseRequest.validityPeriod` is a different concept, the repeat-supply authorisation window); same accepted gap as R08. |
+| R38a | MedicationDispense.status=completed + MedicationDispense.authorizingPrescription → MedicationRequest | Enrichment of the R38 burden's `description` — no new object, no new dataclass, **no `token.state` change** | Static half, mirrors R37a exactly — same `TokenState` grammar exclusion (`discharged` not authorable). Confirmed against the real `au-medicationdispense` profile: the linking field is **`.authorizingPrescription`, not `.basedOn`**; `MedicationDispense.status` has its own value set (`medicationdispense-status`), distinct from `Procedure`'s `event-status` — `declined` is this enum's explicit negative (the rest are incomplete/erroneous states). |
+| R38b | (live bridge) | `Runtime.discharge_burden()` (AM-68) via `POST /fhir/medication-dispense-events` | Live half, mirrors R37b exactly — `fhir_event_handler.handle_medication_dispense_event()`, same dynamic `burden_name` derivation (`f"{_sanitize_id(f'MedicationRequest/{mr_id}')}Obligation"`), no fixed-name constant, same `discharged`/`already_discharged`/`unknown_burden` split, `KeyError` caught inside the handler (not propagated — no fixed target an endpoint could pre-check, mirrors R37b's own reasoning). |
+
+**Deliberately deferred, not built this pass:** the eCDS interaction/duplication-check governance question (who's accountable for catching a cross-plan medication conflict) — see `docs/CONCEPTS_INDEX.md`'s corresponding open finding; a genuinely novel design question, not a mechanical mapping. The "ePrescription Exchange" party is mapped as a plain `Organization` (R01), no special modelling — nothing in `_map_organization` needed adjustment.
+
+---
+
 ## 4. Validation Pipeline
 
 The generated `.el` specification is validated at three levels:

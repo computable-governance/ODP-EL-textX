@@ -131,6 +131,29 @@ R37b — Procedure.status: completed -> discharges the burden its ordering
   negative, the rest (preparation/in-progress/on-hold/stopped/
   entered-in-error/unknown) are incomplete or erroneous states. Reused
   here, not re-derived.
+
+R38b — MedicationDispense.status: completed -> discharges the burden its
+  authorizing MedicationRequest created (touchpoint 5, medicines
+  management; R38a, fhir_mapper.py, is the static provenance-only half).
+  handle_medication_dispense_event() calls Runtime.discharge_burden()
+  (AM-68) directly — structurally identical to R37b (same dynamic
+  burden_name derivation, no fixed-name constant, same three-way
+  discharged/already_discharged/unknown_burden split, same KeyError
+  caught inside the handler rather than propagated), with two field-level
+  differences confirmed against the real au-medicationdispense profile,
+  not assumed:
+    - The linking field is .authorizingPrescription, not .basedOn.
+    - burden_name is derived from the MedicationRequest id:
+      f"{_sanitize_id(f'MedicationRequest/{mr_id}')}Obligation" — the
+      same naming convention fhir_mapper.py's R38 rule uses to generate
+      the burden in the first place (_map_medication_request).
+  status == "completed" is the only qualifying case —
+  MedicationDispense.status has its own value set (medicationdispense-
+  status), distinct from Procedure's event-status: "declined" is this
+  enum's explicit negative (mirroring "not-done"'s role), the rest
+  (preparation/in-progress/cancelled/on-hold/stopped/entered-in-error/
+  unknown) are incomplete or erroneous states. Confirmed against the real
+  AU MedicationDispense profile during R38's own grounding, reused here.
 """
 
 from __future__ import annotations
@@ -183,6 +206,27 @@ class ProcedureEventResult:
     action_taken: str              # "discharged" | "already_discharged" | "no_op" | "unknown_burden"
     message: str
     fhir_provenance: str           # == fhir_procedure_id; carried for API-layer stamping
+    burden_name: Optional[str] = None                # None only when action_taken == "no_op"
+    transition: Optional[TransitionRecord] = None     # set only for "discharged"/"already_discharged"
+
+
+@dataclass(frozen=True)
+class MedicationDispenseEventResult:
+    """Outcome of feeding one FHIR MedicationDispense resource to
+    handle_medication_dispense_event().
+
+    action_taken is one of "discharged" | "already_discharged" | "no_op" |
+    "unknown_burden" — structurally identical to ProcedureEventResult
+    (see the module docstring's R38b section). burden_name is set
+    whenever a burden name was actually derived ("discharged",
+    "already_discharged", "unknown_burden") — only "no_op" leaves it
+    None.
+    """
+    fhir_medication_dispense_id: str
+    fhir_status: str
+    action_taken: str              # "discharged" | "already_discharged" | "no_op" | "unknown_burden"
+    message: str
+    fhir_provenance: str           # == fhir_medication_dispense_id; carried for API-layer stamping
     burden_name: Optional[str] = None                # None only when action_taken == "no_op"
     transition: Optional[TransitionRecord] = None     # set only for "discharged"/"already_discharged"
 
@@ -511,6 +555,121 @@ def handle_procedure_event(
             "nothing changed."
         ),
         fhir_provenance=procedure_id,
+        burden_name=burden_name,
+        transition=tr,
+    )
+
+
+def handle_medication_dispense_event(
+    dispense: dict,
+    runtime: Runtime,
+) -> MedicationDispenseEventResult:
+    """
+    Apply a FHIR R4 MedicationDispense resource event to `runtime` — R38b,
+    the live half of touchpoint 5's static/live split (R38a, fhir_mapper.py,
+    is the static provenance-only half; see this module's docstring for the
+    full comparison against R37b, which this mirrors structurally).
+
+    status == "completed" with an .authorizingPrescription reference to a
+      MedicationRequest: derives burden_name =
+      f"{_sanitize_id(f'MedicationRequest/{mr_id}')}Obligation" (the same
+      naming convention fhir_mapper.py's R38 rule uses) and calls
+      Runtime.discharge_burden() (AM-68) — same discharged/
+      already_discharged/unknown_burden split as handle_procedure_event(),
+      same reasoning throughout (see that function's docstring; not
+      repeated here).
+    status != "completed", or no authorizingPrescription -> MedicationRequest
+      reference at all: "no_op" — mirrors R38a's own status-qualification
+      finding (see module docstring).
+
+    Raises ValueError if the MedicationDispense resource is missing 'id'
+    or 'status'.
+    """
+    dispense_id = dispense.get("id")
+    status = dispense.get("status")
+    if not dispense_id:
+        raise ValueError("MedicationDispense resource missing required 'id' field")
+    if not status:
+        raise ValueError("MedicationDispense resource missing required 'status' field")
+
+    if status != "completed":
+        return MedicationDispenseEventResult(
+            fhir_medication_dispense_id=dispense_id,
+            fhir_status=status,
+            action_taken="no_op",
+            message=(
+                f"MedicationDispense '{dispense_id}' status='{status}' is "
+                "not 'completed' — not handled by this event handler (only "
+                "a completed MedicationDispense can trigger a discharge "
+                "attempt)."
+            ),
+            fhir_provenance=dispense_id,
+        )
+
+    mr_ref = next(
+        (
+            ref_dict.get("reference", "")
+            for ref_dict in dispense.get("authorizingPrescription", [])
+            if ref_dict.get("reference", "").startswith("MedicationRequest/")
+        ),
+        None,
+    )
+    if mr_ref is None:
+        return MedicationDispenseEventResult(
+            fhir_medication_dispense_id=dispense_id,
+            fhir_status=status,
+            action_taken="no_op",
+            message=(
+                f"MedicationDispense '{dispense_id}' status=completed, but "
+                "has no authorizingPrescription reference to a "
+                "MedicationRequest — nothing to discharge."
+            ),
+            fhir_provenance=dispense_id,
+        )
+
+    mr_id = mr_ref.split("/", 1)[1]
+    burden_name = f"{_sanitize_id(f'MedicationRequest/{mr_id}')}Obligation"
+
+    try:
+        tr = runtime.discharge_burden(burden_name)
+    except KeyError as e:
+        return MedicationDispenseEventResult(
+            fhir_medication_dispense_id=dispense_id,
+            fhir_status=status,
+            action_taken="unknown_burden",
+            message=(
+                f"MedicationDispense '{dispense_id}' status=completed, "
+                f"based on {mr_ref}, but burden '{burden_name}' is not "
+                f"declared in the current spec: {e}"
+            ),
+            fhir_provenance=dispense_id,
+            burden_name=burden_name,
+        )
+
+    if tr.discharged:
+        return MedicationDispenseEventResult(
+            fhir_medication_dispense_id=dispense_id,
+            fhir_status=status,
+            action_taken="discharged",
+            message=(
+                f"MedicationDispense '{dispense_id}' status=completed: "
+                f"discharged burden '{burden_name}' ({'; '.join(tr.effects)})."
+            ),
+            fhir_provenance=dispense_id,
+            burden_name=burden_name,
+            transition=tr,
+        )
+
+    return MedicationDispenseEventResult(
+        fhir_medication_dispense_id=dispense_id,
+        fhir_status=status,
+        action_taken="already_discharged",
+        message=(
+            f"MedicationDispense '{dispense_id}' status=completed: burden "
+            f"'{burden_name}' was already discharged (or never granted) — "
+            "nothing changed."
+        ),
+        fhir_provenance=dispense_id,
         burden_name=burden_name,
         transition=tr,
     )

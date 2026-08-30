@@ -41,7 +41,12 @@ from el_kripke import (
 )
 from el_parser import parse
 from el_runtime import Runtime
-from fhir_event_handler import handle_consent_event, handle_procedure_event, PATIENT_DATA_AUTHORIZATION
+from fhir_event_handler import (
+    handle_consent_event,
+    handle_medication_dispense_event,
+    handle_procedure_event,
+    PATIENT_DATA_AUTHORIZATION,
+)
 from fhir_mapper import EncounterContext
 
 
@@ -564,6 +569,24 @@ class ProcedureEventResponse(BaseModel):
     # derived for "unknown_burden" too, but is deliberately withheld here
     # as well, same as ConsentEventResponse withholds authorization_name
     # on its own no-op case; the derived name still appears in `message`)
+    burden_name: Optional[str] = None
+    tick: Optional[int] = None
+    authority: Optional[str] = None
+    outcome: Optional[str] = None
+    effects: Optional[List[str]] = None
+    updated_world: Optional[dict] = None
+    new_objective_score: Optional[float] = None
+    objective_reachable: Optional[bool] = None
+
+
+class MedicationDispenseEventResponse(BaseModel):
+    fhir_medication_dispense_id: str
+    fhir_status: str
+    fhir_provenance: str
+    action_taken: str              # "discharged" | "already_discharged" | "no_op" | "unknown_burden"
+    message: str
+    # populated only when action_taken in ("discharged", "already_discharged")
+    # — same gating as ProcedureEventResponse.
     burden_name: Optional[str] = None
     tick: Optional[int] = None
     authority: Optional[str] = None
@@ -1513,6 +1536,77 @@ def procedure_event(procedure: dict) -> ProcedureEventResponse:
 
     return ProcedureEventResponse(
         fhir_procedure_id=result.fhir_procedure_id,
+        fhir_status=result.fhir_status,
+        fhir_provenance=result.fhir_provenance,
+        action_taken=result.action_taken,
+        message=result.message,
+        burden_name=result.burden_name,
+        tick=tr.tick,
+        authority=tr.actor_name,
+        outcome=tr.outcome,
+        effects=list(tr.effects),
+        updated_world=updated_world,
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint: POST /fhir/medication-dispense-events ────────────────────────
+
+@app.post(
+    "/fhir/medication-dispense-events",
+    response_model=MedicationDispenseEventResponse,
+    summary="Ingest a FHIR MedicationDispense resource event (R38b)",
+    description=(
+        "Accepts a FHIR R4 MedicationDispense resource. status='completed' "
+        "with an authorizingPrescription reference to a MedicationRequest "
+        "(R38b, live half of touchpoint 5's static/live split — R38a in "
+        "fhir_mapper.py is the static provenance-only half) discharges "
+        "that MedicationRequest's burden via Runtime.discharge_burden() "
+        "(AM-68). Structurally identical to POST /fhir/procedure-events: "
+        "no single fixed target, the burden name is derived dynamically "
+        "per call from the MedicationRequest id, using the same naming "
+        "convention fhir_mapper.py's R38 rule uses to generate it. "
+        "action_taken: 'discharged' (real transition), 'already_discharged' "
+        "(idempotent no-op — already discharged, or never granted), "
+        "'unknown_burden' (the derived burden name is not declared in the "
+        "current spec), 'no_op' (status isn't 'completed', or no "
+        "authorizingPrescription -> MedicationRequest reference). 400 if "
+        "the MedicationDispense resource is missing id/status."
+    ),
+)
+def medication_dispense_event(dispense: dict) -> MedicationDispenseEventResponse:
+    try:
+        result = handle_medication_dispense_event(dispense, _runtime)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if result.action_taken not in ("discharged", "already_discharged"):
+        return MedicationDispenseEventResponse(
+            fhir_medication_dispense_id=result.fhir_medication_dispense_id,
+            fhir_status=result.fhir_status,
+            fhir_provenance=result.fhir_provenance,
+            action_taken=result.action_taken,
+            message=result.message,
+        )
+
+    tr = result.transition
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return MedicationDispenseEventResponse(
+        fhir_medication_dispense_id=result.fhir_medication_dispense_id,
         fhir_status=result.fhir_status,
         fhir_provenance=result.fhir_provenance,
         action_taken=result.action_taken,

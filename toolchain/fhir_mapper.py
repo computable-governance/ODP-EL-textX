@@ -609,6 +609,16 @@ class FHIRConsentMapper:
         for enc in by_type.get("Encounter", []):
             self._map_encounter(enc, spec, resources)  # R35
 
+        # 2d — MedicationRequest → commitment + burden (R38, touchpoint 5).
+        # Mirrors ServiceRequest → Commitment + Burden (R05-R08) exactly —
+        # same _resolve_commitment_accountable_party reuse (confirmed
+        # against the real au-medicationrequest profile: .requester's
+        # target types are identical to ServiceRequest.requester's,
+        # PractitionerRole included), same holds-clause emission (AM-72).
+        dispenses = by_type.get("MedicationDispense", [])
+        for mr in by_type.get("MedicationRequest", []):
+            self._map_medication_request(mr, spec, by_ref, dispenses)  # R38
+
         # 3 — Tasks → delegation chain
         # Sort: parent tasks (no partOf) first, then sub-tasks
         tasks = by_type.get("Task", [])
@@ -943,6 +953,144 @@ class FHIRConsentMapper:
         )
         spec.commitments.append(commitment)
         spec.log("R05", fhir_ref, commitment.el_id)
+
+    # ── R38 — MedicationRequest → CommitmentDecl + burden token ────────────────
+    # (touchpoint 5, medicines management). Mirrors R05-R08's ServiceRequest
+    # pipeline exactly — same _resolve_commitment_accountable_party reuse
+    # (confirmed against the real au-medicationrequest profile:
+    # .requester's target types, PractitionerRole included, are identical
+    # to ServiceRequest.requester's), same holds-clause emission (AM-72).
+    # One rule number covers the whole job, not four (R05/R06/R07/R08
+    # separately) — mirrors the R37a/R37b precedent of no bare intermediate
+    # number for a single resource type's mapping.
+
+    def _map_medication_request(
+        self, mr: dict, spec: ELSpec, by_ref: Dict[str, dict], dispenses: List[dict]
+    ) -> None:
+        mr_id    = mr.get("id", "mr")
+        el_id    = _sanitize_id(f"MedicationRequest/{mr_id}")
+        fhir_ref = f"MedicationRequest/{mr_id}"
+
+        # requester, resolved to organisational accountability — identical
+        # mechanism to R06, reused unchanged.
+        requester_el, requester_warning = _resolve_commitment_accountable_party(
+            mr.get("requester"), by_ref
+        )
+
+        # obligation text from medicationCodeableConcept + note. Unlike
+        # ServiceRequest.code, the medication itself lives under
+        # medication[x] — medicationCodeableConcept is the common/simple
+        # case (confirmed against the real AU examples); medicationReference
+        # (a separate Medication resource) is not handled here, same
+        # "don't invent unrequested machinery" scoping as elsewhere.
+        med_concept  = mr.get("medicationCodeableConcept", {})
+        code_text    = med_concept.get("text", "")
+        code_display = _coding_display(med_concept.get("coding", []))
+        notes        = mr.get("note", [{}])
+        note_text    = notes[0].get("text", "") if notes else ""
+        obligation   = note_text or code_text or code_display or "Fulfil medication request"
+
+        burden_id = f"{el_id}Obligation"
+
+        # No FHIR-side field expresses an SLA-style discharge deadline for
+        # a MedicationRequest either — dispenseRequest.validityPeriod is a
+        # different concept (the repeat-supply authorisation window, not a
+        # governance discharge SLA). Same accepted gap as R08.
+        deadline = ""
+
+        # No action-mapping table exists for medication codes (unlike
+        # SERVICE_REQUEST_ACTION_MAP) — not requested, not invented here.
+        # Always derived from the display/text, always flagged unresolved.
+        action = (code_display or code_text or "dispense_medication").lower().replace(" ", "_")
+
+        # Same two independent strict-discharge signals as R07, reused
+        # unchanged (both operate on a generic dict + free text).
+        combined_text   = (note_text + " " + code_text).lower()
+        time_critical   = _is_time_critical(mr, combined_text)
+        consent_related = _is_consent_related(combined_text)
+
+        strict_reasons = []
+        if time_critical:
+            strict_reasons.append("time-critical")
+        if consent_related:
+            strict_reasons.append("consent-related")
+
+        if strict_reasons:
+            discharge_mode = "strict"
+            priority       = "critical"
+            reason_tag     = "strict: " + ", ".join(strict_reasons)
+        else:
+            discharge_mode = "eventual"
+            priority       = "normal"
+            reason_tag     = "eventual: no strict signal"
+
+        token_description = f"[R38] {reason_tag} — Obligation arising from MedicationRequest/{mr_id}"
+        token_description += " [R38] UNRESOLVED for_action — no DSL action mapping, verify manually"
+
+        # holds-clause emission (AM-72), reused unchanged: only grant to a
+        # declared object, never fabricate a holder the bundle doesn't
+        # support.
+        if any(o.el_id == requester_el for o in spec.objects):
+            holder_el_id = requester_el
+        else:
+            holder_el_id = ""
+            token_description += (
+                f" [R38] UNRESOLVED holder — burden not granted to any "
+                f"declared object (accountable party '{requester_el}' is "
+                f"not declared). Verify accountability manually."
+            )
+
+        token = ELToken(
+            el_id=burden_id,
+            kind="burden",
+            for_action=action,
+            deadline=deadline,
+            holder_el_id=holder_el_id,
+            discharge_mode=discharge_mode,
+            priority=priority,
+            description=token_description,
+            fhir_ref=fhir_ref,
+        )
+
+        # R38a (static half, mirrors R37a exactly) — MedicationDispense.
+        # authorizingPrescription -> fulfilment provenance. Description
+        # enrichment only, no token.state change (TokenState grammar rule
+        # permits only active|pending|claimable as an AUTHORED state;
+        # 'discharged' is runtime-only, confirmed during R37a). Only
+        # status: "completed" qualifies (confirmed against the real AU
+        # MedicationDispense profile's medicationdispense-status binding —
+        # "declined" is the explicit negative, the rest are incomplete or
+        # erroneous states).
+        for dispense in dispenses:
+            if dispense.get("status") != "completed":
+                continue
+            based_on_refs = [
+                r.get("reference", "") for r in dispense.get("authorizingPrescription", [])
+            ]
+            if fhir_ref not in based_on_refs:
+                continue
+            dispense_id = dispense.get("id", "")
+            token.description += f" [R38a] Dispensed by MedicationDispense/{dispense_id}"
+            spec.log("R38a", f"MedicationDispense/{dispense_id}", burden_id)
+
+        spec.tokens.append(token)
+        spec.log("R38", fhir_ref, burden_id)
+        if holder_el_id:
+            spec.log("R38", holder_el_id, burden_id)
+
+        commitment_description = f"[R38] Commitment from MedicationRequest/{mr_id}"
+        if requester_warning:
+            commitment_description += f" — {requester_warning}"
+        commitment = ELCommitment(
+            el_id=f"{el_id}Commitment",
+            by=requester_el,
+            obligation=obligation,
+            creates_burden=burden_id,
+            description=commitment_description,
+            fhir_ref=fhir_ref,
+        )
+        spec.commitments.append(commitment)
+        spec.log("R38", fhir_ref, commitment.el_id)
 
     # ── R34 — DiagnosticReport.basedOn → artefact provenance ───────────────────
     # (DN_008 Option A). See _map_service_request's R34 block for the

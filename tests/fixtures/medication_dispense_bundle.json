@@ -1,0 +1,131 @@
+{
+  "resourceType": "Bundle",
+  "id": "medication-dispense-bundle-001",
+  "type": "collection",
+  "timestamp": "2024-09-01T10:00:00+10:00",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/harbourview-pharmacy-001",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "harbourview-pharmacy-001",
+        "name": "Harbourview Community Pharmacy",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/patient-mia-tran",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-mia-tran",
+        "name": [{"family": "Tran", "given": ["Mia"]}],
+        "birthDate": "1980-09-12"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/dr-alvarez",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "dr-alvarez",
+        "name": [{"family": "Alvarez", "given": ["Diego"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "62247001", "display": "General practitioner"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/role-dr-alvarez",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "role-dr-alvarez",
+        "practitioner": {"reference": "Practitioner/dr-alvarez"},
+        "organization": {"reference": "Organization/harbourview-pharmacy-001"}
+      }
+    },
+
+    {
+      "fullUrl": "MedicationRequest/701",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "701",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "27658006", "display": "Amoxicillin"}],
+          "text": "Amoxicillin 500mg capsules"
+        },
+        "subject": {"reference": "Patient/patient-mia-tran"},
+        "authoredOn": "2024-09-01",
+        "requester": {"reference": "PractitionerRole/role-dr-alvarez"}
+      }
+    },
+
+    {
+      "fullUrl": "MedicationDispense/801",
+      "resource": {
+        "resourceType": "MedicationDispense",
+        "id": "801",
+        "status": "completed",
+        "authorizingPrescription": [{"reference": "MedicationRequest/701"}],
+        "medicationCodeableConcept": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "27658006", "display": "Amoxicillin"}]
+        },
+        "subject": {"reference": "Patient/patient-mia-tran"},
+        "whenHandedOver": "2024-09-01T15:30:00+10:00"
+      }
+    },
+
+    {
+      "fullUrl": "MedicationRequest/702",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "702",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "96068000", "display": "Warfarin"}],
+          "text": "Warfarin 1mg tablets"
+        },
+        "subject": {"reference": "Patient/patient-mia-tran"},
+        "authoredOn": "2024-09-01",
+        "requester": {"reference": "PractitionerRole/role-dr-alvarez"}
+      }
+    },
+
+    {
+      "fullUrl": "MedicationDispense/802",
+      "resource": {
+        "resourceType": "MedicationDispense",
+        "id": "802",
+        "status": "declined",
+        "authorizingPrescription": [{"reference": "MedicationRequest/702"}],
+        "medicationCodeableConcept": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "96068000", "display": "Warfarin"}]
+        },
+        "subject": {"reference": "Patient/patient-mia-tran"}
+      }
+    },
+
+    {
+      "fullUrl": "MedicationRequest/703",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "703",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{"system": "http://snomed.info/sct", "code": "27658006", "display": "Amoxicillin"}],
+          "text": "Amoxicillin 250mg oral liquid"
+        },
+        "subject": {"reference": "Patient/patient-mia-tran"},
+        "authoredOn": "2024-09-01",
+        "requester": {"reference": "PractitionerRole/role-dr-alvarez"}
+      }
+    }
+
+  ]
+}

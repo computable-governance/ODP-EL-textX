@@ -4499,3 +4499,45 @@ resolution alone sufficient for the toolchain's purposes?), not a bug.
 Separate from, and lower priority than, anything currently in flight.
 
 ---
+
+## eCDS interaction/duplication-check accountability — who is responsible for catching a cross-plan medication conflict? — OPEN FINDING (2026-08-30)
+
+**Found:** 2026-08-30, scoping R38 (`MedicationRequest`/`MedicationDispense`,
+touchpoint 5, medicines management). Deliberately deferred rather than
+built — flagged here per that pass's own scoping decision, not attempted
+as new machinery.
+
+Touchpoint 5's real workflow (ConnectedCare) has the pharmacy retrieve an
+ePrescription, run eCDS (electronic Clinical Decision Support)
+interaction/duplication checks against the patient's existing medication
+list, then dispense. R38/R38a/R38b map the mechanical shape of this —
+`MedicationRequest` → `Commitment` + `Burden`, `MedicationDispense` →
+fulfilment/discharge — but say nothing about the eCDS check itself: who
+is accountable for actually running it, what happens governance-wise if
+it's skipped, and who bears responsibility if a real interaction is
+missed because two different prescribers (on two different care plans,
+neither aware of the other) both wrote overlapping medications.
+
+This is the same "declare vs verify" gap `DN_004` already names in the
+abstract, but a genuinely new instance of it, not a mechanical mapping
+this project's existing patterns (R33a/R34/R36/R37a/R38a-style
+provenance tagging) can just be pointed at. A `Burden`/`Permit` pair
+requiring the eCDS check before dispense is the obvious first sketch,
+but: which enterprise object holds that burden (the dispensing pharmacy?
+the ePrescription Exchange, mapped as a plain `Organization` for R38 —
+see the sibling entry above? something not yet modelled at all)? What
+FHIR-side signal, if any, indicates the check actually ran (no field
+identified yet — `MedicationRequest`/`MedicationDispense` carry no
+eCDS-outcome element in the AU profiles grounded for R38)? Is a missed
+cross-plan interaction even detectable from the FHIR data alone, or does
+it require information (the *other* plan's medication list) that may
+not be in any single bundle this toolchain ever sees?
+
+Not scoped as a fix, not scoped as a design note yet either — this needs
+its own design pass, not an extension of R38's mechanical mapping.
+Whoever picks this up next should start by checking whether any AU
+profile (au-medicationrequest, au-medicationdispense, or a
+CDS-Hooks-adjacent resource) actually carries a structured field for
+"interaction check performed" before assuming one needs to be invented.
+
+---
