@@ -226,6 +226,26 @@ class ELDeclaration:
     fhir_ref: str = ""
 
 @dataclass
+class ELViolationResponse:
+    """Corresponds to ViolationResponse in the grammar (§6.3.8, §7.8.6). R39.
+
+    on_violation_of/responding_actor/creates_burden/escalate_to are all
+    typed cross-references to already-declared elements in the grammar
+    (not inline declarations) — confirmed against referral_scenario.el's
+    real violation_response block. creates_burden must name a burden
+    declared elsewhere with NO holds clause: fire_violation_responses()
+    (el_engine.py) grants it dynamically at violation-fire time.
+    """
+    el_id: str
+    violated_burden: str         # el_id of the violated DeonticToken
+    responding_actor: str        # el_id of the EnterpriseObject obligated to respond
+    response_kind: str           # "escalate" | "remediate" | "penalise" | "terminate"
+    creates_burden: str = ""     # el_id of a DeonticToken (declared elsewhere, ungranted)
+    escalate_to: str = ""        # el_id of the EnterpriseObject notified
+    description: str = ""
+    fhir_ref: str = ""
+
+@dataclass
 class ELSpec:
     """Complete intermediate representation of a generated governance spec."""
     spec_id: str
@@ -239,6 +259,7 @@ class ELSpec:
     delegations: List[ELDelegation] = field(default_factory=list)
     authorizations: List[ELAuthorization] = field(default_factory=list)
     declarations: List[ELDeclaration] = field(default_factory=list)
+    violation_responses: List[ELViolationResponse] = field(default_factory=list)
     mapping_log: List[Tuple[str, str, str]] = field(default_factory=list)
     # (rule_id, fhir_ref, el_id) — provenance trail
 
@@ -618,6 +639,20 @@ class FHIRConsentMapper:
         dispenses = by_type.get("MedicationDispense", [])
         for mr in by_type.get("MedicationRequest", []):
             self._map_medication_request(mr, spec, by_ref, dispenses)  # R38
+
+        # 2e — Observation → commitment + burden + violation_response (R39,
+        # touchpoint 6: progress/PROM score review with GP escalation).
+        # Must run after ALL ServiceRequest mapping above (2, 2d do not
+        # affect this) — gp_practice_el_id is resolved from the earliest
+        # ServiceRequest's own Commitment.by, which has to already exist.
+        # One rule number, no static/live split like R37/R38: there is no
+        # new live bridge to build here — check_live_violations()/
+        # fire_violation_responses() (el_engine.py) are already-existing,
+        # generic engine functions that operate over any declared burden/
+        # ViolationResponse, regardless of which mapper rule created them.
+        gp_practice_el_id = self._find_earliest_referral_accountable_party(spec, by_type)
+        for obs in by_type.get("Observation", []):
+            self._map_observation(obs, spec, by_ref, gp_practice_el_id)  # R39
 
         # 3 — Tasks → delegation chain
         # Sort: parent tasks (no partOf) first, then sub-tasks
@@ -1092,6 +1127,208 @@ class FHIRConsentMapper:
         spec.commitments.append(commitment)
         spec.log("R38", fhir_ref, commitment.el_id)
 
+    # ── R39 — Observation → CommitmentDecl + burden + violation_response ───────
+    # (touchpoint 6: progress/PROM score review with GP escalation).
+
+    def _find_earliest_referral_accountable_party(
+        self, spec: ELSpec, by_type: Dict[str, List[dict]]
+    ) -> str:
+        """
+        Identify "the GP practice" for R39's escalate_to target: the
+        accountable party of the ServiceRequest with the earliest
+        .authoredOn in the bundle — the referral that started the
+        patient's journey, per the task's own suggested heuristic.
+        ISO 8601 date/datetime strings sort lexicographically =
+        chronologically, so a plain string sort is sufficient here.
+
+        Returns "" if no ServiceRequest carries .authoredOn, or if the
+        earliest one never produced a Commitment (e.g. not present in
+        this bundle at all) — callers must treat that as "no GP practice
+        identified," not fabricate one.
+        """
+        dated = [
+            (sr.get("authoredOn", ""), sr)
+            for sr in by_type.get("ServiceRequest", [])
+            if sr.get("authoredOn")
+        ]
+        if not dated:
+            return ""
+        dated.sort(key=lambda pair: pair[0])
+        earliest_sr = dated[0][1]
+        sr_id = earliest_sr.get("id", "")
+        commitment = next(
+            (c for c in spec.commitments if c.fhir_ref == f"ServiceRequest/{sr_id}"),
+            None,
+        )
+        return commitment.by if commitment else ""
+
+    def _map_observation(
+        self, obs: dict, spec: ELSpec, by_ref: Dict[str, dict], gp_practice_el_id: str
+    ) -> None:
+        obs_id   = obs.get("id", "obs")
+        el_id    = _sanitize_id(f"Observation/{obs_id}")
+        fhir_ref = f"Observation/{obs_id}"
+
+        # Holder resolution: .basedOn -> ServiceRequest -> that
+        # ServiceRequest's own already-resolved Commitment.by is PRIMARY,
+        # not Observation.performer directly — confirmed against the real
+        # base FHIR R4 Observation profile that .performer's target types
+        # include Patient (a self-reported PROM/progress score commonly
+        # has the patient as performer), which would incorrectly obligate
+        # the patient to review their own score. .performer is only a
+        # fallback when .basedOn doesn't resolve, run through
+        # _resolve_commitment_accountable_party for consistency with every
+        # other rule's accountability resolution.
+        holder_el_id = ""
+        for ref_dict in obs.get("basedOn", []):
+            ref = ref_dict.get("reference", "")
+            sr = by_ref.get(ref) if ref else None
+            if not sr or sr.get("resourceType") != "ServiceRequest":
+                continue
+            sr_id = sr.get("id", "")
+            commitment = next(
+                (c for c in spec.commitments if c.fhir_ref == f"ServiceRequest/{sr_id}"),
+                None,
+            )
+            if commitment:
+                holder_el_id = commitment.by
+                break
+
+        if not holder_el_id:
+            performers = obs.get("performer", [{}])
+            holder_el_id, _ = _resolve_commitment_accountable_party(
+                performers[0] if performers else None, by_ref
+            )
+
+        if not holder_el_id:
+            # No accountable-party reference exists at all — neither a
+            # resolvable .basedOn -> ServiceRequest nor a .performer.
+            # Distinct from AM-71/AM-72's "a reference exists but doesn't
+            # resolve to a declared object" tiers: those still produce a
+            # non-empty el_id (syntactically valid, just semantically
+            # unresolved — caught by the validator). An empty string is
+            # different in kind: Commitment.by is a mandatory, non-
+            # optional cross-reference in the grammar, so emitting
+            # "by: " with nothing after it would be a textX PARSE failure,
+            # not a validator warning. Skip creating anything for this
+            # Observation entirely — same "nothing to link to" precedent
+            # as R34/R37a's own skip-when-unresolvable branches — rather
+            # than emit unparseable text.
+            return
+
+        code_text    = obs.get("code", {}).get("text", "")
+        code_display = _coding_display(obs.get("code", {}).get("coding", []))
+        obs_label    = code_text or code_display or "progress score"
+        obligation   = f"Review {obs_label}"
+
+        burden_id = f"{el_id}Obligation"
+
+        # R39 — deadline is a genuine governance-policy constant (7 days),
+        # NOT derived from any FHIR field. This is a real clinical-
+        # governance rule layered on top of the data — a PROM/progress
+        # score must be reviewed within a fixed window regardless of what
+        # (if anything) the Observation itself carries about timing —
+        # unlike R08's blank deadline, this is not a gap.
+        deadline = "7 days"
+
+        # discharge_mode must stay 'eventual', not 'strict' — confirmed by
+        # reading check_live_violations() (el_engine.py): it explicitly
+        # skips every discharge_mode: strict burden, so a strict review
+        # burden could never be tick-swept into 'violated' at all.
+        if any(o.el_id == holder_el_id for o in spec.objects):
+            granted_holder = holder_el_id
+        else:
+            granted_holder = ""
+
+        token_description = f"[R39] {obligation} — Obligation arising from Observation/{obs_id}"
+        if not granted_holder:
+            token_description += (
+                f" [R39] UNRESOLVED holder — burden not granted to any "
+                f"declared object (accountable party '{holder_el_id}' is "
+                f"not declared). Verify accountability manually."
+            )
+
+        token = ELToken(
+            el_id=burden_id,
+            kind="burden",
+            for_action="review_progress_score",
+            deadline=deadline,
+            holder_el_id=granted_holder,
+            discharge_mode="eventual",
+            priority="high",
+            description=token_description,
+            fhir_ref=fhir_ref,
+        )
+        spec.tokens.append(token)
+        spec.log("R39", fhir_ref, burden_id)
+        if granted_holder:
+            spec.log("R39", granted_holder, burden_id)
+
+        commitment = ELCommitment(
+            el_id=f"{el_id}Commitment",
+            by=holder_el_id,
+            obligation=obligation,
+            creates_burden=burden_id,
+            description=f"[R39] Commitment from Observation/{obs_id}",
+            fhir_ref=fhir_ref,
+        )
+        spec.commitments.append(commitment)
+        spec.log("R39", fhir_ref, commitment.el_id)
+
+        # Escalation-notice burden — declared but never granted via holds;
+        # fire_violation_responses() (el_engine.py) grants it dynamically
+        # at violation-fire time via token_from_spec(). Mirrors
+        # escalationNoticeBurden in referral_scenario.el exactly (state:
+        # active, discharge_mode: strict, priority: critical, no holds
+        # clause anywhere).
+        escalation_burden_id = f"{el_id}EscalationNoticeObligation"
+        escalation_token = ELToken(
+            el_id=escalation_burden_id,
+            kind="burden",
+            for_action="notify_gp_of_unreviewed_progress_score",
+            deadline="48 hours from violation detection",
+            discharge_mode="strict",
+            priority="critical",
+            description=(
+                f"[R39] Obligation to notify GP practice of unreviewed "
+                f"{obs_label} from Observation/{obs_id}"
+            ),
+            fhir_ref=fhir_ref,
+        )
+        spec.tokens.append(escalation_token)
+        spec.log("R39", fhir_ref, escalation_burden_id)
+
+        # violation_response only emitted when BOTH the review burden's
+        # holder and the GP practice resolve to real declared objects —
+        # responding_actor/escalate_to are typed cross-references, so a
+        # fabricated target would crash validation exactly like an
+        # unresolved holds clause would (AM-72's same "never fabricate"
+        # discipline, applied here to a different construct).
+        if granted_holder and gp_practice_el_id and any(
+            o.el_id == gp_practice_el_id for o in spec.objects
+        ):
+            vr = ELViolationResponse(
+                el_id=f"{el_id}ViolationResponse",
+                violated_burden=burden_id,
+                responding_actor=granted_holder,
+                response_kind="escalate",
+                creates_burden=escalation_burden_id,
+                escalate_to=gp_practice_el_id,
+                description=(
+                    f"[R39] If {granted_holder} fails to review the "
+                    f"{obs_label} in time, escalate and notify the GP "
+                    f"practice"
+                ),
+                fhir_ref=fhir_ref,
+            )
+            spec.violation_responses.append(vr)
+            spec.log("R39", fhir_ref, vr.el_id)
+        else:
+            token.description += (
+                " [R39] No violation_response emitted — holder or GP "
+                "practice could not be resolved to a declared object."
+            )
+
     # ── R34 — DiagnosticReport.basedOn → artefact provenance ───────────────────
     # (DN_008 Option A). See _map_service_request's R34 block for the
     # Composition-linked, forward-direction sibling case.
@@ -1497,6 +1734,13 @@ class FHIRConsentMapper:
                 lines += self._render_declaration(d)
                 lines.append("")
 
+        # Violation Responses
+        if spec.violation_responses:
+            lines.append("// ── Violation Responses " + "─" * 37)
+            for vr in spec.violation_responses:
+                lines += self._render_violation_response(vr)
+                lines.append("")
+
         # Provenance comment
         lines += self._render_provenance(spec)
 
@@ -1695,6 +1939,22 @@ class FHIRConsentMapper:
             f'    description: "{d.description}"',
             "}",
         ]
+
+    def _render_violation_response(self, vr: ELViolationResponse) -> List[str]:
+        lines = [
+            f"violation_response {vr.el_id} {{",
+            f"    on_violation_of: {vr.violated_burden}",
+            f"    obligates: {vr.responding_actor}",
+            f"    response_kind: {vr.response_kind}",
+        ]
+        if vr.creates_burden:
+            lines.append(f"    creates_burden: {vr.creates_burden}")
+        if vr.escalate_to:
+            lines.append(f"    escalate_to: {vr.escalate_to}")
+        if vr.description:
+            lines.append(f'    description: "{vr.description}"')
+        lines.append("}")
+        return lines
 
     def _render_provenance(self, spec: ELSpec) -> List[str]:
         lines = [

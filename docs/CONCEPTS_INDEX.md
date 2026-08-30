@@ -4541,3 +4541,48 @@ CDS-Hooks-adjacent resource) actually carries a structured field for
 "interaction check performed" before assuming one needs to be invented.
 
 ---
+
+## An accountable-party reference resolving to an empty string would crash the parser, not just fail validation (R05/R38 share this latent gap; guarded only in R39) — OPEN FINDING (2026-08-30)
+
+**Found:** 2026-08-30, implementing R39 (`Observation` → `Burden` +
+`violation_response` escalation, `fhir_mapper.py`).
+
+`Commitment.by` is a mandatory, non-optional `[EnterpriseObject]`
+cross-reference in the grammar — there is no way to declare a
+`Commitment` without one. `_map_observation` (R39) initially hit this
+directly: when neither `.basedOn` nor `.performer` resolves to anything
+at all, the accountable-party el_id comes back as `""`, and naively
+emitting `commitment.by: ` with nothing after it is a textX **parse**
+failure, not a `[SEMANTIC]` validator warning — a strictly worse failure
+mode than AM-71/AM-72's already-accepted "reference exists but doesn't
+resolve to a declared object" risk tier (that case still produces a
+syntactically valid, non-empty identifier). R39 guards against this with
+an early `return` — skip creating anything for that `Observation`
+entirely rather than emit unparseable text.
+
+**Not fixed here, and confirmed present, not merely suspected:**
+`_map_service_request` (R05) and `_map_medication_request` (R38) both
+call `_resolve_commitment_accountable_party(sr.get("requester"), by_ref)`
+unconditionally and pass the result straight into `ELCommitment(by=...)`
+with no non-empty check at all. If `.requester` is completely absent
+from a `ServiceRequest`/`MedicationRequest` (not just unresolvable —
+literally missing the field), `_resolve_commitment_accountable_party`
+falls through its own case 1 to `_ref_id(None)`, which returns `""`, and
+the same blank-`by:` parse crash follows. Every real fixture and every
+real touchpoint bundle used so far has always carried some `.requester`
+value, however unresolvable, so this has never actually fired in
+practice — it is a genuine gap, not a hypothetical one, just not yet
+observed against real data.
+
+Not scoped as a fix — narrower than it looks: the correct guard (skip
+creating the `Commitment`/`Burden` entirely when the accountable-party
+el_id is empty, mirroring R39's own early-return) is a one-line change
+in each of two functions, but making that change without a session
+explicitly scoping it would be exactly the kind of unrequested fix this
+project's working pattern deliberately avoids. Whoever picks this up
+next should add the same empty-string guard to `_map_service_request`
+and `_map_medication_request` that R39 already has, plus a regression
+fixture (a `ServiceRequest`/`MedicationRequest` with no `.requester`
+field at all) to prove it.
+
+---

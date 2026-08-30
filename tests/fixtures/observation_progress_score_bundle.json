@@ -1,0 +1,153 @@
+{
+  "resourceType": "Bundle",
+  "id": "observation-progress-score-bundle-001",
+  "type": "collection",
+  "timestamp": "2024-08-01T09:00:00+10:00",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/elimbah-medical-centre",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "elimbah-medical-centre",
+        "name": "Elimbah Medical Centre",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/guthridge-jarred",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "guthridge-jarred",
+        "name": [{"family": "Guthridge", "given": ["Jarred"]}]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/generalpractitioner-guthridge-jarred",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "generalpractitioner-guthridge-jarred",
+        "practitioner": {"reference": "Practitioner/guthridge-jarred"},
+        "organization": {"reference": "Organization/elimbah-medical-centre"}
+      }
+    },
+
+    {
+      "fullUrl": "Organization/riverside-physio",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "riverside-physio",
+        "name": "Riverside Physiotherapy",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/dr-cole",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "dr-cole",
+        "name": [{"family": "Cole", "given": ["Priya"]}]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/physio-dr-cole",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "physio-dr-cole",
+        "practitioner": {"reference": "Practitioner/dr-cole"},
+        "organization": {"reference": "Organization/riverside-physio"}
+      }
+    },
+
+    {
+      "fullUrl": "Patient/roberts-fred",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "roberts-fred",
+        "name": [{"family": "Roberts", "given": ["Fred"]}],
+        "birthDate": "1961-06-16"
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/210",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "210",
+        "status": "active",
+        "intent": "order",
+        "category": [{"coding": [{"system": "http://snomed.info/sct", "code": "306206005", "display": "Referral to service"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "306162008", "display": "Referral to general practitioner"}], "text": "Initial GP referral"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "authoredOn": "2024-05-01T08:00:00+10:00",
+        "requester": {"reference": "PractitionerRole/generalpractitioner-guthridge-jarred"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/950",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "950",
+        "status": "active",
+        "intent": "order",
+        "category": [{"coding": [{"system": "http://snomed.info/sct", "code": "306207008", "display": "Referral to physiotherapist"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "306207008", "display": "Referral to physiotherapist"}], "text": "Referral to physiotherapist"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "authoredOn": "2024-07-15T10:00:00+10:00",
+        "requester": {"reference": "PractitionerRole/physio-dr-cole"}
+      }
+    },
+
+    {
+      "fullUrl": "Observation/960",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "960",
+        "status": "final",
+        "category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "survey", "display": "Survey"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "razel-prom-01", "display": "Functional recovery score"}], "text": "Patient-reported functional recovery score"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "basedOn": [{"reference": "ServiceRequest/950"}],
+        "effectiveDateTime": "2024-08-01T09:00:00+10:00",
+        "performer": [{"reference": "Patient/roberts-fred"}],
+        "valueQuantity": {"value": 32, "unit": "score", "system": "http://unitsofmeasure.org", "code": "{score}"},
+        "note": [{"text": "Score declined from 68 to 32 over two weeks — deteriorating trend, flagged for clinical review."}]
+      }
+    },
+
+    {
+      "fullUrl": "Observation/961",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "961",
+        "status": "final",
+        "category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "survey", "display": "Survey"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "razel-prom-01", "display": "Functional recovery score"}], "text": "Patient-reported functional recovery score"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "effectiveDateTime": "2024-08-08T09:00:00+10:00",
+        "performer": [{"reference": "PractitionerRole/physio-dr-cole"}],
+        "valueQuantity": {"value": 30, "unit": "score", "system": "http://unitsofmeasure.org", "code": "{score}"}
+      }
+    },
+
+    {
+      "fullUrl": "Observation/962",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "962",
+        "status": "final",
+        "category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "survey", "display": "Survey"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "razel-prom-01", "display": "Functional recovery score"}], "text": "Patient-reported functional recovery score"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "effectiveDateTime": "2024-08-15T09:00:00+10:00",
+        "valueQuantity": {"value": 27, "unit": "score", "system": "http://unitsofmeasure.org", "code": "{score}"}
+      }
+    }
+
+  ]
+}

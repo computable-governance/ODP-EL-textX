@@ -311,6 +311,14 @@ sub-case distinction: `docs/design_notes/R33_triggered_by_rule_spec.md`.
 
 ---
 
+### 3.16 Observation (progress/PROM score) → Burden + violation_response escalation (R39)
+
+| Rule | FHIR source | DSL-EL target | Notes |
+|------|-------------|----------------|-------|
+| R39 | Observation | `CommitmentDecl` + `burden` token (governance-policy deadline) + `violation_response` (escalate) | Touchpoint 6 (recovery/allied health) implemented 2026-08-30 — see tests/test_fhir_mapper_r39_observation_review.py. No AU-specific Observation profile exists anywhere in `~/fhir-docker-folder/package/` (confirmed by a full search) — grounded against the real base FHIR R4 core package instead (`hl7.fhir.r4.core#4.0.1`). Holder resolved via `.basedOn` → `ServiceRequest` → that `ServiceRequest`'s own already-resolved `Commitment.by` (reused, not recomputed) — **not** `.performer` directly: the base profile confirms `.performer`'s target types include `Patient` (a self-reported PROM commonly has the patient as performer), which would incorrectly obligate the patient to review their own score. `.performer` is used only as a fallback when `.basedOn` doesn't resolve, itself run through `_resolve_commitment_accountable_party`. `deadline: "7 days"` is a **genuine governance-policy constant, not derived from any FHIR field** — a real clinical-governance rule layered on top of the data, unlike R08's blank-deadline gap. `discharge_mode` must stay `eventual`, never `strict` — `check_live_violations()` (`el_engine.py`) explicitly skips every `strict` burden. One rule number, no static/live split like R37/R38 — no new live bridge needed: `check_live_violations()`/`fire_violation_responses()` are already-existing, generic engine functions. `escalate_to` resolves to the accountable party of whichever `ServiceRequest` has the earliest `.authoredOn` in the bundle (the referral that started the patient's journey), computed once per bundle. The escalation-notice burden mirrors `escalationNoticeBurden` in the real `referral_scenario.el` exactly (`state: active`, `discharge_mode: strict`, `priority: critical`, no `holds` clause — `fire_violation_responses()` grants it dynamically only when it fires). When neither `.basedOn` nor `.performer` resolves to anything at all, nothing is created for that `Observation` — a blank `commitment.by:` would be a textX **parse** failure (a mandatory cross-reference), not just a validator warning, distinct from AM-71/AM-72's "reference exists but doesn't resolve" tiers. |
+
+---
+
 ## 4. Validation Pipeline
 
 The generated `.el` specification is validated at three levels:
