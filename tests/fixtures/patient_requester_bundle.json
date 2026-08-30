@@ -1,0 +1,78 @@
+{
+  "resourceType": "Bundle",
+  "id": "patient-requester-bundle-001",
+  "type": "collection",
+  "timestamp": "2024-07-01T09:00:00+10:00",
+  "entry": [
+
+    {
+      "fullUrl": "Patient/roberts-fred",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "roberts-fred",
+        "name": [{"family": "Roberts", "given": ["Fred"]}],
+        "birthDate": "1961-06-16"
+      }
+    },
+
+    {
+      "fullUrl": "Organization/brisbane-endocrinology",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "brisbane-endocrinology",
+        "name": "Brisbane Endocrinology Specialists",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/lindqvist-anya",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "lindqvist-anya",
+        "name": [{"family": "Lindqvist", "given": ["Anya"], "prefix": ["Dr"]}]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/endocrinologist-lindqvist-anya",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "endocrinologist-lindqvist-anya",
+        "practitioner": {"reference": "Practitioner/lindqvist-anya"},
+        "organization": {"reference": "Organization/brisbane-endocrinology"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/901",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "901",
+        "status": "active",
+        "intent": "order",
+        "category": [{"coding": [{"system": "http://snomed.info/sct", "code": "306207008", "display": "Referral to physiotherapist"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "306207008", "display": "Referral to physiotherapist"}], "text": "Referral to physiotherapist"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "authoredOn": "2024-07-01",
+        "requester": {"reference": "Patient/roberts-fred"},
+        "note": [{"text": "Self-referral submitted via Consumer App following post-thyroidectomy recovery guidance."}]
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/902",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "902",
+        "status": "active",
+        "intent": "order",
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "390906007", "display": "Follow-up visit"}], "text": "Post-operative follow-up"},
+        "subject": {"reference": "Patient/roberts-fred"},
+        "authoredOn": "2024-07-01",
+        "requester": {"reference": "PractitionerRole/endocrinologist-lindqvist-anya"}
+      }
+    }
+
+  ]
+}
