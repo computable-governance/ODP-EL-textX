@@ -4375,3 +4375,42 @@ fix (likely a `holds` clause emission alongside each `ELToken`, wired
 into whichever party/agent object the burden's holder resolves to).
 
 ---
+
+## PractitionerRole-as-requester crashes validation entirely (ServiceRequest.requester) — OPEN FINDING (2026-08-30)
+
+**Found:** 2026-08-30, while investigating the holds-clause gap against
+real ConnectedCare touchpoint 3+4 data.
+
+_resolve_commitment_accountable_party (fhir_mapper.py:307) silently
+mis-handles a ServiceRequest.requester reference pointing at a
+PractitionerRole resource. Its docstring's "requester does not reference
+a Practitioner" case assumes the reference is already resolved (e.g. an
+Organization) -- but a PractitionerRole reference is NOT already
+resolved this way, and no _map_* function ever turns a PractitionerRole
+resource into a declared ELObject. Result: the generated commitment.by
+names an object that was never declared, causing a hard validator
+failure -- [SEMANTIC] Unknown object "<Name>" of class "EnterpriseObject"
+-- before the pipeline ever completes.
+
+This is more severe than a silent gap: PractitionerRole-as-requester is
+standard AU Core practice, not an edge case, so ANY real ConnectedCare
+(or other AU-shaped) bundle authored this way currently fails validation
+entirely. Every existing test fixture in this repo happens to use
+requester: {"reference": "Practitioner/..."} directly, which is why this
+was never caught until real touchpoint data was run through the pipeline
+(2026-08-30 investigation, confirmed via in-memory workaround -- rewrote
+requester to reference Practitioner/ directly, no source file modified).
+
+Higher priority than the sibling holds-clause finding logged the same
+day: that one is a silent no-op affecting live-runtime behaviour; this
+one is a hard parse/validate failure blocking the static pipeline
+outright for realistic input shapes.
+
+Not yet scoped as a fix -- whoever picks this up should design a
+_map_practitioner_role (or equivalent) resolving a PractitionerRole
+reference to its underlying Practitioner (and/or declaring the
+PractitionerRole itself as an ELObject, matching however Organization
+references are already handled), then wire it into
+_resolve_commitment_accountable_party's requester-resolution logic.
+
+---
