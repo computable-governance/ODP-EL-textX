@@ -151,6 +151,7 @@ class ELToken:
     description: str = ""
     fhir_ref: str = ""
     triggered_by: str = ""        # R33a — el_id of an ELEvent, provenance only
+    holder_el_id: str = ""        # el_id of the ELObject that `holds` this token; "" = ungranted
 
 @dataclass
 class ELEvent:
@@ -780,11 +781,37 @@ class FHIRConsentMapper:
         if for_action_unresolved:
             token_description += " [R07] UNRESOLVED for_action — no DSL action mapping, verify manually"
 
+        # R06 (holds-clause emission) — grant this burden to the same
+        # accountable party resolved above for commitment.by, closing the
+        # docs/CONCEPTS_INDEX.md "mapper-generated burdens are declared but
+        # never granted" gap (2026-08-30) for the R05-R08 path specifically.
+        # requester_el is only a safe `holds` target if it actually names a
+        # declared ELObject — AM-71's tier 0c explicitly accepts that it may
+        # not (e.g. a dangling PractitionerRole reference with no matching
+        # object at all). Checked independently of requester_warning: a
+        # tier-0b warning can still resolve to a validly-declared object
+        # (a Practitioner, which R03 always declares), so "warning present"
+        # and "not a declared object" are not the same condition. If
+        # unresolved, the burden stays ungranted (never fabricate a holder
+        # the bundle doesn't support) — visible via a description tag, not
+        # a spec.log entry, mirroring how requester_warning itself is
+        # surfaced (embedded in text, not logged as a fired rule).
+        if any(o.el_id == requester_el for o in spec.objects):
+            holder_el_id = requester_el
+        else:
+            holder_el_id = ""
+            token_description += (
+                f" [R06] UNRESOLVED holder — burden not granted to any "
+                f"declared object (accountable party '{requester_el}' is "
+                f"not declared). Verify accountability manually."
+            )
+
         token = ELToken(
             el_id=burden_id,
             kind="burden",
             for_action=action,
             deadline=deadline,
+            holder_el_id=holder_el_id,
             discharge_mode=discharge_mode,
             priority=priority,
             description=token_description,
@@ -899,6 +926,8 @@ class FHIRConsentMapper:
 
         spec.tokens.append(token)
         spec.log("R07", fhir_ref, burden_id)
+        if holder_el_id:
+            spec.log("R06", holder_el_id, burden_id)
 
         # R05 — commitment
         commitment_description = f"[R05] Commitment from ServiceRequest/{sr_id}"
@@ -1279,7 +1308,7 @@ class FHIRConsentMapper:
         # Objects
         lines.append("// ── Parties and Agents " + "─" * 38)
         for obj in spec.objects:
-            lines += self._render_object(obj)
+            lines += self._render_object(obj, spec.tokens)
             lines.append("")
 
         # Tokens
@@ -1325,14 +1354,19 @@ class FHIRConsentMapper:
 
         return "\n".join(lines)
 
-    def _render_object(self, obj: ELObject) -> List[str]:
+    def _render_object(self, obj: ELObject, tokens: List[ELToken]) -> List[str]:
+        held_token_ids = [t.el_id for t in tokens if t.holder_el_id == obj.el_id]
         lines = [
             f"{obj.kind} {obj.el_id}",
             f'    description: "{obj.description}"',
         ]
-        has_body = obj.delegated_from or obj.principal_of
+        has_body = held_token_ids or obj.delegated_from or obj.principal_of
         if has_body:
             lines.append("    {")
+            # Grammar body order (ObjectBody, el_grammar.tx): holds_tokens,
+            # then delegated_from, then principal_of.
+            for tok_id in held_token_ids:
+                lines.append(f"        holds {tok_id}")
             if obj.delegated_from:
                 lines.append(f"        delegated_from {obj.delegated_from}")
             for p in obj.principal_of:

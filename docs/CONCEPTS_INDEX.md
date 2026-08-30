@@ -4347,7 +4347,34 @@ throughout (never violate, at any tick tested), while
 
 ---
 
-## Mapper-generated burdens are declared but never granted (no live TokenInstance) — OPEN FINDING (2026-08-30)
+## Mapper-generated burdens are declared but never granted (no live TokenInstance) — RESOLVED (2026-08-30)
+
+**OPEN FINDING (2026-08-30), RESOLVED same day**
+
+**Fix, scoped to R05-R08 specifically (the ServiceRequest → Commitment +
+Burden path):** `_map_service_request` now grants the burden directly to
+the same accountable party already resolved for `commitment.by` (via
+`_resolve_commitment_accountable_party`, AM-71) — but only when that
+el_id actually names a declared `ELObject` (checked at map time, since
+demographics are always mapped before `ServiceRequest`s). `ELToken`
+gains a `holder_el_id` field; `_render_object` emits a `holds <burden>`
+clause inside the holder's body (grammar `ObjectBody` order: `holds`,
+then `delegated_from`, then `principal_of`). When the holder can't be
+resolved (the same dangling-reference risk AM-71's tier (c) already
+accepted), the burden stays ungranted — never fabricate a holder the
+bundle doesn't support — with an `[R06] UNRESOLVED holder` tag on its
+description instead of a silent gap. `Runtime.build_from_spec()` now
+produces a real live `TokenInstance` for these burdens — verified against
+`scenarios/fhir/generated_governance.el` (regenerated) and
+`tests/test_fhir_mapper_holds_clause.py`.
+
+**Confirmed NOT fixed, deliberately out of scope:** R16/R17 (`Consent` →
+`permit`/`embargo` via `Authorization`) has the identical underlying
+gap — checked, not assumed: even the hand-authored `referral_scenario.el`
+cannot use a `holds` clause for an `Authorization`-granted permit at all
+(`el_api.py`'s scenario builders hand-maintain a hardcoded
+`grant_token()` list instead, entirely bypassing both `holds` and
+`Runtime.build_from_spec()`'s generic mechanism). Left for a future pass.
 
 **Found:** 2026-08-30, during R37b test-writing (`fhir_event_handler.py`).
 
@@ -4365,14 +4392,17 @@ had to manually grant a token before it could exercise R37b's real
 (non-idempotent) discharge path against mapper output — the mapper's own
 generated community provides no live instance to test against as-is.
 
-Not yet scoped as a fix — flagging as a genuine, previously-undiscovered
+~~Not yet scoped as a fix — flagging as a genuine, previously-undiscovered
 gap in the mapper's output, separate from R37a/R37b, affecting every
 mapper-generated burden across every rule (R05–R37a), not just
 Procedure-related ones. Whoever picks this up next should check whether
 party declarations in the generated output are even meant to `holds`
 the burdens they're accountable for, and if so, design the mapper-side
 fix (likely a `holds` clause emission alongside each `ELToken`, wired
-into whichever party/agent object the burden's holder resolves to).
+into whichever party/agent object the burden's holder resolves to).~~
+Resolved same day for the R05-R08 path via the fix noted at the top of
+this entry — R16/R17 confirmed to have the same gap and remains open,
+see the note above.
 
 ---
 

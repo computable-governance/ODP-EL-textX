@@ -2,7 +2,7 @@
  * Generated governance specification
  * Source: FHIR Bundle/ai-diagnostic-governance-bundle-001
  * Generator: fhir_mapper.py (ComputableGovernance toolchain)
- * Mapping rules applied: R01, R02, R03, R04, R05, R07, R09, R16, R17, R18
+ * Mapping rules applied: R01, R02, R03, R04, R05, R06, R07, R09, R16, R17, R18
  *
  * This file is machine-generated. Do not edit manually.
  * Re-generate by running: python fhir_mapper.py
@@ -17,6 +17,7 @@ enterprise specification AiDiagnosticGovernanceBundle001GovernanceSpec
 party GpPractice001
     description: "[R01] Data controller: Northside GP Practice"
     {
+        holds ReferralSr001Obligation
         principal_of SpecialistDrOkonkwo
     }
 
@@ -138,6 +139,7 @@ authorization ConsentAiDiagnostic001Auth {
  * [R03] Practitioner/specialist-dr-okonkwo            → SpecialistDrOkonkwo  (party or agent (role-dependent))
  * [R04] Device/ai-diagnostic-agent-001                → AiDiagnosticAgent001  (agent (AI system))
  * [R07] ServiceRequest/referral-sr-001                → ReferralSr001Obligation  (obligation text + burden token)
+ * [R06] GpPractice001                                 → ReferralSr001Obligation  (commitment.by)
  * [R05] ServiceRequest/referral-sr-001                → ReferralSr001Commitment  (CommitmentDecl)
  * [R09] Task/task-specialist-001                      → TaskSpecialist001Delegation  (DelegationDecl)
  * [R09] Task/task-ai-agent-001                        → TaskAiAgent001Delegation  (DelegationDecl)

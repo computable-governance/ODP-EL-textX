@@ -96,6 +96,27 @@ requester crashes validation entirely" (2026-08-30) for the real
 ConnectedCare data that surfaced the original gap — see
 `tests/test_fhir_mapper_practitioner_role_requester.py`.
 
+**R06 holds-clause emission (fixed 2026-08-30):** the same accountable
+party resolved above for `commitment.by` is now also granted the burden
+directly — a `holds <burden>` clause is emitted inside that party's
+declared object body, but only when the resolved el_id actually names a
+declared `ELObject` (checked at map time, since demographics — R01/R02/
+R03/R04 — are always mapped before `ServiceRequest`s). When it doesn't
+(the tier (c) dangling case above), the burden is left ungranted — never
+fabricate a holder the bundle doesn't support — and an `[R06] UNRESOLVED
+holder` tag is added to the burden's own description instead. This
+closes `docs/CONCEPTS_INDEX.md`'s "Mapper-generated burdens are declared
+but never granted (no live TokenInstance)" (2026-08-30) for this path —
+`Runtime.build_from_spec()` now produces a real, live `TokenInstance` for
+every burden whose accountable party resolves cleanly. **Scoped to
+R05-R08 only** — R16/R17 (`Consent` → `permit`/`embargo` via
+`Authorization`, §3.4 below) has the identical underlying gap (confirmed,
+not assumed: even the hand-authored `referral_scenario.el` cannot use a
+`holds` clause for an `Authorization`-granted permit — `el_api.py`'s
+scenario builders hand-maintain a hardcoded `grant_token()` list instead)
+and remains unfixed, deliberately out of scope for this pass. See
+`tests/test_fhir_mapper_holds_clause.py`.
+
 ---
 
 ### 3.3 Task → Delegation Chain

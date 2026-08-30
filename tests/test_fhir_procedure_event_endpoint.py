@@ -15,14 +15,18 @@ module-level _runtime/_active_community to point at it — closing the loop
 from R37a's static output to R37b's live discharge through the real
 generated .el text, not a synthetic probe.
 
-The generated community (fhir_mapper.py's _render_community) never emits
-'holds' clauses, so burdens start with no live TokenInstance at all —
-exercising discharge_burden()'s "no live instance" no-op path (AM-68)
-naturally, straight out of the mapper, with no injection needed. The
-"discharged" (real transition) case needs one token manually granted first,
-mirroring test_fhir_event_handler.py's own pattern of directly manipulating
-_runtime._state to set up a scenario a hand-authored spec doesn't already
-provide.
+Since the "mapper-generated burdens are declared but never granted"
+fix (docs/CONCEPTS_INDEX.md, 2026-08-30 — the R05-R08 path specifically),
+the generated community now emits a real `holds` clause for each burden
+whose accountable party resolves to a declared object, so
+Runtime.build_from_spec() grants a real live TokenInstance for
+Id401Obligation (held by RiverbendClinic001) straight out of the mapper —
+no manual injection needed any more. This means the FIRST live
+procedure_event call now produces a genuine "discharged" transition, and
+a SECOND call is what exercises discharge_burden()'s "already discharged"
+idempotent no-op path (AM-68) — the reverse ordering from before this fix,
+when the first call always hit the no-live-instance no-op because nothing
+was ever granted at construction.
 """
 import importlib
 import json
@@ -72,48 +76,39 @@ def _procedure(status: str, sr_ref: str = "ServiceRequest/401", procedure_id: st
     }
 
 
-def test_procedure_completed_with_no_prior_grant_is_already_discharged(api):
-    """Straight out of the mapper: Id401Obligation has no live TokenInstance
-    at all (the generated community never emits 'holds'), so this exercises
-    AM-68's no-live-instance no-op path — reported as 'already_discharged',
-    not an error."""
-    resp = api.procedure_event(_procedure("completed"))
-
-    assert resp.action_taken == "already_discharged"
-    assert resp.burden_name == "Id401Obligation"
-    assert resp.fhir_provenance == "proc-1"
-    assert resp.outcome == "ok"
-    assert resp.effects == []
-    assert resp.tick is not None
-    assert resp.updated_world is not None
-
-
-def test_procedure_completed_discharges_a_granted_burden(api):
-    """Manually grant Id401Obligation first (mirrors test_fhir_event_handler
-    .py's own pattern of setting up a state a hand-authored/generated spec
-    doesn't already provide) — then confirm a real discharge happens."""
-    from el_engine import TokenInstance
-
-    state = api._runtime.current_state()
-    granted = state.with_tokens(list(state.tokens) + [
-        TokenInstance(
-            token_name="Id401Obligation",
-            kind="burden",
-            holder="RiverbendClinic001",
-            state="active",
-            discharge_mode="eventual",
-            priority="normal",
-            granted_at_tick=state.tick,
-        )
-    ])
-    api._runtime._state = granted
-
+def test_procedure_completed_discharges_the_mapper_granted_burden(api):
+    """Straight out of the mapper: Id401Obligation is already a real, live,
+    'active' TokenInstance held by RiverbendClinic001 (the holds-clause fix)
+    — no manual injection needed. The first live procedure_event call
+    produces a genuine 'discharged' transition."""
     resp = api.procedure_event(_procedure("completed"))
 
     assert resp.action_taken == "discharged"
     assert resp.burden_name == "Id401Obligation"
+    assert resp.fhir_provenance == "proc-1"
+    assert resp.outcome == "ok"
     assert resp.authority == "RiverbendClinic001"
     assert resp.effects and "Id401Obligation" in resp.effects[0]
+    assert resp.tick is not None
+    assert resp.updated_world is not None
+
+    after = [t for t in api._runtime.current_state().tokens if t.token_name == "Id401Obligation"]
+    assert after and after[0].state == "discharged"
+
+
+def test_procedure_completed_second_call_is_idempotent_already_discharged(api):
+    """A second live procedure_event call against the same (now-discharged)
+    burden exercises discharge_burden()'s idempotent no-op path (AM-68) —
+    reported as 'already_discharged', not an error."""
+    first = api.procedure_event(_procedure("completed", procedure_id="proc-1"))
+    assert first.action_taken == "discharged"
+
+    second = api.procedure_event(_procedure("completed", procedure_id="proc-2"))
+
+    assert second.action_taken == "already_discharged"
+    assert second.burden_name == "Id401Obligation"
+    assert second.outcome == "ok"
+    assert second.effects == []
 
     after = [t for t in api._runtime.current_state().tokens if t.token_name == "Id401Obligation"]
     assert after and after[0].state == "discharged"
