@@ -4376,7 +4376,19 @@ into whichever party/agent object the burden's holder resolves to).
 
 ---
 
-## PractitionerRole-as-requester crashes validation entirely (ServiceRequest.requester) — OPEN FINDING (2026-08-30)
+## PractitionerRole-as-requester crashes validation entirely (ServiceRequest.requester) — RESOLVED (2026-08-30)
+
+**OPEN FINDING (2026-08-30), RESOLVED same day**
+
+**Fix:** a new PractitionerRole-direct branch in
+`_resolve_commitment_accountable_party` (`fhir_mapper.py`), resolving
+via a direct `by_ref` lookup in three tiers — `.organization` found
+(clean resolution), no `.organization` (falls back to the
+PractitionerRole's own `.practitioner` reference, with a warning), or
+the PractitionerRole not found in the bundle at all / has neither field
+(falls back to the raw reference, with a warning). Verified against the
+real touchpoint-3 data that originally surfaced this finding — see
+`tests/test_fhir_mapper_practitioner_role_requester.py`.
 
 **Found:** 2026-08-30, while investigating the holds-clause gap against
 real ConnectedCare touchpoint 3+4 data.
@@ -4406,11 +4418,54 @@ day: that one is a silent no-op affecting live-runtime behaviour; this
 one is a hard parse/validate failure blocking the static pipeline
 outright for realistic input shapes.
 
-Not yet scoped as a fix -- whoever picks this up should design a
+~~Not yet scoped as a fix -- whoever picks this up should design a
 _map_practitioner_role (or equivalent) resolving a PractitionerRole
 reference to its underlying Practitioner (and/or declaring the
 PractitionerRole itself as an ELObject, matching however Organization
 references are already handled), then wire it into
-_resolve_commitment_accountable_party's requester-resolution logic.
+_resolve_commitment_accountable_party's requester-resolution logic.~~
+Resolved same day via the fix noted at the top of this entry — no
+separate `_map_practitioner_role`/ELObject declaration turned out to be
+needed; direct-lookup accountability resolution was sufficient (see the
+follow-on design note below on whether role-fulfilment itself is worth
+modelling explicitly).
+
+---
+
+## PractitionerRole/Organization mapping could model role-fulfilment explicitly, not just resolve accountability — OPEN FINDING (2026-08-30)
+
+**Found:** 2026-08-30, while grounding the PractitionerRole-as-requester
+fix against ISO/IEC 15414.
+
+The standard's own concepts map cleanly onto this FHIR structure:
+Practitioner ~ Party/active enterprise object (§6.2 — "parties can have
+intentions and are accountable for their actions"); Organization ~
+Community, with its own contract/objective/roles (matches the standard's
+own library worked example, B.2.2.4-B.2.2.7 — "the libraryCommunity is
+composed of objects fulfilling the roles identified above"); PractitionerRole
+is NOT itself a party or active enterprise object at all — it's FHIR's
+literal encoding of a role-fulfilment relationship, matching §7.8.2's own
+definition almost word for word ("an enterprise object fulfilling the
+role, <X>").
+
+This validates the just-fixed accountability-resolution logic
+(PractitionerRole -> Organization) as conceptually correct, not merely a
+workaround — the community genuinely is where organisational
+accountability sits per §7.6.2's assignment-policy concept.
+
+But it also surfaces a bigger, separate opportunity: the mapper's
+generated role blocks currently render as empty {} bodies (confirmed
+during both R34 and R35's grounding work) — zero real content. A richer
+future mapping could actually DECLARE the role-fulfilment structure the
+standard describes: a real role element on the Organization-community
+(e.g. role generalPractitionerRole), with the Practitioner represented as
+the enterprise object currently assigned to fulfil it (§7.6.2's
+assignment policy, made concrete), rather than flattening PractitionerRole
+into a one-off accountability lookup and discarding the rest.
+
+Not scoped as a fix — this is a design-depth question (does the mapper
+ever need to model role-assignment explicitly, or is accountability
+resolution alone sufficient for the toolchain's purposes?), not a bug.
+Separate from, and lower priority than, anything currently in flight.
 
 ---
