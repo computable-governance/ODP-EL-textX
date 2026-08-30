@@ -91,6 +91,93 @@ that should be made deliberately, with the person, not defaulted to
 whichever is less code (same discipline as the R37b import-vs-duplicate
 decision, AM-68).
 
+## 4a. A third option: Path C -- no grammar or engine change at all
+
+accept/reject (AM-60) was purpose-built for exactly one use case,
+DN_003's delegation-claiming problem -- confirmed directly from the
+amendment log, not assumed. Before AM-60, Evaluation was pure free text
+(STRING/STRING), "confirmed decorative, with zero runtime handlers" --
+AM-60 added a second, STRUCTURED alternative alongside the original
+free-text form; it did not replace or narrow it. The grammar's own
+comment: "the original free-text credit-rating-style use... is untouched
+and continues to have no engine effect, exactly as before."
+
+This means the free-text path has always been exactly general enough
+for a PROM trend judgment -- it is closer to Evaluation's ORIGINAL
+purpose than the accept/reject form is, not a stretch of it.
+
+The real distinguishing question is not "which form is semantically
+broad enough" -- both are -- but "does this decision need real engine
+significance at runtime." accept/reject matters to the ENGINE because
+claim-acceptance is a genuine live, unpredictable-timing decision made
+by a real actor while the system is running (AM-61/AM-62 have to react
+to it as it happens). A PROM trend judgment is different in kind: it is
+knowable entirely from FHIR data already present, AT MAP TIME --
+comparing two Observations and computing "deteriorating" is the same
+KIND of decision fhir_mapper.py already makes constantly (R38's holder
+resolution, R39's .basedOn-vs-.performer choice) -- resolved once, in
+Python, before any .el text is generated. It does not need a live actor
+deciding anything at runtime the way claim-acceptance genuinely does.
+
+Path C: the trend-gating decision lives ENTIRELY in mapper-side Python
+-- no grammar change, no new engine logic. The mapper computes the
+trend (comparing sorted Observations for the same patient/instrument)
+and decides whether to emit the review-burden + violation_response,
+exactly like every other conditional-emission decision in
+fhir_mapper.py today. A free-text Evaluation could still be emitted
+purely for AUDIT TRACEABILITY (recording why the mapper made that call,
+human-readable, in the generated .el) -- but it would carry no engine
+significance whatsoever, matching its original, pre-AM-60 purpose
+exactly.
+
+Two-layer shape, worth stating explicitly: (1) SENSE -- each Observation
+gets assigned a domain value (a score or graded status) -- this is
+purely §6.6.7's evaluation concept; (2) ACT -- a trend function over a
+SEQUENCE of those values decides whether to create the Burden -- a
+discrete governance decision, not a continuous computation. Trend is a
+second-order comparison over prior Evaluation.result values, not a
+delta computed directly over raw clinical data -- this keeps "value"
+doing real work at each individual measurement, with "trend" a
+genuinely separate, higher-order operation on top of it.
+
+No recommendation between Path A/B and Path C made here either -- same
+discipline as §4's existing A-vs-B framing.
+
+## 4b. "Value" (§6.6.7) is not the same concept as this toolchain's
+    utility/Bellman machinery -- important to keep separate
+
+This toolchain already has a formal, working notion of "utility" --
+el_kripke.py's utility_for_objective(), used by the Bellman planner to
+reason about which future actions best advance obligation-discharge. It
+would be a real design mistake to conflate this with §6.6.7's "value"
+just because the vocabulary overlaps.
+
+§6.6.7's value ("usefulness, importance, preference, acceptability") is
+a domain-specific judgment an evaluator assigns to some EXTERNAL thing
+(a bid's quality, a credit score, a patient's functional status) -- an
+INPUT to the governance model. The Kripke layer's utility is a measure
+of how well the OBLIGATION/TOKEN STATE SPACE is progressing toward a
+declared objective -- computed over possible worlds of deontic token
+states, not clinical measurements. Different mathematical objects,
+different domains, sharing a word by coincidence, not by design.
+
+Concretely: do not feed a PROM score into utility_for_objective()'s
+formula. The two-layer sense-then-act pattern in §4a mirrors reward->
+policy structure only conceptually (assess a signal, then act on it) --
+it is not, and should not become, a literal Bellman formulation.
+
+**Explicitly deferred, flagged but not part of this design's near-term
+scope:** a much bigger, more speculative question -- could a community's
+stated OBJECTIVE itself ever explicitly include something like patient
+wellbeing (not just formal obligation-discharge), such that clinical
+"value" and governance "utility" become genuinely the same mathematical
+quantity, feeding one unified Bellman formulation? A real, interesting
+research question, possibly paper-relevant -- but a much bigger,
+separate idea than solving the escalation problem here, and conflating
+the two now would make a simple, working mechanism unnecessarily
+complicated. Logged here as a flagged future thought, not scoped, not
+to be picked up alongside Path A/B/C.
+
 ## 5. The harder, separate problem: baseline comparison
 
 Determining "deteriorating" requires comparing AT LEAST TWO Observations
@@ -140,7 +227,8 @@ creation mechanism), rather than solving them independently.
 
 ## 8. Recommended next step, whenever this is picked up
 
-Decide Path A vs Path B first (a genuine design conversation, not
-something to default), THEN scope the baseline-comparison mapper logic
-separately -- these are two different decisions and shouldn't be bundled
-into one CC prompt.
+Decide between Path A, Path B, and Path C first (a genuine design
+conversation, not something to default), THEN scope the baseline-
+comparison mapper logic separately (relevant regardless of which path is
+chosen for the gating decision itself) -- these are two different
+decisions and shouldn't be bundled into one CC prompt.
