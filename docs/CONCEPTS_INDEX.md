@@ -4346,3 +4346,32 @@ throughout (never violate, at any tick tested), while
 `5b21dc9` already established (elapsed ≥ 40 / ≥ 112 respectively).
 
 ---
+
+## Mapper-generated burdens are declared but never granted (no live TokenInstance) — OPEN FINDING (2026-08-30)
+
+**Found:** 2026-08-30, during R37b test-writing (`fhir_event_handler.py`).
+
+`fhir_mapper.py`'s generated community blocks declare every burden R05
+through R37a create (as `DeonticToken` elements), but never emit a
+`holds` clause anywhere. Consequence: when a mapper-generated `.el` spec
+is parsed and run live via `Runtime.build_from_spec()`, zero live
+`TokenInstance`s exist for any mapper-generated burden — they're
+declared in the spec, but held by nobody.
+
+This means no mapper-generated output has ever actually been runnable in
+the sense of having a real, discharge-able/violate-able token in
+`state.tokens`. It's why `tests/test_fhir_procedure_event_endpoint.py`
+had to manually grant a token before it could exercise R37b's real
+(non-idempotent) discharge path against mapper output — the mapper's own
+generated community provides no live instance to test against as-is.
+
+Not yet scoped as a fix — flagging as a genuine, previously-undiscovered
+gap in the mapper's output, separate from R37a/R37b, affecting every
+mapper-generated burden across every rule (R05–R37a), not just
+Procedure-related ones. Whoever picks this up next should check whether
+party declarations in the generated output are even meant to `holds`
+the burdens they're accountable for, and if so, design the mapper-side
+fix (likely a `holds` clause emission alongside each `ELToken`, wired
+into whichever party/agent object the burden's holder resolves to).
+
+---
