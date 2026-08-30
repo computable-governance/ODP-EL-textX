@@ -86,6 +86,51 @@ R26-R29 probe — Encounter.status: finished -> fires 'encounterConcluded'
   seeding design (status -> state mapping table, deadline computation,
   etc.) tracked as item #1 in docs/CONCEPTS_INDEX.md's priority
   sequencing; that remains future work.
+
+R37b — Procedure.status: completed -> discharges the burden its ordering
+  ServiceRequest created (DN_009 §2.5, live half; R37a, fhir_mapper.py, is
+  the static provenance-only half). handle_procedure_event() calls
+  Runtime.discharge_burden() (AM-68) directly (in-process).
+
+  Architecturally different from R31/R30/R26-R29 above: those all target a
+  single, fixed, scenario-specific name (PATIENT_DATA_AUTHORIZATION,
+  ENCOUNTER_CONCLUDED_EVENT) — "one well-known target, this event either
+  matches it or doesn't." R37b cannot work that way: which burden to
+  discharge depends on which ServiceRequest the incoming Procedure
+  fulfils, so there is no fixed-name constant here. burden_name is
+  derived dynamically per call: burden_name =
+  f"{_sanitize_id(f'ServiceRequest/{sr_id}')}Obligation" — the exact same
+  naming convention fhir_mapper.py's R05/R07 rule uses to generate the
+  burden in the first place (fhir_mapper.py's _map_service_request).
+
+  _sanitize_id is imported directly from fhir_mapper, not duplicated.
+  This codebase has two live precedents for the import-vs-duplicate
+  choice: el_kripke.py imports _build_obligation_descriptors/
+  _parse_deadline_steps directly from el_engine.py (Layer 4 depending on
+  Layer 3's actual computation), while el_engine.py deliberately
+  duplicates _build_group_index from el_kripke.py "per the Layer 3/Layer
+  4 independence architecture" (AM-57) rather than import it. That
+  independence principle is specifically about keeping the two CORE
+  domain-independent governance layers decoupled from each other — it
+  does not apply here: fhir_mapper.py and fhir_event_handler.py are both
+  Layer 1 (FHIR-specific) modules already, sibling bridges, not
+  independent core layers. More importantly, burden_name here isn't a
+  self-contained algorithm computed fresh from each caller's own model
+  (like _build_group_index is) — it must stay byte-identical to a name
+  fhir_mapper.py already burned into a previously-generated .el file. A
+  duplicated copy of _sanitize_id could silently drift from the real one
+  (e.g. a future regex fix), making every live discharge attempt fail to
+  find its target with no warning beyond a generic "unknown_burden". This
+  matches the el_kripke/el_engine import precedent far more closely than
+  the AM-57 duplication one: import, don't duplicate.
+
+  status == "completed" AND .basedOn resolves to a ServiceRequest
+  reference is the only qualifying case — same status-qualification
+  finding as R37a (fhir_mapper.py), confirmed there against the real AU
+  Procedure profile's event-status binding: "not-done" is the explicit
+  negative, the rest (preparation/in-progress/on-hold/stopped/
+  entered-in-error/unknown) are incomplete or erroneous states. Reused
+  here, not re-derived.
 """
 
 from __future__ import annotations
@@ -95,6 +140,7 @@ from typing import Optional
 
 from el_engine import TransitionRecord
 from el_runtime import Runtime
+from fhir_mapper import _sanitize_id
 
 # Scenario-specific: the single patient-consent Authorization declared in
 # scenarios/referral/referral_scenario.el (and gp_referral_scenario.el).
@@ -119,6 +165,26 @@ class ConsentEventResult:
     fhir_provenance: str           # == fhir_consent_id; carried for API-layer stamping
     authorization_name: Optional[str] = None   # set when action_taken in ("revoked", "reinstated", "already_active")
     transition: Optional[TransitionRecord] = None   # set when action_taken in ("revoked", "reinstated", "already_active")
+
+
+@dataclass(frozen=True)
+class ProcedureEventResult:
+    """Outcome of feeding one FHIR Procedure resource to handle_procedure_event().
+
+    action_taken is one of "discharged" | "already_discharged" | "no_op" |
+    "unknown_burden" — see the module docstring's R37b section for exactly
+    what each means. burden_name is set whenever a burden name was actually
+    derived ("discharged", "already_discharged", "unknown_burden") — only
+    "no_op" leaves it None, since no ServiceRequest reference (or no
+    qualifying status) means there was nothing to derive a name from.
+    """
+    fhir_procedure_id: str
+    fhir_status: str
+    action_taken: str              # "discharged" | "already_discharged" | "no_op" | "unknown_burden"
+    message: str
+    fhir_provenance: str           # == fhir_procedure_id; carried for API-layer stamping
+    burden_name: Optional[str] = None                # None only when action_taken == "no_op"
+    transition: Optional[TransitionRecord] = None     # set only for "discharged"/"already_discharged"
 
 
 @dataclass(frozen=True)
@@ -322,4 +388,129 @@ def handle_encounter_event(
             "'cancelled' and 'entered-in-error' raise ValueError)."
         ),
         fhir_provenance=encounter_id,
+    )
+
+
+def handle_procedure_event(
+    procedure: dict,
+    runtime: Runtime,
+) -> ProcedureEventResult:
+    """
+    Apply a FHIR R4 Procedure resource event to `runtime` — R37b, the live
+    half of DN_009 §2.5's static/live split (R37a, fhir_mapper.py, is the
+    static provenance-only half; see this module's docstring for the full
+    architectural comparison against R31/R30/R26-R29's fixed-name shape).
+
+    status == "completed" with a .basedOn reference to a ServiceRequest:
+      derives burden_name = f"{_sanitize_id(f'ServiceRequest/{sr_id}')}Obligation"
+      (the same naming convention fhir_mapper.py's R05/R07 rule uses) and
+      calls Runtime.discharge_burden() (AM-68).
+        - TransitionRecord.discharged non-empty -> "discharged" (a real
+          transition happened).
+        - TransitionRecord.discharged empty (AM-68's no-op signal — the
+          burden was already discharged, or had no live TokenInstance at
+          all) -> "already_discharged". AM-68 does not distinguish those
+          two sub-cases at the engine level; neither does this handler.
+        - discharge_burden() raises KeyError (burden_name not declared as
+          a DeonticToken at all, or declared with a kind other than
+          'burden') -> "unknown_burden". Caught here, not propagated —
+          unlike handle_consent_event's fixed authorization_name (checked
+          once, up front, by the endpoint's own known_auths lookup before
+          this handler is ever called), burden_name is derived fresh on
+          every call from whatever ServiceRequest this Procedure happens
+          to reference, so "not declared" is a normal per-call outcome
+          here, not a precondition the caller could have checked in
+          advance.
+    status != "completed", or no basedOn -> ServiceRequest reference at
+      all: "no_op" — mirrors R37a's own status-qualification finding (see
+      module docstring).
+
+    Raises ValueError if the Procedure resource is missing 'id' or 'status'.
+    """
+    procedure_id = procedure.get("id")
+    status = procedure.get("status")
+    if not procedure_id:
+        raise ValueError("Procedure resource missing required 'id' field")
+    if not status:
+        raise ValueError("Procedure resource missing required 'status' field")
+
+    if status != "completed":
+        return ProcedureEventResult(
+            fhir_procedure_id=procedure_id,
+            fhir_status=status,
+            action_taken="no_op",
+            message=(
+                f"Procedure '{procedure_id}' status='{status}' is not "
+                "'completed' — not handled by this event handler (only a "
+                "completed Procedure can trigger a discharge attempt)."
+            ),
+            fhir_provenance=procedure_id,
+        )
+
+    sr_ref = next(
+        (
+            ref_dict.get("reference", "")
+            for ref_dict in procedure.get("basedOn", [])
+            if ref_dict.get("reference", "").startswith("ServiceRequest/")
+        ),
+        None,
+    )
+    if sr_ref is None:
+        return ProcedureEventResult(
+            fhir_procedure_id=procedure_id,
+            fhir_status=status,
+            action_taken="no_op",
+            message=(
+                f"Procedure '{procedure_id}' status=completed, but has no "
+                "basedOn reference to a ServiceRequest — nothing to "
+                "discharge."
+            ),
+            fhir_provenance=procedure_id,
+        )
+
+    sr_id = sr_ref.split("/", 1)[1]
+    burden_name = f"{_sanitize_id(f'ServiceRequest/{sr_id}')}Obligation"
+
+    try:
+        tr = runtime.discharge_burden(burden_name)
+    except KeyError as e:
+        return ProcedureEventResult(
+            fhir_procedure_id=procedure_id,
+            fhir_status=status,
+            action_taken="unknown_burden",
+            message=(
+                f"Procedure '{procedure_id}' status=completed, based on "
+                f"{sr_ref}, but burden '{burden_name}' is not declared in "
+                f"the current spec: {e}"
+            ),
+            fhir_provenance=procedure_id,
+            burden_name=burden_name,
+        )
+
+    if tr.discharged:
+        return ProcedureEventResult(
+            fhir_procedure_id=procedure_id,
+            fhir_status=status,
+            action_taken="discharged",
+            message=(
+                f"Procedure '{procedure_id}' status=completed: discharged "
+                f"burden '{burden_name}' ({'; '.join(tr.effects)})."
+            ),
+            fhir_provenance=procedure_id,
+            burden_name=burden_name,
+            transition=tr,
+        )
+
+    return ProcedureEventResult(
+        fhir_procedure_id=procedure_id,
+        fhir_status=status,
+        action_taken="already_discharged",
+        message=(
+            f"Procedure '{procedure_id}' status=completed: burden "
+            f"'{burden_name}' was already discharged (or never granted) — "
+            "nothing changed."
+        ),
+        fhir_provenance=procedure_id,
+        burden_name=burden_name,
+        transition=tr,
     )

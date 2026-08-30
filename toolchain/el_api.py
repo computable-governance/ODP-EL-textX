@@ -41,7 +41,7 @@ from el_kripke import (
 )
 from el_parser import parse
 from el_runtime import Runtime
-from fhir_event_handler import handle_consent_event, PATIENT_DATA_AUTHORIZATION
+from fhir_event_handler import handle_consent_event, handle_procedure_event, PATIENT_DATA_AUTHORIZATION
 from fhir_mapper import EncounterContext
 
 
@@ -546,6 +546,27 @@ class ConsentEventResponse(BaseModel):
     tick: Optional[int] = None
     authority: Optional[str] = None
     authorization_name: Optional[str] = None
+    outcome: Optional[str] = None
+    effects: Optional[List[str]] = None
+    updated_world: Optional[dict] = None
+    new_objective_score: Optional[float] = None
+    objective_reachable: Optional[bool] = None
+
+
+class ProcedureEventResponse(BaseModel):
+    fhir_procedure_id: str
+    fhir_status: str
+    fhir_provenance: str
+    action_taken: str              # "discharged" | "already_discharged" | "no_op" | "unknown_burden"
+    message: str
+    # populated only when action_taken in ("discharged", "already_discharged")
+    # (mirrors ConsentEventResponse's gating — burden_name is only ever
+    # derived for "unknown_burden" too, but is deliberately withheld here
+    # as well, same as ConsentEventResponse withholds authorization_name
+    # on its own no-op case; the derived name still appears in `message`)
+    burden_name: Optional[str] = None
+    tick: Optional[int] = None
+    authority: Optional[str] = None
     outcome: Optional[str] = None
     effects: Optional[List[str]] = None
     updated_world: Optional[dict] = None
@@ -1429,6 +1450,76 @@ def consent_event(consent: dict) -> ConsentEventResponse:
         tick=tr.tick,
         authority=tr.actor_name,
         authorization_name=result.authorization_name,
+        outcome=tr.outcome,
+        effects=list(tr.effects),
+        updated_world=updated_world,
+        new_objective_score=round(score, 4),
+        objective_reachable=reachable,
+    )
+
+
+# ── Endpoint: POST /fhir/procedure-events ──────────────────────────────────
+
+@app.post(
+    "/fhir/procedure-events",
+    response_model=ProcedureEventResponse,
+    summary="Ingest a FHIR Procedure resource event (R37b)",
+    description=(
+        "Accepts a FHIR R4 Procedure resource. status='completed' with a "
+        "basedOn reference to a ServiceRequest (R37b, live half of DN_009 "
+        "§2.5 — R37a in fhir_mapper.py is the static provenance-only half) "
+        "discharges that ServiceRequest's burden via "
+        "Runtime.discharge_burden() (AM-68). Unlike POST /fhir/consent-events, "
+        "there is no single fixed target: the burden name is derived "
+        "dynamically per call from the ServiceRequest id, using the same "
+        "naming convention fhir_mapper.py's R05/R07 rule uses to generate "
+        "it. action_taken: 'discharged' (real transition), "
+        "'already_discharged' (idempotent no-op — already discharged, or "
+        "never granted), 'unknown_burden' (the derived burden name is not "
+        "declared in the current spec), 'no_op' (status isn't 'completed', "
+        "or no basedOn -> ServiceRequest reference). 400 if the Procedure "
+        "resource is missing id/status."
+    ),
+)
+def procedure_event(procedure: dict) -> ProcedureEventResponse:
+    try:
+        result = handle_procedure_event(procedure, _runtime)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if result.action_taken not in ("discharged", "already_discharged"):
+        return ProcedureEventResponse(
+            fhir_procedure_id=result.fhir_procedure_id,
+            fhir_status=result.fhir_status,
+            fhir_provenance=result.fhir_provenance,
+            action_taken=result.action_taken,
+            message=result.message,
+        )
+
+    tr = result.transition
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    updated_world = {
+        "step": km.initial.step,
+        "obligations": {
+            oid: state.name for oid, state in sorted(km.initial.obligation_states)
+        },
+        "actors": {
+            actor: status.name for actor, status in sorted(km.initial.actor_states)
+        },
+    }
+    score = km.utility_for_objective(_active_community, km.initial)
+    prop = f"objective_satisfied:{_active_community}"
+    reachable = km.EF(km.initial, prop)
+
+    return ProcedureEventResponse(
+        fhir_procedure_id=result.fhir_procedure_id,
+        fhir_status=result.fhir_status,
+        fhir_provenance=result.fhir_provenance,
+        action_taken=result.action_taken,
+        message=result.message,
+        burden_name=result.burden_name,
+        tick=tr.tick,
+        authority=tr.actor_name,
         outcome=tr.outcome,
         effects=list(tr.effects),
         updated_world=updated_world,
