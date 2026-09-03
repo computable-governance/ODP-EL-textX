@@ -1771,6 +1771,20 @@ proposed addition may need revisiting — flagging this for Zoran's
 judgment, not editing `reviewer_response.md` or any paper file as part of
 this doc-cleanup fix.
 
+**Checked 2026-09-03 (design-chat session, against paper-draft files —
+not part of this repository, so not independently re-verifiable from
+here):** `reviewer_response.md`, `EDOC26_revision_notes.md`,
+`EDOC26_revision_notes_consolidated_2026-06-26.md`,
+`five_viewpoint_dsl_position_note.tex`, and `EDOC26final.tex` were
+grepped for `any_discharged`/`SUPERSEDED`/`TokenGroup`/"collective
+obligation" — zero matches in all five. The proposed Limitations-
+section addition was never actually drafted into any paper file; it
+existed only as an idea in this note. Since the underlying gap is
+resolved (AM-57, `specialist_pool_scenario.el`), there is nothing stale
+to correct. No paper file requires editing. (If those paper files are
+ever brought into this repo, this claim should be re-verified with a
+local grep rather than trusted from this note alone.)
+
 ---
 
 ## Amendments-log gap — AM-34 through AM-37 missing; dangling AM-34 reference
