@@ -264,6 +264,7 @@ def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None
     state = enroll(state, referring_practitioner, role_name="gpClinicianRole")
     state = enroll(state, referring_practitioner, role_name="referringRole")
     state = enroll(state, "SpecialistPractice",  role_name="practiceOversightRole")
+    state = enroll(state, gp_practice, role_name="gpPracticeOversightRole")
     state = enroll(state, "SpecialistClinician", role_name="specialistRole")
     state = enroll(state, "SpecialistClinician", role_name="referredToRole")
     state = enroll(state, "SpecialistAIAgent",   role_name="aiExaminationRole")

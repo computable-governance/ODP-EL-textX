@@ -133,10 +133,15 @@
  *   not participating in the original action). The full chain:
  *     referralResponseBurden VIOLATED
  *       -> escalationNoticeBurden created on SpecialistPractice
- *       -> discharged via notify_gp_of_non_response, which emits
- *          gpNotifiedOfNonResponse
- *       -> triggers reviewNonResponseAndDetermineNextStepsBurden on
- *          GPPractice (triggered_by, pending until fired)
+ *       -> discharged via notify_gp_of_non_response, which directly
+ *          creates reviewNonResponseAndDetermineNextStepsBurden on
+ *          GPPractice (effect create, not emits/triggered_by — that
+ *          mechanism was tried first and reverted same-day: it requires
+ *          a pre-existing pending token that nothing ever granted, and
+ *          GPPractice was never enrolled into practiceOversightRole in
+ *          the builder either. effect create matches the precedent
+ *          initiateReferral already uses for cross-community reactive
+ *          burden creation and needs neither.)
  *   Deliberately cause-agnostic: the model does not capture WHY
  *   referralResponseBurden was violated (capacity, inappropriate
  *   referral, oversight all produce the same undifferentiated VIOLATED
@@ -300,12 +305,11 @@ burden escalationNoticeBurden {
     description: "Obligation on specialist practice to notify GP practice of failure to respond to referral"
 }
 
-// Triggered by gpNotifiedOfNonResponse, emitted when escalationNoticeBurden is discharged.
+// Created directly (effect create) by notify_gp_of_non_response, discharging escalationNoticeBurden.
 burden reviewNonResponseAndDetermineNextStepsBurden {
     for_action: "reviewNonResponseAndDetermineNextSteps"
     state: active
     deadline: "48 hours from escalation notice"
-    triggered_by: gpNotifiedOfNonResponse
     discharge_mode: eventual
     priority: high
     description: "Obligation on GP practice to review the specialist's non-response and determine appropriate next steps for the referral"
@@ -467,12 +471,12 @@ community GPPracticeCommunity
             description: "Patient role — GPPracticeCommunity's own contract/invariants apply while the patient is under this practice's care"
             {}
 
-        role practiceOversightRole
+        role gpPracticeOversightRole
             description: "GP practice's own organisational oversight role — standing review/escalation-response responsibility, distinct from gpClinicianRole's clinical membership"
             {
                 action reviewNonResponseAndDetermineNextSteps {
                     description: "GP practice reviews the specialist's non-response to the referral and determines appropriate next steps"
-                    actor: practiceOversightRole
+                    actor: gpPracticeOversightRole
                     favoured_by_burden reviewNonResponseAndDetermineNextStepsBurden
                 }
             }
@@ -494,9 +498,6 @@ community SpecialistPracticeCommunity
     description: "Standing organisational community for the specialist practice — membership/employment only; referral-specific work lives in ReferralEpisodeCommunity"
     {
         objective: "Maintain a registered, capable specialist clinician workforce able to accept referrals"
-
-        event gpNotifiedOfNonResponse
-            description: "Emitted when specialist practice notifies GP practice that the referral response deadline was missed"
 
         invariant specialistRegistrationCurrency:
             "Specialist clinician must hold current specialist registration in the relevant clinical area to remain a member"
@@ -520,7 +521,7 @@ community SpecialistPracticeCommunity
                     description: "Specialist practice notifies GP practice that the referral response deadline was missed"
                     actor: practiceOversightRole
                     favoured_by_burden escalationNoticeBurden
-                    emits: gpNotifiedOfNonResponse
+                    effect create reviewNonResponseAndDetermineNextStepsBurden to gpPracticeOversightRole
                 }
             }
 

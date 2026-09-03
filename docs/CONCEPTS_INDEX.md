@@ -3758,12 +3758,19 @@ attaching to an object outside a role. Usable as support for a defensible
 
 **`emits` considered and deliberately not added to `notify_gp_of_non_response` (2026-08-20):** X.902 §8.4 defines event notification as a communication to objects *not participating* in the action — which is conceptually exactly the "notify GP practice" (`escalate_to`) signal. However, this toolchain's `emits` construct (`grammar/v2/el_grammar.tx` `EmitsDecl`) does NOT implement §8.4 outbound notification — it implements intra-spec token choreography: an emitted event makes a burden dischargeable (`discharged_by` match, `el_engine.py` `advance()` Step 3) or transitions a `triggered_by` token WAITING→active (Step 7c; mirrored in `el_kripke.py`'s P6a cascade). No token today has `discharged_by`/`triggered_by` pointing at a notification event from this action, so adding `emits` would declare an inert `EventDecl` with no consumer — the opposite of `favoured_by_burden`, whose governance-lookup consumer genuinely exists. The genuine §8.4 GP-practice notification belongs on the `escalate_to` side of the still-open `ViolationResponse` wiring task; revisit `emits` there only if/when a GP-side waiting-token or notification-consumer actually exists. (Grammar v1 confirmed inert: `el_parser.py` hardcodes `grammar/v2/el_grammar.tx`, zero functional v1 references. `setup.cfg`/`setup.py` reference a dead nonexistent `odpel` package — documented cleanup, not blocking.)
 
-**Resolved 2026-09-03:** that GP-side consumer now exists —
-`reviewNonResponseAndDetermineNextStepsBurden` (`triggered_by:
-gpNotifiedOfNonResponse`). `emits: gpNotifiedOfNonResponse` was added to
-`notify_gp_of_non_response`, giving this action a real, non-inert
-`EventDecl` for the first time. Parsed/validated clean; full suite
-passing (321/321).
+**Correction, same day:** the above was resolved via `emits`/
+`triggered_by`, but that mechanism turned out to be non-functional in
+the live builder — `triggered_by` requires a pre-existing `pending`
+token that nothing ever granted, and `GPPractice` was never enrolled
+into the new `gpPracticeOversightRole` either, so nothing could attach
+to it. Neither gap was caught by parse/validate or the full suite, only
+by a test that actually tried to exercise the live chain end-to-end.
+Re-resolved same day using `effect create
+reviewNonResponseAndDetermineNextStepsBurden to gpPracticeOversightRole`
+on `notify_gp_of_non_response` instead — self-contained, no pre-grant
+needed, matches the precedent `initiateReferral` already uses for
+cross-community reactive burden creation. `emits`/`event
+gpNotifiedOfNonResponse` removed as no longer used.
 
 ---
 
@@ -4613,5 +4620,34 @@ next should add the same empty-string guard to `_map_service_request`
 and `_map_medication_request` that R39 already has, plus a regression
 fixture (a `ServiceRequest`/`MedicationRequest` with no `.requester`
 field at all) to prove it.
+
+---
+
+## `effect create ... to <Role>` target resolution has no community scoping — role names must be unique across communities when used as effect-create targets
+
+**Found and fixed same day (2026-09-03), during AM-75's escalation-chain
+work.** `el_engine.py`'s `effect create` target resolution matches by
+bare role-name string across every enrolled actor in the whole
+`WorldState` — it does not scope by which community declares the role.
+`GPPracticeCommunity` and `SpecialistPracticeCommunity` both declaring a
+role named `practiceOversightRole` caused a single `effect create ...
+to practiceOversightRole` to grant the token to *both* practices'
+actors, not just the intended one — confirmed empirically (two `created`
+effects, two live tokens, one per practice).
+
+Fixed by renaming the newly-added `GPPracticeCommunity` role to
+`gpPracticeOversightRole` — a naming-collision avoidance, not an engine
+change. No other two communities in the current scenario set share an
+action-bearing role name, so this was the only live instance.
+
+**Constraint on future scenario design:** role names used as `effect
+create ... to <Role>` targets must be unique across the whole spec, not
+just within their own community — `el_engine.py` does not (and,
+per this finding, currently cannot) disambiguate by community. Worth
+checking for name collisions before adding any new `effect create`
+target role, the same way `any_discharged`/`triggered_by` scenarios
+must check for the masked-sibling constraint. Not scheduled as an
+engine fix (community-scoped target resolution) unless a real scenario
+need for reusing a role name across communities actually arises.
 
 ---

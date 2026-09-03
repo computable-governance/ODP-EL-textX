@@ -30,11 +30,13 @@ from el_api import _build_referral_runtime
 from el_engine import (
     TokenInstance,
     _activate_triggered_tokens,
+    _build_group_index,
     advance,
     enroll,
     grant_token,
     initial_state,
 )
+from el_kripke import build_kripke_from_runtime
 from el_parser import parse_string
 from el_runtime import Runtime
 from fhir_event_handler import handle_encounter_event
@@ -277,3 +279,158 @@ def test_handle_encounter_event_missing_status_raises():
     runtime = _build_referral_runtime()
     with pytest.raises(ValueError, match="missing required 'status'"):
         handle_encounter_event({"resourceType": "Encounter", "id": "enc-x"}, runtime)
+
+
+# ── 6. reviewNonResponseAndDetermineNextStepsBurden group membership / happy-path (AM-75) ──
+
+def test_review_burden_not_member_of_referral_burden_group(spec):
+    """
+    Structural-only check: reviewNonResponseAndDetermineNextStepsBurden must
+    never be a member of referralBurdenGroup — it only exists on the
+    escalation path (violation -> escalationNoticeBurden ->
+    notify_gp_of_non_response -> gpNotifiedOfNonResponse -> this burden), so
+    including it would block an ordinary (non-violated) episode from ever
+    satisfying the episode's all_discharged objective. Reuses
+    el_engine._build_group_index() (AM-57's own group-membership helper)
+    rather than re-parsing TokenGroup members by hand.
+    """
+    group_index = _build_group_index(spec)
+    assert "reviewNonResponseAndDetermineNextStepsBurden" not in group_index["referralBurdenGroup"]
+
+
+def test_happy_path_episode_completes_without_triggering_review_burden():
+    """
+    Drives a normal referral episode to completion via the real actions —
+    no violation ever occurs — then confirms ReferralEpisodeCommunity's
+    objective becomes satisfied (via build_kripke_from_runtime()'s hybrid
+    mode, the same live-state-anchored bridge tests/test_referral_kripke.py's
+    AF/EF checks already use) and that
+    reviewNonResponseAndDetermineNextStepsBurden was never triggered by this
+    violation-free run.
+
+    Discharge sequence follows the real for_action/actor/favoured_by_burden
+    wiring in referral_scenario.el (confirmed via grep, not invented), and
+    reuses tests/test_referral_ai_examination_permit_gate.py's precondition-
+    facts precedent for conductAIExamination — the only precedent in the
+    suite for a live, multi-action discharge sequence against this scenario.
+
+    reviewNonResponseAndDetermineNextStepsBurden is NOT among the tokens
+    _build_referral_runtime() grants (confirmed empirically — same
+    live-granting gap as escalationNoticeBurden, which is likewise never
+    granted at builder time and only ever materializes dynamically via
+    fire_violation_responses()). So "never triggered" is asserted as
+    "no such token exists in live state at all", not as a state value on a
+    token that was never granted in the first place.
+    """
+    runtime = _build_referral_runtime()
+
+    r1 = runtime.advance(
+        "initiateReferral", "GPClinician",
+        facts={"Patient must have an active episode of care and clinical indication for referral": True},
+    )
+    assert r1.outcome == "ok"
+
+    r2 = runtime.advance("acknowledgeReferral", "SpecialistClinician")
+    assert r2.outcome == "ok"
+
+    r3 = runtime.advance(
+        "provideHandover", "GPClinician",
+        facts={"Referral must be active and acknowledged by specialist": True},
+    )
+    assert r3.outcome == "ok"
+
+    r4 = runtime.advance(
+        "scheduleAssessment", "SpecialistClinician",
+        facts={"Referral must be acknowledged and patient availability confirmed": True},
+    )
+    assert r4.outcome == "ok"
+
+    r5 = runtime.advance(
+        "conductAIExamination", "SpecialistAIAgent",
+        facts={"AI agent must hold patientRecordAccessPermitByAuthorization": True},
+    )
+    assert r5.outcome == "ok"
+
+    for token_name in (
+        "referralInitiationBurden", "referralResponseBurden", "clinicalHandoverBurden",
+        "assessmentSchedulingBurden", "aiExaminationBurden",
+    ):
+        assert _referral_burden_state(runtime, token_name) == "discharged"
+
+    km = build_kripke_from_runtime(runtime, horizon=10)
+    assert km.satisfies(km.initial, "objective_satisfied:ReferralEpisodeCommunity")
+
+    assert not any(
+        t.token_name == "reviewNonResponseAndDetermineNextStepsBurden"
+        for t in runtime.current_state().tokens
+    )
+
+
+def test_escalation_path_grants_review_burden_to_gp_practice():
+    """
+    The test that actually proves the escalation feature works, complementing
+    the happy-path regression guard above. Drives referralResponseBurden to
+    a REAL 'violated' state via check_live_violations()'s genuine
+    elapsed-vs-deadline detection — not a hand-rolled _transition() shortcut
+    like tests/test_fire_violation_responses.py's own probe explicitly
+    documents using for its precondition. referralResponseBurden's deadline
+    ("5 working days from referral receipt") resolves to 40 steps (see
+    docs/CONCEPTS_INDEX.md's deadline-magnitude finding); advance_clock(41)
+    crosses it while staying well under assessmentSchedulingBurden's
+    112-step ("14 days") deadline, so only referralResponseBurden violates.
+
+    referralInitiationBurden (discharge_mode: strict) must be discharged
+    first — AM-49 blocks advance_clock() while any active, actionable
+    strict burden remains, mirroring el_kripke.py's Rule T3.
+
+    Then the real chain, end to end: fire_violation_responses() grants
+    escalationNoticeBurden to SpecialistPractice; the real
+    notify_gp_of_non_response action both discharges it and (via AM-75's
+    `effect create ... to gpPracticeOversightRole`, not emits/triggered_by —
+    see docs/CONCEPTS_INDEX.md's same-day correction) creates
+    reviewNonResponseAndDetermineNextStepsBurden for GPPractice specifically.
+
+    Also a direct regression guard for the role-name-collision bug found and
+    fixed the same day (docs/CONCEPTS_INDEX.md, "effect create ... to <Role>
+    target resolution has no community scoping"): asserts the burden lands
+    on GPPractice ONLY, not also on SpecialistPractice (both practices used
+    to share the literal role name "practiceOversightRole" before the fix).
+    """
+    runtime = _build_referral_runtime()
+
+    init_record = runtime.advance(
+        "initiateReferral", "GPClinician",
+        facts={"Patient must have an active episode of care and clinical indication for referral": True},
+    )
+    assert init_record.outcome == "ok"
+
+    clock_record = runtime.advance_clock(41)
+    assert clock_record.outcome == "ok"
+
+    violation_record = runtime.check_live_violations()
+    assert violation_record.outcome == "violation"
+    assert violation_record.violations == ("referralResponseBurden",)
+
+    fire_record = runtime.fire_violation_responses()
+    assert fire_record.fired_responses == ("referralNoResponseViolation",)
+    escalation_tok = next(
+        t for t in runtime.current_state().tokens if t.token_name == "escalationNoticeBurden"
+    )
+    assert escalation_tok.holder == "SpecialistPractice"
+    assert escalation_tok.state == "active"
+
+    notify_record = runtime.advance("notify_gp_of_non_response", "SpecialistPractice")
+    assert notify_record.outcome == "ok"
+    assert notify_record.effects == (
+        "discharged burden 'escalationNoticeBurden'",
+        "created 'reviewNonResponseAndDetermineNextStepsBurden' for 'GPPractice'",
+    )
+
+    review_tokens = [
+        t for t in runtime.current_state().tokens
+        if t.token_name == "reviewNonResponseAndDetermineNextStepsBurden"
+    ]
+    assert len(review_tokens) == 1
+    assert review_tokens[0].holder == "GPPractice"
+    assert review_tokens[0].state == "active"
+    assert not any(t.holder == "SpecialistPractice" for t in review_tokens)
