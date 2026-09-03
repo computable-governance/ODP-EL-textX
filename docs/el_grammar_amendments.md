@@ -4295,3 +4295,60 @@ Kripke reachability, live claim+lapse, live claimed-then-discharge, live
 reject no-op). Full suite: 203 pre-existing tests pass unchanged, plus 9
 new (212 total). Design source:
 `docs/design_notes/DN_003_delegation_claiming_evaluation.md`.
+
+---
+
+## AM-75 (2026-09-03) — reviewNonResponseAndDetermineNextStepsBurden: real §8.4 GP-side notification consumer for escalate_to
+
+**Not a grammar/domain/parser change** — a scenario + builder-level
+addition, logged per AM-63's actual format. Note: AM-63's own text
+claims this logging convention was "already established for AM-58...
+and AM-59" — checked directly, neither has a dedicated entry anywhere
+in this file, only passing references inside AM-63's own text. That
+claim is inaccurate; not corrected here, flagged for a separate
+docs-cleanup pass alongside the already-noted AM-73/AM-74 gap.
+
+**What it fixes:** `referral_scenario.el`'s `escalate_to: GPPractice`
+(on `referralNoResponseViolation`) previously produced only an
+informational effects-log line — no state change on `GPPractice`, so it
+did not meet X.902 §8.4's own definition of event notification
+("receipt of the notification changes the state of objects not
+participating in the original action"). This amendment gives
+`GPPractice` a real, live consumer: `reviewNonResponseAndDetermineNextStepsBurden`,
+granted directly via `effect create ... to gpPracticeOversightRole` on
+`notify_gp_of_non_response` (not `emits`/`triggered_by` — that
+mechanism was tried first, same day, and reverted: it requires a
+pre-existing `pending` token that nothing in the live builder ever
+granted). Deliberately cause-agnostic (the model doesn't capture *why*
+`referralResponseBurden` was violated) and deliberately NOT a member of
+`referralBurdenGroup` (would block ordinary, non-violated episodes from
+ever concluding). Single-hop escalation only — no further
+`ViolationResponse` chains onto it.
+
+**Two real gaps found and fixed empirically, same day, neither caught
+by parse/validate or the full suite alone:**
+1. `emits`/`triggered_by` (the first mechanism tried) never actually
+   fires in the live builder — reverted in favour of `effect create`.
+2. `GPPracticeCommunity`'s new oversight role initially collided in
+   name (`practiceOversightRole`) with `SpecialistPracticeCommunity`'s
+   existing role of the same name — `effect create ... to <Role>`
+   resolves by bare role-name string with no community scoping, so the
+   first fix granted the burden to *both* practices. Renamed to
+   `gpPracticeOversightRole`; logged as a standing constraint on future
+   scenario design (role names used as `effect create` targets must be
+   unique across the whole spec, not just within their own community).
+
+**Files changed:** `scenarios/referral/referral_scenario.el` (new
+burden, new role, new commitment, action wiring, header comment),
+`toolchain/el_api.py` (GPPractice enrolled into
+`gpPracticeOversightRole`), `tests/test_referral_event_triggers.py` (2
+new tests: structural non-membership in `referralBurdenGroup`, and the
+real end-to-end escalation-path proof via genuine
+`check_live_violations()`), `tests/test_gp_escalation_notification_chain.py`
+(new, general `emits`/`triggered_by` mechanism coverage, decoupled from
+this scenario's actual mechanism). Full suite: 325/325 passing. Design/
+finding detail in `docs/CONCEPTS_INDEX.md`'s same-day correction and
+the `effect create` community-scoping finding.
+
+Commits: `d3899b2` (initial), `7041870` (correction: effect create,
+role rename, builder fix).
