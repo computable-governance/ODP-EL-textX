@@ -127,7 +127,32 @@
  *
  * ViolationResponse:
  *   If referralResponseBurden is violated (specialist does not respond),
- *   SpecialistPractice must escalate and notify GPPractice.
+ *   SpecialistPractice must escalate and notify GPPractice — modelled as
+ *   a real §8.4 event notification, not just an informational log entry
+ *   (X.902 §8.4: receipt of a notification changes the state of objects
+ *   not participating in the original action). The full chain:
+ *     referralResponseBurden VIOLATED
+ *       -> escalationNoticeBurden created on SpecialistPractice
+ *       -> discharged via notify_gp_of_non_response, which emits
+ *          gpNotifiedOfNonResponse
+ *       -> triggers reviewNonResponseAndDetermineNextStepsBurden on
+ *          GPPractice (triggered_by, pending until fired)
+ *   Deliberately cause-agnostic: the model does not capture WHY
+ *   referralResponseBurden was violated (capacity, inappropriate
+ *   referral, oversight all produce the same undifferentiated VIOLATED
+ *   state), so GPPractice's obligation is "review and determine next
+ *   steps," not a prescribed specific action. Single-hop escalation
+ *   only — no further ViolationResponse chains onto
+ *   reviewNonResponseAndDetermineNextStepsBurden, matching
+ *   escalationNoticeBurden's own precedent (no recursive re-escalation
+ *   exists anywhere in this toolchain); if GPPractice also fails to
+ *   discharge it, it simply sits VIOLATED like any other unmet burden
+ *   — not a deadlock, since the chain is acyclic (nothing points back
+ *   at SpecialistClinician).
+ *   Deliberately NOT a member of referralBurdenGroup: it is only ever
+ *   triggered on the escalation path, so including it in the episode's
+ *   all_discharged objective would block ordinary (non-violated)
+ *   episodes from ever concluding.
  * ================================================================
  */
 
@@ -273,6 +298,17 @@ burden escalationNoticeBurden {
     discharge_mode: strict
     priority: critical
     description: "Obligation on specialist practice to notify GP practice of failure to respond to referral"
+}
+
+// Triggered by gpNotifiedOfNonResponse, emitted when escalationNoticeBurden is discharged.
+burden reviewNonResponseAndDetermineNextStepsBurden {
+    for_action: "reviewNonResponseAndDetermineNextSteps"
+    state: active
+    deadline: "48 hours from escalation notice"
+    triggered_by: gpNotifiedOfNonResponse
+    discharge_mode: eventual
+    priority: high
+    description: "Obligation on GP practice to review the specialist's non-response and determine appropriate next steps for the referral"
 }
 
 // AM-31b: two permits, reflecting two distinct ODP-EL grant mechanisms
@@ -431,6 +467,16 @@ community GPPracticeCommunity
             description: "Patient role — GPPracticeCommunity's own contract/invariants apply while the patient is under this practice's care"
             {}
 
+        role practiceOversightRole
+            description: "GP practice's own organisational oversight role — standing review/escalation-response responsibility, distinct from gpClinicianRole's clinical membership"
+            {
+                action reviewNonResponseAndDetermineNextSteps {
+                    description: "GP practice reviews the specialist's non-response to the referral and determines appropriate next steps"
+                    actor: practiceOversightRole
+                    favoured_by_burden reviewNonResponseAndDetermineNextStepsBurden
+                }
+            }
+
         lifecycle {
             establishing {
                 implicit: true
@@ -448,6 +494,9 @@ community SpecialistPracticeCommunity
     description: "Standing organisational community for the specialist practice — membership/employment only; referral-specific work lives in ReferralEpisodeCommunity"
     {
         objective: "Maintain a registered, capable specialist clinician workforce able to accept referrals"
+
+        event gpNotifiedOfNonResponse
+            description: "Emitted when specialist practice notifies GP practice that the referral response deadline was missed"
 
         invariant specialistRegistrationCurrency:
             "Specialist clinician must hold current specialist registration in the relevant clinical area to remain a member"
@@ -471,6 +520,7 @@ community SpecialistPracticeCommunity
                     description: "Specialist practice notifies GP practice that the referral response deadline was missed"
                     actor: practiceOversightRole
                     favoured_by_burden escalationNoticeBurden
+                    emits: gpNotifiedOfNonResponse
                 }
             }
 
@@ -714,6 +764,13 @@ commitment aiExaminationCommitment {
     obligation: "Conduct AI diagnostic examination of the referred patient and report findings back to the accountable clinician"
     creates_burden: aiExaminationBurden
     description: "Specialist clinician commits to ensuring AI-assisted diagnostic examination is conducted for the referred patient, prior to sub-delegating the work to the AI agent"
+}
+
+commitment reviewNonResponseCommitment {
+    by: GPPractice
+    obligation: "Review referral non-response escalations and determine appropriate next steps"
+    creates_burden: reviewNonResponseAndDetermineNextStepsBurden
+    description: "GP practice commits to reviewing and acting on non-response escalations from the specialist practice"
 }
 
 // Cross-organisational delegation — the TRUE referral delegation
