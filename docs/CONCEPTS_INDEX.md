@@ -3643,6 +3643,14 @@ resolved alongside the grant-tick design session, since both block the
 same feature (live violation detection + response wiring for the referral
 scenario).
 
+**Resolved (predates this note's own "Status: deferred" line, never
+back-filled):** commit `5572b69` (AM-46) added `practiceOversightRole`
+to `SpecialistPracticeCommunity` specifically so `SpecialistPractice`
+fills a `Role` and `notify_gp_of_non_response` could be declared as a
+real `Action` — the exact blocker this paragraph describes. Confirmed
+via `git log -S`. This paragraph's premise is stale; left in place for
+history, not as an open item.
+
 **Status: deferred, not decided piecemeal under today's momentum.** No
 code written for any of the four items in today's design spec. Next
 dedicated session should resolve both the grant-tick mechanism and the
@@ -3749,6 +3757,13 @@ attaching to an object outside a role. Usable as support for a defensible
 "grammar respects ISO 15414" conformance claim in the position paper.
 
 **`emits` considered and deliberately not added to `notify_gp_of_non_response` (2026-08-20):** X.902 §8.4 defines event notification as a communication to objects *not participating* in the action — which is conceptually exactly the "notify GP practice" (`escalate_to`) signal. However, this toolchain's `emits` construct (`grammar/v2/el_grammar.tx` `EmitsDecl`) does NOT implement §8.4 outbound notification — it implements intra-spec token choreography: an emitted event makes a burden dischargeable (`discharged_by` match, `el_engine.py` `advance()` Step 3) or transitions a `triggered_by` token WAITING→active (Step 7c; mirrored in `el_kripke.py`'s P6a cascade). No token today has `discharged_by`/`triggered_by` pointing at a notification event from this action, so adding `emits` would declare an inert `EventDecl` with no consumer — the opposite of `favoured_by_burden`, whose governance-lookup consumer genuinely exists. The genuine §8.4 GP-practice notification belongs on the `escalate_to` side of the still-open `ViolationResponse` wiring task; revisit `emits` there only if/when a GP-side waiting-token or notification-consumer actually exists. (Grammar v1 confirmed inert: `el_parser.py` hardcodes `grammar/v2/el_grammar.tx`, zero functional v1 references. `setup.cfg`/`setup.py` reference a dead nonexistent `odpel` package — documented cleanup, not blocking.)
+
+**Resolved 2026-09-03:** that GP-side consumer now exists —
+`reviewNonResponseAndDetermineNextStepsBurden` (`triggered_by:
+gpNotifiedOfNonResponse`). `emits: gpNotifiedOfNonResponse` was added to
+`notify_gp_of_non_response`, giving this action a real, non-inert
+`EventDecl` for the first time. Parsed/validated clean; full suite
+passing (321/321).
 
 ---
 
