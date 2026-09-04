@@ -4352,3 +4352,143 @@ the `effect create` community-scoping finding.
 
 Commits: `d3899b2` (initial), `7041870` (correction: effect create,
 role rename, builder fix).
+
+---
+
+## AM-76 (2026-09-04) — Extend `discharge_mode: strict` live enforcement beyond `advance_clock()` to `advance()`, `revoke_authorization()`, `reinstate_authorization()`, `discharge_burden()`, `fire_event()`
+
+**Status:** IMPLEMENTED (2026-09-04).
+
+**Problem:** closes the remainder of the `discharge_mode: strict`
+OPEN FINDING logged in `docs/CONCEPTS_INDEX.md` (2026-08-20), which
+AM-49 (2026-08-21) closed only partially. AM-49's own entry scoped
+itself deliberately narrowly: *"`advance()` itself is unaffected —
+this closes the gap only for the 'let time pass' primitive... Whether
+`advance()` needs an analogous guard for unrelated actions while a
+strict burden sits actionable is a separate question, not addressed
+here."* A direct grep of `el_engine.py` (design note DN_012, chat-level
+handoff, 2026-09-04) confirmed five functions advance
+`WorldState.tick` unconditionally, with zero branch on
+`discharge_mode` anywhere in their bodies: `advance()`,
+`revoke_authorization()`, `reinstate_authorization()`,
+`discharge_burden()`, `fire_event()`. Net effect: an actor could call
+any of these — on an action, authorization, or event completely
+unrelated to an outstanding `strict` Burden — repeatedly, while that
+Burden sat active and actionable, and nothing blocked it. This was the
+exact loophole the 2026-08-20 finding described; AM-49 closed it only
+for the explicit `advance_clock()` no-op primitive.
+(`check_live_violations()`/`fire_violation_responses()` were checked
+and are out of scope — both already exclude `strict` burdens by design
+and only advance tick as a side effect of an already-earned consequence
+on an `eventual` burden, mirroring Kripke's *unconditional* T2 rule
+rather than the gated T3 tick-rule.)
+
+**Design decision — global, not per-actor:** the guard checks
+`discharge_mode: strict` Burdens system-wide, exactly like AM-49's
+existing `_strict_actionable_burdens()` — not scoped to the calling
+actor. This mirrors Kripke Rule T3's own global condition ("NO PENDING
+strict obligation has an ACTIVE holder" — not "no PENDING strict
+obligation **held by this actor**"). Consequence, confirmed and
+accepted: if any `strict` Burden is outstanding anywhere in the
+system, no actor can take any action that doesn't discharge it — not
+just its holder.
+
+**What changed** (`toolchain/el_engine.py`):
+- Two new shared helpers, adjacent to AM-49's existing
+  `_strict_actionable_burdens()`/`_list_and()`:
+  - `_unaddressed_strict_burdens(state, addressed=None)` —
+    `_strict_actionable_burdens(state)` minus any token name in
+    `addressed`, i.e. the strict burdens a given call would still
+    leave outstanding if it proceeded.
+  - `_strict_block_reason(blocking, tail)` — the reason-string builder
+    extracted from `advance_clock()`'s AM-49 logic, parameterised by a
+    `tail` phrase, so every strict-mode guard reads identically.
+- `advance_clock()` refactored to call these two instead of its
+  inline duplicate of the same logic. Wording unchanged (tail:
+  `"before time can advance"`), so the three existing AM-49 tests in
+  `test_advance_clock.py` kept passing unmodified.
+- Five new call-site guards, each returning `outcome="blocked"` via
+  the existing `_blocked()`/`TransitionRecord` convention (never
+  raises for this case):
+  - `advance()` — new Step 3.5, inserted after `dischargeable` is
+    computed (Step 3) and before Preconditions (Step 4). Exempts any
+    burden this same call would discharge (`addressed=set(dischargeable)`),
+    since `advance()` on the actionable burden itself is exactly the
+    thing that must remain possible. Tail: `"before this action can
+    proceed"`.
+  - `revoke_authorization()` — guard inserted after the existing
+    `KeyError` checks (bad `authorization_name`, missing embargo),
+    before any token mutation. Tail: `"before the authorization can be
+    revoked"`.
+  - `reinstate_authorization()` — same placement/pattern. Tail:
+    `"before the authorization can be reinstated"`.
+  - `discharge_burden(burden_name)` — guard inserted right after
+    `holder` is resolved, before the token-transition logic. Exempts
+    the burden being discharged itself (`addressed={burden_name}`) —
+    discharging the blocking burden is always allowed. Tail: `"before
+    another burden can be discharged"`.
+  - `fire_event()` — guard inserted right after `tick = state.tick`,
+    before `_activate_triggered_tokens()`. Tail: `"before the event
+    can be fired"`.
+
+**Standard reference(s):** none new — same as AM-49: §6.4.3 (Burden),
+§7.8.7 (token state).
+
+**Empirical verification:** live spot-check against a fresh
+`_build_referral_runtime()` (which carries `referralInitiationBurden`,
+`discharge_mode: strict`, held by `GPClinician`, active and
+undischarged from construction) confirmed all five guards fire with
+the expected reason string, e.g. `advance()` →
+`"strict burden 'referralInitiationBurden' (held by 'GPClinician') is
+actionable and must be discharged before this action can proceed"`,
+and the parallel wording for `revoke_authorization()`,
+`reinstate_authorization()`, `fire_event()`; confirmed again against a
+fresh `_build_gp_referral_runtime()` for `revoke_authorization()`.
+
+Landing this surfaced that the global-scope decision collides broadly
+with the existing regression suite: 17 pre-existing tests across 6
+files called `revoke_authorization()`/`reinstate_authorization()`/
+`fire_event()` (via `advance()`'s dependency on it too) against
+`referral_scenario.el`/`gp_referral_scenario.el` fixtures that start
+with `referralInitiationBurden` outstanding — unrelated to what each
+test actually exercised, but now correctly blocked by the global
+guard. Fixed in two follow-on commits: 9 tests plus a structurally
+identical reinstate-endpoint pair (11 total) fixed by discharging
+`referralInitiationBurden` in fixture setup before the behaviour under
+test (`b0083ac`); `test_fhir_event_handler.py`'s 4 affected tests
+fixed the same way, plus one new test,
+`test_consent_inactive_revocation_blocked_while_strict_burden_outstanding`,
+added to assert the blocked-consent-revocation behaviour as documented
+behaviour in its own right rather than leaving it as an incidental
+side effect (`870ae0e`). One test,
+`test_revocation_endpoint.py::test_revocation_supersedes_only_authorization_permit`
+(`gp_referral_scenario.el`, superseded/historical scenario), remains
+unfixed as of this entry — tracked separately, fix pending in the same
+pass. Full suite as of this entry: 325 passed, 1 failed (that one
+known, tracked case).
+
+**Known follow-up, not fixed here:** landing this guard made a
+pre-existing latent bug in `fhir_event_handler.py` observable for the
+first time — `handle_consent_event()`'s `status == "inactive"` branch
+unconditionally sets `action_taken="revoked"` regardless of whether
+the underlying `revoke_authorization()` call actually succeeded or was
+blocked (invisible before AM-76, since `revoke_authorization()` never
+used to block). Logged as its own OPEN FINDING in
+`docs/CONCEPTS_INDEX.md` (2026-09-04), cross-referencing this entry,
+tentatively **AM-77**. Not fixed in this pass.
+
+**Files changed:** `toolchain/el_engine.py`
+(`_unaddressed_strict_burdens()`, `_strict_block_reason()`,
+`advance_clock()` refactored to use them, guards added to `advance()`,
+`revoke_authorization()`, `reinstate_authorization()`,
+`discharge_burden()`, `fire_event()`); `tests/test_referral_ai_examination_permit_gate.py`,
+`tests/test_referral_kripke_t6_permit_gate.py`,
+`tests/test_hybrid_t5_exercise_embargo_guard.py`,
+`tests/test_referral_revocation.py`, `tests/test_reinstate_endpoint.py`,
+`tests/test_revocation_endpoint.py`, `tests/test_fhir_event_handler.py`
+(fixture-setup fixes across all seven, one new test in the last);
+`docs/CONCEPTS_INDEX.md` (AM-77 latent-gap finding).
+
+Commits: `a916e6f` (engine guard), `b0083ac` (Bucket A + reinstate-pair
+fixture fixes), `870ae0e` (Bucket B fixture fixes + new test +
+CONCEPTS_INDEX entry).
