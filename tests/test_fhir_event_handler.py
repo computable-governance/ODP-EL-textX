@@ -42,6 +42,8 @@ def _permit_states(runtime):
 
 
 def test_consent_inactive_triggers_revocation_with_provenance(api):
+    api._runtime.discharge_burden("referralInitiationBurden")
+
     before = _permit_states(api._runtime)
     assert before[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "active"
     assert before[("patientRecordAccessPermitByRole", "SpecialistClinician")] == "active"
@@ -70,6 +72,46 @@ def test_consent_inactive_triggers_revocation_with_provenance(api):
     assert embargo[0].state == "active"
 
 
+def test_consent_inactive_revocation_blocked_while_strict_burden_outstanding(api):
+    """AM-76, documented directly: with referralInitiationBurden
+    (discharge_mode: strict, held by GPClinician) still outstanding — the
+    referral scenario's normal initial state, before any test-fixture
+    discharge — a Consent.status=inactive event must NOT actually revoke
+    patientDataAuthorization. Every other test in this file discharges
+    the burden in setup to reach the FHIR-specific behavior each one
+    actually targets; this is the one test that asserts the guard itself,
+    on its own merits, rather than routing around it as a fixture hazard.
+
+    Deliberately does not assert on resp.action_taken: handle_consent_event()
+    unconditionally reports "revoked" for status=="inactive" regardless of
+    whether the underlying revoke_authorization() call actually succeeded
+    or was blocked -- a separate, not-yet-fixed mislabeling (see
+    docs/CONCEPTS_INDEX.md, logged alongside AM-76). Ground truth here is
+    resp.outcome, the ledger's reason string, and the unchanged token
+    state -- not the label.
+    """
+    before = _permit_states(api._runtime)
+    assert before[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "active"
+
+    consent = {"resourceType": "Consent", "id": "consent-blocked", "status": "inactive"}
+    resp = api.consent_event(consent)
+
+    assert resp.outcome == "blocked"
+
+    ledger_reason = api._runtime._ledger[-1].reason
+    assert "referralInitiationBurden" in ledger_reason
+    assert "GPClinician" in ledger_reason
+
+    after = _permit_states(api._runtime)
+    assert after == before  # nothing changed -- the revoke never actually happened
+
+    embargo = [
+        t for t in api._runtime.current_state().tokens
+        if t.token_name == "patientRecordAccessEmbargo"
+    ]
+    assert not embargo, "no embargo should be created when revocation is blocked"
+
+
 def test_consent_active_when_already_active_is_a_true_no_op(api):
     """Referral scenario grants patientRecordAccessPermitByAuthorization
     active at construction, with no prior revoke — reinstate_authorization()
@@ -79,6 +121,8 @@ def test_consent_active_when_already_active_is_a_true_no_op(api):
     "reinstated"). No embargo exists yet either, so nothing else to lift.
     A real TransitionRecord still comes back (tick/authority/outcome are
     populated), it just documents that nothing changed."""
+    api._runtime.discharge_burden("referralInitiationBurden")
+
     before = _permit_states(api._runtime)
     assert before[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "active"
 
@@ -103,6 +147,8 @@ def test_consent_active_grants_permit_when_never_previously_granted(api):
     scenario builder always grants it at construction, so this is the
     only way to exercise reinstate_authorization()'s fresh-grant branch
     against a real scenario without inventing a new one."""
+    api._runtime.discharge_burden("referralInitiationBurden")
+
     tokens = tuple(
         t for t in api._runtime.current_state().tokens
         if t.token_name != "patientRecordAccessPermitByAuthorization"
@@ -126,6 +172,8 @@ def test_consent_active_reinstates_after_revoke_and_lifts_embargo(api):
     permit superseded + embargo active (post-revoke), then reinstate
     transitions permit -> active and embargo -> lifted, distinct from the
     'superseded' state a Permit gets when an Embargo takes over."""
+    api._runtime.discharge_burden("referralInitiationBurden")
+
     revoke_resp = api.consent_event(
         {"resourceType": "Consent", "id": "consent-revoke", "status": "inactive"}
     )

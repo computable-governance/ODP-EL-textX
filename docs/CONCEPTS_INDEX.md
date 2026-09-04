@@ -4651,3 +4651,61 @@ engine fix (community-scoped target resolution) unless a real scenario
 need for reusing a role name across communities actually arises.
 
 ---
+
+## `handle_consent_event()`'s `status=="inactive"` branch mislabels a blocked revocation as "revoked" — OPEN FINDING (2026-09-04)
+
+**Found while landing AM-76** (`docs/el_grammar_amendments.md`), which
+closed the `discharge_mode: strict` live-enforcement gap across
+`advance()`, `revoke_authorization()`, `reinstate_authorization()`,
+`discharge_burden()`, and `fire_event()` in `toolchain/el_engine.py`.
+AM-76 made `revoke_authorization()` able to return `outcome="blocked"`
+for the first time — before AM-76, a call to it always either succeeded
+(`outcome="ok"`) or raised `KeyError`, never blocked.
+
+`fhir_event_handler.py`'s `handle_consent_event()` was written against
+that pre-AM-76 assumption and never updated: its `status == "inactive"`
+branch (R31) calls `runtime.revoke_authorization(authorization_name)`
+and unconditionally sets `action_taken="revoked"` on the result,
+regardless of what `tr.outcome` actually is:
+
+```python
+if status == "inactive":
+    tr = runtime.revoke_authorization(authorization_name)
+    return ConsentEventResult(
+        ...
+        action_taken="revoked",
+        ...
+    )
+```
+
+There is no `if tr.outcome == "ok":` branch here the way the
+`status == "active"` branch below it inspects `tr.effects` to
+distinguish `"reinstated"` from `"already_active"`. So today, if a
+`discharge_mode: strict` Burden is outstanding anywhere in the system
+when a `Consent.status=inactive` FHIR event arrives, `revoke_authorization()`
+correctly blocks the revoke (AM-76) and the permit/embargo state is
+genuinely untouched — but `handle_consent_event()` still reports
+`action_taken="revoked"` to the caller, as if the revocation had
+happened. `el_api.py`'s `consent_event()` propagates `tr.outcome` on the
+response (`outcome="blocked"`), so the ground truth is recoverable by a
+caller that checks `outcome` — but `action_taken` alone is actively
+wrong in this case, not merely uninformative.
+
+**Invisible before AM-76, real now, and now covered by a passing test
+that deliberately routes around it rather than hiding it:**
+`tests/test_fhir_event_handler.py::test_consent_inactive_revocation_blocked_while_strict_burden_outstanding`
+asserts the actual ground truth (`resp.outcome == "blocked"`, the
+ledger's `reason` string, and unchanged token state) and explicitly
+does *not* assert on `resp.action_taken`, with a docstring note
+pointing at this finding.
+
+**Next action:** tentatively **AM-77** — give `handle_consent_event()`'s
+`status == "inactive"` branch the same outcome-inspection the
+`status == "active"` branch already has, e.g. `action_taken="revoked"`
+only when `tr.outcome == "ok"`, else something like
+`action_taken="blocked"` (new value; `ConsentEventResult`/
+`ConsentEventResponse`'s `action_taken` type comment would need
+updating alongside). Small, isolated fix — not bundled into AM-76
+itself, and not done in this pass.
+
+---
