@@ -34,7 +34,7 @@ guard confirming T1's new exclusion check doesn't overreach onto
 Burdens with no requires_permit link.
 """
 from el_api import _build_referral_runtime
-from el_engine import revoke_authorization
+from el_engine import discharge_burden, revoke_authorization
 from el_kripke import build_kripke_from_runtime
 from el_runtime import Runtime
 
@@ -52,6 +52,7 @@ def test_ai_examination_burden_ef_false_when_permit_revoked():
     could ever discharge aiExaminationBurden in this closed model."""
     rt = _build_referral_runtime()
     state, spec = rt.current_state(), rt._spec
+    state, _ = discharge_burden(state, spec, "referralInitiationBurden")
     revoked_state, _ = revoke_authorization(state, spec, "patientDataAuthorization")
     revoked_rt = Runtime(revoked_state, spec)
 

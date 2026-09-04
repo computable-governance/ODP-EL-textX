@@ -48,7 +48,7 @@ would itself be fragile in general — not an issue here since only one
 of the two permits is ever superseded by this specific revocation.
 """
 from el_api import _SCENARIO_BUILDERS
-from el_engine import reinstate_authorization, revoke_authorization
+from el_engine import discharge_burden, reinstate_authorization, revoke_authorization
 from el_kripke import build_kripke_from_runtime
 from el_parser import parse_string
 from el_runtime import Runtime
@@ -191,6 +191,7 @@ def test_hybrid_t5_revoke_authorization_removes_its_exercise_edge():
     finding for the general label-collision property this sidesteps.
     """
     rt = _SCENARIO_BUILDERS["referral"]()
+    rt._state, _ = discharge_burden(rt.current_state(), rt._spec, "referralInitiationBurden")
 
     km_before = build_kripke_from_runtime(rt, horizon=10)
     before_labels = set(km_before.labels.values())
@@ -224,6 +225,7 @@ def test_hybrid_t5_reinstate_authorization_restores_its_exercise_edge():
     as not-active — no guard code change was needed for this to work.
     """
     rt = _SCENARIO_BUILDERS["referral"]()
+    rt._state, _ = discharge_burden(rt.current_state(), rt._spec, "referralInitiationBurden")
 
     # Get to post-revoke state first.
     new_state, record = revoke_authorization(rt.current_state(), rt._spec, "patientDataAuthorization")

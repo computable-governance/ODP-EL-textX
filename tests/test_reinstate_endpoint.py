@@ -47,6 +47,7 @@ def _permit_states(runtime):
 def test_reinstate_after_revoke_activates_permit_and_lifts_embargo(api):
     # Pinned to the referral scenario, same as test_referral_revocation.py.
     api.switch_scenario("referral")
+    api._runtime.discharge_burden("referralInitiationBurden")
 
     api.revoke_authorization_endpoint("patientDataAuthorization")
     revoked = _permit_states(api._runtime)
@@ -74,6 +75,7 @@ def test_reinstate_after_revoke_activates_permit_and_lifts_embargo(api):
 
 def test_reinstate_when_already_active_is_idempotent_with_empty_effects(api):
     api.switch_scenario("referral")
+    api._runtime.discharge_burden("referralInitiationBurden")
 
     # Permit is active from initial scenario construction — no revoke first.
     before = _permit_states(api._runtime)

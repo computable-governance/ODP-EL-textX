@@ -39,6 +39,8 @@ def _permit_states(runtime):
 
 
 def test_referral_revocation_supersedes_only_authorization_permit(api):
+    api._runtime.discharge_burden("referralInitiationBurden")
+
     before = _permit_states(api._runtime)
     assert before[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "active"
     assert before[("patientRecordAccessPermitByRole", "SpecialistClinician")] == "active"
@@ -53,6 +55,8 @@ def test_referral_revocation_supersedes_only_authorization_permit(api):
 
 
 def test_referral_revocation_activates_embargo(api):
+    api._runtime.discharge_burden("referralInitiationBurden")
+
     api.revoke_authorization_endpoint("patientDataAuthorization")
     embargo = [
         t for t in api._runtime.current_state().tokens

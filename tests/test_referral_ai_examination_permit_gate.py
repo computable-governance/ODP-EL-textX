@@ -28,7 +28,7 @@ on every call so Step 6, not Step 4, is what's actually being
 exercised.
 """
 from el_api import _build_referral_runtime
-from el_engine import advance, reinstate_authorization, revoke_authorization
+from el_engine import advance, discharge_burden, reinstate_authorization, revoke_authorization
 
 ACTOR = "SpecialistAIAgent"
 ACTION = "conductAIExamination"
@@ -51,6 +51,7 @@ def _token(state, name, holder=ACTOR):
 def test_conductAIExamination_succeeds_when_permit_active():
     rt = _build_referral_runtime()
     state, spec = rt.current_state(), rt._spec
+    state, _ = discharge_burden(state, spec, "referralInitiationBurden")
 
     assert _token(state, PERMIT).state == "active"
 
@@ -64,6 +65,7 @@ def test_conductAIExamination_succeeds_when_permit_active():
 def test_conductAIExamination_blocked_after_permit_revoked():
     rt = _build_referral_runtime()
     state, spec = rt.current_state(), rt._spec
+    state, _ = discharge_burden(state, spec, "referralInitiationBurden")
 
     revoked_state, rev_record = revoke_authorization(state, spec, AUTHORIZATION)
     assert rev_record.outcome == "ok"
@@ -81,6 +83,7 @@ def test_conductAIExamination_blocked_after_permit_revoked():
 def test_conductAIExamination_succeeds_again_after_reinstatement():
     rt = _build_referral_runtime()
     state, spec = rt.current_state(), rt._spec
+    state, _ = discharge_burden(state, spec, "referralInitiationBurden")
 
     revoked_state, _ = revoke_authorization(state, spec, AUTHORIZATION)
     blocked_state, blocked_record = advance(revoked_state, ACTION, spec, ACTOR, facts=FACTS)

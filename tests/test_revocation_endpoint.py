@@ -70,6 +70,7 @@ def test_revocation_supersedes_only_authorization_permit_referral_scenario(api):
     # (promoted to Reference status, commit fadc237), whose patient party is
     # named "Patient" rather than gp_referral's "PatientParty".
     api._runtime = api._SCENARIO_BUILDERS["referral"]()
+    api._runtime.discharge_burden("referralInitiationBurden")
 
     before = _permit_states(api._runtime)
     # Sanity: both permits active before revocation
@@ -95,6 +96,8 @@ def test_revocation_supersedes_only_authorization_permit_referral_scenario(api):
 
 
 def test_revocation_activates_embargo(api):
+    api._runtime.discharge_burden("referralInitiationBurden")
+
     api.revoke_authorization_endpoint("patientDataAuthorization")
     embargo = [
         t for t in api._runtime.current_state().tokens
