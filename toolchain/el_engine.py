@@ -458,6 +458,17 @@ def advance(
                 and (tok.token_name, actor_name) in accept_evaluations):
             claimable_now.append(tok.token_name)
 
+    # ── Step 3.5: Strict-mode guard (AM-76) ───────────────────────────────────
+    # Mirrors el_kripke.py Rule T3 / advance_clock()'s AM-49 guard, extended
+    # to real domain actions: an active, actionable discharge_mode: strict
+    # Burden must be discharged before ANY action advances tick — global,
+    # not scoped to this actor — unless THIS call is the one discharging it
+    # (dischargeable, computed above, already covers exactly that case).
+    blocking = _unaddressed_strict_burdens(state, addressed=set(dischargeable))
+    if blocking:
+        reason = _strict_block_reason(blocking, "before this action can proceed")
+        return _blocked(state, actor_name, action_name, reason, tick)
+
     # ── Step 4: Preconditions ─────────────────────────────────────────────────
     if grammar_action:
         for precond in grammar_action.preconditions:
@@ -1174,6 +1185,12 @@ def revoke_authorization(
         raise KeyError(f"Authorization '{authorization_name}' has no on_revocation embargo")
 
     tick = state.tick
+
+    blocking = _unaddressed_strict_burdens(state)
+    if blocking:
+        reason = _strict_block_reason(blocking, "before the authorization can be revoked")
+        return _blocked(state, auth.authority.name, f"revoke:{authorization_name}", reason, tick)
+
     effects_log: list[str] = []
 
     # 1 — supersede the granted permit(s)
@@ -1254,6 +1271,12 @@ def reinstate_authorization(
         raise KeyError(f"Authorization '{authorization_name}' has no on_revocation embargo")
 
     tick = state.tick
+
+    blocking = _unaddressed_strict_burdens(state)
+    if blocking:
+        reason = _strict_block_reason(blocking, "before the authorization can be reinstated")
+        return _blocked(state, auth.authority.name, f"reinstate:{authorization_name}", reason, tick)
+
     effects_log: list[str] = []
 
     # 1 — (re-)activate the permit. Only append to effects_log when a real
@@ -1360,6 +1383,11 @@ def discharge_burden(
     ]
     holder = matching[0].holder if matching else "system"
 
+    blocking = _unaddressed_strict_burdens(state, addressed={burden_name})
+    if blocking:
+        reason = _strict_block_reason(blocking, "before another burden can be discharged")
+        return _blocked(state, holder, f"discharge:{burden_name}", reason, tick)
+
     tokens = [
         _transition(t, "discharged")
         if t.token_name == burden_name and t.kind == "burden" and t.state != "discharged"
@@ -1403,6 +1431,12 @@ def fire_event(
     about the calling context.
     """
     tick = state.tick
+
+    blocking = _unaddressed_strict_burdens(state)
+    if blocking:
+        reason = _strict_block_reason(blocking, "before the event can be fired")
+        return _blocked(state, source, f"fire_event:{event_name}", reason, tick)
+
     tokens, effects_log = _activate_triggered_tokens(spec, list(state.tokens), event_name)
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
@@ -1714,6 +1748,28 @@ def _list_and(items: List[str]) -> str:
     return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
+def _unaddressed_strict_burdens(
+    state: WorldState, addressed: Optional[Set[str]] = None
+) -> List[Tuple[str, str]]:
+    """AM-76: _strict_actionable_burdens(state) minus any token_name in
+    `addressed` — the strict burdens THIS call would still leave
+    outstanding if it proceeded. `addressed` names burdens the current
+    call discharges, not burdens already resolved by some earlier call."""
+    addressed = addressed or set()
+    return [(n, h) for n, h in _strict_actionable_burdens(state) if n not in addressed]
+
+
+def _strict_block_reason(blocking: List[Tuple[str, str]], tail: str) -> str:
+    """AM-76: shared reason-string builder, extracted from advance_clock()'s
+    AM-49 logic so every strict-mode guard reads identically. `tail` names
+    what can't proceed yet, e.g. 'before time can advance' or 'before this
+    action can proceed'."""
+    parts = [f"'{name}' (held by '{holder}')" for name, holder in blocking]
+    noun = "strict burden" if len(parts) == 1 else "strict burdens"
+    verb = "is" if len(parts) == 1 else "are"
+    return f"{noun} {_list_and(parts)} {verb} actionable and must be discharged {tail}"
+
+
 def advance_clock(state: WorldState, ticks: int) -> Tuple[WorldState, TransitionRecord]:
     """
     Let simulated time pass without performing any domain action.
@@ -1762,15 +1818,9 @@ def advance_clock(state: WorldState, ticks: int) -> Tuple[WorldState, Transition
 
     tick = state.tick
 
-    blocking = _strict_actionable_burdens(state)
+    blocking = _unaddressed_strict_burdens(state)
     if blocking:
-        parts = [f"'{name}' (held by '{holder}')" for name, holder in blocking]
-        noun = "strict burden" if len(parts) == 1 else "strict burdens"
-        verb = "is" if len(parts) == 1 else "are"
-        reason = (
-            f"{noun} {_list_and(parts)} {verb} actionable and must be "
-            f"discharged before time can advance"
-        )
+        reason = _strict_block_reason(blocking, "before time can advance")
         return _blocked(state, "system", "advance_clock", reason, tick)
 
     new_tick = tick + ticks
