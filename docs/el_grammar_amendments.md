@@ -4492,3 +4492,115 @@ tentatively **AM-77**. Not fixed in this pass.
 Commits: `a916e6f` (engine guard), `b0083ac` (Bucket A + reinstate-pair
 fixture fixes), `870ae0e` (Bucket B fixture fixes + new test +
 CONCEPTS_INDEX entry).
+
+## AM-78 (2026-09-08) — Loosen AM-76's strict-burden guard to T3's actual scope; close `conductAIExamination`'s missing referral-active precondition
+
+**Status:** IMPLEMENTED (2026-09-08).
+
+**Problem:** AM-76 made `advance()`/`discharge_burden()`/
+`revoke_authorization()`/`reinstate_authorization()`/`fire_event()`
+block whenever *any* `discharge_mode: strict` Burden is outstanding and
+the call doesn't discharge *that specific* burden. Confirmed directly
+in `build_kripke_from_runtime()`'s BFS loop: T1/T6 discharge-edge
+generation has no reference to any strict-burden guard at all — only
+the T3 tick-edge ("let time pass, nothing happens") is ever suppressed.
+AM-76 was stricter than the verifier it was meant to mirror: T1
+discharge edges for *other*, unrelated obligations were always meant to
+remain unconditionally available. Concretely, with
+`referralInitiationBurden` (strict) outstanding, the live engine
+incorrectly blocked `conductAIExamination` from discharging
+`aiExaminationBurden` — a real, unrelated discharge, not a no-op — even
+though the verifier's own T1/T3 rules say this should be fine. Design
+note: DN_013 (chat-level, 2026-09-08).
+
+Loosening the guard alone would have let `conductAIExamination` succeed
+immediately after Reset, before any referral exists (no precondition
+tied it to referral state) — worse to demo than the pre-AM-78 block. So
+this amendment closes that real domain gap in the same pass, at the
+grammar layer where it belongs, rather than leaving the loosened guard
+to expose it silently.
+
+**Design decision — don't touch the verifier:** `el_kripke.py`'s T1/T3
+rules are unchanged; they were always correct. This amendment brings
+the live engine back toward their actual scope instead of mirroring
+AM-76's over-tight reading into the verifier (rejected: doing so would
+make one stuck strict burden in one episode block *all* actions in
+every other concurrent episode too, system-wide — the guard has no
+community/episode scoping).
+
+**What changed** (`toolchain/el_engine.py`) — Part A:
+- **New rule:** a `discharge_mode: strict` Burden blocks a call only
+  when that call makes **zero discharge progress at all** — not
+  "doesn't address *this specific* strict burden."
+- `advance()` — Step 3.5 guard changed from
+  `_unaddressed_strict_burdens(state, addressed=set(dischargeable))` to
+  a plain emptiness check: `if not dischargeable:` before even
+  computing `_strict_actionable_burdens(state)`. Any call that
+  discharges *something* — even a burden unrelated to the outstanding
+  strict one — now proceeds.
+- `discharge_burden(name)` — **AM-76's guard removed entirely.** A
+  successful call to this function always discharges the named burden
+  by construction, so it can never be a no-progress action; there was
+  no scenario where the guard was ever correctly blocking here.
+- `revoke_authorization()`, `reinstate_authorization()`, `fire_event()`
+  — **unchanged.** These three never discharge anything
+  (`discharged=()` always), so unconditional blocking while any strict
+  burden is outstanding remains correct — this was the part of AM-76
+  that was always right.
+- `_strict_actionable_burdens()`, `_unaddressed_strict_burdens()`,
+  `_strict_block_reason()` (AM-49/AM-76 helpers) — unchanged; the three
+  functions above still call `_unaddressed_strict_burdens(state)` with
+  no `addressed` argument, exactly as before.
+
+**What changed** (`scenarios/referral/referral_scenario.el`) — Part B:
+- `conductAIExamination` gained a second `precondition:` string,
+  `"Referral must be active for AI examination to proceed"`, ahead of
+  its existing `"AI agent must hold
+  patientRecordAccessPermitByAuthorization"` precondition — matching
+  the exact two-precondition pattern already used by
+  `scheduleAssessment`/`provideHandover`. `ActionBodyItem`'s
+  `items*=ActionBodyItem` already supports multiple `PreconditionDecl`
+  per action (no grammar change needed); `advance()`'s Step 4 checks
+  each in order and blocks on the first unsatisfied one.
+
+**UI checkbox surface — checked, not generalized (see
+`docs/CONCEPTS_INDEX.md`, 2026-09-08 finding):** `el_api.py` does not
+expose `Action.preconditions` on any response model, so the
+coordination UI's existing per-action precondition checkboxes
+(`scheduleAssessment`/`provideHandover`) must already be hardcoded, not
+generic. The new `conductAIExamination` precondition is enforced
+correctly regardless (it flows through `advance()`'s existing generic
+Step 4 fact-lookup) but will need a manual addition to the UI's
+hardcoded list in `computable-governance-ui` before it gets a checkbox
+there. Logged as a separate, smaller follow-up rather than folded into
+this amendment.
+
+**Standard reference(s):** none new — same as AM-49/AM-76: §6.4.3
+(Burden), §7.8.7 (token state).
+
+**Empirical verification:** `tests/test_am78_strict_guard_loosening.py`
+(new) — `conductAIExamination` now discharges `aiExaminationBurden`
+against a fresh `_build_referral_runtime()` with
+`referralInitiationBurden` left outstanding and undischarged (previously
+blocked under AM-76); `access_patient_clinical_records` (discharges no
+burden) remains correctly blocked citing `referralInitiationBurden`;
+`discharge_burden("aiExaminationBurden")` now succeeds unconditionally
+under the same outstanding-strict-burden condition.
+`tests/test_referral_ai_examination_permit_gate.py` — new test
+confirms `conductAIExamination` blocks on the new precondition string
+when a caller supplies only the pre-AM-78 facts shape, and succeeds
+once both precondition facts are supplied. Full suite re-run: 329
+passed, 1 xfailed (the pre-existing, unrelated `gp_referral_scenario.el`
+xfail) — no regressions; AM-76's own fixture-setup `discharge_burden("
+referralInitiationBurden")` calls across the existing suite were left
+in place unmodified (now harmless-but-unnecessary in some cases, per
+DN_013 §5 — not scope-creeped into cleanup this pass).
+
+**Files changed:** `toolchain/el_engine.py` (`advance()` Step 3.5,
+`discharge_burden()` guard removed); `scenarios/referral/referral_scenario.el`
+(`conductAIExamination` second precondition); `tests/test_am78_strict_guard_loosening.py`
+(new); `tests/test_referral_ai_examination_permit_gate.py` (new test +
+`FACTS` updated for the new precondition); `tests/test_referral_event_triggers.py`
+(happy-path facts updated for the new precondition); `docs/CONCEPTS_INDEX.md`
+(AM-76 cross-reference back-filled with the AM-49→AM-76→AM-78 resolution
+chain; new UI-checkbox-hardcoding OPEN FINDING).

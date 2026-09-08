@@ -458,16 +458,20 @@ def advance(
                 and (tok.token_name, actor_name) in accept_evaluations):
             claimable_now.append(tok.token_name)
 
-    # ── Step 3.5: Strict-mode guard (AM-76) ───────────────────────────────────
-    # Mirrors el_kripke.py Rule T3 / advance_clock()'s AM-49 guard, extended
-    # to real domain actions: an active, actionable discharge_mode: strict
-    # Burden must be discharged before ANY action advances tick — global,
-    # not scoped to this actor — unless THIS call is the one discharging it
-    # (dischargeable, computed above, already covers exactly that case).
-    blocking = _unaddressed_strict_burdens(state, addressed=set(dischargeable))
-    if blocking:
-        reason = _strict_block_reason(blocking, "before this action can proceed")
-        return _blocked(state, actor_name, action_name, reason, tick)
+    # ── Step 3.5: Strict-mode guard (AM-78, loosened from AM-76) ──────────────
+    # Mirrors el_kripke.py Rule T3, which only ever suppresses the "let time
+    # pass, nothing happens" tick-edge — T1 discharge edges for other,
+    # unrelated obligations were always meant to remain unconditionally
+    # available. AM-76 over-tightened this to block any action that didn't
+    # address THIS specific strict burden; AM-78 restores the narrower scope:
+    # a strict burden blocks only genuine no-progress actions now (nothing in
+    # `dischargeable`) — any real discharge, even of an unrelated obligation,
+    # is allowed through.
+    if not dischargeable:
+        blocking = _strict_actionable_burdens(state)
+        if blocking:
+            reason = _strict_block_reason(blocking, "before this action can proceed")
+            return _blocked(state, actor_name, action_name, reason, tick)
 
     # ── Step 4: Preconditions ─────────────────────────────────────────────────
     if grammar_action:
@@ -1383,11 +1387,8 @@ def discharge_burden(
     ]
     holder = matching[0].holder if matching else "system"
 
-    blocking = _unaddressed_strict_burdens(state, addressed={burden_name})
-    if blocking:
-        reason = _strict_block_reason(blocking, "before another burden can be discharged")
-        return _blocked(state, holder, f"discharge:{burden_name}", reason, tick)
-
+    # AM-78: no strict-mode guard here — a successful call always discharges
+    # burden_name by construction, so it can never be a no-progress action.
     tokens = [
         _transition(t, "discharged")
         if t.token_name == burden_name and t.kind == "burden" and t.state != "discharged"

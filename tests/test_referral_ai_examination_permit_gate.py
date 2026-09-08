@@ -36,9 +36,12 @@ PERMIT = "patientRecordAccessPermitByAuthorization"
 AUTHORIZATION = "patientDataAuthorization"
 BURDEN = "aiExaminationBurden"
 
-# Satisfies conductAIExamination's free-text precondition field (Step 4)
+# Satisfies conductAIExamination's free-text precondition fields (Step 4)
 # on every call, so a blocked outcome can only be attributed to Step 6.
-FACTS = {"AI agent must hold patientRecordAccessPermitByAuthorization": True}
+FACTS = {
+    "Referral must be active for AI examination to proceed": True,
+    "AI agent must hold patientRecordAccessPermitByAuthorization": True,
+}
 
 
 def _token(state, name, holder=ACTOR):
@@ -98,3 +101,32 @@ def test_conductAIExamination_succeeds_again_after_reinstatement():
     assert record.outcome == "ok"
     assert record.discharged == (BURDEN,)
     assert _token(final_state, BURDEN).state == "discharged"
+
+
+def test_conductAIExamination_blocked_by_referral_active_precondition_gap():
+    """AM-78 Part B: conductAIExamination now carries a second precondition,
+    'Referral must be active for AI examination to proceed', matching the
+    pattern already used by scheduleAssessment/provideHandover. A caller
+    that supplies only the older permit-related fact (the previous FACTS
+    shape, pre-AM-78) is blocked on the new precondition string — closing
+    the domain gap AM-78's guard-loosening in Part A exposed (AI
+    examination could otherwise proceed immediately after Reset, before
+    any referral exists)."""
+    rt = _build_referral_runtime()
+    state, spec = rt.current_state(), rt._spec
+
+    old_facts_only = {"AI agent must hold patientRecordAccessPermitByAuthorization": True}
+    blocked_state, record = advance(state, ACTION, spec, ACTOR, facts=old_facts_only)
+
+    assert record.outcome == "blocked"
+    assert record.reason == (
+        "precondition not satisfied: "
+        "'Referral must be active for AI examination to proceed'"
+    )
+    assert blocked_state is state
+
+    new_state, record = advance(state, ACTION, spec, ACTOR, facts=FACTS)
+
+    assert record.outcome == "ok"
+    assert record.discharged == (BURDEN,)
+    assert _token(new_state, BURDEN).state == "discharged"

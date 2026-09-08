@@ -347,7 +347,10 @@ def test_happy_path_episode_completes_without_triggering_review_burden():
 
     r5 = runtime.advance(
         "conductAIExamination", "SpecialistAIAgent",
-        facts={"AI agent must hold patientRecordAccessPermitByAuthorization": True},
+        facts={
+            "Referral must be active for AI examination to proceed": True,
+            "AI agent must hold patientRecordAccessPermitByAuthorization": True,
+        },
     )
     assert r5.outcome == "ok"
 

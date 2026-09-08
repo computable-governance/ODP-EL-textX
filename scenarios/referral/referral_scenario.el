@@ -697,6 +697,7 @@ community ReferralEpisodeCommunity
                     description: "AI agent conducts diagnostic examination of the referred patient's record and reports findings back to the accountable specialist clinician"
                     actor: aiExaminationRole
                     artefact: patientRecord
+                    precondition: "Referral must be active for AI examination to proceed"
                     precondition: "AI agent must hold patientRecordAccessPermitByAuthorization"
                     requires_permit patientRecordAccessPermitByAuthorization for aiExaminationRole
                     favoured_by_burden aiExaminationBurden

@@ -3658,6 +3658,30 @@ dedicated session should resolve both the grant-tick mechanism and the
 spec (Action declaration, live-detection trigger, `ViolationResponse`
 firing, tests) can proceed against settled ground truth.
 
+**Resolved in three stages, back-filled here to avoid the drift this
+finding's own predecessor suffered (its own "Status: deferred" line was
+never back-filled — see the paragraph above):**
+1. **AM-49 (2026-08-21)** closed this finding only for the explicit
+   `advance_clock()` "let time pass, nothing happens" primitive —
+   deliberately scoped narrowly; AM-49's own entry says so.
+2. **AM-76 (2026-09-04)** extended live enforcement to `advance()`,
+   `revoke_authorization()`, `reinstate_authorization()`,
+   `discharge_burden()`, and `fire_event()` — but over-tightened
+   `advance()`/`discharge_burden()` to block *any* call that didn't
+   address the specific outstanding strict burden, not just genuine
+   no-progress calls. Stricter than Kripke Rule T3 itself, which only
+   ever suppresses the tick-edge; T1 discharge edges for unrelated
+   obligations were always meant to stay unconditionally available.
+3. **AM-78 (2026-09-08)** loosened `advance()`/`discharge_burden()` back
+   to T3's actual scope: they now block only when a call makes zero
+   discharge progress at all. `revoke_authorization()`,
+   `reinstate_authorization()`, and `fire_event()` are unchanged by
+   AM-78 — they never discharge anything, so unconditional blocking
+   while any strict burden is outstanding remains correct for them.
+
+Net effect as of AM-78: the live engine's strict-mode guard now matches
+the verifier's T3 semantics exactly, closing this finding for real.
+
 ---
 
 ## WorldState scope — episode-community vs. standing federation communities (2026-08-20)
@@ -4707,5 +4731,49 @@ only when `tr.outcome == "ok"`, else something like
 `ConsentEventResponse`'s `action_taken` type comment would need
 updating alongside). Small, isolated fix — not bundled into AM-76
 itself, and not done in this pass.
+
+---
+
+## `el_api.py` does not expose `Action.preconditions` on any response model — precondition checkboxes in the coordination UI are necessarily hardcoded per action, not generic — OPEN FINDING (2026-09-08)
+
+**Found while landing AM-78** (`docs/el_grammar_amendments.md`), which
+added a second `precondition:` string to `conductAIExamination` in
+`scenarios/referral/referral_scenario.el` (Part B of that amendment,
+closing a real domain gap AM-78's Part A guard-loosening exposed: AI
+examination could otherwise proceed immediately after Reset, before any
+referral exists). Before adding the string, DN_013 §4 flagged a question
+to check first: is the coordination UI's per-action precondition
+checkbox rendering generic (any precondition string on any action
+automatically gets a checkbox), or hardcoded per action?
+
+**Confirmed by grep of `toolchain/el_api.py`: no response model exposes
+`preconditions` at all** — `grammar_action.preconditions` (populated by
+`el_parser.py`'s object processors, `List[str]`) is consumed only inside
+`el_engine.py:advance()`'s Step 4 fact-lookup; nothing in `el_api.py`
+returns the list to a caller. Since the API gives the UI no generic way
+to discover an action's precondition strings, the UI's existing
+per-action checkboxes for `scheduleAssessment`/`provideHandover` must be
+hardcoded to those two actions' specific strings, not driven by a
+generic "render one checkbox per precondition" rule.
+
+**Net effect:** the new `conductAIExamination` precondition ("Referral
+must be active for AI examination to proceed") added by AM-78 Part B
+needs no `el_engine.py`/`el_api.py` change to be enforced (it flows
+through the existing generic `advance()` Step 4 fact-lookup regardless
+of caller), but will **not** get a checkbox in the coordination UI
+automatically — the UI's own hardcoded per-action list needs a manual
+addition, in whatever repo hosts it (`computable-governance-ui`, per
+CLAUDE.md §13.5's "next action" — not this repository).
+
+**Next action:** when work on the coordination UI (CLAUDE.md §13.5)
+resumes, either (a) add `conductAIExamination`'s new precondition
+string to the UI's hardcoded per-action checkbox list as a small
+follow-up, or (b) generalize by adding a `preconditions: List[str]`
+field to whichever `el_api.py` response model already describes an
+action (e.g. the available-actions endpoint), then switch the UI to
+render checkboxes generically from that list instead of maintaining a
+hardcoded set per action. Not done in this pass — deliberately not
+bundled into AM-78, which is an engine/scenario-file change, not a UI
+one.
 
 ---
