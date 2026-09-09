@@ -2368,6 +2368,25 @@ display surface (2026-08-11 finding, above) are both real remaining gaps,
 but neither blocks R30 Option B itself — this finding's blocking condition
 is resolved.
 
+**Update (2026-09-09) — a deeper, latent instance of this same gap found
+and closed, RESOLVED via DN_014/AM-79.** The 2026-08-13 resolution above
+wired live grant/reinstate through the *engine* and gave hybrid-mode T5
+occurrence-reachability, but never gave the Kripke model's own `World`
+dataclass any per-world notion of Permit/Embargo state at all —
+`build_kripke_from_runtime()`'s `permit_descriptors` remained a single
+static snapshot, computed once before BFS started, filtered active-only,
+then treated as a fixed global constant for the entire graph. Live-tested
+2026-09-09: with `referralInitiationBurden` discharged and
+`patientDataAuthorization` genuinely revoked, `AI Examination discharged
+(permit-gated, T6)` reachability incorrectly reported `UNREACHABLE`, when
+the live system genuinely allows a real 2-hop path (re-authorize, then
+examine). Design note: `docs/design_notes/DN_014_kripke_permit_embargo_per_world_state.md`.
+Fixed by AM-79: `World` gained genuine `permit_states`/`embargo_states`
+fields, and two new hybrid-mode rules — T7 (Authorization Revoke) / T8
+(Authorization Reinstate) — give revocation a real path back within the
+model itself, closing Option 1 from the 2026-08-11 finding above
+completely, not just at the live-engine layer.
+
 ---
 
 ## T5's edge labels silently collide when two Permits share a for_action

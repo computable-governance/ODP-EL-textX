@@ -41,11 +41,19 @@ governing the same for_action — revoking the Authorization behind one of
 them correctly leaves the action reachable via the other, so EF stays
 True by design. Instead it asserts on the specific
 "exercise:patientRecordAccessPermitByAuthorization -> ..." edge label,
-which does disappear. See the 2026-08-13 CONCEPTS_INDEX.md finding
-("T5's edge labels silently collide when two Permits share a
-for_action") for why a bare label-presence check on a shared for_action
-would itself be fragile in general — not an issue here since only one
-of the two permits is ever superseded by this specific revocation.
+which disappears from w0's immediate successors. See the 2026-08-13
+CONCEPTS_INDEX.md finding ("T5's edge labels silently collide when two
+Permits share a for_action") for why a bare label-presence check on a
+shared for_action would itself be fragile in general — not an issue
+here since only one of the two permits is ever superseded by this
+specific revocation.
+
+DN_014/AM-79 (2026-09-09): the fourth and fifth tests' assertions were
+narrowed from "absent/present anywhere in the graph" to "absent/present
+among w0's direct edges" once Rule T8 (Reinstate) landed — a revoked
+permit's exercise edge is no longer gone from the graph entirely, only
+from immediate reachability, since a hypothetical reinstate edge now
+makes it reachable again further out. See each test's own docstring.
 """
 from el_api import _SCENARIO_BUILDERS
 from el_engine import discharge_burden, reinstate_authorization, revoke_authorization
@@ -189,6 +197,19 @@ def test_hybrid_t5_revoke_authorization_removes_its_exercise_edge():
     role-based access, so EF(occurred:access_patient_clinical_records)
     stays True by design, not by bug. See the 2026-08-13 CONCEPTS_INDEX.md
     finding for the general label-collision property this sidesteps.
+
+    DN_014/AM-79 (2026-09-09): the "not in after_labels" assertion here
+    used to check the label's absence from the WHOLE graph. Since T8
+    (Reinstate) landed, that is no longer the correct claim — a
+    hypothetical `reinstate:patientDataAuthorization` edge now makes the
+    permit active again somewhere downstream of w0, so the exercise edge
+    genuinely IS reachable again, further out in the graph. What's still
+    true, and what T7 actually guarantees, is that the edge is gone from
+    w0's OWN immediate successors — revoking removes the *immediate* path,
+    it doesn't remove the permit from the model forever. Narrowed the
+    assertion to w0's direct edges, and added the graph-wide check as its
+    own explicit (now-True) assertion so the T8 behavior is documented
+    here rather than silently making the old assertion just start failing.
     """
     rt = _SCENARIO_BUILDERS["referral"]()
     rt._state, _ = discharge_burden(rt.current_state(), rt._spec, "referralInitiationBurden")
@@ -202,8 +223,16 @@ def test_hybrid_t5_revoke_authorization_removes_its_exercise_edge():
     rt._ledger.append(record)
 
     km_after = build_kripke_from_runtime(rt, horizon=10)
+    w0 = km_after.initial
+    direct_from_w0 = {km_after.labels[(w0, w)] for w in km_after.edges.get(w0, set())}
+    assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" not in direct_from_w0
+
+    # DN_014/AM-79: T8 (Reinstate) makes the edge reachable again further
+    # out in the graph, via a hypothetical reinstate:patientDataAuthorization
+    # edge — no longer a permanent dead end, by design.
     after_labels = set(km_after.labels.values())
-    assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" not in after_labels
+    assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" in after_labels
+    assert "reinstate:patientDataAuthorization" in direct_from_w0
 
     # The independently-granted role-based permit is unaffected by this
     # specific revocation and correctly remains reachable.
@@ -223,6 +252,13 @@ def test_hybrid_t5_reinstate_authorization_restores_its_exercise_edge():
     Also exercises, empirically rather than by code inspection alone, the
     embargo guard's e_state == "active" check correctly treating 'lifted'
     as not-active — no guard code change was needed for this to work.
+
+    DN_014/AM-79 (2026-09-09): the post-revoke check below used to assert
+    the label's absence from the whole graph; narrowed to w0's direct
+    edges only, same reasoning as the sibling revoke test above — T8
+    makes the edge reachable again further out (via a hypothetical
+    reinstate edge) even before the LIVE reinstate_authorization() call
+    this test goes on to make.
     """
     rt = _SCENARIO_BUILDERS["referral"]()
     rt._state, _ = discharge_burden(rt.current_state(), rt._spec, "referralInitiationBurden")
@@ -233,8 +269,12 @@ def test_hybrid_t5_reinstate_authorization_restores_its_exercise_edge():
     rt._ledger.append(record)
 
     km_post_revoke = build_kripke_from_runtime(rt, horizon=10)
-    post_revoke_labels = set(km_post_revoke.labels.values())
-    assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" not in post_revoke_labels
+    w0_post_revoke = km_post_revoke.initial
+    direct_post_revoke = {
+        km_post_revoke.labels[(w0_post_revoke, w)]
+        for w in km_post_revoke.edges.get(w0_post_revoke, set())
+    }
+    assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" not in direct_post_revoke
 
     new_state2, record2 = reinstate_authorization(rt.current_state(), rt._spec, "patientDataAuthorization")
     rt._state = new_state2

@@ -4604,3 +4604,176 @@ DN_013 §5 — not scope-creeped into cleanup this pass).
 (happy-path facts updated for the new precondition); `docs/CONCEPTS_INDEX.md`
 (AM-76 cross-reference back-filled with the AM-49→AM-76→AM-78 resolution
 chain; new UI-checkbox-hardcoding OPEN FINDING).
+
+## AM-79 (2026-09-09) — Per-world Permit/Embargo state in `World`; new Rules T7 (Authorization Revoke) / T8 (Authorization Reinstate) in `build_kripke_from_runtime()`
+
+**Status:** IMPLEMENTED (2026-09-09).
+
+**Problem:** `World` (the Kripke model's core frozen dataclass) tracked
+`obligation_states`, `actor_states`, `occurred_actions`, and `step` —
+but Permit and Embargo state were not part of a world's identity at
+all. In `build_kripke_from_runtime()` (hybrid mode),
+`permit_descriptors` was computed **once**, before BFS expansion even
+started, from whatever the live system's permit state happened to be
+at that exact moment (filtered `if tok.state != "active": continue`),
+then treated as a fixed, global constant for the entire graph. T6's
+gate read this static dict, never anything per-world. Live-tested
+2026-09-09: with `referralInitiationBurden` discharged and
+`patientDataAuthorization` genuinely revoked, the Reachability Path
+panel's check for `AI Examination discharged (permit-gated, T6)`
+returned `UNREACHABLE`, when the live system genuinely allows a 2-hop
+path (re-authorize, then examine). Not a new mistake: hybrid-mode
+`PermitDescriptor` was built this way from its own outset, an
+active-only-timeless approach correct for the spec-static builder
+(`build_kripke_model()`, where a parsed spec never changes mid-
+verification) ported directly into hybrid mode without reconsidering
+that live permit state, unlike a spec's declared state, can genuinely
+change mid-exploration via revoke/reinstate. Design note:
+`docs/design_notes/DN_014_kripke_permit_embargo_per_world_state.md`.
+
+Closes the OPEN FINDING logged 2026-08-11 ("R30 Option B design blocked
+on a deeper gap: runtime events invisible to both Kripke builders"),
+which named exactly this ("extend hybrid mode to read Permit/Embargo
+state and generate a T5-equivalent edge from live runtime state") as
+Option 1 for closing that gap.
+
+**`T4` is not the mechanism extended here.** `T4 — REVOCATION`
+(`build_kripke_model()`'s own docstring) is about *delegation*
+revocation (a Burden's holder going `INACTIVE`, obligation reverting to
+the delegator) — a different concept from *authorization/permit*
+revocation. `T4` stays reserved, unimplemented, untouched.
+
+**Design decision:** same principle already established in this
+codebase for Burden/structure — structure extraction is always
+spec-derived and mode-agnostic; state is always supplied separately by
+whichever mode is running. Extended one step further: who can hold a
+permit (`holder`, `for_action`) stays a static, spec-derived fact —
+`PermitDescriptor`/structure extraction unchanged. What becomes
+per-world is whether that permit is currently active — exactly
+mirroring how `ObligationDescriptor` (static) already sits alongside
+`obligation_states` (per-world).
+
+**Scope: hybrid mode only (`build_kripke_from_runtime()`), not
+`build_kripke_model()`** — matches `T4`'s own precedent exactly; the
+static/spec-only builder has no live runtime to revoke against.
+
+**What changed** (`toolchain/el_kripke.py`):
+- `World` gained `permit_states`/`embargo_states: FrozenSet[Tuple[str,
+  str]]`, both defaulting to `frozenset()` — backward-compatible by
+  construction; every existing world that never touches T7/T8 sees an
+  empty set, meaning "not tracked here." New accessors `get_permit`/
+  `get_embargo`/`permit_dict`/`embargo_dict`, mirroring
+  `get_obligation`/`obligation_dict` exactly. `step` gained a `= 0`
+  default (a dataclass cannot have non-default fields after defaulted
+  ones, and the new fields had to sit before `step` to match T7/T8's
+  call shape).
+- `_make_world()` takes the same two new params. Normalizes via
+  `dict(permit_states).items()` rather than `frozenset(permit_states)`
+  directly — a latent bug caught by the Stage 2 test run: `frozenset()`
+  on a plain dict iterates its *keys*, silently dropping the state
+  values; callers pass either a plain dict (`w0`'s construction) or an
+  already-frozen set of pairs (threaded through from a parent world),
+  and both must normalize to the same shape.
+- `build_kripke_from_runtime()`'s token-processing loop now records
+  every permit/embargo token's real current state into
+  `init_permit_states`/`init_embargo_states` — active *and*
+  superseded/lifted both recorded, nothing filtered out — used to
+  seed `w0`. `permit_descriptors` (structure: holder, for_action) is
+  now populated for **every** permit regardless of current state, not
+  filtered to active-only as before — needed so a permit already
+  superseded at build time still has a structural entry for T6's
+  holder-match check to succeed once a T8 edge reinstates it
+  per-world. (Confirmed necessary empirically, live-testing T7/T8
+  against the exact scenario above — not called out explicitly in
+  DN_014's own text, which under-scoped this to "populated for every
+  permit" without tracing the T6 holder-match consequence.)
+- Every existing `_make_world()` call site across the file (not just
+  `build_kripke_from_runtime()`'s five BFS rules, but also
+  `build_kripke_model()`'s six and the `_run_consent_scenario()` smoke
+  script's three) needed touching: the old signature took `step` as
+  the 4th positional argument, and the two new params were inserted
+  before it — left as positional, `step`'s value would have silently
+  landed in the new `permit_states` slot. Sites outside
+  `build_kripke_from_runtime()` now pass `step=` as a keyword and
+  leave permit/embargo at their `frozenset()` default (correct — those
+  builders don't track this); `build_kripke_from_runtime()`'s five
+  sites thread `w.permit_states`/`w.embargo_states` through unchanged.
+- New shared `_permit_active(w, p)` helper (two-tier: per-world truth
+  when tracked, else the old existence-only check via
+  `permit_descriptors`) — used by both **T6**'s gate (replacing its
+  previous existence-only check) and **T5** (Exercise), which gained
+  this guard as a direct, necessary consequence of unfiltering
+  `permit_descriptors` above: without it, T5 would start generating
+  exercise edges for actions gated by permits that are genuinely
+  superseded per-world (not called out in DN_014 either — found the
+  same way, via empirical live-fire testing before writing Stage 4
+  tests).
+- New shared `strict_burden_blocks(w)` helper, factored out of T3's
+  existing tick-suppression condition (AM-49/AM-76/AM-78's boolean:
+  some `PENDING` `discharge_mode: strict` obligation held by an
+  `ACTIVE` actor). Reused by **T7**/**T8**, since
+  `revoke_authorization()`/`reinstate_authorization()` never discharge
+  anything (`discharged=()` always), so AM-78 correctly left their own
+  live guard unconditional whenever this holds — the identical
+  condition, not a new one.
+- New **T7 — AUTHORIZATION REVOKE** / **T8 — AUTHORIZATION REINSTATE**,
+  hybrid-mode only, next free rule numbers after T6 (`T4` stays
+  reserved). Mirror `revoke_authorization()`/`reinstate_authorization()`
+  (`el_engine.py`) as closely as the model's shape allows: same field
+  access (`auth.permit.name` via `_obj_name()`, `on_revocation_embargo`),
+  same defensive skip when an Authorization declares no on_revocation
+  embargo, same strict-burden guard. Sourced via
+  `_collect(spec, "Authorization")` — the same helper
+  `_extract_permit_structure()` already uses to walk Authorization
+  elements, resolving DN_014 §6's open question empirically rather than
+  inventing a new lookup pattern (`_cls(e)` is exactly
+  `type(e).__name__`, so this is functionally identical to
+  `revoke_authorization()`'s own manual loop). Unlike the live engine,
+  T7/T8 do not advance `step` — they are instantaneous actions on a
+  world, exactly like T1/T5/T6; only T3 (tick) advances `step`.
+
+**Standard reference(s):** none new — extends the same `T4` precedent
+(`build_kripke_model()`'s own docstring) to a distinct concept
+(authorization/permit revocation vs. delegation revocation); §6.4.3
+(deontic token kinds), §6.6.4/§7.10.2/§7.8.8.4 (Authorization).
+
+**Empirical verification:** full suite re-run after each stage —
+Stage 1 (structural `World`/`_make_world()` change alone): 329 passed,
+1 xfailed, zero regressions. Stage 2 (T6's two-tier gate): initially 29
+failures, all `ValueError: dictionary update sequence element #0 has
+length 40` — the `frozenset(dict)` bug above, caught immediately by
+the staged test run precisely because it was the first thing to
+exercise `w.permit_dict()`; fixed, back to 329 passed, 1 xfailed.
+Stage 3 (T7/T8): live-fired the exact scenario above by hand before
+writing any test — found and fixed the `permit_descriptors`
+unfiltering gap and the resulting T5 guard need (both above); 3 tests
+then failed, each asserting the pre-DN_014 bug as correct behavior
+(`test_referral_kripke_t6_permit_gate.py::test_ai_examination_burden_ef_false_when_permit_revoked`;
+`test_hybrid_t5_exercise_embargo_guard.py`'s revoke/reinstate
+whole-graph-label-absence tests) — none are regressions in this
+amendment's own code. Stage 4: those three tests updated to assert the
+new, correct behavior (one renamed
+`test_ai_examination_burden_ef_true_after_revoke_via_reinstate`, with a
+new sibling `..._t6_gate_still_blocks_direct_discharge_while_revoked`
+guard distinguishing "reachable via reinstate" from "T6's gate went
+slack"; the two `test_hybrid_t5_...` tests narrowed from
+whole-graph-label-absence to w0's-direct-edges-absence, since T8 makes
+the label reachable again further out, by design). New
+`tests/test_hybrid_t7_t8_authorization_revoke_reinstate.py` (3 tests):
+T7/T8 absent from `w0` while a strict burden is outstanding; T7's
+revoke edge present and correct once the strict burden clears; T8's
+reinstate edge present and correctly lifts (not merely deactivates)
+the embargo. Full suite: 333 passed, 1 xfailed (the pre-existing,
+unrelated AM-76 xfail) — zero regressions against the pre-DN_014
+baseline.
+
+**Files changed:** `toolchain/el_kripke.py` (`World`, `_make_world()`,
+`build_kripke_from_runtime()`'s `w0` construction and BFS loop, T6's
+gate, new T5 guard, new T7/T8 rule, new shared `strict_burden_blocks()`/
+`_permit_active()` helpers; every other `_make_world()` call site in
+the file, keyword-argument-only for `step`); `tests/test_referral_kripke_t6_permit_gate.py`
+(one test renamed + rewritten, one new guard test); `tests/test_hybrid_t5_exercise_embargo_guard.py`
+(two tests' assertions narrowed to w0's direct edges); `tests/test_hybrid_t7_t8_authorization_revoke_reinstate.py`
+(new); `docs/KRIPKE_TRANSITION_RULES.md` (T7/T8 status → Implemented; T6
+correction status closed); `docs/CONCEPTS_INDEX.md` (2026-08-11 R30
+Option B finding closed out).
