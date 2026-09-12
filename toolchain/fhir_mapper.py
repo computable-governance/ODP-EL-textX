@@ -19,7 +19,7 @@ Mapping coverage (22 rules):
   R09  Task                     → DelegationDecl
   R10  Task.requester           → delegation.from
   R11  Task.owner               → delegation.to
-  R12  Task.basedOn             → traces to root commitment
+  R12  Task.focus               → traces to root commitment
   R13  Task.partOf              → sub-delegation
   R14  Task.restriction.period  → deadline on burden
   R15  Task.status              → ObligationState lifecycle note
@@ -91,7 +91,7 @@ MAPPING_RULES = {
     "R09": ("Task",                      "DelegationDecl"),
     "R10": ("Task.requester",            "delegation.from"),
     "R11": ("Task.owner",                "delegation.to"),
-    "R12": ("Task.basedOn",              "traces to root commitment"),
+    "R12": ("Task.focus",                "traces to root commitment"),
     "R13": ("Task.partOf",               "sub-delegation flag"),
     "R14": ("Task.restriction.period",   "deadline on burden"),
     "R15": ("Task.status",               "ObligationState lifecycle note"),
@@ -1460,9 +1460,13 @@ class FHIRConsentMapper:
         if not from_el or not to_el:
             return  # cannot map without both ends
 
-        # R12 — trace back to ServiceRequest to find obligation and burden
-        based_on  = task.get("basedOn", [{}])
-        sr_ref    = based_on[0].get("reference", "") if based_on else ""
+        # R12 — trace via Task.focus (the request this Task fulfils),
+        # NOT Task.basedOn (the higher-level authorization that triggered
+        # Task creation — a distinct FHIR concept). Confirmed against
+        # every real AU eRequesting Task example: none populate basedOn;
+        # all populate focus with the ServiceRequest reference.
+        focus     = task.get("focus", {})
+        sr_ref    = focus.get("reference", "") if focus else ""
         sr_el     = _sanitize_id(sr_ref) if sr_ref else ""
         burden_id = f"{sr_el}Obligation" if sr_el else ""
         obligation = self._find_obligation_text(sr_el, spec) or "Fulfil delegated task"
