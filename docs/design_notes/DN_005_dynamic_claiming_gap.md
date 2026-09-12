@@ -1,5 +1,13 @@
 # DN_005 — Dynamic Claiming: Closing the Static-Evaluation Gap Before Any FHIR Claim Bridge
 
+**Status update (2026-09-12):** §3's Option C is now implemented —
+`runtime.claim()`/`runtime.decline()` (`toolchain/el_engine.py`,
+`toolchain/el_runtime.py`), tested in
+`tests/test_runtime_claim_decline.py`. The paragraph below describes
+the note's original state when written; see the two "Addendum"
+sections further down for the full implementation history and the
+`$claim`-framing correction.
+
 *Design note — not implemented, no code changes proposed here. Surfaces a
 real limitation found while live-testing AM-60–63 against the running API
 (this session), and lays out options for resolving it. This is a
