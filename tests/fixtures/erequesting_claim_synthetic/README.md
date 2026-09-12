@@ -2,7 +2,9 @@
 
 *Created 2026-08-24 while investigating the mapper-level gap documented in
 `docs/design_notes/DN_005_dynamic_claiming_gap.md`'s addendum. Kept here as
-a small, clearly-labeled test fixture for whenever that gap is picked up.*
+a small, clearly-labeled test fixture for whenever that gap is picked up.
+`Task-undirected-unclaimed.json` added 2026-09-12 — see its own section
+below.*
 
 ## What this is
 
@@ -14,6 +16,9 @@ Two `Task` FHIR resources, hand-constructed to demonstrate the
 - `Task-alternate-filler-claimed.json` — the alternate filler's new Task,
   `status: requested`, for the same underlying request (same
   `groupIdentifier`).
+
+A third, separate fixture, `Task-undirected-unclaimed.json` (added
+2026-09-12), covers a different case — see its own section below.
 
 ## What this is NOT
 
@@ -50,3 +55,35 @@ them — `businessStatus` is not read by `_map_task` at all. This is the
 exact, empirically-confirmed finding documented in DN_005's addendum. If
 `_map_task` is ever extended to recognise this pattern, re-running this
 fixture through the mapper is the natural first regression check.
+
+## `Task-undirected-unclaimed.json` — a distinct, undirected-order fixture (added 2026-09-12)
+
+**What this is:** a single `Task`, `status: requested`, with **no `owner`
+element at all** — the undirected-order case confirmed as the real AU
+eRequesting `$claim` mechanism: an order is lodged with no filler
+assigned; a filler later calls `$claim` (requisition identifier + org
+reference), which assigns `Task.owner` and returns a new group `Task`.
+This is a create-and-link operation, not a same-`Task` `businessStatus`
+transition — a different pattern from the `request-claimed` /
+`cancel-handled` pair above, not a variant of it.
+
+**Why it's separate from Task/209 (the live HAPI fixture):** Task/209
+(`localhost:8081/fhir/Task/209`) has `status: requested` but already has
+`owner: Organization/kioma-pathology` assigned — a *directed* order, so it
+cannot exercise the `$claim` path. This fixture exists specifically to
+cover the case Task/209 can't.
+
+**Anchors reused, not fabricated:** `Patient/roberts-fred`,
+`PractitionerRole/generalpractitioner-guthridge-jarred`, and
+`Organization/elimbah-medical-centre` are the same real, published anchors
+the other two files in this directory use. `groupIdentifier.value`
+(`EMC4542244-5627`) and the `focus` reference
+(`ServiceRequest/order-fbc-undirected-1`) are both new, synthetic values —
+deliberately distinct from Task/209's `EMC4542244-5625` and from this
+directory's existing pair's `EMC4542244-5624`/`order-xray-1`, so none of
+the three can be mistaken for one another.
+
+**Status as of 2026-09-12:** design/fixture step only. Not yet run through
+`fhir_mapper.py`; no `$claim` runtime mechanism exists yet to act on it
+(see DN_005 §3's Option C, not yet implemented). This fixture is here so
+that work has something concrete to act on when it starts.
