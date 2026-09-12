@@ -97,6 +97,46 @@ by that actor reverts to `PENDING` on the delegator.
 Only a placeholder exists — referenced in `build_kripke_model()`'s own
 docstring, never implemented. No example exists yet.
 
+**Investigation findings (2026-09-12), before any implementation:**
+
+Prompted by considering T4 as the formal mechanism for DN_005's
+still-open businessStatus-linking gap (a delegation being superseded
+when an alternate filler claims a previously-directed request).
+
+- **T4 as currently documented is the wrong shape for that use case.**
+  `ActorStatus.ACTIVE`/`INACTIVE` is a single, flat, global flag per
+  actor name (confirmed: no role/community/delegation scoping exists
+  anywhere in `el_kripke.py`'s actor-state handling). Revoking one
+  delegation to an actor should not flip that actor `INACTIVE`
+  everywhere, for every other obligation they may separately hold —
+  that would be a real correctness bug, not a faithful implementation
+  of "this one delegation is revoked."
+- **A naive whole-actor implementation would also need a reverse
+  direction to be usable** (an actor legitimately returns to active
+  elsewhere after one displacement) — which would reintroduce a
+  reversible cycle in the world-graph, the same shape as T7/T8's
+  revoke/reinstate pair (AM-79). That specific failure mode is no
+  longer dangerous on its own: `bellman_values()` was generalized to
+  iterative value iteration in AM-80 specifically because it no longer
+  assumes an acyclic graph, so a future cycle here would not crash the
+  same way T7/T8's did. This does not make a whole-actor design
+  correct — see the point above — but it does mean the cycle
+  question itself is not a blocker.
+- **Nothing partially built exists to extend.** Checked directly: no
+  `revoke`/`Revocation` grammar keyword exists anywhere in
+  `grammar/v2/el_grammar.tx`. `ELDelegation.revocable` is a static
+  boolean flag only (no event/trigger mechanism). `JoinLeaveEffect` is
+  an unrelated community-membership construct. T4 needs real design
+  work from scratch regardless of scope.
+
+**Recommended direction, not yet designed in detail:** scope T4 per
+*delegation instance*, mirroring how T7/T8 themselves are correctly
+scoped per specific Permit/Embargo instance (`permit_states`/
+`embargo_states`) rather than as a blunt per-actor flag. This would
+resolve the correctness concern above and give DN_005's
+businessStatus-linking gap a formally verifiable target, not just a
+descriptive/mapper-level one.
+
 ## T5 — Exercise
 
 **An `ACTIVE` Permit, held by an `ACTIVE` actor, adds its `for_action` to
