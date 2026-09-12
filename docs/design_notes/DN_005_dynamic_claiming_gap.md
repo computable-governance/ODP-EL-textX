@@ -370,5 +370,51 @@ a `$claim`-completed Task. What's missing to actually *drive* a live
 claim end-to-end is §3 itself — `runtime.claim()`/`runtime.decline()`
 — which remains the next real piece of work.
 
+### Correction (2026-09-12, later same day) — no `$claim` FHIR operation exists
+
+Everything above describing `$claim` as "the real AU eRequesting
+mechanism," "a formal operation," or something "confirmed against the
+public terminology server" does not hold up under direct checking.
+Exhaustively searched: no `OperationDefinition` named `$claim` (or
+anything resembling it) exists anywhere in this IG or in base FHIR.
+Every "$claim"-named operation found anywhere is the unrelated
+Financial Management `Claim/$submit` (insurance billing
+adjudication) — a different resource type, different domain, sharing
+only the word.
+
+The terminology-server check this morning's brief cited almost
+certainly confirmed the `businessStatus` *codes* (`request-claimed`,
+`cancel-handled`) are real — which they are — not that a `$claim`
+*operation* exists. A code existing is not an operation existing;
+these were conflated.
+
+**What's actually real, confirmed directly from the IG's own workflow
+guidance:** the Home page lists "patient choice via assigned or
+unassigned requests" as genuinely in-scope for Release 1 — an
+ownerless Task is a real state. But nothing in the IG describes a
+special operation that produces or resolves it; the most plausible
+real mechanism is an ordinary Task update (a normal FHIR `PUT`/
+`PATCH` adding `owner`), not a create-and-link operation returning a
+new group Task. Separately, the *displaced-by-another-filler* case
+(`request-claimed`/`cancel-handled`, this note's original
+2026-08-24 finding) remains accurate and distinct — a Task already
+directed to filler A being cancelled because filler B claimed it
+instead. Both are real, ordinary Task lifecycle events; neither
+involves a special operation.
+
+**What this does and doesn't change:** the mapper-level fixes above
+(R10, R12, Task Group exclusion) are unaffected — none depended on
+`$claim` being real; all were grounded in genuine `Task/209`, real
+Task Group examples, and real `PractitionerRole` data. §3's runtime
+design (Option C: `runtime.claim()`/`runtime.decline()`) is also
+unaffected — it was always scoped generically to "a live
+claim/assignment event arrives," not tied to any particular FHIR
+mechanism. What changes is narrower: the
+`Task-undirected-unclaimed.json` fixture's own framing (corrected
+separately, see its README entry) and the "Release-1 scope
+discrepancy" bullet two sections above, which is now resolved rather
+than open — there's no discrepancy once `$claim` is understood not
+to exist at all.
+
 ---
 

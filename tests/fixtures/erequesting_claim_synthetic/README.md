@@ -59,13 +59,20 @@ fixture through the mapper is the natural first regression check.
 ## `Task-undirected-unclaimed.json` — a distinct, undirected-order fixture (added 2026-09-12)
 
 **What this is:** a single `Task`, `status: requested`, with **no `owner`
-element at all** — the undirected-order case confirmed as the real AU
-eRequesting `$claim` mechanism: an order is lodged with no filler
-assigned; a filler later calls `$claim` (requisition identifier + org
-reference), which assigns `Task.owner` and returns a new group `Task`.
-This is a create-and-link operation, not a same-`Task` `businessStatus`
-transition — a different pattern from the `request-claimed` /
-`cancel-handled` pair above, not a variant of it.
+element at all** — a genuine undirected-order state (the IG's own Home
+page scope section lists "patient choice via assigned or unassigned
+requests" as in-scope for Release 1). **Corrected 2026-09-12:** earlier
+text here described this as produced by a "$claim" FHIR operation --
+no such operation exists anywhere in this IG or in base FHIR (verified
+exhaustively; every "$claim"-named operation found is the unrelated
+Financial Management `Claim/$submit`). The most plausible real
+mechanism is an ordinary Task update adding `owner` -- not a
+create-and-link operation returning a new group Task. Still a
+different real scenario from the `request-claimed`/`cancel-handled`
+pair above (that pair covers a Task already directed to one filler
+being displaced by another; this fixture covers first-time assignment
+of a previously-unassigned Task) -- just not via any special operation
+in either case.
 
 **Why it's separate from Task/209 (the live HAPI fixture):** Task/209
 (`localhost:8081/fhir/Task/209`) has `status: requested` but already has
@@ -83,7 +90,10 @@ deliberately distinct from Task/209's `EMC4542244-5625` and from this
 directory's existing pair's `EMC4542244-5624`/`order-xray-1`, so none of
 the three can be mistaken for one another.
 
-**Status as of 2026-09-12:** design/fixture step only. Not yet run through
-`fhir_mapper.py`; no `$claim` runtime mechanism exists yet to act on it
-(see DN_005 §3's Option C, not yet implemented). This fixture is here so
-that work has something concrete to act on when it starts.
+**Status as of 2026-09-12:** design/fixture step only. Not yet run
+through `fhir_mapper.py`. DN_005 §3's Option C
+(`runtime.claim()`/`runtime.decline()`) remains the right target
+design regardless of the `$claim`-operation correction above -- it was
+always scoped generically to "a live assignment event arrives," not
+tied to any specific FHIR mechanism. This fixture is here so that work
+has something concrete to act on when it starts.
