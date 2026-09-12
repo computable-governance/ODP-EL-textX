@@ -115,7 +115,7 @@ delegation TaskAiAgent001Delegation {
     creates_reporting_burden: true
     duration: "2026-05-20T17:00:00Z"
     revocable: true
-    description: "[R09] Delegation from Task/task-ai-agent-001 (status=requested). AI agent performs diagnostic analysis — must seek informed consent before proceeding"
+    description: "[R09] Delegation from Task/task-ai-agent-001 (status=requested). AI agent performs diagnostic analysis — must seek informed consent before proceeding — [R06] UNRESOLVED organisational affiliation for Practitioner/specialist-dr-okonkwo — no PractitionerRole.organization found in bundle; commitment.by falls back to the practitioner directly. Verify accountability manually."
 }
 
 // ── Authorizations ─────────────────────────────────────────

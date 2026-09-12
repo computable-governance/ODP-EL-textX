@@ -660,7 +660,7 @@ class FHIRConsentMapper:
         parent_tasks = [t for t in tasks if not t.get("partOf")]
         child_tasks  = [t for t in tasks if t.get("partOf")]
         for task in parent_tasks + child_tasks:
-            self._map_task(task, spec)              # R09–R15
+            self._map_task(task, spec, by_ref)       # R09–R15
 
         # 4 — Consent → tokens + authorization
         for consent in by_type.get("Consent", []):
@@ -1444,13 +1444,15 @@ class FHIRConsentMapper:
 
     # ── R09–R15 — Task → DelegationDecl ───────────────────────────────────────
 
-    def _map_task(self, task: dict, spec: ELSpec) -> None:
+    def _map_task(self, task: dict, spec: ELSpec, by_ref: Dict[str, dict]) -> None:
         task_id  = task.get("id", "task")
         el_id    = _sanitize_id(f"Task/{task_id}")
         fhir_ref = f"Task/{task_id}"
 
         # R10 — requester (delegator)
-        from_el = _ref_id(task.get("requester"))                     # R10
+        from_el, requester_warning = _resolve_commitment_accountable_party(
+            task.get("requester"), by_ref
+        )                                                              # R10
 
         # R11 — owner (delegate)
         to_el   = _ref_id(task.get("owner"))                         # R11
@@ -1487,6 +1489,10 @@ class FHIRConsentMapper:
         desc   = task.get("description", "")
         note   = (task.get("note") or [{}])[0].get("text", "")
 
+        description = f"[R09] Delegation from Task/{task_id} (status={status}). {desc or note}".strip(". ")
+        if requester_warning:
+            description += f" — {requester_warning}"
+
         delegation = ELDelegation(
             el_id=f"{el_id}Delegation",
             from_obj=from_el,
@@ -1497,7 +1503,7 @@ class FHIRConsentMapper:
             revocable=True,
             sub_delegation_allowed=False,  # set to True by child task via R13
             creates_reporting_burden=True,
-            description=f"[R09] Delegation from Task/{task_id} (status={status}). {desc or note}".strip(". "),
+            description=description,
             fhir_ref=fhir_ref,
         )
         spec.delegations.append(delegation)
@@ -1909,7 +1915,7 @@ class FHIRConsentMapper:
         if d.revocable:
             lines.append("    revocable: true")
         if d.description:
-            lines.append(f'    description: "{d.description[:200]}"')
+            lines.append(f'    description: "{d.description}"')
         lines.append("}")
         return lines
 
