@@ -218,3 +218,157 @@ clearly-labeled-as-constructed fixture for whenever this gap is picked up
 — see the companion file note. Not an official IG example; safe to treat
 as a synthetic conformance test case only.
 
+---
+
+## Addendum (2026-09-12) — Mapper-level ($claim shape) closed; runtime-level (§3) still open; two new findings along the way
+
+*Added after a session of fixture-building and empirical mapper fixes,
+prompted by re-scoping gap 2 (the 2026-08-24 addendum's mapper-level
+gap) against the real AU eRequesting `$claim` operation rather than
+only the `businessStatus`-linking pattern originally assumed.*
+
+### A third, distinct pattern confirmed: `$claim`, separate from `businessStatus`-linking
+
+The 2026-08-24 addendum's synthetic fixture demonstrates one real
+pattern: two independently-created Tasks linked only by
+`businessStatus` codes (`request-claimed`/`cancel-handled`) — a
+same-Task-lifecycle read. Real AU eRequesting also defines a second,
+structurally different mechanism for *undirected* orders: a Task is
+lodged with **no `owner` at all**; a filler later calls the `$claim`
+operation (requisition identifier + org reference), which assigns
+`Task.owner` and returns a new group Task. This is a create-and-link
+operation, not a `businessStatus` transition on an existing pair.
+Confirmed against the real AU eRequesting Task Group profile (two
+published examples, `Task-taskgroup-pathology-1`/`-imaging-1`) and
+against the live HAPI fixture `Task/209` (directed — owner
+pre-assigned, so it cannot exercise this path). Both patterns are now
+real, distinct, and separately fixture-backed:
+`tests/fixtures/erequesting_claim_synthetic/` holds the original
+`businessStatus`-linked pair, plus a new `Task-undirected-unclaimed.json`
+for the `$claim`/no-owner case.
+
+**Decision taken:** target the `$claim`-shape specifically for gap-2
+mapper work, since it's what the spec actually mandates for undirected
+orders; the `businessStatus`-linking pattern remains the right model
+for a *directed* Task later reassigned/cancelled by some other
+mechanism, and stays separately open (see below).
+
+### Grounding confirmed directly in the IG's own guidance text (not just examples)
+
+Everything above was inferred from real published examples. The
+IG's own "Diagnostic Request Grouping" guidance
+(general-guidance.html#diagnostic-request-grouping, AU eRequesting
+v1.0.1) confirms it directly, and adds a consequential detail the
+examples alone didn't establish: **a Task Group SHALL always be
+created, including when there is only a single request for a test or
+exam** — this isn't a multi-item-order edge case, it's present on
+every real AU eRequesting order. That makes today's Task Group
+exclusion fix (below) load-bearing for essentially all real bundles,
+not an occasional correction.
+
+The same guidance text also states, as explicit implementation rules
+rather than inferred convention: fulfilment Tasks use `Task.focus` to
+reference the diagnostic request being fulfilled, `Task.partOf` to
+reference the Task Group, and `Task.meta.tag` of `"fulfilment-task"`
+(vs. the group's own `"fulfilment-task-group"`) — directly confirming
+R12's `focus` fix and the Task Group exclusion's profile/tag marker,
+not merely consistent with the examples that prompted them.
+
+**A fourth Task shape this session never touched:** the guidance also
+describes an "AU eRequesting Task Communication Request" profile —
+tracking fulfilment of a `CommunicationRequest` (patient instructions,
+urgent-results routing, copy-to-GP), structurally parallel to the
+diagnostic-request Task but with `focus` pointing at a
+`CommunicationRequest`, not a `ServiceRequest`. R12's obligation
+lookup would find nothing to trace to for this shape and fall back to
+the generic string — untested, not confirmed harmless, just not yet
+examined at all. Logged as an open item, not acted on.
+
+**A discrepancy worth flagging, not resolving here:** this same IG
+version's own Home page lists "Claiming of diagnostic requests by
+fillers" under aspects explicitly **not** considered a priority for
+Release 1's scope. That sits oddly next to this note's own premise
+that `$claim` is a confirmed, spec-mandated mechanism (per the
+original brief's terminology-server check). Worth resolving which is
+accurate — a not-yet-prioritised R1 scope item, or a genuinely defined
+operation elsewhere in the spec — before treating `$claim` as
+implementation-ready for gap 3.
+
+### Mapper-level gap-2 ($claim shape): now closed, via two prerequisite fixes neither anticipated by this note
+
+Empirically confirmed (2026-09-12): once `$claim` assigns `owner` on
+the previously-ownerless Task, the **existing** R09–R15 pathway in
+`_map_task` already produces a correct `ELDelegation` — no new mapping
+rule needed for the core "recognize a claimed Task" requirement. But
+getting there required fixing two pre-existing, unrelated bugs this
+note didn't anticipate, both confirmed against real IG data rather
+than assumed:
+
+- **R10** resolved `Task.requester` with the bare `_ref_id()` helper —
+  no `PractitionerRole` handling, unlike R06's equivalent fix
+  (2026-08-30) for `ServiceRequest.requester`. Produced a dangling
+  reference and a validation failure for any Task whose requester is a
+  `PractitionerRole` — which is every real AU eRequesting Task,
+  including `Task/209` itself. Fixed by routing R10 through the same
+  `_resolve_commitment_accountable_party()` resolver R06 already uses.
+- **R12** traced `Task.basedOn` to find the obligation-bearing
+  ServiceRequest — but per FHIR's own Task resource definition,
+  `basedOn` is "a higher-level authorization that triggered the
+  creation of the task," distinct from "the request resource the task
+  is seeking to fulfill," which is referenced by `focus`. No real AU
+  eRequesting Task example populates `basedOn`; all populate `focus`.
+  R12 had, in effect, never resolved a real obligation against any
+  genuinely IG-shaped Task. Fixed by switching R12 to read `focus`,
+  and correcting the one hand-authored bundle (`ai_diagnostic_bundle.json`)
+  that happened to use `basedOn`, matching real convention.
+
+A separately-triggered `[:200]` description-truncation bug in
+`_render_delegation` was also fixed in the same pass (harmless before
+R10's fix started producing longer, warning-bearing descriptions;
+silently corrupted checked-in output otherwise).
+
+### New finding, not anticipated by this note at all: Task Group resources duplicate their child fulfilment Task
+
+The AU eRequesting Task Group profile (real published examples) was
+found to populate `requester`/`owner` **identically** to its child
+fulfilment Task — same PractitionerRole, same Organization, restated
+at container level, not a different party in a delegation chain.
+Unmapped, this would have produced a spurious duplicate delegation for
+the group Task itself once R10/R12 were fixed. `_map_task` now
+excludes Task Group resources by `meta.profile` marker before they
+ever reach R09–R15 — see `docs/CONCEPTS_INDEX.md`'s corresponding
+entry (now resolved) for the full empirical trace.
+
+### What remains genuinely open
+
+- **§3's runtime-level mechanism (Option C: `runtime.claim()`/
+  `runtime.decline()`) — unchanged, not started.** Everything above
+  closes the *mapper*-level half of gap 2; the *runtime* half (§1–§3 of
+  this note's main text) is exactly as scoped before today's session.
+- **The `businessStatus`-linking pattern (2026-08-24 addendum's
+  original gap-1 finding)** — still entirely unaddressed. `$claim` was
+  today's target because it's the mandated mechanism for undirected
+  orders, but a directed Task later reassigned via `businessStatus`
+  codes is a real, separate case with its own fixture, still unmapped.
+- **Actor resolution** (FHIR `Organization` reference ↔ ODP-EL party
+  name) — as this note already flagged in §4, still open, and now more
+  concretely relevant: `$claim`'s `owner` assignment is exactly the
+  kind of live event that will need this resolution once §3 exists.
+- **Task Communication Request mapping** — an entirely separate,
+  untested Task shape (see above); not yet run through the mapper at
+  all.
+- **The Release-1 scope discrepancy on `$claim`** (see above) — needs
+  resolving before gap 3 is built on the assumption that `$claim` is a
+  confirmed, in-scope mechanism for this IG version.
+
+### Sequencing consequence
+
+§5's original sequencing (design → implement §3 → then the FHIR
+bridge) still holds, with mapper-level readiness now further along
+than assumed: the mapper can already produce a correct delegation from
+a `$claim`-completed Task. What's missing to actually *drive* a live
+claim end-to-end is §3 itself — `runtime.claim()`/`runtime.decline()`
+— which remains the next real piece of work.
+
+---
+
