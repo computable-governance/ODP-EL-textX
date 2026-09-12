@@ -96,6 +96,23 @@ class TransitionRecord:
     fired_responses: Tuple[str, ...] = ()  # ViolationResponse names fired (fire_violation_responses() only)
 
 
+@dataclass(frozen=True)
+class LiveEvaluation:
+    """A runtime-synthesized Evaluation fact (DN_005 §3 Option C) —
+    the live-path counterpart to a spec-declared Evaluation element.
+    Constructed fresh for each claim()/decline() call, scoped only to
+    that call's advance() invocation — not persisted across calls.
+    Only result_code == "accept" folds into advance()'s
+    accept_evaluations gating set; a "reject" fact has no gating
+    effect, mirroring a spec-declared reject Evaluation's existing
+    no-op behavior (DN_003 §5.3, verified in
+    test_live_reject_evaluation_is_a_no_op)."""
+    token_name: str
+    actor_name: str
+    result_code: str  # "accept" | "reject"
+    tick: int
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _find_action(spec, action_name):
@@ -370,6 +387,7 @@ def advance(
     spec,
     actor_name: str,
     facts: Optional[dict] = None,
+    live_evaluations: Optional[List[LiveEvaluation]] = None,
 ) -> Tuple[WorldState, TransitionRecord]:
     """
     Execute one governance-checked action step.
@@ -383,6 +401,10 @@ def advance(
     actor_name  : name of the EnterpriseObject performing the action
     facts       : dict mapping precondition strings to truthy values;
                   absent key → blocked  (fail-safe)
+    live_evaluations : runtime-synthesized accept/reject facts (DN_005 §3
+                  Option C — claim()/decline()) folded into the same
+                  accept_evaluations gating set spec-declared Evaluation
+                  elements already build below.
 
     Returns
     -------
@@ -449,6 +471,12 @@ def advance(
         and getattr(el, "target_token", None) is not None
         and getattr(el, "result_code", None) == "accept"
     }
+    if live_evaluations:
+        accept_evaluations |= {
+            (le.token_name, le.actor_name)
+            for le in live_evaluations
+            if le.result_code == "accept"
+        }
     claimable_now: list[str] = []
     for tok in state.tokens:
         if (tok.holder == actor_name
@@ -1334,6 +1362,97 @@ def reinstate_authorization(
         violations=(),
     )
     return new_state, record
+
+
+def claim(
+    state: WorldState, spec, token_name: str, actor_name: str,
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    DN_005 §3 Option C: dynamically claim a CLAIMABLE burden token
+    via a direct method call — the caller does not need to know or
+    supply the underlying Action name (tok.for_action is looked up
+    internally). Synthesizes one live accept Evaluation fact scoped
+    to this call and invokes the SAME advance()/7a-claim transition
+    logic the spec-declared path already uses — no duplicate gating
+    logic, no state manipulation of its own.
+
+    Raises KeyError if token_name is not declared as a DeonticToken
+    in spec.elements (spec-level error, mirrors discharge_burden()).
+
+    Returns a blocked TransitionRecord (not an exception) if no
+    matching 'claimable' TokenInstance held by actor_name currently
+    exists — a genuine runtime/state condition, not a spec error.
+    """
+    token_el = None
+    for el in spec.elements:
+        if type(el).__name__ == "DeonticToken" and el.name == token_name:
+            token_el = el
+            break
+    if token_el is None:
+        raise KeyError(f"DeonticToken '{token_name}' not found in spec")
+
+    tick = state.tick
+    tok = next(
+        (t for t in state.tokens
+         if t.token_name == token_name and t.holder == actor_name
+         and t.kind == "burden" and t.state == "claimable"),
+        None,
+    )
+    if tok is None:
+        return _blocked(
+            state, actor_name, f"claim:{token_name}",
+            f"no claimable '{token_name}' token held by '{actor_name}'",
+            tick,
+        )
+
+    fact = LiveEvaluation(token_name=token_name, actor_name=actor_name,
+                           result_code="accept", tick=tick)
+    return advance(state, tok.for_action, spec, actor_name,
+                    live_evaluations=[fact])
+
+
+def decline(
+    state: WorldState, spec, token_name: str, actor_name: str,
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    DN_005 §3 Option C sibling: symmetric construction to claim(),
+    same call shape, but the synthesized fact has result_code=
+    "reject" — which advance()'s gating never treats as
+    claim-worthy, so this remains a functional no-op (mirrors
+    test_live_reject_evaluation_is_a_no_op's verified behavior:
+    outcome='ok', effects=()). Recording it anyway (rather than
+    short-circuiting before calling advance()) means it still
+    appends a real TransitionRecord to the caller's ledger —
+    the audit-trail distinction between "declined" and "never
+    touched" that DN_005 §3 asks for, with no new persistent state
+    needed. Same KeyError/blocked-record conventions as claim().
+    """
+    token_el = None
+    for el in spec.elements:
+        if type(el).__name__ == "DeonticToken" and el.name == token_name:
+            token_el = el
+            break
+    if token_el is None:
+        raise KeyError(f"DeonticToken '{token_name}' not found in spec")
+
+    tick = state.tick
+    tok = next(
+        (t for t in state.tokens
+         if t.token_name == token_name and t.holder == actor_name
+         and t.kind == "burden" and t.state == "claimable"),
+        None,
+    )
+    if tok is None:
+        return _blocked(
+            state, actor_name, f"decline:{token_name}",
+            f"no claimable '{token_name}' token held by '{actor_name}'",
+            tick,
+        )
+
+    fact = LiveEvaluation(token_name=token_name, actor_name=actor_name,
+                           result_code="reject", tick=tick)
+    return advance(state, tok.for_action, spec, actor_name,
+                    live_evaluations=[fact])
 
 
 def discharge_burden(

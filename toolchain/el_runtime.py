@@ -17,6 +17,8 @@ from el_engine import (
     advance as _engine_advance,
     advance_clock as _engine_advance_clock,
     check_live_violations as _engine_check_live_violations,
+    claim as _engine_claim,
+    decline as _engine_decline,
     discharge_burden as _engine_discharge_burden,
     enroll,
     fire_event as _engine_fire_event,
@@ -231,6 +233,27 @@ class Runtime:
         to the ledger. (R30 Option B)"""
         new_state, record = _engine_reinstate_authorization(
             self._state, self._spec, authorization_name
+        )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def claim(self, token_name: str, actor_name: str) -> TransitionRecord:
+        """Dynamically claim a CLAIMABLE burden token and append the
+        event to the ledger. (DN_005 §3 Option C)"""
+        new_state, record = _engine_claim(
+            self._state, self._spec, token_name, actor_name
+        )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def decline(self, token_name: str, actor_name: str) -> TransitionRecord:
+        """Record a declined claim for a CLAIMABLE burden token — a
+        functional no-op, but appended to the ledger for audit parity
+        with claim(). (DN_005 §3 Option C)"""
+        new_state, record = _engine_decline(
+            self._state, self._spec, token_name, actor_name
         )
         self._state = new_state
         self._ledger.append(record)
