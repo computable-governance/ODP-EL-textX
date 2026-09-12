@@ -4828,3 +4828,37 @@ Only the *recommendation* feature (`recommended-action`,
 governance/permit enforcement never touches this code path.
 
 ---
+
+## Task Group resources (AU eRequesting Task Group profile) are mapped identically to ordinary fulfilment Tasks — OPEN FINDING (2026-09-12)
+
+**Finding:** the AU eRequesting Task Group profile (real IG examples:
+Task-taskgroup-pathology-1, Task-taskgroup-imaging-1, fetched directly
+2026-09-12) populates requester/owner identically to an individual
+fulfilment Task, with no basedOn or partOf of its own. The only
+structural signal distinguishing it from an ordinary Task is
+meta.profile (`.../StructureDefinition/au-erequesting-task-group`) and
+meta.tag (`fulfilment-task-group`) — neither read anywhere in
+_map_task today.
+
+**Consequence:** a bundle containing a Task Group alongside its child
+fulfilment Tasks (the pattern the IG's own examples suggest is normal,
+not specific to $claim) would today produce a spurious delegation for
+the group Task itself, indistinguishable from a real one — no error,
+no warning. This surfaced while investigating whether $claim's
+returned "new group Task" needs its own mapping rule for gap 2/3, but
+the gap is broader than $claim: it applies to any Task Group present
+in a mapped bundle.
+
+**Not yet decided:** whether _map_task should skip Task Group
+resources entirely (recognizing meta.profile/tag and excluding them
+from R09-R15), map them to something structurally different (e.g. a
+non-delegation grouping construct), or something else — pending
+familiarisation with the FHIR Task/partOf parent-child pattern this
+profile relies on.
+
+**Status:** OPEN — no code change proposed. Affects gap 2/3 scope: if
+$claim's returned group Task follows this same shape, gap 2's
+implementation needs to explicitly exclude it from producing its own
+delegation, not just handle the original ownerless Task correctly.
+
+---
