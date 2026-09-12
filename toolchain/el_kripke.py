@@ -1022,16 +1022,30 @@ class KripkeModel:
 
     # ── §C.4 Level 3 — Bellman value iteration ────────────────────────────────
 
-    def bellman_values(self, gamma: float = 0.9) -> Dict[World, float]:
+    def bellman_values(
+        self,
+        gamma: float = 0.9,
+        epsilon: float = 1e-6,
+        max_iterations: int = 1000,
+    ) -> Dict[World, float]:
         """
-        §C.4 Level 3: compute V*(w) for every world via backward induction.
+        §C.4 Level 3: compute V*(w) for every world via value iteration.
 
-        The world-graph is a DAG (deontic states are monotone — obligations
-        only advance forward: PENDING→DISCHARGED/VIOLATED/etc — so no cycles
-        exist). However, same-step action-discharge transitions (step N→N)
-        co-exist with tick transitions (step N→N+1), so step-order processing
-        alone is insufficient. Kahn's topological sort gives the correct
-        reverse-processing order for exact backward induction.
+        AM-80: the world-graph is not a DAG in general. Every transition
+        rule before T7/T8 (AM-79) is monotone — deontic states only ever
+        advance forward (PENDING→DISCHARGED/VIOLATED/etc) — so no cycles
+        could arise. T7 (Authorization Revoke) / T8 (Authorization
+        Reinstate) are the first genuinely reversible pair: revoke then
+        reinstate, with nothing else changed in between, returns to a
+        world identical to the starting one — including at a
+        fully-discharged terminal world, since T7/T8 depend only on
+        permit state and strict-burden status, not on obligation
+        completion. The prior implementation used Kahn's topological
+        sort for one-pass backward induction, which assumed acyclicity;
+        under a cycle, worlds caught in it never reach in-degree zero,
+        never enter the topological order, and are silently skipped —
+        producing a `KeyError` when an already-processed world looks one
+        up as a successor.
 
         γ is applied uniformly to all edges, including same-step transitions.
         The rationale: γ discounts per decision point, not per calendar time
@@ -1053,41 +1067,54 @@ class KripkeModel:
           V*(non-terminal w) = max over w' in successors(w) of
                                  [utility(w') + γ · V*(w')]
 
+        Standard iterative value iteration (Bellman backup applied
+        repeatedly until convergence) computes the same fixed point as
+        backward induction on a DAG, but also handles cycles correctly:
+        with γ < 1, the Bellman operator is a contraction mapping, so
+        the iteration converges regardless of graph structure.
+
         Parameters
         ----------
         gamma : discount factor in (0, 1]. Default 0.9.
+        epsilon : convergence threshold — iteration stops once the
+            largest change in any world's value drops below this.
+            Default 1e-6.
+        max_iterations : safety cap on iteration count, in case epsilon
+            is never reached. Default 1000.
 
         Returns
         -------
         Dict[World, float] — V* for every world in self.worlds.
         """
-        # Kahn's algorithm: BFS-based topological sort.
-        in_degree: Dict[World, int] = {w: 0 for w in self.worlds}
-        for w in self.worlds:
-            for succ in self.successors(w):
-                in_degree[succ] += 1
+        # utility(w) is pure and worlds are immutable, but it is not cheap
+        # (rebuilds a dict and sums over obligations each call) — computed
+        # self.worlds × max_iterations times, it dominated wall-clock time
+        # on the 1352-world referral graph (~2.6s uncached vs ~1s cached).
+        # successors() is cheap (a dict lookup) but cached alongside it for
+        # the same reason: neither depends on V, so both are loop-invariant.
+        worlds = list(self.worlds)
+        succs_by_world = {w: self.successors(w) for w in worlds}
+        utility_by_world = {w: self.utility(w) for w in worlds}
 
-        queue: deque = deque(w for w in self.worlds if in_degree[w] == 0)
-        topo_order: List[World] = []
-        while queue:
-            w = queue.popleft()
-            topo_order.append(w)
-            for succ in self.successors(w):
-                in_degree[succ] -= 1
-                if in_degree[succ] == 0:
-                    queue.append(succ)
+        V: Dict[World, float] = {w: 0.0 for w in worlds}
 
-        # Backward induction in reverse topological order.
-        V: Dict[World, float] = {}
-        for w in reversed(topo_order):
-            succs = self.successors(w)
-            if not succs:
-                V[w] = self.utility(w)
-            else:
-                V[w] = max(
-                    self.utility(w_prime) + gamma * V[w_prime]
-                    for w_prime in succs
-                )
+        for _ in range(max_iterations):
+            delta = 0.0
+            new_V: Dict[World, float] = {}
+            for w in worlds:
+                succs = succs_by_world[w]
+                if not succs:
+                    new_V[w] = utility_by_world[w]
+                else:
+                    new_V[w] = max(
+                        utility_by_world[w_prime] + gamma * V[w_prime]
+                        for w_prime in succs
+                    )
+                delta = max(delta, abs(new_V[w] - V[w]))
+            V = new_V
+            if delta < epsilon:
+                break
+
         return V
 
     def optimal_path(
