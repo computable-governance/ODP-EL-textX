@@ -4796,3 +4796,35 @@ bundled into AM-78, which is an engine/scenario-file change, not a UI
 one.
 
 ---
+
+## `bellman_values()` crashed on any Kripke world graph containing a cycle — RESOLVED (2026-09-09)
+
+**OPEN FINDING (2026-09-09), RESOLVED same day**
+
+**Fix (AM-80):** `bellman_values()`'s one-pass Kahn's-topological-sort
+backward induction assumed the world graph was a DAG — true for every
+transition rule before T7/T8 (AM-79), all monotone, but false once
+T7/T8 (Authorization Revoke/Reinstate) introduced a genuinely
+reversible pair. Replaced with standard iterative value iteration
+(the textbook-correct algorithm for a cyclic MDP with `gamma < 1`),
+with successors/utility precomputed once per world to offset the
+O(worlds × edges) → O(worlds × edges × iterations) complexity change
+(~2.8× faster on the 1352-world referral graph after caching, vs the
+naive iterative version). See `docs/el_grammar_amendments.md` AM-80
+for full detail: root cause, design rationale, empirical verification
+(direct reproduction, cycle sanity check, synthetic-DAG equivalence
+check, real-graph fixed-point check, convergence and performance
+measurements), and files changed.
+
+**Found:** 2026-09-09, live-testing immediately after AM-79 landed
+(same session, same day) — the first board-view load of
+`GET /communities/ReferralEpisodeCommunity/recommended-action` after a
+fresh server restart crashed with `KeyError: World(step=9, [all five
+referral burdens DISCHARGED])`. Design note:
+`docs/design_notes/DN_015_bellman_cycle_fix.md`.
+
+Only the *recommendation* feature (`recommended-action`,
+`objective-score` — both call `bellman_values()`) was affected; live
+governance/permit enforcement never touches this code path.
+
+---

@@ -4777,3 +4777,140 @@ the file, keyword-argument-only for `step`); `tests/test_referral_kripke_t6_perm
 (new); `docs/KRIPKE_TRANSITION_RULES.md` (T7/T8 status → Implemented; T6
 correction status closed); `docs/CONCEPTS_INDEX.md` (2026-08-11 R30
 Option B finding closed out).
+
+## AM-80 (2026-09-09) — Fix `bellman_values()`'s cycle-handling crash
+
+**Status:** IMPLEMENTED (2026-09-09).
+
+**Problem:** live-testing immediately after AM-79 landed, the very
+first board-view load of `GET /communities/ReferralEpisodeCommunity/recommended-action`
+after a fresh server restart crashed with:
+
+```
+File "toolchain/el_kripke.py", line 1088, in <genexpr>
+    self.utility(w_prime) + gamma * V[w_prime]
+KeyError: World(step=9, [all five referral burdens DISCHARGED])
+```
+
+`bellman_values()` ordered worlds via Kahn's algorithm (BFS-based
+topological sort) and computed each world's value in a single
+reverse-topological pass, assuming every successor's value was already
+computed by the time it was needed — correct only for a DAG. Every
+transition rule before T7/T8 (AM-79) is monotone (PENDING→
+DISCHARGED/VIOLATED/etc, never back), so the world graph was always
+acyclic in practice, even though nothing enforced that structurally.
+T7 (Authorization Revoke) / T8 (Authorization Reinstate) are the first
+genuinely reversible pair: revoke then reinstate, with nothing else
+changed in between, returns to a world indistinguishable from a prior
+one. Both depend only on permit state and strict-burden status, not on
+obligation completion, so this is reachable even from a
+fully-discharged terminal world (exactly the crashing world above) —
+not limited to mid-episode states. Under Kahn's algorithm, worlds
+caught in a cycle never reach in-degree zero, never enter
+`topo_order`, and are silently skipped; an already-processed world
+looking one up as a successor then raises `KeyError`.
+
+Confirmed not a graph-construction problem:
+`build_kripke_from_runtime()`'s BFS already dedupes on `World`
+equality, so it correctly builds a finite graph even with cycles in
+it — the bug is isolated entirely to `bellman_values()`'s
+value-computation step, downstream of a correctly-built graph.
+Design note: `docs/design_notes/DN_015_bellman_cycle_fix.md`.
+
+**Design decision:** replace the one-pass topological backward
+induction with standard iterative value iteration — the textbook-
+correct algorithm for an MDP with cycles and discount factor
+`gamma < 1`, not a narrower cycle-avoidance patch. `gamma < 1` makes
+the Bellman operator a contraction mapping, so the iteration converges
+to the same fixed point regardless of graph structure — matching
+backward induction's output exactly on a DAG (verified — see Empirical
+verification below) while also being correct on a graph containing
+cycles, which backward induction cannot handle at all.
+
+**What changed** (`toolchain/el_kripke.py`, `bellman_values()` only):
+- Two new parameters, both with defaults chosen empirically against
+  the real referral scenario (see below): `epsilon: float = 1e-6`
+  (convergence threshold) and `max_iterations: int = 1000` (safety
+  cap). Existing callers (`optimal_path()`; `el_api.py`'s
+  `get_recommended_action()`/`get_objective_score()`) all call with
+  `gamma=` only (positional or keyword), so both remain fully
+  backward-compatible.
+- Kahn's-topological-sort block removed entirely. Replaced with:
+  initialize `V[w] = 0.0` for every world; repeat up to
+  `max_iterations` times computing `new_V[w] = utility(w)` for a
+  terminal world (no successors) or
+  `max(utility(w') + gamma * V[w'] for w' in successors(w))`
+  otherwise, tracking the largest per-world change (`delta`) each
+  pass; stop once `delta < epsilon`.
+- Performance: `utility(w)` is pure (worlds are immutable) but not
+  cheap — it rebuilds a dict and sums over obligations on every call —
+  and the naive loop called it `len(worlds) × iterations` times,
+  dominating wall-clock time. `successors(w)`/`utility(w)` are now
+  precomputed once into plain dicts before the iteration loop (both
+  are loop-invariant — neither depends on the evolving `V`), cutting
+  wall-clock time by ~2.8× on the graph measured below with no change
+  to the algorithm's output.
+
+**What did not need to change:** `optimal_path()` — already has its
+own explicit cycle detection while *walking* a path (a `visited` set,
+per its own docstring), independent of `bellman_values()`'s internals;
+it depends on `bellman_values()` succeeding first, and is unaffected
+otherwise (verified — see below). `el_api.py`'s
+`get_recommended_action()`/`get_objective_score()` (callers, both call
+with `gamma=` only, unmodified). `build_kripke_from_runtime()`'s BFS,
+`World`, T7/T8 themselves — all unaffected; this is purely a
+value-computation fix downstream of a correctly-built graph. Live
+governance/permit enforcement is entirely unaffected — only the
+*recommendation* feature (`recommended-action`, `objective-score`,
+both of which call `bellman_values()`) was crashing; the live engine's
+own permit/precondition checks never touch this code path.
+
+**Empirical verification:**
+- Direct reproduction: reimplemented the pre-AM-80 algorithm inline
+  (not imported, so it stays a stable regression fixture) and ran it
+  against the exact crashing scenario — `_build_referral_runtime()`
+  with all five discharge-able referral burdens (`referralInitiationBurden`,
+  `clinicalHandoverBurden`, `referralResponseBurden`,
+  `assessmentSchedulingBurden`, `aiExaminationBurden`) discharged via
+  `discharge_burden()` — confirmed it raises the identical `KeyError`
+  found live; confirmed the new algorithm completes on the same
+  scenario and returns a value for every world in `km.worlds`,
+  including the ones caught in the revoke/reinstate 2-cycle.
+- Fixture sanity: confirmed by direct DFS cycle-check (independent of
+  `bellman_values()` itself) that this reproduction's graph genuinely
+  contains a cycle — not merely a graph the old algorithm happened to
+  survive.
+- Convergence-equivalence: on a small synthetic DAG (plain-string
+  worlds, duck-typed against `KripkeModel.bellman_values` — the real
+  referral scenario turned out to have revoke/reinstate cycles
+  reachable at modest horizon even from a fresh `w0`, once
+  `referralInitiationBurden` clears down some path, so "acyclic real
+  subgraph" was not a stable fixture), the new algorithm's output
+  matches the reimplemented old algorithm's output exactly (within
+  1e-6). On the real cyclic graph, where the old algorithm cannot run
+  at all, verified instead that the new algorithm's output satisfies
+  the Bellman fixed-point equation for every world.
+- Convergence sanity: on the 1352-world graph (referral scenario,
+  fresh runtime, `horizon=10`), confirmed convergence within the
+  default `epsilon=1e-6` inside `max_iterations=1000` (empirically
+  ~133 iterations; `max_iterations` never binds at the default
+  `epsilon`) by comparing against a looser `epsilon=1e-3` run — all
+  per-world values agree within 1e-2.
+- Performance, measured (not assumed) on the referral scenario, fresh
+  runtime: `horizon=10` → 1352 worlds / 4632 edges, 2.56s uncached →
+  0.91s with the successors/utility caching above; `horizon=15` → 2072
+  worlds / 6922 edges, 1.47s. Practical for an interactive API call.
+- `optimal_path()` regression: re-ran with the new `bellman_values()`
+  on the cyclic scenario — completes, returns a plan, unmodified code
+  path.
+- Full suite: 339 passed, 1 xfailed (the pre-existing, unrelated
+  AM-76 xfail) — zero regressions against the pre-AM-80 baseline (333
+  passed, 1 xfailed), the 6 new tests accounting for the difference.
+
+**Files changed:** `toolchain/el_kripke.py` (`bellman_values()` only);
+new `tests/test_am80_bellman_cycle_fix.py` (6 tests: cyclic-graph
+sanity check, direct-reproduction completeness check, synthetic-DAG
+equivalence check, real-graph fixed-point check, epsilon-convergence
+regression guard, `optimal_path()` composition check); this file;
+`docs/CONCEPTS_INDEX.md` (if not landed in the same sitting — see
+that file for current status).
