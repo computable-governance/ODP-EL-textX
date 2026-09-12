@@ -126,6 +126,21 @@ SERVICE_REQUEST_ACTION_MAP: Dict[Tuple[str, str], str] = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# R09 — Task Group exclusion
+# ══════════════════════════════════════════════════════════════════════════════
+
+# A Task Group resource (AU eRequesting Task Group profile) populates
+# requester/owner identically to its child fulfilment Task — same
+# PractitionerRole, same Organization, restated at container level, not a
+# different party (confirmed against real IG examples, 2026-09-12:
+# Task-taskgroup-pathology-1, Task-taskgroup-imaging-1 vs.
+# Task-taskfulfilment-pathology-1, Task-taskfulfilment-imaging-1). Mapping
+# both would produce a spurious duplicate delegation for the group Task
+# itself. meta.profile is the only structural marker distinguishing the two.
+TASK_GROUP_PROFILE = "http://hl7.org.au/fhir/ereq/StructureDefinition/au-erequesting-task-group"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Internal representation — intermediate between FHIR and .el text
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -656,7 +671,15 @@ class FHIRConsentMapper:
 
         # 3 — Tasks → delegation chain
         # Sort: parent tasks (no partOf) first, then sub-tasks
-        tasks = by_type.get("Task", [])
+        # Task Group resources duplicate their child fulfilment Task's
+        # requester/owner exactly (confirmed against real IG examples,
+        # 2026-09-12) — mapping them would produce a spurious duplicate
+        # delegation. Excluded by profile marker before _map_task ever sees
+        # them, not handled inside _map_task itself.
+        tasks = [
+            t for t in by_type.get("Task", [])
+            if TASK_GROUP_PROFILE not in t.get("meta", {}).get("profile", [])
+        ]
         parent_tasks = [t for t in tasks if not t.get("partOf")]
         child_tasks  = [t for t in tasks if t.get("partOf")]
         for task in parent_tasks + child_tasks:
