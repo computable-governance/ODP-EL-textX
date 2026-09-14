@@ -166,6 +166,7 @@ _ActionOccurrences = FrozenSet[str]                     # action names that have
 _PermitStates = FrozenSet[Tuple[str, str]]              # (permit_name, "active"|"superseded")
 _EmbargoStates = FrozenSet[Tuple[str, str]]             # (embargo_name, "active"|"lifted")
 _DelegationStates = FrozenSet[Tuple[str, str]]           # (delegation_name, "active"|"revoked")
+_HolderOverrides = FrozenSet[Tuple[str, str]]             # (obligation_id, current_holder_actor_name)
 
 
 @dataclass(frozen=True)
@@ -200,6 +201,18 @@ class World:
                             revocable, direct-burden (`transfers_burden`)
                             Delegations are tracked; `transfers_token_group`
                             Delegations never appear here (out of scope).
+      - holder_overrides  : per-world Burden holder reassignment via a
+                            Rule T9 (Transfer) edge, AM-82 — a SEPARATE
+                            field from delegation_states, deliberately
+                            not merged into it: T9 models a live Action's
+                            `transfer` DeonticEffect (§6.4.7/§7.8.7), a
+                            distinct mechanism from delegation revocation
+                            (AM-81) that happens to need the same shape
+                            (obligation_id -> current holder actor name).
+                            Only Burden-kind tokens ever appear here —
+                            Permit/Embargo transfers are out of scope for
+                            T9 (their per-world state tracks activity,
+                            not holder identity).
       - step              : discrete time step (0 = initial)
 
     Frozen so that worlds are hashable and can appear in sets/dict keys.
@@ -211,6 +224,7 @@ class World:
     permit_states: _PermitStates = frozenset()   # frozenset of (permit_name, "active"|"superseded")
     embargo_states: _EmbargoStates = frozenset() # frozenset of (embargo_name, "active"|"lifted")
     delegation_states: _DelegationStates = frozenset()  # frozenset of (delegation_name, "active"|"revoked")
+    holder_overrides: _HolderOverrides = frozenset()  # frozenset of (obligation_id, holder_actor_name)
     step: int = 0
 
     # ── Convenience accessors ─────────────────────────────────────────────────
@@ -265,6 +279,16 @@ class World:
     def delegation_dict(self) -> Dict[str, str]:
         return dict(self.delegation_states)
 
+    def get_holder_override(self, obligation_id: str) -> str:
+        """Return the transferred-to holder for obligation_id in this world."""
+        for oid, holder in self.holder_overrides:
+            if oid == obligation_id:
+                return holder
+        raise KeyError(f"Obligation '{obligation_id}' has no holder override in this world")
+
+    def holder_override_dict(self) -> Dict[str, str]:
+        return dict(self.holder_overrides)
+
     def has_occurred(self, action_name: str) -> bool:
         """True iff action_name has occurred by this world (T5)."""
         return action_name in self.occurred_actions
@@ -296,17 +320,19 @@ def _make_world(
     permit_states: _PermitStates = frozenset(),
     embargo_states: _EmbargoStates = frozenset(),
     delegation_states: _DelegationStates = frozenset(),
+    holder_overrides: _HolderOverrides = frozenset(),
     step: int = 0,
 ) -> World:
     """Convenience constructor from plain dicts (+ frozensets of action names
-    and permit/embargo/delegation (name, state) pairs — DN_014, AM-81).
+    and permit/embargo/delegation/holder-override (name, state) pairs —
+    DN_014, AM-81, AM-82).
 
-    permit_states/embargo_states/delegation_states accept either a plain
-    dict (as built at w0, DN_014 §4) or an already-frozen set of (name,
-    state) pairs (as threaded through unchanged from a parent world in the
-    BFS loop) — normalized via dict(...) first so frozenset(...) always
-    yields pairs, never bare keys (frozenset() on a dict alone iterates its
-    keys, silently dropping state).
+    permit_states/embargo_states/delegation_states/holder_overrides accept
+    either a plain dict (as built at w0, DN_014 §4) or an already-frozen
+    set of (name, state) pairs (as threaded through unchanged from a
+    parent world in the BFS loop) — normalized via dict(...) first so
+    frozenset(...) always yields pairs, never bare keys (frozenset() on a
+    dict alone iterates its keys, silently dropping state).
     """
     return World(
         obligation_states=frozenset(obligation_states.items()),
@@ -315,6 +341,7 @@ def _make_world(
         permit_states=frozenset(dict(permit_states).items()),
         embargo_states=frozenset(dict(embargo_states).items()),
         delegation_states=frozenset(dict(delegation_states).items()),
+        holder_overrides=frozenset(dict(holder_overrides).items()),
         step=step,
     )
 
@@ -1994,6 +2021,22 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            standing grant (§6.4.5), not consumed by being exercised. No
            Embargo guard yet (landing separately).
 
+         Rule T9 — TRANSFER (§6.4.7/§7.8.7 DeonticEffect(transfer)):
+           For each Burden-kind `transfer` DeonticEffect whose `from_role`
+           and `to_role` each resolve to exactly one live actor, if the
+           token's current effective holder is that from-actor and the
+           from-actor is ACTIVE and the carrying Action hasn't already
+           occurred in w, add an edge w → w' where w' is identical to w
+           except the obligation's holder is reassigned (via
+           `holder_overrides`, not obligation_states) to the to-actor and
+           the Action is added to occurred_actions. Formal-verification
+           counterpart to the already-live engine effect (el_engine.py,
+           `elif op == "transfer":`) — Layer 3 is unaffected. AM-82
+           (2026-09-14) — implemented in hybrid mode only
+           (`build_kripke_from_runtime()`); NOT implemented in this
+           static/pre-exec builder, same hybrid-only gap T4/T7/T8 also
+           have here.
+
     Parameters
     ----------
     model   : parsed EnterpriseSpec (output of el_parser.parse)
@@ -2694,6 +2737,85 @@ def _build_delegation_transfer_index(spec: Any) -> Dict[str, DelegationLink]:
     return index
 
 
+@dataclass
+class TransferLink:
+    """AM-82: metadata about one Burden-kind `transfer` DeonticEffect
+    (§6.4.7/§7.8.7) resolved against live role membership, keyed by
+    action_name in `_build_transfer_index()`'s returned index."""
+    action_name: str
+    token_name: str
+    from_actor: str
+    to_actor: str
+
+
+def _build_transfer_index(spec: Any, actors: Any) -> Dict[str, List[TransferLink]]:
+    """AM-82: index Burden-kind `transfer` DeonticEffects by action_name,
+    for Rule T9 (Transfer). Walks Community/Domain/Federation -> role ->
+    action exactly like `_build_permit_requirement_index()` does, checking
+    each action's `deontic_effects` for `operation == "transfer"` with
+    `token.kind == "burden"`.
+
+    Unlike `delegation_index` (spec-static, mode-agnostic), this index
+    needs LIVE runtime actor state to resolve `from_role`/`to_role` into
+    actor names — `actors` is `state.actors` (the live WorldState's actor
+    tuple), passed in by the caller. Built inside
+    `build_kripke_from_runtime()` only, not shared with the static
+    builder, which has no live role membership to resolve against.
+
+    Scoped narrowly (AM-82): Burden-kind tokens only (Permit/Embargo
+    transfers are out of scope — their per-world state tracks activity,
+    not holder identity). Single-source, single-target only: a
+    `transfer` DeonticEffect is included only when BOTH `from_role` and
+    `to_role` resolve to exactly one actor via current role membership
+    (`a.role_name == role_name` over `actors`) — the live engine's
+    fan-out-to-multiple-holders case is not modelled here. A `transfer`
+    with no `from_role` at all is skipped entirely: there is no live
+    acting-actor parameter to fall back on the way el_engine.py's own
+    `eff.from_role or actor_name` does — the Kripke model has no
+    per-transition acting actor.
+
+    NOTE — known, unfixed asymmetry, deliberately NOT reproduced here:
+    el_engine.py's own `transfer` DeonticEffect handler resolves
+    `to_role` via role membership but matches `from_role` directly
+    against `TokenInstance.holder`, with NO role resolution at all. That
+    is a latent asymmetry in the live engine (out of scope for AM-82 to
+    fix) — this function resolves BOTH `from_role` and `to_role` through
+    the same role->actor lookup, which is the semantically correct
+    behavior for new formal-verification code, not a mirror of the live
+    engine's current (asymmetric) matching.
+    """
+    index: Dict[str, List[TransferLink]] = {}
+
+    def _resolve_one(role_name: Optional[str]) -> Optional[str]:
+        if not role_name:
+            return None
+        matches = [a.actor_name for a in actors if a.role_name == role_name]
+        return matches[0] if len(matches) == 1 else None
+
+    for el in spec.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                for eff in getattr(action, "deontic_effects", []):
+                    if getattr(eff, "operation", None) != "transfer":
+                        continue
+                    tok_ref = getattr(eff, "token", None)
+                    if tok_ref is None or getattr(tok_ref, "kind", None) != "burden":
+                        continue
+                    from_actor = _resolve_one(getattr(eff, "from_role", None))
+                    to_actor = _resolve_one(getattr(eff, "to_role", None))
+                    if from_actor is None or to_actor is None:
+                        continue
+                    index.setdefault(action.name, []).append(TransferLink(
+                        action_name=action.name,
+                        token_name=tok_ref.name,
+                        from_actor=from_actor,
+                        to_actor=to_actor,
+                    ))
+    return index
+
+
 def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     """
     Hybrid mode (ISO 15414 Annex C): KripkeModel anchored to runtime.current_state().
@@ -2705,6 +2827,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     group_index = _build_group_index(spec)
     satisfaction_conditions = _build_satisfaction_conditions(spec)
     delegation_index = _build_delegation_transfer_index(spec)  # AM-81
+    transfer_index = _build_transfer_index(spec, state.actors)  # AM-82
     discharged_in_ledger: Set[str] = {n for r in ledger for n in r.discharged}
     init_obligs: Dict[str, ObligationState] = {}
     descriptors: Dict[str, ObligationDescriptor] = {}
@@ -2848,16 +2971,20 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     authorizations = _collect(spec, "Authorization")
 
     def _effective_holder(w: World, oid: str, desc: ObligationDescriptor) -> str:
-        """AM-81: resolve oid's genuine current holder, accounting for a
-        revoked delegation. Returns the Delegation's delegator when oid
-        maps to a tracked DelegationLink AND that delegation is flagged
-        "revoked" in this world; otherwise returns desc.holder unchanged
-        (the common case — including every burden with no revocable
-        direct-burden Delegation at all, which never appears in
-        delegation_index)."""
+        """AM-81/AM-82: resolve oid's genuine current holder, accounting
+        for a revoked delegation or a Rule T9 (Transfer) holder override.
+        Checks the delegation-revocation branch first (AM-81, unchanged);
+        if that doesn't apply, checks w.holder_override_dict() (AM-82,
+        additive) and returns it if present; otherwise falls through to
+        desc.holder unchanged (the common case — including every burden
+        with no revocable direct-burden Delegation and no live transfer
+        at all)."""
         link = delegation_index.get(oid)
         if link is not None and w.delegation_dict().get(link.delegation_name) == "revoked":
             return link.delegator
+        override = w.holder_override_dict().get(oid)
+        if override is not None:
+            return override
         return desc.holder
 
     def strict_burden_blocks(w: World) -> bool:
@@ -2910,6 +3037,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         {**obligs, oid: ObligationState.DISCHARGED}, actors, occurred,
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=w.delegation_states,
+                        holder_overrides=w.holder_overrides,
                         step=w.step,
                     )
                     if wd not in worlds:
@@ -2923,6 +3051,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         {**obligs, oid: ObligationState.VIOLATED}, actors, occurred,
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=w.delegation_states,
+                        holder_overrides=w.holder_overrides,
                         step=w.step,
                     )
                     if wv not in worlds:
@@ -2938,6 +3067,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 obligs, actors, occurred,
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
                 delegation_states=w.delegation_states,
+                holder_overrides=w.holder_overrides,
                 step=w.step + 1,
             )
             if wt not in worlds:
@@ -2983,6 +3113,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 obligs, actors, new_occurred,
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
                 delegation_states=w.delegation_states,
+                holder_overrides=w.holder_overrides,
                 step=w.step,
             )
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
@@ -3038,6 +3169,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 new_obligs, actors, new_occurred,
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
                 delegation_states=w.delegation_states,
+                holder_overrides=w.holder_overrides,
                 step=w.step,
             )
             label   = f"examine:{oid} → {desc.for_action}"
@@ -3079,6 +3211,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         permit_states=frozenset(new_permits.items()),
                         embargo_states=frozenset(new_embargoes.items()),
                         delegation_states=w.delegation_states,
+                        holder_overrides=w.holder_overrides,
                         step=w.step,
                     )
                     if w_revoked not in worlds:
@@ -3103,6 +3236,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         permit_states=frozenset(new_permits.items()),
                         embargo_states=frozenset(new_embargoes.items()),
                         delegation_states=w.delegation_states,
+                        holder_overrides=w.holder_overrides,
                         step=w.step,
                     )
                     if w_reinstated not in worlds:
@@ -3136,6 +3270,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     obligs, actors, occurred,
                     permit_states=w.permit_states, embargo_states=w.embargo_states,
                     delegation_states=frozenset(new_delegations.items()),
+                    holder_overrides=w.holder_overrides,
                     step=w.step,
                 )
                 if w_revoked_deleg not in worlds:
@@ -3144,6 +3279,48 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         queue.append(w_revoked_deleg)
                 edges.setdefault(w, set()).add(w_revoked_deleg)
                 labels[(w, w_revoked_deleg)] = f"revoke_delegation:{deleg_name}"
+
+        # ── Rule T9: TRANSFER (Burden holder transfer via Action effect) ────
+        # AM-82. Formal-verification counterpart to the live `transfer`
+        # DeonticEffect (el_engine.py, `elif op == "transfer":`) — Layer 3
+        # is untouched by this amendment; this is purely additive here,
+        # same spirit as T7/T8's port of already-live engine behavior.
+        # Same strict-burden guard as T4/T7/T8 (a transfer doesn't
+        # discharge anything either). Unlike the live engine, this does
+        # not advance step — T9 is instantaneous on a world, like every
+        # other rule here except T3 (tick).
+        if not strict_burden_blocks(w):
+            for action_name, links in transfer_index.items():
+                if w.has_occurred(action_name):
+                    continue  # avoid a redundant self-loop, same idiom T5 uses
+                for link in links:
+                    oid = link.token_name
+                    if oid not in descriptors:
+                        continue  # token not tracked as a live obligation here
+                    current_holder = _effective_holder(w, oid, descriptors[oid])
+                    if current_holder != link.from_actor:
+                        continue
+                    if actors.get(link.from_actor) != ActorStatus.ACTIVE:
+                        continue
+
+                    new_overrides = {**w.holder_override_dict(), oid: link.to_actor}
+                    new_occurred = occurred | {action_name}
+                    w_transferred = _make_world(
+                        obligs, actors, new_occurred,
+                        permit_states=w.permit_states, embargo_states=w.embargo_states,
+                        delegation_states=w.delegation_states,
+                        holder_overrides=frozenset(new_overrides.items()),
+                        step=w.step,
+                    )
+                    if w_transferred not in worlds:
+                        worlds.add(w_transferred)
+                        if w_transferred.step < horizon:
+                            queue.append(w_transferred)
+                    edges.setdefault(w, set()).add(w_transferred)
+                    labels[(w, w_transferred)] = (
+                        f"transfer:{link.token_name} via {action_name} "
+                        f"({link.from_actor}→{link.to_actor})"
+                    )
 
     props = {w: _build_propositions(w, satisfaction_conditions) for w in worlds}
     return KripkeModel(

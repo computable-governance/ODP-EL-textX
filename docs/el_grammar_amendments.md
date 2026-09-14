@@ -5087,3 +5087,139 @@ block, `build_kripke_model()`'s docstring); new
 `tests/test_hybrid_t4_delegation_revocation.py`; this file;
 `docs/KRIPKE_TRANSITION_RULES.md` (T4 row); `docs/CONCEPTS_INDEX.md`
 (2026-09-12 T4 investigation entry's resolution note).
+
+## AM-82 (2026-09-14) — Burden transfer (T9): hybrid-mode `Rule T9` in `build_kripke_from_runtime()` (Layer 4 only — Layer 3's `transfer` DeonticEffect already existed)
+
+**Status:** IMPLEMENTED (2026-09-14).
+
+**Problem:** the `transfer` `DeonticEffect` (§6.4.7/§7.8.7) has been live
+in `el_engine.py` since before this amendment (`elif op == "transfer":`,
+reassigning a token's holder when an Action carrying that effect is
+performed) but had no Kripke-layer counterpart at all — no rule
+existed to model it in either builder, and it went unmentioned even in
+`build_kripke_model()`'s own T1–T8 docstring enumeration. There is zero
+live usage of it anywhere in `referral_scenario.el` (confirmed:
+`grep -n "effect.*transfer"` returns nothing there), so this amendment
+also required a new synthetic probe spec (below) to exercise it at all.
+
+**Scope, deliberately narrow, matching T4/T7/T8's own scope:**
+Burden-kind tokens only (Permit/Embargo transfers are out of scope —
+their per-world state tracks activity, not holder identity);
+single-source, single-target only (a `transfer` DeonticEffect is
+included only when both `from_role` and `to_role` resolve to exactly
+one actor via current role membership — the live engine's
+fan-out-to-multiple-holders case is not modelled); a `transfer` with no
+`from_role` at all is skipped entirely (no live per-transition acting
+actor to fall back on, unlike `el_engine.py`'s own
+`eff.from_role or actor_name`); hybrid mode only
+(`build_kripke_from_runtime()`) — `build_kripke_model()` is untouched,
+same as T4/T7/T8. Layer 3 is untouched this pass — purely additive to
+`el_kripke.py`, same spirit as T7/T8's port of already-live engine
+behavior (AM-79).
+
+**Known, deliberately unfixed asymmetry (flagged, not copied):**
+`el_engine.py`'s own `transfer` handler resolves `to_role` via role
+membership (`[a.actor_name for a in state.actors if a.role_name ==
+to_role]`) but matches `from_role` directly against
+`TokenInstance.holder`, with no role resolution at all — a latent
+asymmetry in the live engine, out of scope for this amendment to fix.
+`_build_transfer_index()` resolves BOTH `from_role` and `to_role`
+through the identical role→actor lookup, which is the semantically
+correct behavior for new formal-verification code — not a mirror of
+the live engine's current (asymmetric) matching.
+
+**What changed** (`toolchain/el_kripke.py`):
+- `World` gained `holder_overrides: FrozenSet[Tuple[str, str]] =
+  frozenset()` — `(obligation_id, current_holder_actor_name)` pairs.
+  **Deliberately a separate new field from AM-81's `delegation_states`,
+  not a merge/refactor of it** — AM-81's already-shipped, tested code
+  is untouched. Same accessor pattern (`get_holder_override()`/
+  `holder_override_dict()`), same backward-compatible empty default,
+  same threading discipline: every `_make_world()` call site inside
+  `build_kripke_from_runtime()`'s BFS loop (T1's discharge/violate
+  edges, T3's tick, T5's exercise, T6's examine, T7's revoke, T8's
+  reinstate, T4's revoke_delegation) now also threads
+  `holder_overrides=w.holder_overrides` through unchanged, the same
+  discipline AM-79/AM-81 established for `permit_states`/
+  `embargo_states`/`delegation_states`.
+- `_effective_holder()` (added AM-81) gained one additive `elif`
+  branch, not a rewrite: the existing delegation-revocation check runs
+  first, unchanged; if it doesn't apply, `w.holder_override_dict()` is
+  checked and returned if present; otherwise falls through to
+  `desc.holder` as before.
+- New `TransferLink` dataclass (`action_name`, `token_name`,
+  `from_actor`, `to_actor`) and `_build_transfer_index(spec, actors) ->
+  Dict[str, List[TransferLink]]`, keyed by `action_name` — walks
+  Community/Domain/Federation → role → action exactly like
+  `_build_permit_requirement_index()` does, checking each action's
+  `deontic_effects` for `operation == "transfer"` with
+  `token.kind == "burden"`. Unlike `delegation_index` (spec-static,
+  mode-agnostic), this index needs live runtime actor state to resolve
+  `from_role`/`to_role` — built inside `build_kripke_from_runtime()`
+  only (from `state.actors`), not shared with the static builder, which
+  has no live role membership to resolve against.
+- New **T9 — TRANSFER**, same position/shape as T4 (immediately after
+  it): for each `TransferLink` where the token's current effective
+  holder (via `_effective_holder()`) equals `from_actor` and
+  `from_actor` is `ACTIVE`, and the carrying Action hasn't already
+  occurred in this world (`w.has_occurred(action_name)` — same idiom T5
+  already uses for its own occurred-check, though for a different
+  reason there: avoids a redundant self-loop), add an edge to a world
+  with `holder_overrides` updated for that obligation and
+  `occurred_actions` including the Action (the live engine really does
+  mark the action occurred; T9 mirrors that). Gated by the identical
+  `strict_burden_blocks(w)` condition as T4/T7/T8 — a transfer doesn't
+  discharge anything either. Labelled
+  `f"transfer:{token_name} via {action_name} ({from_actor}→{to_actor})"`.
+  Instantaneous, no step advance, same convention as every other rule
+  here except T3.
+- `build_kripke_model()`'s own docstring gained a new T9 paragraph —
+  there wasn't one before (this rule didn't exist in that docstring's
+  original T1–T5 enumeration at all), added in the same phrasing
+  convention T4's paragraph uses for its own hybrid-only-gap note.
+
+**New synthetic probe spec** (`scenarios/probes/transfer_probe.el`,
+Probe tier): the first and only live exercise of `effect transfer`
+anywhere in this repo's scenarios. One `party`/`Burden`/`Action` happy
+path (`performTransfer`: `roleA` → `roleB`) plus one dedicated
+Burden/Action pair per T9 skip case in the same file — no `from_role`
+at all, `from_role` (`roleC`) filled by two actors (ambiguous),
+`to_role` (`roleUnfilled`) filled by nobody (zero actors), and a
+Permit-kind token — plus one outstanding `discharge_mode: strict`
+Burden to exercise the `strict_burden_blocks()` guard. Role membership
+has no grammar construct in this DSL at all (no "fills"/"member"
+binding — an Action's `actor: roleX` is descriptive only, per the
+grammar's own DOC-03 comment), so role assignment is done in Python via
+`el_engine.enroll(state, actor_name, role_name=...)`, the same pattern
+`el_api.py`'s own scenario builders already use — not something this
+grammar is missing a construct for by mistake.
+
+**Standard reference(s):** §6.4.7/§7.8.7 (DeonticEffect, transfer
+operation) — the same clause the already-live `el_engine.py` handler
+cites; no new grammar construct.
+
+**Empirical verification:** full suite re-run after each stage, no
+regressions at any point. Structural change (`World`/`_make_world()`/
+`_effective_holder()` additive branch): 357 passed, 1 xfailed
+(baseline unchanged). Index/T9 rule block: 357 passed, 1 xfailed,
+unchanged — confirmed live against the new probe that
+`_build_transfer_index()` returns exactly one entry (`performTransfer`)
+out of five candidate Actions, correctly excluding all four skip cases,
+and that the resulting `transfer:` edge's world reassigns
+`probeBurden`'s effective holder (confirmed via both
+`get_holder_override()` directly and T1's discharge label changing
+from `by ActorA` to `by ActorB` afterward). New
+`tests/test_hybrid_t9_transfer.py` (8 tests): happy-path edge presence
+and holder reassignment, T1 discharge-label rewiring (plus a
+no-self-loop check), the four skip cases, and the strict-burden guard
+(absent while outstanding, present once cleared). Full suite: 365
+passed, 1 xfailed — the 8 new tests accounting for the difference from
+the 357/1 baseline, zero regressions.
+
+**Files changed:** `toolchain/el_kripke.py` (`World`, `_make_world()`,
+`_effective_holder()`, new `TransferLink`/`_build_transfer_index()`,
+new T9 rule block, `build_kripke_model()`'s docstring); new
+`scenarios/probes/transfer_probe.el`; new
+`tests/test_hybrid_t9_transfer.py`; this file;
+`docs/KRIPKE_TRANSITION_RULES.md` (T9 row); `scenarios/README.md` (new
+probe catalog entry).
