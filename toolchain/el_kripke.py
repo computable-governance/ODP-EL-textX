@@ -33,7 +33,7 @@ Relationship to other layers
 -----------------------------
   Layer 1 — computable-governance grammar (Igor Dejanovic)
   Layer 2 — el_grammar.tx + el_validator.py + el_reasoner.py
-  Layer 3 — Sepanosian runtime: WorldState, transitions, ledger
+  Layer 3 — Runtime engine: WorldState, transitions, ledger
   Layer 4 — THIS MODULE
 
 The reachability relation R is built from the DSL-EL delegation structure
@@ -42,7 +42,7 @@ branching tree of possible futures. This is the primary and complete mode
 of Layer 4 verification: it asks "across all conceivable futures, does the
 obligation inevitably discharge?" before anything has happened at runtime.
 
-An optional HYBRID mode (not yet implemented) would allow a Sepanosian
+An optional HYBRID mode (not yet implemented) would allow the
 Layer 3 transition ledger to anchor the initial world to the current runtime
 state and prune branches that are no longer reachable. This would support
 post-hoc verification: "given what has already happened, is the obligation

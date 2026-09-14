@@ -140,7 +140,7 @@ Implements §6.4.6 conditional action semantics:
 
 **Important limitation:** This is a *static* check against declared token
 holdings in ObjectDecl bodies. Runtime token state changes (via speech acts)
-are not modelled — this is structural, not operational. Sepanosian's engine
+are not modelled — this is structural, not operational. The runtime engine
 handles the dynamic/operational version.
 
 **Returns:** `CanPerformResult` with:
@@ -202,7 +202,7 @@ Specification (.el file)
         │                    ──► check_permission()   [EF φ]
         │                    ──► ranked_reachable()   [utility §C.3/C.4]
         │
-        └──► Sepanosian's runtime engine (separate toolchain)
+        └──► Runtime engine (el_engine.py / el_runtime.py)
              ──► WorldState transitions
              ──► Deontic enforcement at runtime
              ──► Append-only ledger
@@ -213,7 +213,7 @@ Specification (.el file)
 - Validator: *Is this specification internally consistent?*
 - Reasoner: *Given consistency, what can we conclude about accountability?*
 - Kripke (el_kripke.py): *Across all possible futures, will obligation O inevitably discharge?*
-- Sepanosian's engine: *Given a valid specification, what happened when executed?*
+- Runtime engine: *Given a valid specification, what happened when executed?*
 
 ---
 
@@ -228,11 +228,9 @@ Layer 2 — THIS TOOLCHAIN (el_grammar.tx + el_validator.py + el_reasoner.py)
           Structural governance and accountability tracing
           Q: Who is accountable for obligation O through the chain?
 
-Layer 3 — Sepanosian runtime engine
+Layer 3 — Runtime engine
           Operational execution: WorldState, transitions, ledger
           Q: What happened, and was each step permitted?
-          Repo: github.com/thomas-sepanosian/pyodpel
-          (Thomas Sepanosian, MSc thesis, University of Twente, 2026)
 
 Layer 4 — el_kripke.py (implemented May 2026)
           Kripke semantics (Annex C of ISO/IEC 15414:2015)
@@ -265,7 +263,7 @@ futures. Three transition rules expand the model from the initial world:
 - **T3 TICK**      — time passes (suppressed if any strict obligation is pending
                      and its holder is active)
 
-An optional **hybrid mode** (not yet implemented) allows a Sepanosian Layer 3
+An optional **hybrid mode** (not yet implemented) allows the Layer 3
 ledger to anchor the initial world and prune unreachable branches.
 
 ### Modal operators (§C.2)

@@ -14,8 +14,8 @@ Design principles
 - Grammar is the schema: every class attribute name matches the
   corresponding grammar rule attribute exactly, so textX can populate
   fields without any renaming.
-- Frozen dataclasses: ``frozen=True`` enforces immutability consistent
-  with Thomas Sepanosian's WorldState design. Pydantic may replace
+- Frozen dataclasses: ``frozen=True`` enforces the immutability this
+  WorldState design relies on. Pydantic may replace
   dataclasses once structure stabilises (Step 5).
 - Object processors (Step 4) handle post-parse work: injecting enum
   defaults, flattening body wrappers, splitting unified item lists into

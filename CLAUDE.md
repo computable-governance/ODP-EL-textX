@@ -54,8 +54,7 @@ Layer 2 — DSL-EL specification and accountability reasoning
              accountable?
 
 Layer 3 — Runtime enforcement
-          Thomas Sepanosian's pyodpel engine.
-          https://github.com/thomas-sepanosian/pyodpel
+          el_engine.py / el_runtime.py
           WorldState + stateless engine + append-only ledger.
           Q: Did each action comply with the governance rules at execution time?
 
@@ -287,7 +286,7 @@ community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition)
 ## 6. The textX Custom Classes Architecture
 
 ### 6.1 The problem solved
-Thomas Sepanosian's pyodpel runtime used a two-step pipeline:
+An early two-step pipeline design:
 
 ```
 .odpel file → textX parser → generic AST → separate compilation step
@@ -360,11 +359,7 @@ Discovered during V-16a implementation (commit 3aae4be).
 
 ---
 
-## 7. Thomas Sepanosian's Runtime Engine (Layer 3)
-
-Repository: https://github.com/thomas-sepanosian/pyodpel (public, MIT licence)
-Thesis: "Design and Evaluation of an ODP-EL Toolchain for Executable
-Accountability", University of Twente, April 2026.
+## 7. The Runtime Engine (Layer 3)
 
 ### 7.1 Architecture
 - **Stateless engine** — `(WorldState, Action) → (WorldState, TransitionRecord)`
@@ -494,10 +489,6 @@ domain-independent. Never let clinical or FHIR concepts leak into
 - **Igor Dejanovic** — textX creator, computable-governance organisation
   co-founder. Confirmed the textX custom classes architecture direction
   (June 3, 2026).
-
-- **Thomas Sepanosian** — pyodpel runtime implementer, University of Twente
-  MSc. Does not yet know about the computable-governance organisation.
-  Plan: invite post-examination; pyodpel belongs here as the Layer 3 component.
 
 - **Peter Linington** — co-author of Linington/Milosevic/Dejanovic/Tanaka
   SSM 2025 paper; foundational ODP-EL work acknowledged in EDOC 2026 paper.

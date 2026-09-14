@@ -435,12 +435,6 @@ and their token-state consequences — facts that are the same regardless of
 whether the purpose of querying them is "prove compliance" (governance)
 or "navigate toward the objective" (coordination).
 
-Note: Thomas Sepanosian's thesis (2026) also used an append-only ledger
-concept, arrived at independently via a Pydantic-based architecture. The
-convergence on the same data structure reflects the naturalness of
-"immutable history of speech acts" as the right representation for deontic
-token state changes — not a shared design.
-
 ## 9. Key component summary (as of 2026-06-16)
 
 **`el_parser.py`** — Grammar loading + object processors (P1-P10)

@@ -28,7 +28,6 @@ Layer 2 — DSL-EL (specification layer)
 Layer 3 — Runtime Enforcement
           WorldState, deontic engine, append-only ledger
           Q: Did each action comply with the governance rules?
-          (see Thomas Sepanosian, ODP-EL Toolchain, University of Twente, 2026)
 
 Layer 4 — Kripke Verification
           el_kripke.py

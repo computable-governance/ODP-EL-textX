@@ -157,9 +157,6 @@ the acceptance evaluation resolves:
 - ISO 15414 Annex A (Figure A.6): `pending → active → discharged /
   violated / expired`. `pending` is the masked state (constraint not yet
   applied to the holder).
-- The Sepanosian summary of the standard notes a delegated obligation may
-  sit `pending` "while an agent attempts to discharge it" — precisely the
-  window an acceptance evaluation gates.
 
 So the transition the acceptance evaluation gates is **`pending → active`
 on accept**, and something-other-than-active on reject (see §5). The

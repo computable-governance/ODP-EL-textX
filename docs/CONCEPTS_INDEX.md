@@ -508,34 +508,37 @@ needs a careful check against the actual grammar file (done — quoted above)
 and against whatever existing tests/scenarios use `MemberRef` before any
 change is proposed. Recording the question here, not proposing a fix.
 
-**OPEN FINDING** — **Finding 1 (2026-07-28) — `DelegatedFrom.delegator` should be typed
-`[Party]`, not `[EnterpriseObject]`.** Per ISO/IEC 15414's Figure A.5
-(class diagram; confirmed via a secondary source describing the figure
-directly — Sepanosian's thesis, cited here only for its factual
-description of the standard's own diagram structure, not as a design
-authority, per this project's standing "do not cite Sepanosian as a
-design reference" note): "Principal and Agent... are specialisations of
-Party and ActiveEO respectively." That is, Principal is required to be a
-Party specifically (narrower type); Agent may be any active enterprise
-object (broader type, not restricted to Party). Confirmed against the
-current grammar (`grammar/v2/el_grammar.tx`):
+**OPEN FINDING** — **Finding 1 (2026-07-28) — DelegatedFrom.delegator
+may need to be typed `[Party]`, not `[EnterpriseObject]`; requires
+direct re-verification against ISO/IEC 15414 Figure A.5 before acting
+on this.** This finding's original evidentiary basis (a secondary
+source's description of Figure A.5) has been removed from this
+project and was never independently re-confirmed. Before any
+implementation: verify directly against the standard
+(BS_ISO_IEC_15414_2015.pdf) whether Figure A.5 actually requires
+Principal to be a Party specifically (narrower type) while allowing
+Agent to be any active enterprise object (broader type).
+
+If confirmed, the current grammar (`grammar/v2/el_grammar.tx`) would
+not enforce it:
 
     DelegatedFrom:
         'delegated_from' delegator=[EnterpriseObject]
         ('duration' ':' duration=STRING)?
     ;
 
-`delegator` is typed `[EnterpriseObject]`, not `[Party]` — this does not
-enforce the Figure A.5 restriction. Also confirmed: no validator rule
-enforces this either. V-07 (`DelegationDecl`, a separate, different
-construct — the speech-act version, §7.10.1) requires both delegator and
-delegate to be party OR agent (symmetric), which is a different rule from
-the Figure A.5 restriction and doesn't substitute for it. AM-31-V1
-(`Authorization.authority` must be a party) is also a different, adjacent
-relationship, not this one. This is a confirmed gap, not yet fixed —
-flagged for careful implementation in a future session, given the need to
-check whether any existing scenario currently declares a `delegated_from`
-pointing at something other than a Party before tightening this type.
+`delegator` is typed `[EnterpriseObject]`, not `[Party]`. Also
+confirmed: no validator rule enforces this either. V-07
+(`DelegationDecl`, a separate, different construct — the speech-act
+version, §7.10.1) requires both delegator and delegate to be party OR
+agent (symmetric), which is a different rule from the Figure A.5
+restriction and wouldn't substitute for it even if the restriction is
+real. AM-31-V1 (`Authorization.authority` must be a party) is also a
+different, adjacent relationship, not this one. Flagged for the
+standard-verification step above before any grammar change is
+considered — and, if confirmed, a check of whether any existing
+scenario currently declares a `delegated_from` pointing at something
+other than a Party before tightening the type.
 
 **Investigation 1 results (2026-07-28) — blast radius, before any grammar
 change.** Every `delegated_from:` declaration in `scenarios/**/*.el` was
@@ -3757,11 +3760,6 @@ example (§B.2 Templeman Library, pages 43–49) — plus the normative prose
 paper "Obligations and Delegation in the ODP Enterprise Language" (the paper by
 the standard's own co-author describing the deontic-token extension as it went
 into ISO 15414; its Figure 2 became Annex A's community-concepts diagram).
-
-**Note:** the standard DOES contain a library example (§B.2, Templeman Library
-at Kent) — this is distinct from and should not be confused with Thomas
-Sepanosian's thesis / pyodpel library scenario, which is not a credible design
-reference. The §B.2 example is normative-annex material and citable.
 
 **Finding — the grammar's choice is fully standard-conformant, not merely
 defensible:** in both worked examples, every action attributes participation to
