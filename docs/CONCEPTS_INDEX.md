@@ -4862,3 +4862,55 @@ implementation needs to explicitly exclude it from producing its own
 delegation, not just handle the original ownerless Task correctly.
 
 ---
+
+## `JoinLeaveEffect`/`on_join` role membership has no Kripke-layer counterpart — structurally different from the T-series gaps, not a smaller version of the same problem
+
+**OPEN FINDING (2026-09-14)**
+
+AM-83 (`docs/el_grammar_amendments.md`) closed the Layer 3 half of this
+gap: `el_engine.join_role()` now grants the token a `JoinLeaveEffect`'s
+`on_join` declares when an actor fills the named role. The Layer 4
+(`el_kripke.py`) side is deliberately **not** touched by that amendment
+and is recorded here as unresolved, not deferred-and-forgotten.
+
+**Why this isn't a T10:** every existing T-rule (T1, T3–T9) adds a
+*transition* over a dimension `World` already tracks — token state,
+tick, permit/embargo activity, delegation holder, burden holder. Actor
+membership itself (`actors`/`ActorState` — who fills which role) is
+never one of those dimensions: it is threaded completely unchanged,
+identically, through the entire BFS across every world in both
+`build_kripke_model()` and `build_kripke_from_runtime()`, for every
+rule that exists today. `on_join`/`on_leave` are not new edges over
+existing state — they are a request to make `World` track a **new,
+dynamic dimension** (which actors fill which roles, and how that
+population changes across the reachable-worlds graph) that it has
+structurally never had. Modeling this is a different kind of design
+problem than adding T4/T6/T7/T8/T9 was — those extended the shape of
+transitions over fixed state; this would extend the shape of the state
+itself. Treat any future work here as its own dedicated design session,
+not a same-shape follow-on to the T-series.
+
+**Confirms and narrows a pre-existing related finding:** "Permit
+granted via role-level `holds` is invisible to spec-only
+`permit_descriptors`" (above, 2026-08-18) already identified that
+`_extract_permit_structure()` has no resolution tier for a permit
+granted via role-level `holds` + `on_join ... transfer`, in spec-only
+mode specifically. That finding is about *holder resolution* for a
+token that already has a live descriptor; this finding is broader — it
+is about `World` having no representation of role membership as a
+state dimension at all, which is the deeper reason no resolution tier
+could fully close that gap even if one were added. Hybrid mode
+(`build_kripke_from_runtime()`) sidesteps both findings today by
+reading `state.actors`/`state.tokens` directly from a live `Runtime`
+that was already built with actors enrolled and tokens pre-seeded
+(`el_api.py`'s `_build_*_runtime()` functions) — but that is a
+work-around via pre-seeding, not `on_join` semantics actually reaching
+the Kripke layer; a world reached *after* a hypothetical `join_role()`-
+equivalent BFS transition would still show unchanged, initial-seed
+actor/token state.
+
+**Status:** OPEN, not scheduled. No `docs/KRIPKE_TRANSITION_RULES.md`
+row added — nothing in that file changed; this is a state-shape
+question, not a new transition rule.
+
+---

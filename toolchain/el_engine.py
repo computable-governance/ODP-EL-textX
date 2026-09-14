@@ -792,6 +792,63 @@ def enroll(state: WorldState, actor_name: str, role_name: Optional[str] = None,
     return WorldState(tokens=state.tokens, actors=tuple(new_actors), tick=state.tick)
 
 
+def join_role(state: WorldState, spec: Any, actor_name: str, role_name: str,
+              community_tag: str = "") -> Tuple[WorldState, List[str]]:
+    """Enroll actor_name into role_name AND apply any declared on_join
+    JoinLeaveEffect grants for that role (§7.8.7 NOTE 3).
+
+    enroll() itself has no `spec` parameter and so cannot see
+    JoinLeaveEffect declarations at all — this is a separate, additive
+    entry point, not a change to enroll()'s signature or behavior; every
+    existing bare enroll() call site (across the test suite, el_api.py,
+    scenario builders) is untouched and keeps producing zero token
+    effects, same as before.
+
+    on_leave/revert is deliberately out of scope: there is no
+    leave/unenroll primitive anywhere in this engine — only enroll()
+    exists, and nothing removes or reassigns an ActorState — so an
+    on_leave counterpart has no state transition to hook into yet
+    (see docs/el_grammar_amendments.md AM-83).
+
+    Idempotency mirrors the `create` DeonticEffect handler (~line 673
+    above): skip granting a token the actor already holds by name,
+    rather than appending a second, indistinguishable instance.
+    """
+    state = enroll(state, actor_name, role_name, community_tag)
+    tokens = list(state.tokens)
+    effects_log: List[str] = []
+
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for jle in getattr(el, "join_leave_effects", []):
+            if jle.kind != "on_join" or jle.role_name != role_name:
+                continue
+            tok_ref = jle.token
+            if not tok_ref:
+                continue
+            if any(t.token_name == tok_ref.name and t.holder == actor_name
+                   for t in tokens):
+                continue
+
+            tokens.append(TokenInstance(
+                token_name=tok_ref.name,
+                kind=tok_ref.kind,
+                holder=actor_name,
+                state="active",
+                discharge_mode=tok_ref.discharge_mode or "eventual",
+                priority=tok_ref.priority or "normal",
+                granted_at_tick=state.tick,
+                deadline=getattr(tok_ref, "deadline", None),
+                for_action=getattr(tok_ref, "for_action", None),
+            ))
+            effects_log.append(
+                f"on_join '{role_name}': granted '{tok_ref.name}' to '{actor_name}'"
+            )
+
+    return state.with_tokens(tokens), effects_log
+
+
 def grant_token(state: WorldState, token: TokenInstance) -> WorldState:
     """Add a TokenInstance to the WorldState."""
     return state.with_tokens(list(state.tokens) + [token])

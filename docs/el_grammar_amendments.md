@@ -5223,3 +5223,100 @@ new T9 rule block, `build_kripke_model()`'s docstring); new
 `tests/test_hybrid_t9_transfer.py`; this file;
 `docs/KRIPKE_TRANSITION_RULES.md` (T9 row); `scenarios/README.md` (new
 probe catalog entry).
+
+---
+
+## AM-83 (2026-09-14) — JoinLeaveEffect on_join (§7.8.7 NOTE 3): new `el_engine.join_role()` (Layer 3 only — Layer 4 gap logged separately, not closed)
+
+**Status:** IMPLEMENTED (2026-09-14), Layer 3 only.
+
+**Problem:** `JoinLeaveEffect` (`on_join <role> transfer <token>` /
+`on_leave <role> revert <token>`) has been a live grammar construct
+since AM-21, and is parsed into `Community.join_leave_effects` (also
+`Domain`/`Federation`, though neither of those two grammar rules
+actually declares a `join_leave_effects` field — see "What changed"
+below), but was consulted by **nothing at any layer**. This is a
+different failure mode from the T-series items (T4/T6/T7/T8/T9): those
+were Layer-3-implemented-Layer-4-missing gaps (an existing live engine
+behavior with no Kripke counterpart yet). This one is
+declared-and-silently-inert everywhere — `enroll()`, the engine's only
+role-membership entry point, has no `spec` parameter and so cannot see
+`JoinLeaveEffect` declarations at all; it is not a missing effect
+handler inside an existing dispatch, it is a missing capability at the
+entry point itself.
+
+`referral_scenario.el` has three live, previously-inert `on_join`
+declarations exercised by this amendment: `gpClinicianRole` →
+`referralInitiationBurden`, `referringRole` → `clinicalHandoverBurden`,
+`referredToRole` → `patientRecordAccessPermitByRole`.
+
+**Scope — deliberately Layer 3 only:** `on_leave`/`revert` is
+explicitly OUT of scope, not a deferred nice-to-have: there is no
+leave/unenroll primitive anywhere in this engine (only `enroll()`
+exists; nothing removes or reassigns an `ActorState`), so there is no
+state transition for an `on_leave` handler to hook into yet — a hard
+prerequisite blocker. Layer 4/Kripke is explicitly NOT touched this
+pass either; see the new dated entry in `docs/CONCEPTS_INDEX.md` for
+why that is a structurally different, harder problem than the T-series
+additions, not a smaller version of the same one.
+
+**What changed** (`toolchain/el_engine.py`):
+- New `join_role(state, spec, actor_name, role_name, community_tag="")
+  -> Tuple[WorldState, List[str]]`, placed immediately after `enroll()`.
+  `enroll()` itself is completely untouched — same signature, same
+  zero-token-effect behavior, confirmed by a dedicated regression test
+  below. `join_role()` calls `enroll()` for the base actor-state change,
+  then walks `spec.elements` for `Community`/`Domain`/`Federation`,
+  collecting each element's `join_leave_effects` (via `getattr(el,
+  "join_leave_effects", [])` — defensive, same style as
+  `_find_action_for_burden`'s existing traversal — since `Domain`'s
+  `DomainBodyItem` and `Federation`'s `FedBodyItem` alternations do not
+  actually include `JoinLeaveEffect` at all; only `Community`'s body
+  rule does. Confirmed by reading the grammar directly, not assumed.
+  Today this means only `Community`-declared `on_join` effects can ever
+  fire; the `Domain`/`Federation` walk is forward-compatible, not dead
+  code covering a real current gap), filters to `kind == "on_join"` and
+  a matching `role_name`, and for each match grants the named token to
+  `actor_name` — mirroring the `create` `DeonticEffect` handler's exact
+  `TokenInstance` construction (`state="active"`, `discharge_mode` from
+  the token's own declared default or `"eventual"`, `priority` default
+  `"normal"`, `granted_at_tick=state.tick`) including its idempotency
+  guard (skip if `actor_name` already holds a token of that name — same
+  guard shape as AM-"double role-enrollment bug" fix, `docs/CONCEPTS_INDEX.md`,
+  2026-08-20). Chose create-style construction over literally moving an
+  existing live `TokenInstance` from a `from_role` holder (the way the
+  separate, pre-existing `transfer` `DeonticEffect` op at
+  `el_engine.py:706` does) because the grammar's own `holds <token>`
+  declarations inside a role body are spec-level, not live pre-seeded
+  `WorldState` instances in general — confirmed against
+  `referral_scenario.el` itself: `referringRole` has no `holds
+  clinicalHandoverBurden` in its body at all (unlike `gpClinicianRole`
+  and `referredToRole`, which do), so a from-role-holder-move semantics
+  would have nothing to move for that case. This grant-on-join reading
+  is also the one already implied by the pre-existing, still-open
+  finding "Permit granted via role-level `holds` is invisible to
+  spec-only `permit_descriptors`" (`docs/CONCEPTS_INDEX.md`,
+  2026-08-18), checked before implementing this amendment per this
+  repo's CLAUDE.md OPEN FINDING gate.
+
+**Standard reference(s):** §7.8.7 NOTE 3 (JoinLeaveEffect / token
+transfer on role fill or leave) — no new grammar construct; the grammar
+side has existed since AM-21.
+
+**Empirical verification:** new `tests/test_join_role_on_join_effects.py`
+(7 tests), run directly against `referral_scenario.el`'s real,
+previously-inert `on_join` declarations — no synthetic probe needed:
+grant-on-join for each of the three live declarations; idempotency both
+when `join_role()` itself is called twice and when the token was
+already granted by an unrelated means beforehand; a role with no
+matching `JoinLeaveEffect` (`aiExaminationRole`) behaves identically to
+bare `enroll()` (zero token effects); and a direct regression check that
+bare `enroll()` itself still produces zero token effects, unchanged.
+Full suite: 372 passed, 1 xfailed — the 7 new tests accounting for the
+difference from the 365/1 baseline, zero regressions.
+
+**Files changed:** `toolchain/el_engine.py` (new `join_role()`); new
+`tests/test_join_role_on_join_effects.py`; this file;
+`docs/CONCEPTS_INDEX.md` (new dated entry documenting the Layer 4 gap
+as unresolved and structurally distinct from the T-series — not a
+`KRIPKE_TRANSITION_RULES.md` row, since nothing in that file changed).
