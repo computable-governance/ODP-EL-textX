@@ -1447,7 +1447,7 @@ def revoke_delegation(
 
     Scoped narrowly (AM-81): single `transfers_burden` Delegations only —
     a Delegation using `transfers_token_group` is out of scope and raises
-    KeyError. One-way only: there is no reinstate-delegation counterpart.
+    KeyError. See reinstate_delegation() (AM-84) for the reverse direction.
 
     1. Raises KeyError if delegation_name is not declared.
     2. Raises KeyError if delegation.revocable is not True — enforced
@@ -1529,6 +1529,103 @@ def revoke_delegation(
         tick=tick,
         actor_name=delegator_name,
         action_name=f"revoke_delegation:{delegation_name}",
+        outcome="ok",
+        discharged=(),
+        effects=effects_log,
+        violations=(),
+    )
+    return new_state, record
+
+
+def reinstate_delegation(
+    state: WorldState, spec, delegation_name: str
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    AM-84: Reinstate a previously-revoked Delegation at runtime, reassigning
+    its burden's holder from the delegator back to the delegate. Closes the
+    one-way gap AM-81 deliberately left open in revoke_delegation() — same
+    scope, not a reopening of AM-81's other scope decisions.
+
+    Simpler than reinstate_authorization()'s mirror of revoke_authorization():
+    delegation revocation never creates a new token (no embargo-equivalent),
+    it only moves an existing Burden's holder — so there is no first-time-
+    grant branch to handle here, just "is it currently with the delegator,
+    and if so move it back."
+
+    1. Raises KeyError if delegation_name is not declared.
+    2. Raises KeyError if delegation.revocable is not True — same
+       precondition as revoke_delegation().
+    3. Raises KeyError if delegation.burden is not set (i.e. this is a
+       transfers_token_group delegation) — out of scope, same as
+       revoke_delegation().
+    4. Blocked (not raised) while an unaddressed strict burden is
+       outstanding elsewhere — same guard/reason convention as
+       revoke_delegation()/reinstate_authorization(): reinstating doesn't
+       discharge anything either.
+    5. No-op (outcome='ok', empty effects) if no live 'active'
+       TokenInstance for the burden is currently held by the delegator —
+       already back with the delegate, or discharged/violated.
+    6. Otherwise reassigns that token's holder back to the delegate via the
+       existing _reassign_holder() helper (AM-81); its state is left
+       unchanged (still 'active').
+    """
+    deleg = None
+    for el in spec.elements:
+        if type(el).__name__ == "Delegation" and el.name == delegation_name:
+            deleg = el
+            break
+    if deleg is None:
+        raise KeyError(f"Delegation '{delegation_name}' not found in spec")
+
+    if not deleg.revocable:
+        raise KeyError(f"Delegation '{delegation_name}' is not revocable")
+
+    if deleg.burden is None:
+        raise KeyError(
+            f"Delegation '{delegation_name}' has no direct burden "
+            "(transfers_token_group delegations are out of scope for AM-81/AM-84)"
+        )
+
+    tick = state.tick
+    delegator_name = deleg.delegator.name
+    delegate_name = deleg.delegate.name
+    burden_name = deleg.burden.name
+
+    blocking = _unaddressed_strict_burdens(state)
+    if blocking:
+        reason = _strict_block_reason(blocking, "before the delegation can be reinstated")
+        return _blocked(state, delegator_name, f"reinstate_delegation:{delegation_name}", reason, tick)
+
+    if not any(
+        t.token_name == burden_name and t.kind == "burden"
+        and t.holder == delegator_name and t.state == "active"
+        for t in state.tokens
+    ):
+        record = TransitionRecord(
+            tick=tick,
+            actor_name=delegator_name,
+            action_name=f"reinstate_delegation:{delegation_name}",
+            outcome="ok",
+            discharged=(),
+            effects=(),
+            violations=(),
+        )
+        return state, record
+
+    tokens = [
+        _reassign_holder(t, delegate_name)
+        if t.token_name == burden_name and t.kind == "burden"
+        and t.holder == delegator_name and t.state == "active"
+        else t
+        for t in state.tokens
+    ]
+    effects_log = (f"reassigned '{burden_name}' from '{delegator_name}' to '{delegate_name}'",)
+
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=delegator_name,
+        action_name=f"reinstate_delegation:{delegation_name}",
         outcome="ok",
         discharged=(),
         effects=effects_log,

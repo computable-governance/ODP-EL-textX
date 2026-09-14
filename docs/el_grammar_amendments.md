@@ -5320,3 +5320,117 @@ difference from the 365/1 baseline, zero regressions.
 `docs/CONCEPTS_INDEX.md` (new dated entry documenting the Layer 4 gap
 as unresolved and structurally distinct from the T-series — not a
 `KRIPKE_TRANSITION_RULES.md` row, since nothing in that file changed).
+
+---
+
+## AM-84 (2026-09-14) — Delegation reinstatement (T10): `el_engine.reinstate_delegation()` + hybrid-mode `Rule T10` in `build_kripke_from_runtime()` (closes AM-81's deliberate one-way gap, both layers)
+
+**Status:** IMPLEMENTED (2026-09-14).
+
+**Problem:** AM-81 implemented `revoke_delegation()`/`Rule T4`
+deliberately one-way — "no reinstate-delegation edge/function" was an
+explicit scope decision, not an oversight. This amendment closes that
+gap: the reverse direction, both layers, same scope boundaries AM-81
+already established. It does not reopen any of AM-81's other scope
+decisions (`transfers_token_group` Delegations remain out of scope;
+`.revocable` remains a real, enforced precondition; hybrid mode only
+at Layer 4).
+
+**Scope — identical to AM-81, just bidirectional now:** single
+`transfers_burden` Delegations only; `.revocable` enforced; hybrid
+mode only (`build_kripke_from_runtime()`) — `build_kripke_model()` is
+untouched.
+
+**Layer 3 (`toolchain/el_engine.py`):**
+- New `reinstate_delegation(state, spec, delegation_name)`, placed
+  immediately after `revoke_delegation()`. Simpler than
+  `reinstate_authorization()`'s mirror of `revoke_authorization()`:
+  delegation revocation never creates a new token (no
+  embargo-equivalent) — it only moves an existing Burden's holder — so
+  there is no first-time-grant branch to handle, just "is it currently
+  with the delegator, and if so move it back." Same three `KeyError`
+  preconditions as `revoke_delegation()` (undeclared, not `.revocable`,
+  no direct `.burden`); same `_unaddressed_strict_burdens()`/
+  `_strict_block_reason()` guard (reinstating doesn't discharge
+  anything either); no-op (`outcome="ok"`, empty `effects`) if no live
+  `"active"` `TokenInstance` for the burden is currently held by the
+  **delegator** — already back with the delegate, or discharged/
+  violated; otherwise reassigns that token's holder from delegator back
+  to delegate via the existing `_reassign_holder()` helper (AM-81) — no
+  new helper needed.
+- `revoke_delegation()`'s own docstring corrected: the "One-way only:
+  there is no reinstate-delegation counterpart" line is no longer true
+  and now points to `reinstate_delegation()` instead.
+
+**Layer 4 (`toolchain/el_kripke.py`):**
+- Extended the existing T4 rule block rather than writing a new one:
+  the block header is renamed "Rule T4/T10: DELEGATION REVOKE /
+  REINSTATE" (same naming convention as the T7/T8 header above it), and
+  its comment now describes both directions, with the "one-way only"
+  line removed (no longer true). The single `for link in
+  delegation_index.values(): ... if w.delegation_dict().get(deleg_name,
+  "active") != "active": continue` early-exit was restructured into two
+  independent `if` branches — `== "active"` (T4, unchanged behavior)
+  and `== "revoked"` (new T10) — the same `if`/`if`-shaped pairing T7/T8
+  already use for their own revoke/reinstate branches (two independent
+  checks, not an `if`/`elif`, since a `continue` would have skipped the
+  new branch too). T10 flips `delegation_states[deleg_name]` from
+  `"revoked"` back to `"active"` in a new world via the same
+  `_make_world()` call shape T4 already uses (`holder_overrides`/
+  `permit_states`/`embargo_states` threaded through unchanged). No
+  change needed to `_effective_holder()` itself: it already falls
+  through to `desc.holder` (the delegate) whenever
+  `delegation_dict().get(...)` is anything other than `"revoked"`, so
+  flipping the state back to `"active"` alone restores the original
+  delegate as the effective holder everywhere T4 redirected it (T1,
+  `strict_burden_blocks()`, T6). Labelled
+  `f"reinstate_delegation:{deleg_name}"`. Same `strict_burden_blocks(w)`
+  guard, same instantaneous/no-step-advance convention as T4.
+- `build_kripke_model()`'s own docstring gained a new T10 paragraph
+  immediately after T4's (T4's paragraph also lost its own "one-way
+  only" line), same hybrid-only-gap phrasing convention T9's paragraph
+  already uses.
+
+**Standard reference(s):** §6.6.6/§7.10.1 (Delegation, revocability) —
+same clause AM-81 already cites; no new grammar construct.
+
+**Empirical verification:** full suite re-run after each stage, no
+regressions at any point. `tests/test_revoke_delegation.py` extended
+(not a new file) with 7 tests: `reinstate_delegation()` happy path
+against `specialistToAIDelegation` (revoke then reinstate, confirming
+the holder ends back with `SpecialistAIAgent`, active state preserved,
+a real effect logged), the same three `KeyError` cases (unknown
+delegation, `transfers_token_group` delegation via the scenario's real
+`gpToSpecialistDelegation`, non-revocable delegation via the existing
+probe spec), the strict-burden-blocked case, and the no-op case
+(delegation never revoked, so nothing is with the delegator to move
+back) — 12 tests total in that file, up from 6. Confirmed the existing
+happy-path test's assertion still holds unmodified (revoke's own
+behavior is untouched).
+`tests/test_hybrid_t4_delegation_revocation.py` extended (not a new
+file) with 2 tests: after a `revoke_delegation:specialistToAIDelegation`
+edge, a `reinstate_delegation:specialistToAIDelegation` edge is
+reachable from that world and the resulting world's `delegation_states`
+shows `"active"` again; and confirmed live that
+`examine:aiExaminationBurden → conductAIExamination` — absent in the
+revoked world (AM-81's own documented consequence) — reappears in the
+reinstated world, the mirror image of that finding: the case where the
+AI genuinely does get its access back and the obligation stops being
+stranded. Also fixed the existing edge-presence test's now-stale
+"One-way only — no reinstate-delegation edge back" comment (the
+assertion itself — no re-revoke edge from an already-revoked world —
+was still correct and needed no change; only the comment was wrong) —
+6 tests total in that file, up from 4. Full suite: 380 passed, 1
+xfailed — the 8 new tests accounting for the difference from the 372/1
+baseline, zero regressions.
+
+**Files changed:** `toolchain/el_engine.py` (new
+`reinstate_delegation()`; `revoke_delegation()`'s docstring corrected);
+`toolchain/el_kripke.py` (T4 rule block extended into T4/T10,
+`build_kripke_model()`'s docstring gained a T10 paragraph);
+`tests/test_revoke_delegation.py` (extended); `tests/test_hybrid_t4_delegation_revocation.py`
+(extended); this file; `docs/KRIPKE_TRANSITION_RULES.md` (new T10 row,
+T4's row retitled and its "one-way only" framing dropped). No
+`docs/CONCEPTS_INDEX.md` entry — this closes a documented,
+already-logged gap (AM-81's own explicit scope note), it does not
+surface a new finding.

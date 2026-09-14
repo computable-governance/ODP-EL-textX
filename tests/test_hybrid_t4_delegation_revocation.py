@@ -1,5 +1,6 @@
 """
-Layer 4 — hybrid-mode Rule T4 (Delegation Revocation), AM-81 (2026-09-14).
+Layer 4 — hybrid-mode Rule T4/T10 (Delegation Revoke/Reinstate), AM-81
+(2026-09-14) and AM-84 (2026-09-14).
 
 docs/CONCEPTS_INDEX.md's 2026-09-12 T4 investigation finding identified
 the documented T4 ("flip the delegate's ActorStatus to INACTIVE globally")
@@ -9,12 +10,16 @@ instance instead (`World.delegation_states`, mirroring how T7/T8 scope
 Permit/Embargo per instance), and threads a resolved `_effective_holder()`
 through T1's discharge check/label and `strict_burden_blocks()` so a
 revoked delegation's burden is judged/attributed against its delegator,
-not its (now-former) delegate.
+not its (now-former) delegate. AM-84 closes the one-way gap AM-81
+deliberately left open: T10 flips a `"revoked"` delegation back to
+`"active"` in the same `delegation_states` map, restoring
+`_effective_holder()`'s fall-through to the original delegate — same
+scope, same guard, same instantaneous shape as T4.
 
 Scoped narrowly, matching T7/T8's own scope exactly: single
 `transfers_burden` Delegations only, `.revocable` enforced as a real
-precondition, one-way (no reinstate-delegation edge), hybrid mode only
-(`build_kripke_from_runtime()` — `build_kripke_model()` is untouched).
+precondition, hybrid mode only (`build_kripke_from_runtime()` —
+`build_kripke_model()` is untouched).
 
 Two fixtures:
   - referral_scenario.el (via el_api._build_referral_runtime()) for the
@@ -77,7 +82,9 @@ def test_t4_revoke_delegation_edge_present_once_strict_burden_clears():
         if km.labels[(w0, w)] == "revoke_delegation:specialistToAIDelegation"
     )
     assert w_revoked.get_delegation("specialistToAIDelegation") == "revoked"
-    # One-way only — no reinstate-delegation edge back.
+    # No re-revoke edge from an already-revoked world (T4's own branch is
+    # guarded by the == "active" check) — T10's reinstate edge from here
+    # is tested separately below.
     out_from_revoked = {km.labels[(w_revoked, w)] for w in km.edges.get(w_revoked, set())}
     assert not any("specialistToAIDelegation" in lbl and lbl.startswith("revoke_delegation")
                    for lbl in out_from_revoked)
@@ -108,6 +115,62 @@ def test_t4_examine_edge_for_gated_burden_disappears_after_revocation():
     )
     post_edges = {km.labels[(w_revoked, w)] for w in km.edges.get(w_revoked, set())}
     assert "examine:aiExaminationBurden → conductAIExamination" not in post_edges
+
+
+def test_t10_reinstate_delegation_edge_present_and_flips_state_back_to_active():
+    """AM-84: from a world where specialistToAIDelegation is 'revoked',
+    a reinstate_delegation: edge must be reachable, and the world it
+    leads to must show the delegation flagged 'active' again."""
+    rt = _build_referral_runtime()
+    state, spec = rt.current_state(), rt._spec
+    state, _ = discharge_burden(state, spec, "referralInitiationBurden")
+    rt = Runtime(state, spec)
+
+    km = build_kripke_from_runtime(rt, horizon=10)
+    w0 = km.initial
+    w_revoked = next(
+        w for w in km.edges[w0]
+        if km.labels[(w0, w)] == "revoke_delegation:specialistToAIDelegation"
+    )
+
+    out_from_revoked = {km.labels[(w_revoked, w)] for w in km.edges.get(w_revoked, set())}
+    assert "reinstate_delegation:specialistToAIDelegation" in out_from_revoked
+
+    w_reinstated = next(
+        w for w in km.edges[w_revoked]
+        if km.labels[(w_revoked, w)] == "reinstate_delegation:specialistToAIDelegation"
+    )
+    assert w_reinstated.get_delegation("specialistToAIDelegation") == "active"
+
+
+def test_t10_examine_edge_reappears_after_reinstatement():
+    """Mirror image of test_t4_examine_edge_for_gated_burden_disappears_
+    after_revocation: once specialistToAIDelegation is reinstated, the
+    effective holder reverts to SpecialistAIAgent, who does hold
+    patientRecordAccessPermitByAuthorization — so the examine: edge that
+    disappeared under T4 must reappear under T10. This is the case where
+    the AI genuinely does get its access back and the obligation stops
+    being stranded."""
+    rt = _build_referral_runtime()
+    state, spec = rt.current_state(), rt._spec
+    state, _ = discharge_burden(state, spec, "referralInitiationBurden")
+    rt = Runtime(state, spec)
+
+    km = build_kripke_from_runtime(rt, horizon=10)
+    w0 = km.initial
+    w_revoked = next(
+        w for w in km.edges[w0]
+        if km.labels[(w0, w)] == "revoke_delegation:specialistToAIDelegation"
+    )
+    revoked_edges = {km.labels[(w_revoked, w)] for w in km.edges.get(w_revoked, set())}
+    assert "examine:aiExaminationBurden → conductAIExamination" not in revoked_edges
+
+    w_reinstated = next(
+        w for w in km.edges[w_revoked]
+        if km.labels[(w_revoked, w)] == "reinstate_delegation:specialistToAIDelegation"
+    )
+    reinstated_edges = {km.labels[(w_reinstated, w)] for w in km.edges.get(w_reinstated, set())}
+    assert "examine:aiExaminationBurden → conductAIExamination" in reinstated_edges
 
 
 # ── Minimal probe spec — T1 effective-holder discharge-label rewiring ───────

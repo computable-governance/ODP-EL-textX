@@ -2009,9 +2009,21 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            finding). AM-81 (2026-09-14) — implemented in hybrid mode
            only (build_kripke_from_runtime()); NOT implemented in this
            static/pre-exec builder, same hybrid-only gap T5's Embargo
-           guard and T7/T8 also have here. One-way only — no reinstate-
-           delegation edge. Scoped to `transfers_burden` Delegations
-           only; `transfers_token_group` is out of scope.
+           guard and T7/T8 also have here. Scoped to `transfers_burden`
+           Delegations only; `transfers_token_group` is out of scope.
+
+         Rule T10 — REINSTATEMENT (delegation):
+           The reverse of T4: for each revocable Delegation transferring
+           a direct burden whose delegation state is currently "revoked"
+           in w, add an edge flipping that delegation's state back to
+           "active" — mirroring reinstate_delegation() (el_engine.py):
+           the burden's effective holder resolves back to the delegate
+           (desc.holder) wherever it is read. Closes the one-way gap T4
+           deliberately left open. AM-84 (2026-09-14) — implemented in
+           hybrid mode only (build_kripke_from_runtime()); NOT
+           implemented in this static/pre-exec builder, same hybrid-only
+           gap T4/T5/T7/T8/T9 also have here. Same scope as T4:
+           `transfers_burden` Delegations only.
 
          Rule T5 — EXERCISE (§7.8.8.2/§7.8.8.3 permit-occurrence):
            For each ACTIVE Permit P with a for_action held by an ACTIVE
@@ -3246,39 +3258,61 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     edges.setdefault(w, set()).add(w_reinstated)
                     labels[(w, w_reinstated)] = f"reinstate:{auth.name}"
 
-        # ── Rule T4: REVOCATION (delegation) ────────────────────────────────
-        # AM-81. Mirrors revoke_delegation() (el_engine.py) as closely as
-        # the Kripke model's shape allows: same defensive skip for a
-        # non-revocable or absent-burden Delegation (never enters
-        # delegation_index at all — see _build_delegation_transfer_index()),
-        # same strict-burden guard as T7/T8 (revoke_delegation() never
-        # discharges anything, so it stays correctly blocked whenever a
-        # strict burden is outstanding and actionable, exactly like tick/
-        # T7/T8). Unlike the live engine, this does not advance step — T4
-        # is instantaneous on a world, like T1/T5/T6/T7/T8. One-way only:
-        # no reinstate-delegation edge (out of scope, AM-81).
+        # ── Rule T4/T10: DELEGATION REVOKE / REINSTATE ──────────────────────
+        # T4 (AM-81) / T10 (AM-84). Mirrors revoke_delegation()/
+        # reinstate_delegation() (el_engine.py) as closely as the Kripke
+        # model's shape allows: same defensive skip for a non-revocable or
+        # absent-burden Delegation (never enters delegation_index at all —
+        # see _build_delegation_transfer_index()), same strict-burden
+        # guard as T7/T8 (neither direction discharges anything, so both
+        # stay correctly blocked whenever a strict burden is outstanding
+        # and actionable, exactly like tick/T7/T8). Unlike the live
+        # engine, this does not advance step — T4/T10 are instantaneous on
+        # a world, like T1/T5/T6/T7/T8/T9. Two-way: T10 closes the one-way
+        # gap T4 deliberately left open at AM-81.
         if not strict_burden_blocks(w):
             for link in delegation_index.values():
                 deleg_name = link.delegation_name
                 if not link.revocable:
                     continue
-                if w.delegation_dict().get(deleg_name, "active") != "active":
-                    continue  # already revoked in this world — one-way only
 
-                new_delegations = {**w.delegation_dict(), deleg_name: "revoked"}
-                w_revoked_deleg = _make_world(
-                    obligs, actors, occurred,
-                    permit_states=w.permit_states, embargo_states=w.embargo_states,
-                    delegation_states=frozenset(new_delegations.items()),
-                    holder_overrides=w.holder_overrides,
-                    step=w.step,
-                )
-                if w_revoked_deleg not in worlds:
-                    worlds.add(w_revoked_deleg)
-                    if w_revoked_deleg.step < horizon:
-                        queue.append(w_revoked_deleg)
-                edges.setdefault(w, set()).add(w_revoked_deleg)
-                labels[(w, w_revoked_deleg)] = f"revoke_delegation:{deleg_name}"
+                if w.delegation_dict().get(deleg_name, "active") == "active":
+                    # T4 — Revoke: flip the delegation to "revoked" — the
+                    # burden's effective holder becomes the delegator
+                    # (_effective_holder()).
+                    new_delegations = {**w.delegation_dict(), deleg_name: "revoked"}
+                    w_revoked_deleg = _make_world(
+                        obligs, actors, occurred,
+                        permit_states=w.permit_states, embargo_states=w.embargo_states,
+                        delegation_states=frozenset(new_delegations.items()),
+                        holder_overrides=w.holder_overrides,
+                        step=w.step,
+                    )
+                    if w_revoked_deleg not in worlds:
+                        worlds.add(w_revoked_deleg)
+                        if w_revoked_deleg.step < horizon:
+                            queue.append(w_revoked_deleg)
+                    edges.setdefault(w, set()).add(w_revoked_deleg)
+                    labels[(w, w_revoked_deleg)] = f"revoke_delegation:{deleg_name}"
+
+                if w.delegation_dict().get(deleg_name, "active") == "revoked":
+                    # T10 — Reinstate: flip the delegation back to
+                    # "active" — the burden's effective holder reverts to
+                    # desc.holder (the delegate), via _effective_holder().
+                    new_delegations = {**w.delegation_dict(), deleg_name: "active"}
+                    w_reinstated_deleg = _make_world(
+                        obligs, actors, occurred,
+                        permit_states=w.permit_states, embargo_states=w.embargo_states,
+                        delegation_states=frozenset(new_delegations.items()),
+                        holder_overrides=w.holder_overrides,
+                        step=w.step,
+                    )
+                    if w_reinstated_deleg not in worlds:
+                        worlds.add(w_reinstated_deleg)
+                        if w_reinstated_deleg.step < horizon:
+                            queue.append(w_reinstated_deleg)
+                    edges.setdefault(w, set()).add(w_reinstated_deleg)
+                    labels[(w, w_reinstated_deleg)] = f"reinstate_delegation:{deleg_name}"
 
         # ── Rule T9: TRANSFER (Burden holder transfer via Action effect) ────
         # AM-82. Formal-verification counterpart to the live `transfer`
