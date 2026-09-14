@@ -89,7 +89,7 @@ this is what gives `strict` its "compelled" character in the model.
 `strict` obligation is simultaneously dischargeable, T3 fires,
 incrementing `step` with no other state change.
 
-## T4 — Revocation *(reserved, not yet built)*
+## T4 — Revocation *(implemented, hybrid mode only — AM-81, 2026-09-14)*
 
 **Intended:** actor status transitions to `INACTIVE`; any obligation held
 by that actor reverts to `PENDING` on the delegator.
@@ -136,6 +136,46 @@ scoped per specific Permit/Embargo instance (`permit_states`/
 resolve the correctness concern above and give DN_005's
 businessStatus-linking gap a formally verifiable target, not just a
 descriptive/mapper-level one.
+
+**Resolution (AM-81, 2026-09-14):** built exactly along the recommended
+direction above. `World` gained `delegation_states` (per delegation
+instance, `"active"|"revoked"`), not a per-actor `ActorStatus` flip —
+`ActorStatus.INACTIVE` remains completely unused anywhere in
+`el_kripke.py`, by design; the correctness concern this investigation
+raised about a global actor flag is avoided entirely rather than fixed
+after the fact. A new `_effective_holder()` resolves a burden's genuine
+current holder (the delegator, once its delegation is flagged
+`"revoked"` in a given world) and is threaded through T1's discharge
+check/label, `strict_burden_blocks()`, and T6's holder/permit-ownership
+check.
+
+**What was built:**
+- `el_engine.revoke_delegation()` (Layer 3) and hybrid-mode Rule T4
+  (Layer 4) — see `docs/el_grammar_amendments.md`'s AM-81 entry for the
+  full change list and empirical verification.
+- Scoped to single `transfers_burden` Delegations only — matches this
+  investigation's own framing (a delegation-instance-scoped mechanism);
+  `transfers_token_group` Delegations are explicitly out of scope.
+- `.revocable` is enforced as a real runtime precondition in
+  `revoke_delegation()` — `revoke_authorization()`'s corresponding check
+  is a known, separately-tracked looseness, not carried into this path.
+
+**Explicitly deferred, not built this pass:**
+- **Reinstate-delegation (the reverse direction).** One-way revoke
+  only. The investigation above flagged that a *whole-actor* design
+  would need a reverse direction to be usable, and noted the resulting
+  cycle risk is no longer a crash risk since AM-80 generalized
+  `bellman_values()` to handle cycles — that observation carries over
+  unchanged to this narrower, correctly-scoped design too, so a future
+  reinstate-delegation edge remains straightforward to add without
+  reopening the cycle question.
+- **`transfers_token_group` Delegations.** Only a Delegation's direct
+  `.burden` reference is indexed; group-transfer Delegations never
+  enter `delegation_index` at all and are unaffected by T4.
+- **DN_005's businessStatus-linking gap itself.** This amendment gives
+  that gap a formally verifiable target (as this investigation hoped),
+  but does not itself wire T4 into the FHIR mapper or DN_005's live
+  event handling — that remains separate follow-on work.
 
 ## T5 — Exercise
 

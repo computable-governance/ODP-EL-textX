@@ -4914,3 +4914,176 @@ equivalence check, real-graph fixed-point check, epsilon-convergence
 regression guard, `optimal_path()` composition check); this file;
 `docs/CONCEPTS_INDEX.md` (if not landed in the same sitting — see
 that file for current status).
+
+## AM-81 (2026-09-14) — Delegation revocation (T4): `el_engine.revoke_delegation()` + hybrid-mode `Rule T4` in `build_kripke_from_runtime()`
+
+**Status:** IMPLEMENTED (2026-09-14).
+
+**Problem:** `T4 — REVOCATION` had been reserved but unimplemented since
+`build_kripke_model()`'s own docstring first named it — genuinely
+distinct from `T7`/`T8` (AM-79), which cover *authorization/permit*
+revocation, not *delegation* revocation. The docstring's original
+sketch ("flip the delegate's `ActorStatus` to `INACTIVE`") was
+investigated on 2026-09-12 (docs/CONCEPTS_INDEX.md, T4 investigation
+finding) and found to be the wrong shape: `ActorStatus` is a single,
+flat, global flag per actor name with no delegation/role/community
+scoping anywhere in `el_kripke.py` — revoking one delegation to an
+actor would incorrectly flip that actor `INACTIVE` for every other
+obligation they separately hold. This amendment implements T4 scoped
+per delegation *instance* instead, mirroring how T7/T8 themselves are
+correctly scoped per Permit/Embargo instance (`permit_states`/
+`embargo_states`) rather than as a blunt per-actor flag — the
+investigation's own recommended direction.
+
+**Scope, deliberately narrow, matching T7/T8's own scope exactly:**
+single `transfers_burden` Delegations only (`transfers_token_group` is
+out of scope — never enters `delegation_index` at all); `.revocable`
+enforced as a real precondition (`revoke_authorization()`'s existing
+looseness here — it never actually checks `Authorization.revocable` —
+is a known, separately-tracked gap, not copied into this new path);
+one-way revoke only (no reinstate-delegation edge/function); hybrid
+mode only (`build_kripke_from_runtime()`) — `build_kripke_model()` is
+untouched, same as T7/T8.
+
+**Layer 3 (`toolchain/el_engine.py`):**
+- New `_reassign_holder(tok, new_holder)` helper alongside `_transition()`
+  — field-by-field reconstruction with only `holder` changed, modelled
+  on the existing inline `transfer` `DeonticEffect` handler's pattern
+  (same shape, one field instead of every field).
+- New `revoke_delegation(state, spec, delegation_name)`, mirroring
+  `revoke_authorization()`'s shape as closely as the different
+  construct allows: `KeyError` if undeclared, `KeyError` if not
+  `.revocable`, `KeyError` if `.burden` is unset (a
+  `transfers_token_group` Delegation), blocked (not raised) via the
+  same `_unaddressed_strict_burdens()`/`_strict_block_reason()` guard
+  `revoke_authorization()`/`reinstate_authorization()` use, no-op
+  (`outcome="ok"`, empty `effects`) if no live TokenInstance for the
+  burden is currently held by the delegate — mirroring
+  `reinstate_authorization()`'s "already_active" convention — otherwise
+  reassigns that token's holder to the delegator, state unchanged.
+- **Corrected while implementing, against the spec as originally
+  drafted:** the no-op/target lookup matches on `state == "active"`,
+  not `"pending"`. No burden anywhere in this codebase is ever granted
+  or left `"pending"` while delegated — every burden (including
+  `aiExaminationBurden` in `referral_scenario.el`) is declared and
+  granted `state: active` and stays `"active"` until discharged/
+  violated/superseded; `"pending"` is used *only* for AM-57's unrelated
+  TokenGroup `any_discharged` sibling-masking mechanism. Matching on
+  `"pending"` as originally specified would have made
+  `revoke_delegation()` a permanent no-op against every real scenario
+  — confirmed empirically against `referral_scenario.el` before fixing
+  it. `"active"` mirrors `_strict_actionable_burdens()`'s own
+  convention (`state == "active"`, never `"pending"`, for burden
+  actionability).
+
+**Layer 4 (`toolchain/el_kripke.py`):**
+- `World` gained `delegation_states: FrozenSet[Tuple[str, str]] =
+  frozenset()` — `(delegation_name, "active"|"revoked")` pairs, same
+  convention and same backward-compatible empty-default as
+  `permit_states`/`embargo_states` (AM-79). New `get_delegation()`/
+  `delegation_dict()` accessors, mirroring `get_permit()`/
+  `permit_dict()`. `_make_world()` takes the same new param; every
+  `_make_world()` call site inside `build_kripke_from_runtime()`'s BFS
+  loop (T1's discharge/violate edges, T3's tick, T5's exercise, T6's
+  examine, T7's revoke, T8's reinstate) threads
+  `delegation_states=w.delegation_states` through unchanged, same
+  discipline AM-79 established for `permit_states`/`embargo_states`.
+- New `DelegationLink` dataclass (`delegation_name`, `delegator`,
+  `delegate`, `revocable`) and `_build_delegation_transfer_index(spec)`,
+  keyed by obligation_id (the burden's token name) — mirrors the
+  unconditional direct-`.burden`-match branch of
+  `_delegation_chain_for_token()` exactly, deliberately excluding that
+  function's `token_group` branch (out of scope here).
+- New `_effective_holder(w, oid, desc)` helper (closure inside
+  `build_kripke_from_runtime()`, alongside `_permit_active()`):
+  resolves to the Delegation's delegator when `oid` maps to a tracked
+  `DelegationLink` *and* that delegation is flagged `"revoked"` in
+  world `w`; otherwise returns `desc.holder` unchanged (every burden
+  with no revocable direct-burden Delegation at all — the overwhelming
+  majority — is completely unaffected).
+- **T1** (Discharge)'s holder-active check and discharge label now read
+  through `_effective_holder()` instead of the static `desc.holder` —
+  a burden whose delegation was revoked in `w` discharges (and is
+  labelled as discharging) against the delegator, not the former
+  delegate.
+- **`strict_burden_blocks()`** (shared by T3's tick-suppression and
+  T7/T8's guard) reads through `_effective_holder()` for the same
+  reason: a revoked delegation's still-strict obligation must be judged
+  actionable against whoever now actually holds it.
+- **T6** (Examine)'s holder-active check *and* its permit-ownership
+  match (`permit_descriptors[p].holder == …`) were also switched to
+  `_effective_holder()`, extending beyond T1/`strict_burden_blocks()` —
+  added after live-verifying against `referral_scenario.el`'s only
+  in-scope Delegation (`specialistToAIDelegation`) that its burden,
+  `aiExaminationBurden`, is itself permit-gated
+  (`conductAIExamination` `requires_permit
+  patientRecordAccessPermitByAuthorization`), so T1 alone never governs
+  its discharge at all. Confirmed consequence, not a relabeling: post-
+  revocation, the effective holder (`SpecialistClinician`) does not
+  hold the AI-specific authorization permit `SpecialistAIAgent` was
+  granted, so the permit-ownership match fails and the `examine:` edge
+  disappears from the reachable model entirely, rather than being
+  reattributed. Judged the more correct governance outcome (revoking
+  the AI's delegation makes its AI-specific action newly unreachable,
+  since the delegator does not inherit the AI's own authorization-
+  granted permit) and confirmed with the user before implementing.
+- New **T4 — REVOCATION (delegation)** rule block, same position/shape
+  as T7/T8 (guarded by the identical `strict_burden_blocks(w)` check —
+  `revoke_delegation()` never discharges anything, so it stays
+  correctly blocked whenever a strict burden is outstanding and
+  actionable, exactly like tick/T7/T8): for each revocable
+  `DelegationLink` still `"active"` in `w`, add an edge to a world with
+  that delegation flipped to `"revoked"` (obligation/actor/permit/
+  embargo state and `step` otherwise unchanged — instantaneous, like
+  T1/T5/T6/T7/T8; only T3 advances `step`). Labelled
+  `f"revoke_delegation:{deleg_name}"`. One-way only, by design — no
+  reinstate branch.
+- `build_kripke_model()`'s own docstring (the static/pre-exec builder)
+  updated: T4's paragraph now describes the implemented mechanism and
+  states explicitly that it is hybrid-mode only, not implemented here —
+  same phrasing convention T5's docstring already uses for its own
+  Embargo-guard hybrid-only gap.
+
+**Standard reference(s):** §6.6.6/§7.10.1 (Delegation, revocability);
+extends the `T4` slot named in `build_kripke_model()`'s own docstring
+since before AM-79.
+
+**Empirical verification:** full suite re-run after each stage, no
+regressions at any point. Layer 3 alone: 347 passed, 1 xfailed
+(baseline unchanged). Layer 4 structural change (`World`/
+`_make_world()`/index/helper additions, T1/`strict_burden_blocks()`
+substitution): 347 passed, 1 xfailed, unchanged — confirmed via a live
+probe against `referral_scenario.el` that a `revoke_delegation:
+specialistToAIDelegation` edge is reachable and flips
+`delegation_states` correctly. T6 substitution: 347 passed, 1 xfailed,
+unchanged — confirmed live that `examine:aiExaminationBurden →
+conductAIExamination` is reachable pre-revocation and absent in the
+world reached via the T4 edge. New `tests/test_revoke_delegation.py`
+(6 tests: happy-path holder reassignment against `referral_scenario.el`,
+unknown-delegation `KeyError`, `transfers_token_group`-delegation
+`KeyError` — using the scenario's real `gpToSpecialistDelegation` —
+blocked-while-strict-burden-outstanding, no-op-once-already-discharged,
+and a minimal probe spec for the non-revocable-delegation `KeyError`
+case, which has no counterpart in `referral_scenario.el`) and new
+`tests/test_hybrid_t4_delegation_revocation.py` (4 tests: T4 absent
+from `w0` while a strict burden is outstanding, mirroring T7/T8's own
+guard test; T4's edge present and correctly flips
+`delegation_states` once the strict burden clears, with a one-way-only
+check; the `examine:` edge disappearance above; and a minimal probe
+spec with an *ungated* delegated burden isolating T1's own
+`discharge:<oid> by <holder>` label rewiring to the delegator — the one
+behavior `referral_scenario.el`'s own in-scope Delegation cannot
+demonstrate directly, since its burden is permit-gated). Full suite:
+357 passed, 1 xfailed — the 10 new tests accounting for the difference
+from the 347/1 baseline, zero regressions.
+
+**Files changed:** `toolchain/el_engine.py` (`_reassign_holder()`, new
+`revoke_delegation()`); `toolchain/el_kripke.py` (`World`,
+`_make_world()`, new `DelegationLink`/
+`_build_delegation_transfer_index()`, new `_effective_holder()`
+closure, T1/`strict_burden_blocks()`/T6 substitutions, new T4 rule
+block, `build_kripke_model()`'s docstring); new
+`tests/test_revoke_delegation.py`; new
+`tests/test_hybrid_t4_delegation_revocation.py`; this file;
+`docs/KRIPKE_TRANSITION_RULES.md` (T4 row); `docs/CONCEPTS_INDEX.md`
+(2026-09-12 T4 investigation entry's resolution note).

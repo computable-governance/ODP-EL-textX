@@ -165,6 +165,7 @@ _ActorStates = FrozenSet[Tuple[str, ActorStatus]]       # (actor_name, status)
 _ActionOccurrences = FrozenSet[str]                     # action names that have occurred
 _PermitStates = FrozenSet[Tuple[str, str]]              # (permit_name, "active"|"superseded")
 _EmbargoStates = FrozenSet[Tuple[str, str]]             # (embargo_name, "active"|"lifted")
+_DelegationStates = FrozenSet[Tuple[str, str]]           # (delegation_name, "active"|"revoked")
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,12 @@ class World:
                             (or w0, per DN_014 §4) populate this.
       - embargo_states    : per-world Embargo activity ("active"|"lifted"),
                             DN_014 — same rationale as permit_states.
+      - delegation_states : per-world Delegation activity
+                            ("active"|"revoked"), AM-81 — same rationale
+                            as permit_states/embargo_states. Only
+                            revocable, direct-burden (`transfers_burden`)
+                            Delegations are tracked; `transfers_token_group`
+                            Delegations never appear here (out of scope).
       - step              : discrete time step (0 = initial)
 
     Frozen so that worlds are hashable and can appear in sets/dict keys.
@@ -203,6 +210,7 @@ class World:
     occurred_actions: _ActionOccurrences  # frozenset of action names
     permit_states: _PermitStates = frozenset()   # frozenset of (permit_name, "active"|"superseded")
     embargo_states: _EmbargoStates = frozenset() # frozenset of (embargo_name, "active"|"lifted")
+    delegation_states: _DelegationStates = frozenset()  # frozenset of (delegation_name, "active"|"revoked")
     step: int = 0
 
     # ── Convenience accessors ─────────────────────────────────────────────────
@@ -247,6 +255,16 @@ class World:
     def embargo_dict(self) -> Dict[str, str]:
         return dict(self.embargo_states)
 
+    def get_delegation(self, delegation_name: str) -> str:
+        """Return the state of a named delegation in this world."""
+        for name, state in self.delegation_states:
+            if name == delegation_name:
+                return state
+        raise KeyError(f"Delegation '{delegation_name}' not tracked in this world")
+
+    def delegation_dict(self) -> Dict[str, str]:
+        return dict(self.delegation_states)
+
     def has_occurred(self, action_name: str) -> bool:
         """True iff action_name has occurred by this world (T5)."""
         return action_name in self.occurred_actions
@@ -277,16 +295,18 @@ def _make_world(
     occurred_actions: FrozenSet[str],
     permit_states: _PermitStates = frozenset(),
     embargo_states: _EmbargoStates = frozenset(),
+    delegation_states: _DelegationStates = frozenset(),
     step: int = 0,
 ) -> World:
     """Convenience constructor from plain dicts (+ frozensets of action names
-    and permit/embargo (name, state) pairs — DN_014).
+    and permit/embargo/delegation (name, state) pairs — DN_014, AM-81).
 
-    permit_states/embargo_states accept either a plain dict (as built at w0,
-    DN_014 §4) or an already-frozen set of (name, state) pairs (as threaded
-    through unchanged from a parent world in the BFS loop) — normalized via
-    dict(...) first so frozenset(...) always yields pairs, never bare keys
-    (frozenset() on a dict alone iterates its keys, silently dropping state).
+    permit_states/embargo_states/delegation_states accept either a plain
+    dict (as built at w0, DN_014 §4) or an already-frozen set of (name,
+    state) pairs (as threaded through unchanged from a parent world in the
+    BFS loop) — normalized via dict(...) first so frozenset(...) always
+    yields pairs, never bare keys (frozenset() on a dict alone iterates its
+    keys, silently dropping state).
     """
     return World(
         obligation_states=frozenset(obligation_states.items()),
@@ -294,6 +314,7 @@ def _make_world(
         occurred_actions=frozenset(occurred_actions),
         permit_states=frozenset(dict(permit_states).items()),
         embargo_states=frozenset(dict(embargo_states).items()),
+        delegation_states=frozenset(dict(delegation_states).items()),
         step=step,
     )
 
@@ -1948,11 +1969,22 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            PENDING obligations remain PENDING. This allows the model to
            represent legitimate delay before discharge.
 
-         Rule T4 — REVOCATION (optional):
-           If the delegation is revocable, add an edge w → w_revoke
-           where the holder's ActorStatus becomes INACTIVE and the
-           obligation reverts to PENDING on the delegator.
-           (Not yet implemented — placeholder for hybrid mode.)
+         Rule T4 — REVOCATION (delegation):
+           For each revocable Delegation transferring a direct burden,
+           add an edge flipping that delegation's state from "active" to
+           "revoked" — mirroring revoke_delegation() (el_engine.py):
+           the burden's effective holder resolves back to the delegator
+           wherever it is read (T1's discharge check, its discharge
+           label, and strict_burden_blocks()), rather than flipping the
+           delegate's ActorStatus globally (that would incorrectly
+           affect every other obligation the delegate separately holds
+           — see docs/kripke_transition_rules_reference.md's 2026-09-12 T4 investigation
+           finding). AM-81 (2026-09-14) — implemented in hybrid mode
+           only (build_kripke_from_runtime()); NOT implemented in this
+           static/pre-exec builder, same hybrid-only gap T5's Embargo
+           guard and T7/T8 also have here. One-way only — no reinstate-
+           delegation edge. Scoped to `transfers_burden` Delegations
+           only; `transfers_token_group` is out of scope.
 
          Rule T5 — EXERCISE (§7.8.8.2/§7.8.8.3 permit-occurrence):
            For each ACTIVE Permit P with a for_action held by an ACTIVE
@@ -2621,6 +2653,47 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
     return chain
 
 
+@dataclass
+class DelegationLink:
+    """AM-81: metadata about one revocable, direct-burden Delegation,
+    keyed by the burden's token name (obligation_id) in
+    _build_delegation_transfer_index()'s returned index. Scoped to
+    `transfers_burden` Delegations only — a `transfers_token_group`
+    Delegation never produces an entry here."""
+    delegation_name: str
+    delegator: str
+    delegate: str
+    revocable: bool
+
+
+def _build_delegation_transfer_index(spec: Any) -> Dict[str, DelegationLink]:
+    """AM-81: index revocable, direct-burden Delegations by obligation_id
+    (the burden's token name), for T4 (delegation revocation) and the
+    _effective_holder() lookups T1/strict_burden_blocks() need.
+
+    Mirrors the unconditional direct-match branch of
+    _delegation_chain_for_token() (the `b = getattr(d, "burden", None)`
+    check above) — deliberately does NOT include the token_group branch,
+    which is out of scope for AM-81."""
+    index: Dict[str, DelegationLink] = {}
+    for d in _collect(spec, "Delegation"):
+        b = getattr(d, "burden", None)
+        if b is None:
+            continue
+        token_name = _obj_name(b)
+        delegator_name = _obj_name(getattr(d, "delegator", None))
+        delegate_name = _obj_name(getattr(d, "delegate", None))
+        if not token_name or not delegator_name or not delegate_name:
+            continue
+        index[token_name] = DelegationLink(
+            delegation_name=d.name,
+            delegator=delegator_name,
+            delegate=delegate_name,
+            revocable=bool(getattr(d, "revocable", False)),
+        )
+    return index
+
+
 def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     """
     Hybrid mode (ISO 15414 Annex C): KripkeModel anchored to runtime.current_state().
@@ -2631,6 +2704,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     state, spec, ledger = runtime.current_state(), runtime._spec, runtime._ledger
     group_index = _build_group_index(spec)
     satisfaction_conditions = _build_satisfaction_conditions(spec)
+    delegation_index = _build_delegation_transfer_index(spec)  # AM-81
     discharged_in_ledger: Set[str] = {n for r in ledger for n in r.discharged}
     init_obligs: Dict[str, ObligationState] = {}
     descriptors: Dict[str, ObligationDescriptor] = {}
@@ -2773,6 +2847,19 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     # lookup pattern invented here.
     authorizations = _collect(spec, "Authorization")
 
+    def _effective_holder(w: World, oid: str, desc: ObligationDescriptor) -> str:
+        """AM-81: resolve oid's genuine current holder, accounting for a
+        revoked delegation. Returns the Delegation's delegator when oid
+        maps to a tracked DelegationLink AND that delegation is flagged
+        "revoked" in this world; otherwise returns desc.holder unchanged
+        (the common case — including every burden with no revocable
+        direct-burden Delegation at all, which never appears in
+        delegation_index)."""
+        link = delegation_index.get(oid)
+        if link is not None and w.delegation_dict().get(link.delegation_name) == "revoked":
+            return link.delegator
+        return desc.holder
+
     def strict_burden_blocks(w: World) -> bool:
         """DN_014 §6 — the identical boolean T3 already gates tick on
         (AM-49/AM-76/AM-78): True iff some PENDING strict-discharge
@@ -2781,12 +2868,17 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         reinstate_authorization() never discharge anything, so AM-78 left
         their live guard unconditional — they stay correctly blocked
         whenever this holds, exactly like tick.
+
+        AM-81: reads the effective holder (post-revocation delegator, if
+        applicable), not the static desc.holder — a revoked delegation's
+        still-strict obligation must be judged actionable against the
+        actor who now actually holds it.
         """
         obligs, actors = w.obligation_dict(), w.actor_dict()
         return any(
             obligs.get(o) == ObligationState.PENDING
             and descriptors[o].discharge_mode == "strict"
-            and actors.get(descriptors[o].holder) == ActorStatus.ACTIVE
+            and actors.get(_effective_holder(w, o, descriptors[o])) == ActorStatus.ACTIVE
             for o in descriptors
         )
 
@@ -2812,10 +2904,12 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             if desc.for_action and desc.for_action in permit_requirement_index:
                 continue  # gated — T6 handles this obligation's discharge, not T1
             if obligs.get(oid) == ObligationState.PENDING:
-                if actors.get(desc.holder) == ActorStatus.ACTIVE:
+                effective_holder = _effective_holder(w, oid, desc)  # AM-81
+                if actors.get(effective_holder) == ActorStatus.ACTIVE:
                     wd = _make_world(
                         {**obligs, oid: ObligationState.DISCHARGED}, actors, occurred,
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
+                        delegation_states=w.delegation_states,
                         step=w.step,
                     )
                     if wd not in worlds:
@@ -2823,11 +2917,12 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         if wd.step < horizon:
                             queue.append(wd)
                     edges.setdefault(w, set()).add(wd)
-                    labels[(w, wd)] = f"discharge:{oid} by {desc.holder}"
+                    labels[(w, wd)] = f"discharge:{oid} by {effective_holder}"
                 if w.step >= desc.deadline_steps:
                     wv = _make_world(
                         {**obligs, oid: ObligationState.VIOLATED}, actors, occurred,
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
+                        delegation_states=w.delegation_states,
                         step=w.step,
                     )
                     if wv not in worlds:
@@ -2842,6 +2937,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             wt = _make_world(
                 obligs, actors, occurred,
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
+                delegation_states=w.delegation_states,
                 step=w.step + 1,
             )
             if wt not in worlds:
@@ -2886,6 +2982,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             w_prime = _make_world(
                 obligs, actors, new_occurred,
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
+                delegation_states=w.delegation_states,
                 step=w.step,
             )
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
@@ -2907,14 +3004,15 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 continue
             if not desc.for_action or desc.for_action not in permit_requirement_index:
                 continue  # not gated — T1 already handled this case
-            if actors.get(desc.holder) != ActorStatus.ACTIVE:
+            effective_holder = _effective_holder(w, oid, desc)  # AM-81
+            if actors.get(effective_holder) != ActorStatus.ACTIVE:
                 continue
 
             required = permit_requirement_index[desc.for_action]
             all_active = all(
                 _permit_active(w, p)
                 and permit_descriptors.get(p) is not None
-                and permit_descriptors[p].holder == desc.holder
+                and permit_descriptors[p].holder == effective_holder
                 for p in required
             )
             if not all_active:
@@ -2927,7 +3025,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             blocked = False
             for embargo_name in embargo_inhibition_index.get(desc.for_action, []):
                 e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
-                if e_state == "active" and e_holder == desc.holder:
+                if e_state == "active" and e_holder == effective_holder:
                     blocked = True
                     break
             if blocked:
@@ -2939,6 +3037,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             w_prime = _make_world(
                 new_obligs, actors, new_occurred,
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
+                delegation_states=w.delegation_states,
                 step=w.step,
             )
             label   = f"examine:{oid} → {desc.for_action}"
@@ -2979,6 +3078,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         obligs, actors, occurred,
                         permit_states=frozenset(new_permits.items()),
                         embargo_states=frozenset(new_embargoes.items()),
+                        delegation_states=w.delegation_states,
                         step=w.step,
                     )
                     if w_revoked not in worlds:
@@ -3002,6 +3102,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         obligs, actors, occurred,
                         permit_states=frozenset(new_permits.items()),
                         embargo_states=frozenset(new_embargoes.items()),
+                        delegation_states=w.delegation_states,
                         step=w.step,
                     )
                     if w_reinstated not in worlds:
@@ -3010,6 +3111,39 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                             queue.append(w_reinstated)
                     edges.setdefault(w, set()).add(w_reinstated)
                     labels[(w, w_reinstated)] = f"reinstate:{auth.name}"
+
+        # ── Rule T4: REVOCATION (delegation) ────────────────────────────────
+        # AM-81. Mirrors revoke_delegation() (el_engine.py) as closely as
+        # the Kripke model's shape allows: same defensive skip for a
+        # non-revocable or absent-burden Delegation (never enters
+        # delegation_index at all — see _build_delegation_transfer_index()),
+        # same strict-burden guard as T7/T8 (revoke_delegation() never
+        # discharges anything, so it stays correctly blocked whenever a
+        # strict burden is outstanding and actionable, exactly like tick/
+        # T7/T8). Unlike the live engine, this does not advance step — T4
+        # is instantaneous on a world, like T1/T5/T6/T7/T8. One-way only:
+        # no reinstate-delegation edge (out of scope, AM-81).
+        if not strict_burden_blocks(w):
+            for link in delegation_index.values():
+                deleg_name = link.delegation_name
+                if not link.revocable:
+                    continue
+                if w.delegation_dict().get(deleg_name, "active") != "active":
+                    continue  # already revoked in this world — one-way only
+
+                new_delegations = {**w.delegation_dict(), deleg_name: "revoked"}
+                w_revoked_deleg = _make_world(
+                    obligs, actors, occurred,
+                    permit_states=w.permit_states, embargo_states=w.embargo_states,
+                    delegation_states=frozenset(new_delegations.items()),
+                    step=w.step,
+                )
+                if w_revoked_deleg not in worlds:
+                    worlds.add(w_revoked_deleg)
+                    if w_revoked_deleg.step < horizon:
+                        queue.append(w_revoked_deleg)
+                edges.setdefault(w, set()).add(w_revoked_deleg)
+                labels[(w, w_revoked_deleg)] = f"revoke_delegation:{deleg_name}"
 
     props = {w: _build_propositions(w, satisfaction_conditions) for w in worlds}
     return KripkeModel(

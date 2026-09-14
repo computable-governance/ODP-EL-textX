@@ -156,6 +156,23 @@ def _transition(tok: TokenInstance, new_state: str) -> TokenInstance:
     )
 
 
+def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
+    """AM-81: field-by-field reconstruction with only holder changed —
+    same shape as the inline `transfer` DeonticEffect handler (~line 689),
+    just a single field instead of every field."""
+    return TokenInstance(
+        token_name=tok.token_name,
+        kind=tok.kind,
+        holder=new_holder,
+        state=tok.state,
+        discharge_mode=tok.discharge_mode,
+        priority=tok.priority,
+        granted_at_tick=tok.granted_at_tick,
+        deadline=tok.deadline,
+        for_action=tok.for_action,
+    )
+
+
 def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int
              ) -> Tuple[WorldState, TransitionRecord]:
     return state, TransitionRecord(
@@ -1359,6 +1376,105 @@ def reinstate_authorization(
         outcome="ok",
         discharged=(),
         effects=tuple(effects_log),
+        violations=(),
+    )
+    return new_state, record
+
+
+def revoke_delegation(
+    state: WorldState, spec, delegation_name: str
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    AM-81: Revoke a revocable Delegation at runtime, reassigning its
+    burden's holder from the delegate back to the delegator.
+
+    Scoped narrowly (AM-81): single `transfers_burden` Delegations only —
+    a Delegation using `transfers_token_group` is out of scope and raises
+    KeyError. One-way only: there is no reinstate-delegation counterpart.
+
+    1. Raises KeyError if delegation_name is not declared.
+    2. Raises KeyError if delegation.revocable is not True — enforced
+       properly here, unlike revoke_authorization()'s existing looseness
+       (a known, separately-tracked gap; not carried over into this path).
+    3. Raises KeyError if delegation.burden is not set (i.e. this is a
+       transfers_token_group delegation) — out of scope this pass.
+    4. Blocked (not raised) while an unaddressed strict burden is
+       outstanding elsewhere — same guard/reason convention as
+       revoke_authorization()/reinstate_authorization().
+    5. No-op (outcome='ok', empty effects) if no live 'active'
+       TokenInstance for the burden is currently held by the delegate —
+       already discharged/violated, or never delegated to that holder.
+       'active', not 'pending': no burden anywhere in this codebase is
+       ever granted or left 'pending' while delegated — 'pending' means
+       AM-57's unrelated TokenGroup any_discharged sibling-masking state,
+       and matching on it here would make this function a permanent
+       no-op against every real scenario (confirmed empirically against
+       referral_scenario.el before fixing this). Mirrors
+       reinstate_authorization()'s "already_active" convention for
+       distinguishing a real effect from a no-op.
+    6. Otherwise reassigns that token's holder to the delegator; its
+       state is left unchanged (still 'active').
+    """
+    deleg = None
+    for el in spec.elements:
+        if type(el).__name__ == "Delegation" and el.name == delegation_name:
+            deleg = el
+            break
+    if deleg is None:
+        raise KeyError(f"Delegation '{delegation_name}' not found in spec")
+
+    if not deleg.revocable:
+        raise KeyError(f"Delegation '{delegation_name}' is not revocable")
+
+    if deleg.burden is None:
+        raise KeyError(
+            f"Delegation '{delegation_name}' has no direct burden "
+            "(transfers_token_group delegations are out of scope for AM-81)"
+        )
+
+    tick = state.tick
+    delegator_name = deleg.delegator.name
+    delegate_name = deleg.delegate.name
+    burden_name = deleg.burden.name
+
+    blocking = _unaddressed_strict_burdens(state)
+    if blocking:
+        reason = _strict_block_reason(blocking, "before the delegation can be revoked")
+        return _blocked(state, delegator_name, f"revoke_delegation:{delegation_name}", reason, tick)
+
+    if not any(
+        t.token_name == burden_name and t.kind == "burden"
+        and t.holder == delegate_name and t.state == "active"
+        for t in state.tokens
+    ):
+        record = TransitionRecord(
+            tick=tick,
+            actor_name=delegator_name,
+            action_name=f"revoke_delegation:{delegation_name}",
+            outcome="ok",
+            discharged=(),
+            effects=(),
+            violations=(),
+        )
+        return state, record
+
+    tokens = [
+        _reassign_holder(t, delegator_name)
+        if t.token_name == burden_name and t.kind == "burden"
+        and t.holder == delegate_name and t.state == "active"
+        else t
+        for t in state.tokens
+    ]
+    effects_log = (f"reassigned '{burden_name}' from '{delegate_name}' to '{delegator_name}'",)
+
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=delegator_name,
+        action_name=f"revoke_delegation:{delegation_name}",
+        outcome="ok",
+        discharged=(),
+        effects=effects_log,
         violations=(),
     )
     return new_state, record
