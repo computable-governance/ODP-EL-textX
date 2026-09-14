@@ -704,7 +704,22 @@ def advance(
                 effects_log.append(f"activated '{tok_ref.name}'")
 
             elif op == "transfer":
-                from_role = eff.from_role or actor_name
+                # AM-85: from_role, when given, is resolved via role
+                # membership exactly like to_role already is (with the
+                # same graceful literal-name fallback if nobody currently
+                # fills that role) — fixes the asymmetry AM-82 diagnosed
+                # but deliberately left unfixed (see that entry). When
+                # from_role is omitted, actor_name (already a concrete
+                # actor, not a role name) is used as-is — it must NOT be
+                # re-resolved through role lookup, or the "whoever is
+                # performing this action" fallback breaks.
+                if eff.from_role:
+                    from_actors = [
+                        a.actor_name for a in state.actors
+                        if a.role_name == eff.from_role
+                    ] or [eff.from_role]
+                else:
+                    from_actors = [actor_name]
                 to_role = eff.to_role
                 if to_role:
                     to_actors = [
@@ -713,7 +728,7 @@ def advance(
                     ] or [to_role]
                     updated: list[TokenInstance] = []
                     for t in tokens:
-                        if t.token_name == tok_ref.name and t.holder == from_role:
+                        if t.token_name == tok_ref.name and t.holder in from_actors:
                             for tgt in to_actors:
                                 updated.append(TokenInstance(
                                     token_name=t.token_name,
@@ -727,7 +742,7 @@ def advance(
                                     for_action=t.for_action,
                                 ))
                             effects_log.append(
-                                f"transferred '{tok_ref.name}' from '{from_role}'"
+                                f"transferred '{tok_ref.name}' from '{t.holder}'"
                                 f" to {to_actors}"
                             )
                         else:

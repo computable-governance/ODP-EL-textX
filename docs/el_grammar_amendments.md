@@ -5126,7 +5126,8 @@ asymmetry in the live engine, out of scope for this amendment to fix.
 `_build_transfer_index()` resolves BOTH `from_role` and `to_role`
 through the identical role→actor lookup, which is the semantically
 correct behavior for new formal-verification code — not a mirror of
-the live engine's current (asymmetric) matching.
+the live engine's current (asymmetric) matching. Fixed by AM-85
+(2026-09-14).
 
 **What changed** (`toolchain/el_kripke.py`):
 - `World` gained `holder_overrides: FrozenSet[Tuple[str, str]] =
@@ -5434,3 +5435,92 @@ T4's row retitled and its "one-way only" framing dropped). No
 `docs/CONCEPTS_INDEX.md` entry — this closes a documented,
 already-logged gap (AM-81's own explicit scope note), it does not
 surface a new finding.
+
+---
+
+## AM-85 (2026-09-14) — Fix the live `transfer` DeonticEffect's from_role/to_role resolution asymmetry (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED (2026-09-14).
+
+**Problem:** diagnosed during AM-82 but deliberately left unfixed at the
+time (see that entry's "Known, deliberately unfixed asymmetry" note,
+and the matching note in `_build_transfer_index()`'s docstring in
+`el_kripke.py`, both updated by this amendment with a one-line pointer
+here). `el_engine.py`'s live `transfer` `DeonticEffect` handler resolved
+`to_role` via role membership, with a graceful literal-name fallback if
+nobody currently fills that role:
+
+    to_actors = [a.actor_name for a in state.actors
+                 if a.role_name == to_role] or [to_role]
+
+`from_role` got no such resolution at all — `from_role = eff.from_role
+or actor_name`, then matched directly against `t.holder`
+(`t.holder == from_role`). This only ever worked if `from_role`
+happened to literally equal an actor's own name. A genuine role name
+passed as `from_role` never matched anything: the transfer silently did
+nothing — no error, no log entry indicating why, no distinguishing this
+case from "nothing to transfer."
+
+**The fix:** the identical role-resolution-with-fallback pattern
+`to_role` already used, applied to `from_role`, but only when
+`eff.from_role` was actually given — the `actor_name` fallback (when it
+is omitted) is preserved exactly as-is, since `actor_name` at that point
+is already a concrete actor, not a role name, and must not be
+re-resolved through role lookup or the "whoever is performing this
+action" fallback breaks:
+
+    if eff.from_role:
+        from_actors = [a.actor_name for a in state.actors
+                       if a.role_name == eff.from_role] or [eff.from_role]
+    else:
+        from_actors = [actor_name]
+
+The match condition changed from `t.holder == from_role` to
+`t.holder in from_actors`; the effects-log line now reports the actual
+matched `t.holder` (previously equivalent to `from_role` under the old
+single-literal-match scheme, no longer equivalent once `from_actors` can
+resolve to a role's one current filler).
+
+**Scope:** Layer 3 only (`el_engine.py`). No Kripke-side change needed:
+`_build_transfer_index()` (AM-82) already resolved both `from_role` and
+`to_role` through the identical role→actor lookup — its own docstring
+already noted this was "the semantically correct behavior for new
+formal-verification code, not a mirror of the live engine's current
+(asymmetric) matching." That mirror gap is now closed from the live-
+engine side instead.
+
+**Standard reference(s):** §6.4.7/§7.8.7 (DeonticEffect, transfer
+operation) — same clause AM-82 already cites; no grammar change.
+
+**Empirical verification:** new `tests/test_transfer_effect_from_role_resolution.py`
+(3 tests) — the first test exercising this handler via live execution
+at all (AM-82's own tests are Kripke-side/state-only). Uses a small,
+throwaway inline probe spec (`parse_string()`, same pattern as
+`tests/test_discharge_burden.py`), distinct from
+`scenarios/probes/transfer_probe.el` (AM-82's Kripke-tier probe,
+explicitly documented as disposable/not expected to be touched again).
+Probe deliberately names the role-filling actor `Holder` and the role
+`sourceRole` — different strings — so a passing test could not have
+passed against the pre-fix code (`t.holder == from_role` would compare
+`"Holder" == "sourceRole"` and never match). Covers: `from_role` given
+as a real role name, resolved correctly (also the regression case,
+since the holder's name differs from the role name); `from_role`
+omitted, confirming the `actor_name` fallback is unchanged; `from_role`
+naming a role nobody currently fills, confirming the
+`or [eff.from_role]` fallback still attempts a literal match and
+degrades gracefully (outcome `"ok"`, empty effects, holder unchanged) —
+the same non-crashing shape the pre-fix code already had for any
+non-matching `from_role`, only how it gets there changed. Full suite:
+383 passed, 1 xfailed — the 3 new tests accounting for the difference
+from the 380/1 baseline, zero regressions.
+
+**Files changed:** `toolchain/el_engine.py` (`transfer` `DeonticEffect`
+handler); new `tests/test_transfer_effect_from_role_resolution.py`;
+this file (new entry, plus a one-line pointer added to AM-82's own
+entry); `toolchain/el_kripke.py` (one-line pointer added to
+`_build_transfer_index()`'s docstring — the function itself is
+unchanged). No `docs/KRIPKE_TRANSITION_RULES.md` change — T9's row
+already describes `_build_transfer_index()`'s own (already-correct)
+resolution, not the live engine's; no `docs/CONCEPTS_INDEX.md` entry —
+this closes a documented, already-logged gap (AM-82's own explicit
+note), it does not surface a new finding.

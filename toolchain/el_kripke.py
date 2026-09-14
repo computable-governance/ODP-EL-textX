@@ -2794,7 +2794,9 @@ def _build_transfer_index(spec: Any, actors: Any) -> Dict[str, List[TransferLink
     fix) — this function resolves BOTH `from_role` and `to_role` through
     the same role->actor lookup, which is the semantically correct
     behavior for new formal-verification code, not a mirror of the live
-    engine's current (asymmetric) matching.
+    engine's current (asymmetric) matching. Fixed in the live engine by
+    AM-85 (el_engine.py) — this function's own dual role->actor
+    resolution was already correct and needed no change.
     """
     index: Dict[str, List[TransferLink]] = {}
 
