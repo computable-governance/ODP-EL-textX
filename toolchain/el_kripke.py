@@ -2847,10 +2847,11 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     descriptors: Dict[str, ObligationDescriptor] = {}
 
     # Spec-derived structure, shared with pre-exec mode. Only covers burdens
-    # that appear in a Commitment or Delegation.token_group (see that
+    # that appear in a Commitment, ViolationResponse.creates_burden,
+    # Authorization.auth_burden (AM-86), or Delegation.token_group (see that
     # function's docstring) — some scenario builders enrol tokens directly
-    # in Python without a matching Commitment (documented gap, see
-    # el_api._build_gp_referral_runtime's docstring), so a live token may
+    # in Python without a matching root construct at all (documented gap,
+    # see el_api._build_gp_referral_runtime's docstring), so a live token may
     # have no entry here; fall back to the original inline computation for
     # those. holder/chain are deliberately NOT taken from this: unlike
     # pre-exec mode, hybrid mode has a live runtime holder that may have

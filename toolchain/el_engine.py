@@ -1098,13 +1098,22 @@ def _priority_weight(priority_str: Optional[str]) -> float:
 def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]:
     """
     Extract ObligationDescriptor for each burden that appears in at least
-    one CommitmentDecl or DelegationDecl.
+    one CommitmentDecl, ViolationResponse, Authorization, or DelegationDecl.
 
     Algorithm:
     1. Index all BurdenDecl elements by name.
-    2. For each CommitmentDecl, find its creates_burden reference.
+    2. For each of the three root constructs that create a burden
+       (Commitment, ViolationResponse, Authorization), resolve
+       (burden_name, actor_name, obl_text) and hand off to the shared
+       _add_descriptor() closure below.
     3. Walk the delegation graph forward to find the current holder.
     4. Record the full accountability chain.
+
+    AM-86: added the ViolationResponse and Authorization roots (previously
+    only Commitment was iterated, leaving escalationNoticeBurden-shaped
+    burdens structurally absent from the Kripke model — see
+    docs/CONCEPTS_INDEX.md's now-resolved "escalationNoticeBurden has no
+    ObligationDescriptor" finding).
     """
     # Index burdens by name.
     # The grammar uses DeonticToken for all token kinds (burden/permit/embargo);
@@ -1152,19 +1161,17 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
 
     descriptors: Dict[str, ObligationDescriptor] = {}
 
-    for c in model.elements:
-        if type(c).__name__ != "Commitment":  # AM-18: CommitmentDecl → Commitment
-            continue
-        burden_ref = getattr(c, "burden", None)
-        burden_name = getattr(burden_ref, "name", None)
-        actor_name  = getattr(getattr(c, "actor", None), "name", None)
+    def _add_descriptor(burden_name: Optional[str], actor_name: Optional[str], obl_text: str) -> None:
+        """Shared tail logic for every root construct that creates a burden.
+        AM-86: extracted from the Commitment-only loop this function used to
+        be, so ViolationResponse and Authorization can feed the same chain-
+        walking / descriptor-construction logic without duplicating it."""
         if not burden_name or not actor_name:
-            continue
+            return
         burden = burdens.get(burden_name)
         if burden is None:
-            continue
+            return
 
-        obl_text     = getattr(c, "obligation", burden_name)
         deadline_str = getattr(burden, "deadline", None)
         chain        = walk_chain(actor_name, obl_text)
         holder       = chain[-1]
@@ -1207,6 +1214,50 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
             fires_event=fires_event,
             for_action=for_action,
         )
+
+    # Root 1: Commitment (§6.6.2, §7.10.3) — unchanged behavior/order from
+    # pre-AM-86. Always has a mandatory .obligation STRING.
+    for c in model.elements:
+        if type(c).__name__ != "Commitment":  # AM-18: CommitmentDecl → Commitment
+            continue
+        burden_name = getattr(getattr(c, "burden", None), "name", None)
+        actor_name  = getattr(getattr(c, "actor", None), "name", None)
+        obl_text    = getattr(c, "obligation", burden_name)
+        _add_descriptor(burden_name, actor_name, obl_text)
+
+    # Root 2: ViolationResponse.creates_burden (§6.3.8, §7.8.6 NOTE 2) — AM-86.
+    # Only when creates_burden is actually set (optional grammar field).
+    # actor_name comes from .obligates (parsed attribute: responding_actor),
+    # mirroring AM-56's Layer-2 precedent (el_reasoner.ultimate_accountability()
+    # already treats this as a valid accountability root). No .obligation
+    # field exists on this construct; falls back to burden_name, same
+    # fallback shape Commitment's own obl_text extraction already uses.
+    for vr in model.elements:
+        if type(vr).__name__ != "ViolationResponse":
+            continue
+        burden_name = getattr(getattr(vr, "creates_burden", None), "name", None)
+        if burden_name is None:
+            continue
+        actor_name = getattr(getattr(vr, "responding_actor", None), "name", None)
+        obl_text   = getattr(vr, "description", None) or burden_name
+        _add_descriptor(burden_name, actor_name, obl_text)
+
+    # Root 3: Authorization.auth_burden (§6.6.4, §7.10.2, §7.8.8.4) — AM-86.
+    # Grammar keyword is 'creates_burden_on_authority'; parsed attribute name
+    # is auth_burden. Only when set (optional field). actor_name comes from
+    # .authority — "the authority grants a permit AND undertakes a burden to
+    # facilitate" (grammar's own comment on Authorization). Zero live usage
+    # in the corpus as of AM-86; closed proactively before anything depends
+    # on it, same shape as AM-82/T9.
+    for auth in model.elements:
+        if type(auth).__name__ != "Authorization":
+            continue
+        burden_name = getattr(getattr(auth, "auth_burden", None), "name", None)
+        if burden_name is None:
+            continue
+        actor_name = getattr(getattr(auth, "authority", None), "name", None)
+        obl_text   = getattr(auth, "description", None) or burden_name
+        _add_descriptor(burden_name, actor_name, obl_text)
 
     # Second pass: Delegation elements that transfer a token_group (§7.8.7 NOTE).
     # These obligations are held by the delegate but may not have a Commitment.

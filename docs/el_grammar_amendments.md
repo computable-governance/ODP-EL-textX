@@ -5524,3 +5524,117 @@ already describes `_build_transfer_index()`'s own (already-correct)
 resolution, not the live engine's; no `docs/CONCEPTS_INDEX.md` entry —
 this closes a documented, already-logged gap (AM-82's own explicit
 note), it does not surface a new finding.
+
+## AM-86 (2026-09-15) — `_build_obligation_descriptors()` gains two new accountability roots: `ViolationResponse.creates_burden` and `Authorization.auth_burden` (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED (2026-09-15).
+
+**Problem:** `_build_obligation_descriptors()` (`toolchain/el_engine.py`)
+only ever iterated `Commitment` elements. Any burden created exclusively
+through a different root construct was structurally absent from
+`km.obligation_descriptors` — invisible not just to AF/EF checks but to
+`recommend_action()`/Bellman planning too, since both only ever score
+obligations already present in that dict. Two real/candidate cases:
+
+- `ViolationResponse.creates_burden` — real, live case:
+  `escalationNoticeBurden` in `scenarios/referral/referral_scenario.el` is
+  created only via `violation_response referralNoResponseViolation`, no
+  Commitment anywhere in the file creates it. Logged as an open finding
+  in `docs/CONCEPTS_INDEX.md` ("`escalationNoticeBurden` has no
+  ObligationDescriptor — invisible to Layer 4"), now resolved by this
+  amendment. AM-56 already closed the equivalent Layer-2 gap in
+  `el_reasoner.ultimate_accountability()`; `el_kripke.py`'s hybrid-mode
+  docstring (AM-56's cross-reference note) explicitly flagged the
+  Layer-4 side as "unaffected and remains open" — this closes it.
+- `Authorization.auth_burden` (grammar keyword
+  `creates_burden_on_authority`) — same shape, discovered while grounding
+  this fix. Zero live usage anywhere in the corpus (confirmed via grep
+  over `scenarios/`); closed proactively before anything depends on it,
+  same shape as AM-82/T9. New open finding logged in
+  `docs/CONCEPTS_INDEX.md` for the one open question this raises: whether
+  `el_reasoner.py`'s Layer-2 accountability resolution has the identical
+  blind spot for this specific construct (AM-56 only confirmed covering
+  `ViolationResponse.creates_burden`) — flagged there, not answered.
+
+**The fix:** extracted the shared tail logic (chain-walking from a seed
+actor, resolving `sub_delegation_allowed`/`revocable` from the delegation
+terminating at the holder, extracting `triggered_by`/`fires_event`/
+`for_action` from the burden token, constructing the `ObligationDescriptor`
+itself) into one nested closure, `_add_descriptor(burden_name, actor_name,
+obl_text)`, called once per root construct instead of duplicated per root.
+Three roots, in this order:
+
+1. `Commitment` (§6.6.2, §7.10.3) — unchanged from pre-AM-86: `actor_name`
+   from `.actor`, `obl_text` from the mandatory `.obligation` STRING.
+2. `ViolationResponse` (§6.3.8, §7.8.6 NOTE 2) — only when `.creates_burden`
+   is set (optional field, skipped otherwise). `actor_name` from
+   `.obligates` (parsed attribute `responding_actor`) — mirrors AM-56's
+   Layer-2 precedent directly rather than making a new accountability-root
+   decision. `obl_text` from `.description` if present, else falls back to
+   `burden_name` — this construct has no `.obligation` field at all.
+3. `Authorization` (§6.6.4, §7.10.2, §7.8.8.4) — only when `.auth_burden`
+   is set. `actor_name` from `.authority` — "the authority grants a permit
+   AND undertakes a burden to facilitate" (the grammar's own comment on
+   `Authorization`). Same `.description`-or-`burden_name` fallback as (2).
+   Note the grammar keyword/attribute-name split: the keyword is
+   `creates_burden_on_authority`, but the parsed attribute is `auth_burden`
+   (`grammar/v2/el_grammar.tx:1018`, `el_domain.py:1183`) — same split
+   pattern as `on_violation_of` → `violated_burden`.
+
+If the same `burden_name` were ever referenced by more than one of these
+three roots (not structurally prevented, but not expected given the
+grammar's own separation of concerns), the last root evaluated wins — not
+new behavior, the pre-existing Commitment-only loop already had the same
+last-write-wins property if two Commitments somehow referenced the same
+burden.
+
+Also updated: a stale comment in `build_kripke_from_runtime()`
+(`el_kripke.py`, ~line 2849) claiming `spec_descriptors` "only covers
+burdens that appear in a Commitment or Delegation.token_group" — corrected
+to name all four roots now covered.
+
+**Scope:** both Layer 4 builders (`build_kripke_model()` and
+`build_kripke_from_runtime()` both import the same
+`_build_obligation_descriptors()`, `el_kripke.py:94`) — confirmed both
+pick up the fix, not just one. No grammar change (both fields already
+existed, AM-31/AM-17-era); no `el_reasoner.py` change (Layer-2 already
+covers `ViolationResponse` via AM-56; the `Authorization.auth_burden`
+Layer-2 question is opened, not closed, by this amendment — see the new
+`docs/CONCEPTS_INDEX.md` finding).
+
+**Standard reference(s):** §6.3.8/§7.8.6 NOTE 2 (ViolationResponse);
+§6.6.4/§7.10.2/§7.8.8.4 (Authorization); §6.6.2/§7.10.3 (Commitment,
+unchanged).
+
+**Empirical verification:** new `tests/test_am86_obligation_descriptor_roots.py`
+(7 tests). Covers: `escalationNoticeBurden` gets a genuine descriptor in
+pre-exec mode (`build_kripke_model()`) with holder resolving to the
+degenerate single-element chain `["SpecialistPractice"]` (confirmed by
+direct inspection of the file's two delegation blocks, neither of which
+originates at `SpecialistPractice` — not assumed); is now reachable via
+both `check_obligation()`/AF and `check_permission()`/EF, and appears in a
+`recommend_action()` successor world's `obligation_states`; gets a
+descriptor in hybrid mode too (`build_kripke_from_runtime()`, live token
+granted directly since this burden is never granted at referral-runtime
+builder time — same live-granting gap `tests/test_referral_event_triggers.py`
+already documents), with `for_action` as the concrete before/after field
+(empirically confirmed `None` under git HEAD's pre-AM-86 code on the
+identical live-token setup, `"notify_gp_of_non_response"` post-fix); a
+throwaway inline probe (`parse_string()`, same convention as
+`tests/test_transfer_effect_from_role_resolution.py`/AM-85) for
+`Authorization.auth_burden`, both the burden-created and
+no-burden-created-when-field-absent cases; and a parametrized regression
+test pinning every pre-existing Commitment-backed descriptor's full field
+set (both `referral_scenario.el`'s 6 and `consent_scenario.el`'s 2) to
+values captured from an empirical `dataclasses.asdict()` diff against git
+HEAD's (`dde0e6c`) pre-AM-86 code — all byte-identical, confirming this is
+a pure additive change to the existing Commitment path. Full suite: 390
+passed, 1 xfailed — the 7 new tests accounting for the difference from the
+383/1 baseline, zero regressions.
+
+**Files changed:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`
+refactor); `toolchain/el_kripke.py` (stale comment correction, no logic
+change); new `tests/test_am86_obligation_descriptor_roots.py`; this file
+(new entry); `docs/CONCEPTS_INDEX.md` (escalationNoticeBurden finding
+marked RESOLVED; new finding logged for the open
+`Authorization.auth_burden`/Layer-2 question).

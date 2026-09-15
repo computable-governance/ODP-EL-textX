@@ -452,6 +452,23 @@ fix has landed — flagged as non-negotiable before this work starts, since a
 validator that's already wrong makes LLM-output failures unattributable.
 Not started.
 
+**Candidate technique surfaced (2026-09-15):** an externally-derived
+prototype (LinkedIn-article tangent, unrelated to this toolchain's own
+development) demonstrated a schema-bound authoring pattern worth
+evaluating when this item is picked up: a JSON schema generated from
+the grammar's terminals plus a community model's *actually-declared*
+instances (not just the abstract type), candidate proposals validated
+against that schema before any translation occurs, deterministic
+(non-LLM) translation once validated, and a round-trip re-parse through
+the same grammar a runtime uses as a fidelity guarantee. Answers a
+different question than this item's own core research question
+(AF/strict vs. EF/eventual classification) — it's a trust-chain/
+validation technique, not a classification approach — but plausibly
+composable with it. Built and tested only against a toy grammar; not
+yet evaluated against `el_grammar.tx`'s real cross-references and
+multi-element-kind files. Not a reason to start this item early —
+still blocked on `_build_obligation_descriptors()` landing first.
+
 ---
 
 ## CommunityObject
@@ -1948,9 +1965,9 @@ narrative intent, not verified chain-walk behaviour.
 
 ---
 
-## `escalationNoticeBurden` has no ObligationDescriptor — invisible to Layer 4
+## `escalationNoticeBurden` has no ObligationDescriptor — invisible to Layer 4 — RESOLVED (2026-09-15)
 
-**OPEN FINDING**
+**OPEN FINDING, RESOLVED 2026-09-15**
 
 Surfaced while checking whether every declared burden in
 `referral_scenario.el` has a corresponding `ObligationDescriptor` in
@@ -2015,6 +2032,84 @@ iterating `Commitment`) is **unaffected and remains open** —
 `km.obligation_descriptors`, still invisible to AF/EF checks and Bellman
 planning. `el_kripke.py` was deliberately not touched by AM-56. See
 `docs/el_grammar_amendments.md`'s AM-56 entry.
+
+**Priority note (2026-09-15):** this fix is the specific prerequisite the
+"LLM-to-DSL translation pipeline (Mode 2)" entry above already names as
+non-negotiable before that research direction can start — a validator
+that's already wrong makes LLM-output failures unattributable. Treat this
+as higher-priority than its position in any general backlog ordering would
+otherwise suggest, since it now blocks a second, independently-valuable
+line of work, not just this gap on its own merits.
+
+**RESOLVED (2026-09-15) — AM-86:** `_build_obligation_descriptors()`
+(`toolchain/el_engine.py`) now treats `ViolationResponse.creates_burden`
+as a second valid root, alongside the unchanged `Commitment` root —
+answering the first branch of the open question above (treated as a
+second root, functionally equivalent to a `Commitment`, no duplicated
+authoring required) rather than the second (a separate explicit
+`Commitment`). The third bullet's generalisation question is also
+answered for one more case in the same pass: `Authorization.auth_burden`
+(grammar keyword `creates_burden_on_authority`) had the identical
+blind spot and is now a third root — see `docs/el_grammar_amendments.md`'s
+AM-86 entry for the full design and the new open finding this raised for
+`Authorization.auth_burden` specifically (below). `escalationNoticeBurden`
+now has a real descriptor in both `build_kripke_model()` and
+`build_kripke_from_runtime()`, confirmed reachable via AF/EF and eligible
+for Bellman-planned paths.
+
+**Important — this does NOT close the separate "Live violation
+triggering" finding below (2026-08-20), which remains open as logged
+there:** that finding is about a *different* gap — whatever remains
+unresolved in wiring detected violations to actually firing
+`referralNoResponseViolation` and granting `escalationNoticeBurden` as a
+live token in the first place (see that entry for its own current
+status; not restated here). This amendment only makes the *descriptor*
+exist once the token is granted, by whatever mechanism grants it; it
+does not itself grant anything or change how/whether that grant is
+triggered. Do not conflate the two when reading either entry. (Note in
+passing, out of scope for this amendment: that finding's own
+`_violation_entry()` function-name claim was retracted same-day per its
+"Correction" block below — `fire_violation_responses()` and
+`check_live_violations()` are the real, currently-existing functions in
+this area; whether the finding's headline gap is still accurate given
+those functions' existence has not been re-verified here.)
+
+---
+
+## `Authorization.auth_burden` — same descriptor blind spot as `escalationNoticeBurden` had, caught proactively; open question whether `el_reasoner.py` shares it
+
+**OPEN FINDING (2026-09-15)**
+
+Discovered while grounding AM-86 (the `escalationNoticeBurden` fix
+above): `Authorization` (§6.6.4, §7.10.2, §7.8.8.4) has an
+`auth_burden` field (grammar keyword `creates_burden_on_authority`)
+with the identical shape to `ViolationResponse.creates_burden` — an
+optional field on a non-`Commitment` construct that creates a burden.
+Before AM-86, `_build_obligation_descriptors()` (`toolchain/el_engine.py`)
+would have had the same blind spot for it as it did for
+`escalationNoticeBurden`. AM-86 closes this proactively: `Authorization`
+is now a third root, alongside `Commitment` and `ViolationResponse`.
+
+**Confirmed empirically:** zero live usage of
+`creates_burden_on_authority`/`auth_burden` anywhere in `scenarios/`
+(grepped at fix time). One mention in `docs/DSL_DESIGN_NOTES.md:200`
+(`creates_burden_on_authority: managementSupportObligation`) — a design
+note, not a live scenario file.
+
+**Open question, not investigated here:** AM-56 confirmed
+`el_reasoner.py`'s `ultimate_accountability()` covers
+`ViolationResponse.creates_burden` as a fourth accountability root. It
+was never checked whether `ultimate_accountability()` has an equivalent
+blind spot for `Authorization.auth_burden` specifically — same shape,
+same construct family, but not confirmed either way. Since there is no
+live scenario using this field, there is no forcing case to surface the
+answer the way `escalationNoticeBurden` forced the Layer-4 question.
+Check `el_reasoner.py`'s root-construct list directly before relying on
+`ultimate_accountability()` for any future scenario that does use
+`Authorization.auth_burden`.
+
+**Status:** Layer 4 closed (AM-86). Layer 2 question open, not
+investigated.
 
 ---
 
