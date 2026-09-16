@@ -2078,7 +2078,7 @@ those functions' existence has not been re-verified here.)
 
 ## `Authorization.auth_burden` — same descriptor blind spot as `escalationNoticeBurden` had, caught proactively; open question whether `el_reasoner.py` shares it
 
-**OPEN FINDING (2026-09-15)**
+**OPEN FINDING (2026-09-15), RESOLVED 2026-09-16**
 
 Discovered while grounding AM-86 (the `escalationNoticeBurden` fix
 above): `Authorization` (§6.6.4, §7.10.2, §7.8.8.4) has an
@@ -2096,20 +2096,24 @@ is now a third root, alongside `Commitment` and `ViolationResponse`.
 (`creates_burden_on_authority: managementSupportObligation`) — a design
 note, not a live scenario file.
 
-**Open question, not investigated here:** AM-56 confirmed
-`el_reasoner.py`'s `ultimate_accountability()` covers
-`ViolationResponse.creates_burden` as a fourth accountability root. It
-was never checked whether `ultimate_accountability()` has an equivalent
-blind spot for `Authorization.auth_burden` specifically — same shape,
-same construct family, but not confirmed either way. Since there is no
-live scenario using this field, there is no forcing case to surface the
-answer the way `escalationNoticeBurden` forced the Layer-4 question.
-Check `el_reasoner.py`'s root-construct list directly before relying on
-`ultimate_accountability()` for any future scenario that does use
-`Authorization.auth_burden`.
+**Open question, RESOLVED 2026-09-16 (AM-87,
+`docs/el_grammar_amendments.md`):** AM-56 confirmed `el_reasoner.py`'s
+`ultimate_accountability()` covers `ViolationResponse.creates_burden` as
+a fourth accountability root. Checked directly: `grep -n
+"Authorization\|auth_burden" toolchain/el_reasoner.py` returned zero
+matches before AM-87 — confirming `ultimate_accountability()` had the
+identical blind spot for `Authorization.auth_burden` as
+`_build_obligation_descriptors()` did before AM-86. AM-87 closes it: a
+new `_find_authorization_roots()` fallback (mirroring
+`_find_violation_response_roots()` exactly, `actor_name` from
+`.authority`) is now checked after the `ViolationResponse` fallback,
+and `AccountabilityChain` gains a `root_authorization` field. Verified
+via `tests/test_am87_authorization_accountability_root.py` (3 tests,
+reusing AM-86's own `_AUTH_BURDEN_PROBE`) — full suite 393 passed, 1
+xfailed, zero regressions.
 
-**Status:** Layer 4 closed (AM-86). Layer 2 question open, not
-investigated.
+**Status:** Layer 4 closed (AM-86). Layer 2 closed (AM-87). No further
+action.
 
 ---
 

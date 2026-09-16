@@ -88,6 +88,10 @@ class AccountabilityChain:
     # ViolationResponse.creates_burden rather than a Commitment — the two
     # are mutually exclusive origins, never both set on one chain.
     root_violation_response: Optional[str] = None
+    # AM-87: set instead of root_commitment/root_violation_response when
+    # the root was found via Authorization.auth_burden — mutually
+    # exclusive with both, same shape as AM-56's field.
+    root_authorization: Optional[str] = None
 
     def render(self) -> str:
         """Human-readable chain description."""
@@ -99,6 +103,8 @@ class AccountabilityChain:
             lines.append(f"Origin     : commitment '{self.root_commitment}'")
         if self.root_violation_response:
             lines.append(f"Origin     : violation_response '{self.root_violation_response}'")
+        if self.root_authorization:
+            lines.append(f"Origin     : authorization '{self.root_authorization}'")
         if self.chain:
             lines.append("Chain      :")
             for i, link in enumerate(self.chain):
@@ -452,6 +458,18 @@ def ultimate_accountability(
        (root_violation_response set, root_commitment left None), not a
        StaticRoleAnchor. Matched structurally on creates_burden's token
        identity, never free text (AM-54 precedent).
+    9. AM-87: if step 8 also finds nothing, check whether the queried
+       token is named by some Authorization.auth_burden (grammar keyword
+       creates_burden_on_authority; §6.6.4, §7.10.2, §7.8.8.4 — "the
+       authority grants a permit AND undertakes a burden to facilitate").
+       Authorization's authority is an already-resolved [EnterpriseObject]
+       cross-reference, same as ViolationResponse.responding_actor — no
+       filler ambiguity — so a match is reported as a genuine
+       AccountabilityChain (root_authorization set, root_commitment and
+       root_violation_response left None). Matched structurally on
+       auth_burden's token identity, never free text (AM-54/AM-56
+       precedent). Mirrors AM-86's equivalent Layer-4 addition in
+       toolchain/el_engine.py's _build_obligation_descriptors().
 
     §7.10.1: "A principal is responsible for the acts of an object
               acting as its agent."
@@ -468,12 +486,15 @@ def ultimate_accountability(
     List of AccountabilityChain and/or StaticRoleAnchor. Never a mix of
     both in one call — the Commitment/Delegation path and the role-anchor
     fallback are mutually exclusive (the fallback only runs when the
-    primary path found nothing at all). AM-56's ViolationResponse fallback
-    is likewise only reached when both the Commitment/Delegation path and
-    the role-anchor fallback find nothing, and always returns
-    AccountabilityChain, never StaticRoleAnchor. An empty list means
-    genuinely not found: no Commitment, no Delegation, no Role declares
-    'holds', and no ViolationResponse.creates_burden names this token.
+    primary path found nothing at all). AM-56's ViolationResponse
+    fallback and AM-87's Authorization fallback are likewise only
+    reached when the Commitment/Delegation path, the role-anchor
+    fallback, and (for AM-87) the ViolationResponse fallback all find
+    nothing, in that order, and both always return AccountabilityChain,
+    never StaticRoleAnchor. An empty list means genuinely not found: no
+    Commitment, no Delegation, no Role declares 'holds', no
+    ViolationResponse.creates_burden names this token, and no
+    Authorization.auth_burden names this token either.
     """
     chains: List[Union[AccountabilityChain, StaticRoleAnchor]] = []
     graph = delegation_graph(model)
@@ -497,7 +518,10 @@ def ultimate_accountability(
         role_anchors = _find_role_anchors_for_obligation(model, obligation)
         if role_anchors:
             return role_anchors
-        return _find_violation_response_roots(model, obligation)
+        violation_response_roots = _find_violation_response_roots(model, obligation)
+        if violation_response_roots:
+            return violation_response_roots
+        return _find_authorization_roots(model, obligation)
 
     # Collect root parties: from commitments
     processed_roots: Set[str] = set()
@@ -698,6 +722,45 @@ def _find_violation_response_roots(model, token_name: str) -> List[Accountabilit
             chain=[],
             current_holder=root_name,
             root_violation_response=vr.name,
+        ))
+    return chains
+
+
+def _find_authorization_roots(model, token_name: str) -> List[AccountabilityChain]:
+    """
+    AM-87: Authorization.auth_burden as a fifth, fully-resolved root —
+    last resort, only reached from ultimate_accountability() when neither
+    Commitment/Delegation, the AM-53 role-anchor fallback, nor AM-56's
+    ViolationResponse fallback found anything for token_name.
+
+    §6.6.4/§7.10.2/§7.8.8.4: Authorization is "an empowerment (unlike
+    mere permission) — the authority grants a permit AND undertakes a
+    burden to facilitate" (grammar's own comment). Authorization's
+    authority is an already-resolved [EnterpriseObject] cross-reference
+    (grammar keyword 'authority'; el_domain.py attribute 'authority') —
+    unlike Role.holds there is no filler ambiguity to flag, so a match is
+    reported as a genuine AccountabilityChain, not a StaticRoleAnchor.
+    Mirrors _find_violation_response_roots() (AM-56) exactly, substituting
+    Authorization/auth_burden/authority for
+    ViolationResponse/creates_burden/responding_actor.
+
+    Matched structurally on auth_burden's own token identity (AM-54/AM-56
+    precedent: never free-text) — does not scan description prose.
+    """
+    chains: List[AccountabilityChain] = []
+    for auth in _collect(model, "Authorization"):
+        if _obj_name(getattr(auth, "auth_burden", None)) != token_name:
+            continue
+        root_name = _obj_name(getattr(auth, "authority", None))
+        if not root_name:
+            continue
+        chains.append(AccountabilityChain(
+            obligation=token_name,
+            root_party=root_name,
+            root_commitment=None,
+            chain=[],
+            current_holder=root_name,
+            root_authorization=auth.name,
         ))
     return chains
 

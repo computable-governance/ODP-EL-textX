@@ -5860,3 +5860,78 @@ change); new `tests/test_am86_obligation_descriptor_roots.py`; this file
 (new entry); `docs/CONCEPTS_INDEX.md` (escalationNoticeBurden finding
 marked RESOLVED; new finding logged for the open
 `Authorization.auth_burden`/Layer-2 question).
+
+---
+
+## AM-87 (2026-09-16) — `ultimate_accountability()` gains a fifth accountability root: `Authorization.auth_burden` (`toolchain/el_reasoner.py`)
+
+**Status:** IMPLEMENTED (2026-09-16).
+
+**Problem:** answers the open question AM-86 logged in
+`docs/CONCEPTS_INDEX.md` ("`Authorization.auth_burden` — same descriptor
+blind spot as `escalationNoticeBurden` had, caught proactively; open
+question whether `el_reasoner.py` shares it") rather than leaving it
+unchecked. Direct inspection confirms it does: `grep -n
+"Authorization\|auth_burden" toolchain/el_reasoner.py` returned zero
+matches before this fix, and `ultimate_accountability()`'s own docstring
+enumerated exactly four root paths — `Commitment`, `Delegation`-only
+roots, AM-53's `Role.holds` fallback, and AM-56's
+`ViolationResponse.creates_burden` fallback — with nothing for
+`Authorization.auth_burden`. A burden created purely via `authorization {
+creates_burden_on_authority: ... }` (no Commitment, no Delegation, no
+Role.holds, no ViolationResponse) fell through every branch and returned
+`[]`, the identical "genuinely not found" symptom AM-53/AM-56 already
+fixed for the role-anchor and violation-response cases respectively.
+
+**What changed** (`toolchain/el_reasoner.py`):
+- `AccountabilityChain` gains `root_authorization: Optional[str] = None`,
+  mirroring AM-56's `root_violation_response` field exactly — mutually
+  exclusive with `root_commitment`/`root_violation_response`, never more
+  than one set on a given chain. `render()` gains the matching `"Origin
+  : authorization '...'"` line.
+- New `_find_authorization_roots(model, token_name)`, placed immediately
+  after `_find_violation_response_roots()` — structurally identical to
+  it, substituting `Authorization`/`auth_burden`/`authority` for
+  `ViolationResponse`/`creates_burden`/`responding_actor`. `actor_name`
+  resolves from `.authority` (the grammar's own comment on
+  `Authorization`: "the authority grants a permit AND undertakes a
+  burden to facilitate"), matching AM-86's Layer-4 choice of seed actor
+  for the identical construct. Matched structurally on `auth_burden`'s
+  own token identity, never free text (AM-54/AM-56 precedent).
+- `ultimate_accountability()`'s no-Commitment/no-Delegation branch now
+  tries, in order: `_find_role_anchors_for_obligation()` (AM-53), then
+  `_find_violation_response_roots()` (AM-56), then
+  `_find_authorization_roots()` (AM-87) — each only reached when every
+  path before it found nothing. Docstring's numbered algorithm gains a
+  step 9 describing this; the `Returns` section's "genuinely not found"
+  definition extended to include "no `Authorization.auth_burden` names
+  this token either."
+
+**Standard reference(s):** §6.6.4/§7.10.2/§7.8.8.4 (Authorization) — same
+clauses cited on the grammar rule itself (AM-31); no new grammar
+construct.
+
+**Empirical verification:** zero live usage of
+`creates_burden_on_authority`/`auth_burden` anywhere in `scenarios/`
+(confirmed via grep, same as AM-86's own finding) — this is a
+proactive-closure fix, not a regression fix against a real scenario. New
+`tests/test_am87_authorization_accountability_root.py` (3 tests), reusing
+AM-86's exact `_AUTH_BURDEN_PROBE` spec (`tests/test_am86_obligation_descriptor_roots.py`)
+via `parse_string()` for consistency between the Layer-2 and Layer-4
+checks on the identical construct: the probe's `facilitationBurden`
+resolves to `root_party == "Authority"`, `root_authorization ==
+"probeAuthorization"`, both `root_commitment`/`root_violation_response`
+left `None`; the same probe with `creates_burden_on_authority` removed
+still returns `[]`; and a regression check that the real
+`escalationNoticeBurden` case (AM-56, `referral_scenario.el`) still
+resolves via `root_violation_response`, unaffected by the new fallback
+sitting after it in the same branch. Full suite: 393 passed, 1 xfailed —
+the 3 new tests accounting for the difference from the 390/1 baseline,
+zero regressions.
+
+**Files changed:** `toolchain/el_reasoner.py` (`AccountabilityChain.root_authorization`,
+`render()`, `_find_authorization_roots()`, `ultimate_accountability()`
+docstring + branch wiring); new
+`tests/test_am87_authorization_accountability_root.py`; this file (new
+entry); `docs/CONCEPTS_INDEX.md` (AM-86's open question marked
+RESOLVED).
