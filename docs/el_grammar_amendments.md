@@ -4129,6 +4129,69 @@ ground-truth pass.
 
 ---
 
+## AM-58 (2026-08-22) — `specialist_pool_scenario.el`: first named any_discharged/SUPERSEDED demonstration scenario
+
+**Not a grammar/domain/parser change** — a named scenario + test file,
+logged retroactively (2026-09-16) per the same convention later made
+explicit by AM-63/AM-75: a scenario-level demonstration that exercises
+an existing mechanism under a real name gets its own entry here,
+cross-referenced from the scenario file's own header and from
+`tests/test_specialist_pool_scenario.py`'s docstring, rather than a
+grammar/domain/parser diff.
+
+**What it demonstrates:** `OnCallConsultCommunity` governs two
+equally-eligible specialists (`SpecialistA`/`SpecialistB`) over an
+`any_discharged(consultResponseGroup)` objective, both members
+Commitment-backed (`specialistAResponseCommitment`/
+`specialistBResponseCommitment`, satisfying V-16a). First named,
+standalone scenario exercising the `any_discharged`/`SUPERSEDED`
+collective-obligation mechanism end-to-end — Layer 4 verifier
+(`el_kripke.py`'s P6b, since AM-27) and Layer 3 live engine
+(`el_engine.py`, since AM-57) — rather than re-testing the mechanism's
+own logic (that remains AM-57's job,
+`tests/test_any_discharged_sibling_supersession.py`). Two checks match
+the scenario file's own header comment: Q1, `EF(objective_satisfied:
+OnCallConsultCommunity)` holds — either specialist discharging
+satisfies the community objective; Q2, discharging
+`specialistAResponseBurden` via the live engine supersedes
+`specialistBResponseBurden` (AM-57's mechanism, exercised here under a
+real scenario name for the first time).
+
+**Files changed:** `scenarios/specialist_pool/specialist_pool_scenario.el`
+(new), `tests/test_specialist_pool_scenario.py` (new, 3 tests).
+
+Commit: `aa26e3a`.
+
+---
+
+## AM-59 (2026-08-23) — `ai_vendor_probe.el`: first named demonstration of AM-40's role-based Domain syntax and the AIVendor two-construct shape
+
+**Not a grammar/domain/parser change** — a named scenario + test file,
+logged retroactively (2026-09-16), same convention as AM-58 above.
+
+**What it demonstrates:** first named scenario exercising AM-40's
+role-based Domain syntax (`controlling_role`/`controlled_role`/
+`DomainRoleFiller` with `via=[Federation]`) and the AIVendor
+two-construct shape identified as a gap 2026-07-09
+(`docs/CONCEPTS_INDEX.md`): peer contract federations for the
+pre-deployment provider duty, one shared subordination domain for the
+in-use processor duty. Deliberately structural only — no burdens,
+commitments, or Kripke verification, since the AIVendor gap is about
+provenance and role correctness, not discharge semantics. Confirms
+parse/validate cleanliness (V-NEW-21 passes using only the new
+role-based syntax, no `controlling_object`/`controlled_object`) and
+that each deployed agent's `via` resolves to the correct, distinct
+`Federation` against the real parsed model — the actual N-peer
+provenance claim, not just a parse-success check.
+
+**Files changed:** `scenarios/vendor/ai_vendor_probe.el` (new),
+`tests/test_ai_vendor_probe_scenario.py` (new, 2 tests),
+`docs/CONCEPTS_INDEX.md` (20 lines — AIVendor gap update).
+
+Commit: `53e9ba1`.
+
+---
+
 ## AM-60 (2026-08-24) — `Evaluation` structured form + `claimable` `TokenState` (grammar/parser/domain layer)
 
 **Problem:** delegation claiming (DN_003) needs a burden offered to an
@@ -4298,15 +4361,174 @@ new (212 total). Design source:
 
 ---
 
+## AM-73 (2026-08-30) — R38/R38a/R38b: `MedicationRequest` → Commitment + Burden, `MedicationDispense` → fulfilment/discharge (touchpoint 5)
+
+**Status:** CONFIRMED (2026-08-30).
+
+**Problem:** touchpoint 5 (medicines management) of the ConnectedCare
+demonstration scenario had no FHIR mapping — pharmacy retrieval of an
+ePrescription, eCDS interaction/duplication checks, and dispensing were
+unmapped. Needed a `MedicationRequest`/`MedicationDispense` pipeline
+mirroring the R05-R08 `ServiceRequest` pipeline and the R37a/R37b
+static/live split already established for `Procedure`.
+
+**Design decision — one rule number covers the whole
+`MedicationRequest` mapping job**, mirroring the R37a/R37b precedent of
+no bare intermediate number for a single resource type's mapping. R38a
+= static provenance (mirrors R37a exactly — same `TokenState` grammar
+exclusion, `discharged` not authorable). R38b = live bridge (mirrors
+R37b exactly — dynamic `burden_name` derivation, no fixed-name
+constant, `KeyError` caught inside the handler).
+
+**What changed:**
+- `_map_medication_request()` (`toolchain/fhir_mapper.py`) — mirrors
+  `_map_service_request()` exactly, including the AM-72 holds-clause
+  pattern. `.requester` resolved via
+  `_resolve_commitment_accountable_party()` (AM-71) unchanged —
+  confirmed against the real AU `au-medicationrequest` profile that its
+  target types (`Practitioner|PractitionerRole|Organization|Patient|
+  RelatedPerson|Device`) are identical to `ServiceRequest.requester`'s,
+  `PractitionerRole` included.
+- `handle_medication_dispense_event()` (`toolchain/fhir_event_handler.py`)
+  — structurally identical to `handle_procedure_event()`. Confirmed
+  against the real `au-medicationdispense` profile: the linking field
+  is `.authorizingPrescription`, not `.basedOn`; `medicationdispense-status`
+  is its own value set, distinct from `Procedure`'s `event-status` —
+  `declined` is this enum's explicit negative.
+- `POST /fhir/medication-dispense-events` (`toolchain/el_api.py`) —
+  mirrors `procedure_event`.
+- No deadline mapping — `dispenseRequest.validityPeriod` is a different
+  concept (the repeat-supply authorisation window), not an SLA
+  deadline; same accepted gap as R08.
+
+**Standard reference(s):** §6.6 (Commitment), §6.4.3 (Burden) — same as
+R05-R08/R37a/R37b; no new grammar construct introduced.
+
+**Empirical verification:** `tests/fixtures/medication_dispense_bundle.json`
+plus 3 new test files (mapper/static, handler-probe, endpoint-integration),
+including a live `Runtime.build_from_spec()` check confirming a real
+`TokenInstance` exists, not just plausible generated text. Full suite:
+308/308 passing (288 baseline + 6 mapper + 8 handler + 6 endpoint).
+
+**New open finding logged, not fixed here:** the eCDS
+interaction/duplication-check accountability question (who is
+responsible for catching a cross-plan medication conflict) —
+deliberately deferred as a genuinely novel design question, not a
+mechanical mapping. See `docs/CONCEPTS_INDEX.md`, "eCDS
+interaction/duplication-check accountability" (OPEN FINDING,
+2026-08-30).
+
+**Files changed:** `toolchain/fhir_mapper.py`,
+`toolchain/fhir_event_handler.py`, `toolchain/el_api.py`,
+`toolchain/fhir_mapping_table.md` (§3.15),
+`tests/fixtures/medication_dispense_bundle.json`,
+`tests/test_fhir_mapper_r38_medication_request.py`,
+`tests/test_fhir_medication_dispense_event_handler.py`,
+`tests/test_fhir_medication_dispense_event_endpoint.py`,
+`docs/CONCEPTS_INDEX.md`.
+
+Commit: `2db41f9`.
+
+---
+
+## AM-74 (2026-08-30) — R39: `Observation` (progress/PROM score) → Burden + `violation_response` escalation (touchpoint 6)
+
+**Status:** CONFIRMED (2026-08-30).
+
+**Problem:** wires the first real escalation logic into the FHIR
+mapper, addressing DN_007's originally-flagged gap ("no escalation
+logic appears anywhere, across all six ConnectedCare diagrams"). An
+`Observation` representing a progress/PROM score needed to create a
+Burden with a genuine clinical-governance deadline and, if unreviewed,
+escalate to the GP practice via the existing
+`violation_response`/`fire_violation_responses()` mechanism.
+
+**Design decisions:**
+- Deadline (`7 days`) is a genuine governance-policy constant, layered
+  on top of the data — not derived from any FHIR field (no AU-specific
+  `Observation` profile exists; grounded against the base FHIR R4 core
+  package, `hl7.fhir.r4.core#4.0.1`, confirmed via a full search of the
+  cached AU package directory).
+- Holder resolution: `.basedOn` → `ServiceRequest` → that
+  `ServiceRequest`'s own already-resolved `Commitment.by` (reused, not
+  recomputed) — not `.performer` directly. The base R4 profile confirms
+  `.performer`'s target types include `Patient` (a self-reported PROM
+  commonly has the patient as performer), which would incorrectly
+  obligate the patient to review their own score; `.performer` is used
+  only as a fallback when `.basedOn` doesn't resolve.
+- `discharge_mode` must stay `eventual`, never `strict` — confirmed via
+  `check_live_violations()` that it explicitly skips every `strict`
+  burden, which would make a strict review burden permanently
+  non-violatable.
+- `ViolationResponse`'s shape grounded against the real working example
+  already in `referral_scenario.el` (`violation_response
+  referralNoResponseViolation`) — `creates_burden` names an ungranted
+  burden (no `holds` clause anywhere); the engine grants it dynamically
+  only when the violation actually fires.
+- One rule number, no static/live split like R37/R38 — no new live
+  bridge needed; `check_live_violations()`/`fire_violation_responses()`
+  are already-existing, generic engine functions operating over any
+  declared burden/`ViolationResponse`.
+- `escalate_to` resolves to the accountable party of whichever
+  `ServiceRequest` has the earliest `.authoredOn` in the bundle (the
+  referral that started the patient's journey), computed once per
+  bundle via a new `_find_earliest_referral_accountable_party()`
+  helper.
+
+**What changed** (`toolchain/fhir_mapper.py`): `ELViolationResponse`
+dataclass, `_map_observation()`, `_find_earliest_referral_accountable_party()`,
+`_render_violation_response()`, wired into `_render_el()` after
+Declarations (`ViolationResponse` confirmed top-level via
+`grammar/v2/el_grammar.tx:73`, sibling to `Commitment`/`Authorization`).
+
+**Standard reference(s):** §6.6 (Commitment), §6.4.3 (Burden),
+§6.3.8/§7.8.6/§7.8.6 NOTE 2 (ViolationResponse — see AM-17) — no new
+grammar construct introduced.
+
+**Empirical verification:** `tests/fixtures/observation_progress_score_bundle.json`
+plus `tests/test_fhir_mapper_r39_observation_review.py` — 8 tests:
+`.basedOn` priority over `.performer`, `.performer` fallback, the
+degenerate skip case, `violation_response` correctness,
+escalation-burden shape, full parse+validate, and the real proof
+(advance clock past the 56-tick deadline, `check_live_violations()`
+transitions to `violated`, `fire_violation_responses()` grants the
+escalation burden and logs the GP notification). Full suite: 321/321
+passing (313 baseline + 8 new).
+
+**Edge case discovered, not fixed here:** when neither `.basedOn` nor
+`.performer` resolves to anything at all, naively emitting
+`commitment.by:` with an empty string would be a textX **parse**
+failure (a mandatory grammar cross-reference), not just a validator
+warning — a stricter failure mode than AM-71/AM-72's "reference exists
+but doesn't resolve" tiers. Guarded via an early-return skipping the
+`Observation` entirely in this case. The same latent gap likely exists
+in R05/R38 (a `ServiceRequest`/`MedicationRequest` with a completely
+absent `.requester`) — not fixed here, logged separately as its own
+finding. See `docs/CONCEPTS_INDEX.md`, "An accountable-party reference
+resolving to an empty string would crash the parser..." (OPEN FINDING,
+2026-08-30).
+
+**Files changed:** `toolchain/fhir_mapper.py`,
+`toolchain/fhir_mapping_table.md` (§3.16),
+`tests/fixtures/observation_progress_score_bundle.json`,
+`tests/test_fhir_mapper_r39_observation_review.py`,
+`docs/CONCEPTS_INDEX.md`.
+
+Commit: `2e76380`.
+
+---
+
 ## AM-75 (2026-09-03) — reviewNonResponseAndDetermineNextStepsBurden: real §8.4 GP-side notification consumer for escalate_to
 
 **Not a grammar/domain/parser change** — a scenario + builder-level
 addition, logged per AM-63's actual format. Note: AM-63's own text
 claims this logging convention was "already established for AM-58...
-and AM-59" — checked directly, neither has a dedicated entry anywhere
-in this file, only passing references inside AM-63's own text. That
-claim is inaccurate; not corrected here, flagged for a separate
-docs-cleanup pass alongside the already-noted AM-73/AM-74 gap.
+and AM-59" — checked directly (2026-09-16), neither had a dedicated
+entry anywhere in this file at the time AM-63 was written, only
+passing references inside AM-63's own text. **Fixed as of 2026-09-16:**
+both now have dedicated entries above (AM-58, AM-59), and the
+AM-73/AM-74 logging gap referenced below has also been closed — see
+those entries.
 
 **What it fixes:** `referral_scenario.el`'s `escalate_to: GPPractice`
 (on `referralNoResponseViolation`) previously produced only an
