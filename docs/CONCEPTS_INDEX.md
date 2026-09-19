@@ -5016,7 +5016,8 @@ question, not a new transition rule.
 
 **AM-88a RESOLVED (2026-09-19); AM-88b (GuardProbe trust) RESOLVED
 (2026-09-19); AM-88c (chain-extension root choice) RESOLVED for
-Commitment-rooted tokens, OPEN for tokens with no Commitment (2026-09-19).**
+Commitment-rooted tokens (2026-09-19); the no-Commitment case is RESOLVED
+by AM-91 (2026-09-19, below).**
 
 **Ground truth (recon):** grepped every parseable scenario file (all of
 `scenarios/**/*.el` except the already-documented pre-existing syntax
@@ -5108,21 +5109,24 @@ reachable to that actor via the same BFS the guard uses — GuardProbe now
 resolves to `['P2','AgentA','AgentB']` in **both** declaration orders,
 direct and hybrid mode, verified live.
 
-**Still genuinely open, by design:** a token with NO `Commitment` of its
-own (e.g. rooted at `Authorization.auth_burden` instead) has no actor to
-prefer against — the chain for that case is still order-dependent after
-AM-88c (`test_no_commitment_multi_parent_token_remains_order_dependent`),
-and deliberately left that way: defaulting to some parent with nothing to
-anchor the choice against would be a guess, not a fix. **Planned
-resolution: AM-91** (not yet scheduled) — a `[W-16e]` warning naming an
-agent's ≥2 `principal_of` parents (sorted) and noting that the exported
-chain for a Commitment-less token among them names only one, plus a
-sorted-first deterministic fallback in `_delegation_chain_for_token()` so
-the choice is at least stable rather than declaration-order-dependent.
-Note this is distinct from AM-90's `[W-16c]`, which only counts genuine
-`Delegation`-based parents — a purely `principal_of`-based multi-parent
-structure is exactly the case AM-90 documents as out of scope and AM-91
-would cover. Not scoped to AM-88 or AM-90.
+**RESOLVED by AM-91 (2026-09-19):** a token with NO `Commitment` of its
+own (e.g. rooted via a Role `holds`, or `Authorization.auth_burden`) had
+no actor to prefer against, so the chain for that case remained
+order-dependent after AM-88c, and was deliberately left that way:
+defaulting to some parent with nothing to anchor the choice against would
+have been a guess, not a fix. **AM-91 closed it two ways:** (1)
+`_delegation_chain_for_token()`'s fallback, when no Commitment-anchored
+choice exists, is now `sorted(candidates)[0]` — deterministic regardless
+of declaration order (`tests/test_am88c_multi_parent_chain_extension.py::test_no_commitment_multi_parent_token_is_now_order_independent`,
+renamed and re-asserted); (2) a new `[W-16e]` warning names an agent's ≥2
+standing `principal_of` parents (sorted), so the arbitrariness of "first
+alphabetically" is visible rather than silent. A dedicated parity test
+(`tests/test_am91_standing_parent_warnings.py::test_parity_chain_fallback_names_standing_parents_of_first_entry`)
+asserts the chain's extension and `standing_parents_of()`'s first sorted
+entry can never diverge. This is distinct from AM-90's `[W-16c]`, which
+only counts genuine `Delegation`-based parents — a purely
+`principal_of`-based multi-parent structure was exactly the case AM-90
+documented as out of scope, and is what `[W-16e]` (AM-91) now covers.
 
 **Pre-exec vs. hybrid divergence on GuardProbe (intended — recon item f, confirmed):**
 GuardProbe's `burdenT` is Commitment-rooted at `P2`, but `P2 → AgentA` is a
@@ -5187,8 +5191,8 @@ with no behavioural effect on any code path today.
 `tests/test_am88a_multi_parent_tracing.py` covers everything AM-88a-
 resolved above; `tests/test_am88b_guard_multi_parent_reachability.py`
 covers the AM-52 guard's trust decision; `tests/test_am88c_multi_parent_chain_extension.py`
-covers the final chain-extension root choice, including the still-open
-no-Commitment residual.
+covers the final chain-extension root choice. The no-Commitment residual
+noted above is now resolved — see AM-91, below.
 
 ---
 
@@ -5254,8 +5258,9 @@ toward `[W-16c]`'s parent count, and a `to_role` Authorization does not
 appear in the co-granted-authorizations clause — neither resolves to a
 single attributable agent the way a genuine `Delegation`/`to_agent`
 Authorization does. An agent whose only "multi-parent" structure is two
-`principal_of` parents (zero real Delegations) produces no warning at all;
-this is intentional, verified by test, not an oversight.
+`principal_of` parents (zero real Delegations) produces no `[W-16c]`; this
+is intentional, verified by test, not an oversight — that exact case is
+what `[W-16e]` (AM-91, below) covers instead, not silence.
 
 **Authorizations are authority sources, not co-principals (AM-31 §4.0b):**
 `[W-16c]`'s co-granted-authorizations clause is deliberately a separate
@@ -5273,5 +5278,65 @@ anywhere new (unchanged from AM-89's finding).
 
 **Files:** `docs/el_grammar_amendments.md`, AM-90.
 `tests/test_am90_multi_parent_warnings.py` covers everything above.
+
+---
+
+## AM-91 — standing `principal_of` multi-parent: `[W-16e]` warning and a deterministic verifier fallback
+
+**RESOLVED (2026-09-19).**
+
+Closes the residual AM-90 deliberately left open (see AM-88's section,
+above): AM-90's `[W-16c]` counts only genuine `Delegation`-based parents,
+so an agent with ≥2 STANDING `principal_of` parents (a one-sided
+structural affiliation, not paired with `delegated_from`) was both
+order-dependent (the AM-88c residual — `_delegation_chain_for_token()`'s
+final extension fell back to first-declared when no `Commitment` anchored
+the choice) and unwarned. `el_reasoner.standing_parents_of(model,
+agent_name)` (new query, built entirely on `delegation_graph()`'s
+structural links) and `el_validator`'s new `[W-16e]` (built from that
+exact query — no twin logic) close the "unwarned" half; a
+`sorted(candidates)[0]` fallback in `_delegation_chain_for_token()` closes
+the "order-dependent" half. Full detail: `docs/el_grammar_amendments.md`,
+AM-91.
+
+**`[W-16c]` and `[W-16e]` are independent:** an agent can trigger either,
+both, or neither, depending on whether its multi-parent structure comes
+from genuine `Delegation`s, standing `principal_of` affiliations, or both
+— verified by a dedicated test constructing an agent with two of each,
+disjoint.
+
+**One real, tracked-corpus hit — a true positive, not modified:**
+`scenarios/consent/federation_consent_scenario.el`'s `SpecialistParty` has
+two standing `principal_of` parents (`GPParty`, `SpecialistPracticeParty`)
+— found during AM-91's own recon, and also the reason AM-88c's amendment
+entry needed a correction (it had claimed no tracked scenario had this
+shape). This file now emits exactly one `[W-16e]`, advisory, pinned by
+test on the named file; the scenario itself is unchanged. The underlying
+chain-resolution ambiguity this warning describes is, for this specific
+file, never actually reached by `_delegation_chain_for_token()`:
+`SpecialistParty` (and the file's only other structural child) is also
+the delegate of a real `Delegation`, which resolves its chain-parent
+unconditionally before the fallback logic ever runs — so AM-91's fallback
+change produces zero diff on this file's snapshot entry, confirmed
+empirically, while `[W-16e]` still correctly names the structural
+ambiguity regardless (the warning's trigger is independent of whether any
+particular token's chain ever reaches into it).
+
+**Message/behaviour parity, enforced by test:** `[W-16e]`'s "chain-based
+views name one of them (the first alphabetically)" claim is not just
+prose — `tests/test_am91_standing_parent_warnings.py`'s parity test
+asserts, across every declaration-order permutation, that
+`_delegation_chain_for_token()`'s actual fallback choice equals
+`sorted(standing_parents_of(model, agent))[0]`. If either the message or
+the fallback rule is ever changed independently, this test catches the
+divergence.
+
+**Where a spec author sees this:** the same surfaces AM-89/AM-90 already
+established — no new API/UI validation surface was added.
+
+**Files:** `docs/el_grammar_amendments.md`, AM-91.
+`tests/test_am91_standing_parent_warnings.py` covers everything above;
+`tests/test_am88c_multi_parent_chain_extension.py`'s former
+order-dependence test is renamed and now asserts order-independence.
 
 ---

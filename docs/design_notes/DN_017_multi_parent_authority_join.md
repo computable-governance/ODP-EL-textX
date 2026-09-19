@@ -1,14 +1,15 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b, AM-88c and AM-89 implemented, committed, and
-pushed. AM-90 implemented and committed locally, pending push at time of
-writing. §7 steps 1, 2 and 4 done; steps 3, 5 and 6 remain proposed.
+**Status:** AM-88a, AM-88b, AM-88c, AM-89 and AM-90 implemented, committed,
+and pushed. AM-91 implemented and committed locally, pending push at time
+of writing. §7 steps 1, 2, 4 and 7 done; steps 3, 5 and 6 remain proposed.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
-`walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`),
-`toolchain/el_validator.py` (V-08; W-16c, W-16d — AM-90; future V-J1),
-`toolchain/el_parser.py` (`ParseResult` — `.warnings`, AM-89),
-`toolchain/el_reasoner.py` (`parents_of()` — AM-90), grammar rules
+`walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
+— fallback, AM-91), `toolchain/el_validator.py` (V-08; W-16c, W-16d —
+AM-90; W-16e — AM-91; future V-J1), `toolchain/el_parser.py`
+(`ParseResult` — `.warnings`, AM-89), `toolchain/el_reasoner.py`
+(`parents_of()` — AM-90; `standing_parents_of()` — AM-91), grammar rules
 `EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`.
 **Found:** design session 2026-09-19, prompted by an external enquiry about
 delegation graphs in which one child has more than one incoming parent.
@@ -106,12 +107,14 @@ by live probes:
 | AM-88c (`e9fa28b`) | verifier | final extension prefers the token's own Commitment actor | 37 chain pairs identical; suite 424 |
 | AM-89 (`56939b9`) | parser | `ParseResult.warnings` added; `parse()` splits `[W-…]` by prefix; `validate_spec()` untouched; both CLIs (`el_reasoner.py`, `fhir_mapper.py`) print warnings, unaffected exit status | suite 424 → 433 |
 | AM-90 (`51416f8`) | reasoner + validator | `el_reasoner.parents_of()` (shared query); `[W-16c]` multi-parent notice, `[W-16d]` same-token conflict, both built from it | zero hits on tracked corpus; order-invariant across all permutations; suite 433 → 447 |
+| AM-91 (`f445ae3`) | reasoner + validator + verifier | `el_reasoner.standing_parents_of()` (shared query); `[W-16e]` standing-`principal_of` multi-parent notice; `_delegation_chain_for_token()`'s no-Commitment fallback becomes `sorted(candidates)[0]` | one real corpus hit (`federation_consent_scenario.el`, true positive, pinned); byte-identical on the 25-pair public snapshot; order-invariant and message/behaviour-parity tested; suite 448 → 461 |
 
 Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am88b_guard_multi_parent_reachability.py`,
 `tests/test_am88c_multi_parent_chain_extension.py`,
 `tests/test_am89_warnings_channel.py`,
-`tests/test_am90_multi_parent_warnings.py`, plus two snapshot fixtures
+`tests/test_am90_multi_parent_warnings.py`,
+`tests/test_am91_standing_parent_warnings.py`, plus two snapshot fixtures
 in `tests/fixtures/`. Full detail: `docs/el_grammar_amendments.md`,
 `docs/CONCEPTS_INDEX.md`.
 
@@ -127,12 +130,11 @@ holds identically on a clean clone (`760f99c`).
 - More than one structurally matching delegation for one token from one node
   is ill-formed (§6.4.1/§7.8.7) and is silently resolved by declaration order
   in both `walk_chain()` and `_delegation_chain_for_token()`.
-- A multi-principal token with **no Commitment** still has an
-  order-dependent exported chain (asserted by test, by design). AM-90's
-  `[W-16c]` does not cover this — it only counts genuine `Delegation`-based
-  parents, and a purely `principal_of`-based multi-parent structure is
-  exactly what AM-90 documents as out of scope. Planned resolution:
-  **AM-91** (see §10).
+- ~~A multi-principal token with **no Commitment** still has an
+  order-dependent exported chain, and AM-90's `[W-16c]` doesn't cover a
+  purely `principal_of`-based multi-parent structure.~~ **Resolved by
+  AM-91**: the fallback is now `sorted(candidates)[0]` (deterministic),
+  and `[W-16e]` names the agent's standing parents. See §10.
 - `_is_standing_affiliation()` exists as independent twins in the verifier and
   reasoner, and both read the single-valued `delegated_from`.
 - Pre-exec and hybrid verifier modes differ on `principal_of`-rooted tokens
@@ -142,8 +144,8 @@ holds identically on a clean clone (`760f99c`).
 - No API/UI validation surface exists. `el_api.py` never calls
   `validate_spec()` at all (every one of its `parse()` calls uses
   `validate=False`), and no HTTP endpoint returns validation messages to a
-  caller. A spec author reaches `[W-16c]`/`[W-16d]` (or `[W-16b]`) only via
-  `ParseResult.warnings` directly, or via `el_reasoner.py`'s and
+  caller. A spec author reaches `[W-16c]`/`[W-16d]`/`[W-16e]` (or `[W-16b]`)
+  only via `ParseResult.warnings` directly, or via `el_reasoner.py`'s and
   `fhir_mapper.py`'s CLIs, which print them to stderr.
 
 ## 7. Proposed next steps (in order)
@@ -179,6 +181,15 @@ holds identically on a clean clone (`760f99c`).
    to one agent by distinct authorities should be flagged if it omits the
    others. Grouping key is `domain_scope`, currently free text; AM-14
    (cross-reference) should land first or the fragility accepted.
+7. **Standing `principal_of` multi-parent — done (AM-91).** `[W-16e]` warns
+   on an agent with ≥2 standing `principal_of` parents (not covered by
+   W-16c, which only counts genuine `Delegation`-based parents), built
+   from a new `el_reasoner.standing_parents_of()` query. Paired with a
+   deterministic `sorted(candidates)[0]` fallback in
+   `_delegation_chain_for_token()`, replacing first-declared-wins for the
+   no-Commitment case — closes the AM-88c residual (§6). One real hit on
+   the tracked corpus (`federation_consent_scenario.el`), a true positive,
+   scenario unmodified. Full detail: `docs/el_grammar_amendments.md`, AM-91.
 
 ## 8. The hand-off contract
 
@@ -237,24 +248,23 @@ class of bug before it reaches a public clone.
 
 ## 10. Open decisions for the maintainer
 
-- **No-Commitment fallback — decided: AM-91 (not yet scheduled).** AM-90's
-  `[W-16c]` does not count structural `principal_of` parents (documented
-  scope — it only covers genuine `Delegation`-based parents), so an agent
-  whose only multi-parent structure is ≥2 `principal_of` parents, where a
-  token among them has no `Commitment` of its own, remains BOTH
-  order-dependent AND unwarned today. Planned resolution: a `[W-16e]`
-  warning for an agent with ≥2 `principal_of` parents, naming them (sorted)
-  and noting that the exported chain for a Commitment-less token among
-  them names only one of them — plus a sorted-first, deterministic
-  fallback in `_delegation_chain_for_token()` itself, replacing today's
-  first-declared-wins so the named chain is at least stable rather than
-  order-dependent.
+- **No-Commitment fallback — resolved: AM-91.** AM-90's `[W-16c]` does not
+  count structural `principal_of` parents (documented scope — it only
+  covers genuine `Delegation`-based parents), so an agent whose only
+  multi-parent structure was ≥2 `principal_of` parents, where a token
+  among them has no `Commitment` of its own, used to be BOTH
+  order-dependent AND unwarned. AM-91 closed both: `[W-16e]` names an
+  agent's ≥2 standing `principal_of` parents (sorted), noting that the
+  exported chain for a Commitment-less token among them names only one of
+  them; `_delegation_chain_for_token()`'s fallback for that same case is
+  now `sorted(candidates)[0]`, replacing first-declared-wins. A dedicated
+  parity test ties the two together so they cannot silently diverge.
 - **W-16d severity — decided: warning.** Implemented as advisory (AM-90),
   consistent with W-16c and the AM-89 warnings channel.
 - **Grouping key for V-J1.** Land AM-14 first, or accept free-text fragility.
 - **Parents query.** Shape and home — decided and implemented:
   `el_reasoner.parents_of(model, agent_name)` (AM-90).
-- **Push timing.** AM-88a/b/c and AM-89 pushed. AM-90 was pending push at
-  time of writing (committed locally as its own individually-gated
-  commit); the external reply that tracing is fixed is the maintainer's
-  own next action, not part of this series' scope.
+- **Push timing.** AM-88a/b/c, AM-89 and AM-90 pushed. AM-91 was pending
+  push at time of writing (committed locally as its own
+  individually-gated commit); the external reply that tracing is fixed is
+  the maintainer's own next action, not part of this series' scope.

@@ -6229,9 +6229,19 @@ ambiguous); §7.10.1 (`principal_of` structural affiliation).
 
 **Empirical verification:** byte-identical regression against the AM-88b
 snapshot (`tests/fixtures/am88b_delegation_chain_for_token_snapshot.json`,
-same 37 pairs) — zero diffs; no existing scenario has an agent with more
-than one `principal_of` parent, so nothing changes for the real corpus.
-New `tests/test_am88c_multi_parent_chain_extension.py` (6 tests: the
+same 37 pairs) — zero diffs. **Correction (found during AM-91 recon):** an
+earlier version of this note claimed no existing scenario has an agent
+with more than one `principal_of` parent — imprecise.
+`scenarios/consent/federation_consent_scenario.el`'s `SpecialistParty`
+does have two standing `principal_of` parents (`GPParty`,
+`SpecialistPracticeParty`). The byte-identical regression holds anyway,
+for a different reason: `SpecialistParty` (and the file's only other
+structural child, `AISpecialistAgent`) is *also* the delegate of a real
+`Delegation`, which sets `parent[to] = frm` unconditionally, before this
+function's final-extension loop even runs — `parent.setdefault(...)` is
+therefore a no-op for both, regardless of which fallback rule the loop
+uses. This scenario's chain output has never depended on, and still
+doesn't depend on, this fix. New `tests/test_am88c_multi_parent_chain_extension.py` (6 tests: the
 snapshot check; GuardProbe's full-chain order-independence, direct and
 hybrid, both declaration orders; and the no-Commitment residual, asserted
 as still order-dependent by design, not a bug). Full suite: 424 passed, 1
@@ -6457,3 +6467,143 @@ clean `git worktree add` checkout with the diff applied.
 dispatch wiring, module docstring, `Tuple` import); new
 `tests/test_am90_multi_parent_warnings.py`; this file (new entry);
 `docs/CONCEPTS_INDEX.md` (new AM-90 note).
+
+---
+
+## AM-91 (2026-09-19) — standing `principal_of` multi-parent: `[W-16e]` warning and a deterministic verifier fallback (`toolchain/el_reasoner.py`, `toolchain/el_validator.py`, `toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-19). Closes the residual AM-88c/AM-90 left
+open (`docs/CONCEPTS_INDEX.md`).
+
+**Problem:** AM-90's `[W-16c]` counts only genuine `Delegation`-based
+parents; structural `principal_of` affiliations are documented out of
+scope there. That left an agent with ≥2 STANDING `principal_of` parents
+(a one-sided structural affiliation, not paired with `delegated_from` —
+`el_reasoner._is_standing_affiliation()`), where a token among them has no
+`Commitment` of its own, BOTH order-dependent (the AM-88c residual —
+`el_kripke._delegation_chain_for_token()`'s final chain-extension fell
+back to first-declared when no Commitment anchored the choice) AND
+unwarned.
+
+**Recon finding, not zero:** scanning all 11 tracked `.el` files for
+agents with ≥2 distinct standing structural links found ONE real hit:
+`scenarios/consent/federation_consent_scenario.el`'s `SpecialistParty`
+(parents `GPParty`, `SpecialistPracticeParty`). Traced empirically, not
+assumed: this file's only descriptor (`seekConsentObligation`) is
+Commitment-rooted at a third, fully disconnected party
+(`GPPracticeParty`), so `_delegation_chain_for_token()`'s walk never
+reaches `SpecialistParty` at all — AM-91's fallback change produces zero
+diff on this file's `am88b_delegation_chain_for_token_snapshot.json`
+entry. Separately, `SpecialistParty` (and the file's only other
+structural child, `AISpecialistAgent`) is *also* the delegate of a real
+`Delegation`, which sets that agent's `parent[to] = frm` unconditionally
+before the fallback loop runs — `parent.setdefault(...)` is therefore a
+no-op regardless of which fallback rule is used. Confirmed this is the
+*only* multi-standing-parent case anywhere in the tracked corpus, so the
+byte-identical snapshot gate holds for the entire corpus, not just this
+one file. `[W-16e]` still fires on this file, correctly — its trigger is
+independent of chain-reachability; see the new test pinning this exact
+case as a true positive.
+
+**What changed** (`toolchain/el_reasoner.py`):
+- `standing_parents_of(model, agent_name) -> List[str]` — every standing
+  `principal_of` parent of `agent_name`, sorted, built entirely on
+  `delegation_graph()`'s existing `link.structural=True` entries (no
+  separate `principal_of`/`_is_standing_affiliation` scan — confirmed by
+  inspection during recon that this produces the identical parent set
+  `el_kripke.py`'s own inline `structural_parents_multi` computes, since
+  both share byte-identical `_is_standing_affiliation` bodies and
+  identical `EnterpriseObject`/`principal_of` iteration). Returns every
+  standing parent found (0, 1, or more) — the ≥2 threshold is the
+  caller's decision, matching `parents_of()`'s shape. Unknown `agent_name`
+  returns `[]`, never raises.
+
+**What changed** (`toolchain/el_validator.py`):
+- `[W-16e]` (`_validate_standing_multi_parent_notice()`) — an agent with
+  ≥2 distinct standing `principal_of` parents. Built entirely from
+  `standing_parents_of()` — message and query share the same data by
+  construction. Advisory (AM-89 channel), never affects `.ok`.
+  Independent of `[W-16c]`: an agent can trigger either, both, or
+  neither, depending on which kind of parent edge it has (verified by a
+  dedicated test constructing an agent with two of each, disjoint).
+  Message: `[W-16e] Agent 'X' has N standing principal_of parents: P1,
+  P2. For a token with no Commitment of its own, chain-based views name
+  one of them (the first alphabetically); the choice is stable but
+  arbitrary. Which parent's authority applies is application-defined. See
+  el_reasoner.standing_parents_of(model, 'X').`
+
+**What changed** (`toolchain/el_kripke.py`, `_delegation_chain_for_token()`'s
+final chain-extension loop): when an agent has >1 `principal_of` parent
+and no Commitment-anchored choice exists (no `Commitment` at all, or the
+Commitment's actor is neither an exact candidate nor reachable), the
+fallback is now `sorted(candidates)[0]` instead of `structural_parent[agent_name]`
+(first-declared). Single-parent agents and every Commitment-anchored case
+are unaffected — the new branch only replaces the *last-resort* fallback.
+**Message/behaviour parity, enforced by test, not just documented:**
+`tests/test_am91_standing_parent_warnings.py`'s dedicated parity test
+asserts, across every declaration-order permutation, that the fallback's
+actual choice equals `sorted(standing_parents_of(model, agent))[0]` — the
+exact claim `[W-16e]`'s "first alphabetically" wording makes. This is
+what stops the message and the fallback from silently diverging if either
+is ever changed independently.
+
+**Correction to an earlier amendment entry (found during this amendment's
+own recon):** AM-88c's "no existing scenario has an agent with more than
+one `principal_of` parent" framing was imprecise —
+`federation_consent_scenario.el` does have one. That entry is corrected
+above with the actual reason the byte-identical gate held regardless (the
+real-`Delegation`-wins-first argument, not scenario absence). AM-88b's
+own, narrower claim (that no scenario *exercises the AM-52 guard* under
+two `principal_of` parents) is unaffected by this correction — that guard
+only engages for a `transfers_token_group` `Delegation`, and this file has
+none.
+
+**Standard reference(s):** §7.10.1 (`principal_of` structural
+affiliation, multi-parent collective responsibility — same basis as
+`[W-16c]`); §6.4.1/§7.8.7 (one holder per token — the reason an ambiguous
+fallback choice is flagged rather than silently trusted).
+
+**Import graph:** confirmed cycle-free before writing any code, same
+argument as AM-90 — `el_reasoner.py` still has zero internal toolchain
+imports at module level; `el_validator.py` adding `standing_parents_of`
+to its existing `from el_reasoner import delegation_graph, parents_of`
+line is a one-directional edge with no cycle.
+
+**Empirical verification:** ran the `[W-16e]` trigger condition against
+every tracked `.el` file — exactly the one real hit above, nothing else.
+Byte-identical regression against `tests/fixtures/am88b_delegation_chain_for_token_snapshot.json`
+(25 pairs, current public snapshot) — zero diffs, confirming AM-91's
+fallback change is inert for the entire tracked corpus. Order-invariance
+verified across all permutations of a 3-party standing-parent probe —
+identical `[W-16e]` string every time. New
+`tests/test_am91_standing_parent_warnings.py` (13 tests): the `[W-16e]`
+message and its order-invariance; the message/behaviour parity test
+described above; a single-standing-parent negative; a paired
+`principal_of`+`delegated_from` negative (must not count as standing); a
+`Delegation`-only negative (`[W-16c]` fires, `[W-16e]` does not); a
+both-kinds-at-once positive (both warnings, independently); `standing_parents_of()`
+output-matches-message and unknown-agent checks; the two named tracked
+reference scenarios (unchanged); the one real corpus hit
+(`federation_consent_scenario.el`, exact string pinned); warnings never
+affect `.ok`; and `validate_spec()`'s own unsplit-list contract. Also
+updated: `tests/test_am88c_multi_parent_chain_extension.py`'s residual
+test, renamed from `..._remains_order_dependent` to
+`..._is_now_order_independent` and re-asserted (both declaration orders
+now give `["P1", "AgentA", "AgentB"]`); `tests/test_am90_multi_parent_warnings.py`'s
+principal_of-only test, renamed and narrowed to assert only that `[W-16c]`
+does not fire (it no longer asserts zero warnings overall, since
+`[W-16e]` now correctly fires on that exact shape). Full suite: 461
+passed, 1 xfailed (448/1 AM-90 baseline + 13 new, zero regressions) —
+reproduced identically on a clean `git worktree add` checkout with the
+diff applied.
+
+**Files changed:** `toolchain/el_reasoner.py` (`standing_parents_of()`,
+module docstring); `toolchain/el_validator.py`
+(`_validate_standing_multi_parent_notice()`, dispatch wiring, module
+docstring); `toolchain/el_kripke.py` (`_delegation_chain_for_token()`'s
+final extension loop, `sorted(candidates)[0]` fallback branch); new
+`tests/test_am91_standing_parent_warnings.py`; updated
+`tests/test_am88c_multi_parent_chain_extension.py` and
+`tests/test_am90_multi_parent_warnings.py` (see above); this file (AM-88c
+entry corrected, new AM-91 entry); `docs/CONCEPTS_INDEX.md` (residual:
+RESOLVED by AM-91; new AM-91 section).
