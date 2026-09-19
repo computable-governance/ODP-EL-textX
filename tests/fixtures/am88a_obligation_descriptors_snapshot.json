@@ -1,0 +1,628 @@
+{
+  "scenarios/consent/consent_scenario.el": {
+    "reportingObligation": {
+      "chain": [
+        "GPPracticeParty"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "submit_consent_report",
+      "holder": "GPPracticeParty",
+      "obligation_id": "reportingObligation",
+      "obligation_text": "Submit consent and analysis report after AI diagnostic session",
+      "priority_weight": 0.25,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "seekConsentObligation": {
+      "chain": [
+        "GPPracticeParty",
+        "SpecialistAgent",
+        "AIDiagnosticAgent"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "seek_patient_consent",
+      "holder": "AIDiagnosticAgent",
+      "obligation_id": "seekConsentObligation",
+      "obligation_text": "Seek informed patient consent before AI diagnostic analysis",
+      "priority_weight": 1.0,
+      "revocable": true,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/consent/federation_consent_scenario.el": {
+    "seekConsentObligation": {
+      "chain": [
+        "GPPracticeParty"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "seek_patient_consent",
+      "holder": "GPPracticeParty",
+      "obligation_id": "seekConsentObligation",
+      "obligation_text": "ensure patient consent for AI specialist analysis",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/ereferral/ereferral_model.el": {},
+  "scenarios/erequesting_claiming/erequesting_claiming_scenario.el": {
+    "providerAClaimBurden": {
+      "chain": [
+        "DiagnosticProviderA"
+      ],
+      "deadline_steps": 20,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "claimReferralA",
+      "holder": "DiagnosticProviderA",
+      "obligation_id": "providerAClaimBurden",
+      "obligation_text": "Claim and fulfil the referral if it becomes available to this provider",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "providerBClaimBurden": {
+      "chain": [
+        "DiagnosticProviderB"
+      ],
+      "deadline_steps": 20,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "claimReferralB",
+      "holder": "DiagnosticProviderB",
+      "obligation_id": "providerBClaimBurden",
+      "obligation_text": "Claim and fulfil the referral if it becomes available to this provider",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/fhir/generated_governance.el": {
+    "ReferralSr001Obligation": {
+      "chain": [
+        "GpPractice001",
+        "SpecialistDrOkonkwo",
+        "AiDiagnosticAgent001"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "imaging",
+      "holder": "AiDiagnosticAgent001",
+      "obligation_id": "ReferralSr001Obligation",
+      "obligation_text": "Seek informed patient consent before AI diagnostic analysis. GP practice is ultimately accountable for consent chain.",
+      "priority_weight": 1.0,
+      "revocable": true,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/gp_referral/gp_referral_scenario.el": {
+    "assessmentSchedulingBurden": {
+      "chain": [
+        "SpecialistParty"
+      ],
+      "deadline_steps": 112,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "scheduleAssessment",
+      "holder": "SpecialistParty",
+      "obligation_id": "assessmentSchedulingBurden",
+      "obligation_text": "Schedule specialist assessment appointment for the patient",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "clinicalHandoverBurden": {
+      "chain": [
+        "GPPracticeParty"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "provideHandover",
+      "holder": "GPPracticeParty",
+      "obligation_id": "clinicalHandoverBurden",
+      "obligation_text": "Provide complete clinical handover documentation to specialist",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "escalationNoticeBurden": {
+      "chain": [
+        "SpecialistParty"
+      ],
+      "deadline_steps": 240,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "notify_gp_of_non_response",
+      "holder": "SpecialistParty",
+      "obligation_id": "escalationNoticeBurden",
+      "obligation_text": "If specialist fails to respond to referral, specialist party must escalate and notify GP practice",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "referralInitiationBurden": {
+      "chain": [
+        "GPPracticeParty"
+      ],
+      "deadline_steps": 240,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "initiateReferral",
+      "holder": "GPPracticeParty",
+      "obligation_id": "referralInitiationBurden",
+      "obligation_text": "Initiate specialist referral and provide clinical handover for the patient",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "referralResponseBurden": {
+      "chain": [
+        "GPPracticeParty",
+        "SpecialistClinician"
+      ],
+      "deadline_steps": 40,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "acknowledgeReferral",
+      "holder": "SpecialistClinician",
+      "obligation_id": "referralResponseBurden",
+      "obligation_text": "Respond to the specialist referral within the agreed timeframe and schedule assessment",
+      "priority_weight": 0.75,
+      "revocable": true,
+      "sub_delegation_allowed": true,
+      "triggered_by": null
+    }
+  },
+  "scenarios/industrial_procedure/industrial_procedure_scenario.el": {
+    "compressorStartOblig": {
+      "chain": [
+        "PlantOperations",
+        "FieldOperatorAgent"
+      ],
+      "deadline_steps": 15,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "start_compressor",
+      "holder": "FieldOperatorAgent",
+      "obligation_id": "compressorStartOblig",
+      "obligation_text": "Start the compressor during Ready",
+      "priority_weight": 0.5,
+      "revocable": true,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureCheckObligation": {
+      "chain": [
+        "PlantOperations",
+        "FieldOperatorAgent"
+      ],
+      "deadline_steps": 30,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "confirm_pressure_reading",
+      "holder": "FieldOperatorAgent",
+      "obligation_id": "pressureCheckObligation",
+      "obligation_text": "Confirm pressure reading during Preparing",
+      "priority_weight": 0.75,
+      "revocable": true,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureInterlockTrip": {
+      "chain": [
+        "SafetyInterlockSystem"
+      ],
+      "deadline_steps": 45,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "automated_pressure_trip",
+      "holder": "SafetyInterlockSystem",
+      "obligation_id": "pressureInterlockTrip",
+      "obligation_text": "Automatically trip on unconfirmed pressure",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/industrial_procedure/sop_4471_generated.el": {
+    "compressorStartObligation": {
+      "chain": [
+        "FieldOperator"
+      ],
+      "deadline_steps": 15,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "start_compressor",
+      "holder": "FieldOperator",
+      "obligation_id": "compressorStartObligation",
+      "obligation_text": "CompressorStart: FieldOperator task, escalates to ShiftLead if missed",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureCheckObligation": {
+      "chain": [
+        "FieldOperator"
+      ],
+      "deadline_steps": 30,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "confirm_pressure_reading",
+      "holder": "FieldOperator",
+      "obligation_id": "pressureCheckObligation",
+      "obligation_text": "PressureCheck: FieldOperator task, escalates to ShiftLead if missed",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureInterlockTripObligation": {
+      "chain": [
+        "SafetyInterlockSystem"
+      ],
+      "deadline_steps": 45,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "automated_pressure_trip",
+      "holder": "SafetyInterlockSystem",
+      "obligation_id": "pressureInterlockTripObligation",
+      "obligation_text": "PressureInterlockTrip: FieldOperator task, escalates to SafetyInterlockSystem if missed",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/industrial_procedure/sop_4471_generated_EMBARGO_CONFLICT_TEST.el": {
+    "compressorStartObligation": {
+      "chain": [
+        "FieldOperator"
+      ],
+      "deadline_steps": 15,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "start_compressor",
+      "holder": "FieldOperator",
+      "obligation_id": "compressorStartObligation",
+      "obligation_text": "CompressorStart: FieldOperator task, escalates to ShiftLead if missed",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureCheckObligation": {
+      "chain": [
+        "FieldOperator"
+      ],
+      "deadline_steps": 30,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "confirm_pressure_reading",
+      "holder": "FieldOperator",
+      "obligation_id": "pressureCheckObligation",
+      "obligation_text": "PressureCheck: FieldOperator task, escalates to ShiftLead if missed",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureInterlockTripObligation": {
+      "chain": [
+        "SafetyInterlockSystem"
+      ],
+      "deadline_steps": 45,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "automated_pressure_trip",
+      "holder": "SafetyInterlockSystem",
+      "obligation_id": "pressureInterlockTripObligation",
+      "obligation_text": "PressureInterlockTrip: FieldOperator task, escalates to SafetyInterlockSystem if missed",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/industrial_procedure/sop_4471_generated_MISMATCH_TEST.el": {
+    "compressorStartObligation": {
+      "chain": [
+        "FieldOperator"
+      ],
+      "deadline_steps": 15,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "start_compressor",
+      "holder": "FieldOperator",
+      "obligation_id": "compressorStartObligation",
+      "obligation_text": "CompressorStart: FieldOperator task, escalates to ShiftLead if missed",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureCheckObligation": {
+      "chain": [
+        "FieldOperator"
+      ],
+      "deadline_steps": 30,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "confirm_pressure_reading",
+      "holder": "FieldOperator",
+      "obligation_id": "pressureCheckObligation",
+      "obligation_text": "PressureCheck: FieldOperator task, escalates to ShiftLead if missed",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "pressureInterlockTripObligation": {
+      "chain": [
+        "SafetyInterlockSystem"
+      ],
+      "deadline_steps": 45,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "automated_pressure_trip",
+      "holder": "SafetyInterlockSystem",
+      "obligation_id": "pressureInterlockTripObligation",
+      "obligation_text": "PressureInterlockTrip: FieldOperator task, escalates to SafetyInterlockSystem if missed",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/probes/transfer_probe.el": {
+    "ambiguousFromBurden": {
+      "chain": [
+        "ActorA"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": null,
+      "holder": "ActorA",
+      "obligation_id": "ambiguousFromBurden",
+      "obligation_text": "Probe: ambiguous from_role skip case",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "noFromRoleBurden": {
+      "chain": [
+        "ActorA"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": null,
+      "holder": "ActorA",
+      "obligation_id": "noFromRoleBurden",
+      "obligation_text": "Probe: no-from_role skip case",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "probeBurden": {
+      "chain": [
+        "ActorA"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": null,
+      "holder": "ActorA",
+      "obligation_id": "probeBurden",
+      "obligation_text": "Hold probeBurden until transferred to roleB's filler",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "strictBurden": {
+      "chain": [
+        "ActorA"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": null,
+      "holder": "ActorA",
+      "obligation_id": "strictBurden",
+      "obligation_text": "Probe: strict-burden-blocking guard case",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "unfilledToBurden": {
+      "chain": [
+        "ActorA"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": null,
+      "holder": "ActorA",
+      "obligation_id": "unfilledToBurden",
+      "obligation_text": "Probe: unfilled to_role skip case",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/referral/referral_scenario.el": {
+    "aiExaminationBurden": {
+      "chain": [
+        "SpecialistClinician",
+        "SpecialistAIAgent"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "conductAIExamination",
+      "holder": "SpecialistAIAgent",
+      "obligation_id": "aiExaminationBurden",
+      "obligation_text": "Conduct AI diagnostic examination of the referred patient and report findings back to the accountable clinician",
+      "priority_weight": 0.5,
+      "revocable": true,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "assessmentSchedulingBurden": {
+      "chain": [
+        "SpecialistPractice"
+      ],
+      "deadline_steps": 112,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "scheduleAssessment",
+      "holder": "SpecialistPractice",
+      "obligation_id": "assessmentSchedulingBurden",
+      "obligation_text": "Schedule specialist assessment appointment for the patient",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "clinicalHandoverBurden": {
+      "chain": [
+        "GPPractice"
+      ],
+      "deadline_steps": 5,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "provideHandover",
+      "holder": "GPPractice",
+      "obligation_id": "clinicalHandoverBurden",
+      "obligation_text": "Provide complete clinical handover documentation to specialist",
+      "priority_weight": 0.5,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "escalationNoticeBurden": {
+      "chain": [
+        "SpecialistPractice"
+      ],
+      "deadline_steps": 240,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "notify_gp_of_non_response",
+      "holder": "SpecialistPractice",
+      "obligation_id": "escalationNoticeBurden",
+      "obligation_text": "If specialist fails to respond to referral, specialist practice must escalate and notify GP practice",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "referralInitiationBurden": {
+      "chain": [
+        "GPPractice"
+      ],
+      "deadline_steps": 240,
+      "discharge_mode": "strict",
+      "fires_event": null,
+      "for_action": "initiateReferral",
+      "holder": "GPPractice",
+      "obligation_id": "referralInitiationBurden",
+      "obligation_text": "Initiate specialist referral and provide clinical handover for the patient",
+      "priority_weight": 1.0,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": "encounterConcluded"
+    },
+    "referralResponseBurden": {
+      "chain": [
+        "GPPractice"
+      ],
+      "deadline_steps": 40,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "acknowledgeReferral",
+      "holder": "GPPractice",
+      "obligation_id": "referralResponseBurden",
+      "obligation_text": "Respond to the specialist referral within the agreed timeframe and schedule assessment",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "reviewNonResponseAndDetermineNextStepsBurden": {
+      "chain": [
+        "GPPractice"
+      ],
+      "deadline_steps": 240,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "reviewNonResponseAndDetermineNextSteps",
+      "holder": "GPPractice",
+      "obligation_id": "reviewNonResponseAndDetermineNextStepsBurden",
+      "obligation_text": "Review referral non-response escalations and determine appropriate next steps",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/specialist_pool/specialist_pool_scenario.el": {
+    "specialistAResponseBurden": {
+      "chain": [
+        "SpecialistOnCallA"
+      ],
+      "deadline_steps": 10,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "acceptConsultA",
+      "holder": "SpecialistOnCallA",
+      "obligation_id": "specialistAResponseBurden",
+      "obligation_text": "Accept and respond to the urgent consult request",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    },
+    "specialistBResponseBurden": {
+      "chain": [
+        "SpecialistOnCallB"
+      ],
+      "deadline_steps": 10,
+      "discharge_mode": "eventual",
+      "fires_event": null,
+      "for_action": "acceptConsultB",
+      "holder": "SpecialistOnCallB",
+      "obligation_id": "specialistBResponseBurden",
+      "obligation_text": "Accept and respond to the urgent consult request",
+      "priority_weight": 0.75,
+      "revocable": false,
+      "sub_delegation_allowed": false,
+      "triggered_by": null
+    }
+  },
+  "scenarios/vendor/ai_vendor_probe.el": {}
+}

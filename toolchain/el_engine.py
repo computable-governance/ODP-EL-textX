@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 
 # ── Runtime types ─────────────────────────────────────────────────────────────
@@ -1095,6 +1095,41 @@ def _priority_weight(priority_str: Optional[str]) -> float:
     }.get(priority_str or "normal", 0.50)
 
 
+def _commitment_root_for_token(model: Any, token_name: str) -> Optional[Tuple[str, str]]:
+    """Returns (actor_name, obligation_text) for token_name's own Commitment,
+    if one exists, else None.
+
+    AM-88a: added here, mirroring el_kripke.py's identical function of the
+    same name (not yet shared — el_kripke.py keeps its own copy for now;
+    AM-88b switches it to import this one instead), so el_engine.py's
+    walk_chain() below can apply the same AM-52 token_group-membership
+    guard el_kripke.py's _delegation_chain_for_token() already had —
+    without this, a Delegation's
+    transfers_token_group is trusted as a genuine transfer path for ANY
+    member token, even one with its own independent Commitment that this
+    Delegation has nothing to do with (confirmed live: without this guard,
+    referralInitiationBurden/clinicalHandoverBurden in
+    scenarios/gp_referral/gp_referral_scenario.el pick up a spurious second
+    hop, 'GPPracticeParty' -> 'SpecialistClinician', purely from group
+    co-membership with referralResponseBurden/assessmentSchedulingBurden,
+    which ARE genuinely transferred by that Delegation).
+
+    Rewritten in el_engine.py's own idiom (inline type-name filtering)
+    rather than dragging el_kripke.py's _collect()/_obj_name() utilities
+    along — confirmed exactly equivalent: _obj_name(ref) is
+    getattr(ref, "name", None), and _collect(model, "Commitment") is
+    [c for c in model.elements if type(c).__name__ == "Commitment"]."""
+    for c in model.elements:
+        if type(c).__name__ != "Commitment":
+            continue
+        burden_ref = getattr(c, "burden", None)
+        if burden_ref and getattr(burden_ref, "name", None) == token_name:
+            actor_name = getattr(getattr(c, "actor", None), "name", None)
+            if actor_name:
+                return actor_name, c.obligation
+    return None
+
+
 def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]:
     """
     Extract ObligationDescriptor for each burden that appears in at least
@@ -1124,40 +1159,118 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
         if type(t).__name__ == "DeonticToken" and getattr(t, "kind", None) == "burden"
     }
 
-    # Build delegation graph: from_name → list of (to_name, obligation_text)
+    # Build delegation graph: from_name → list of
+    # (to_name, obligation_text, sub_delegation_allowed, revocable,
+    #  burden_name, group_tokens)
+    # burden_name/group_tokens are AM-88a's structural transfer signals
+    # (mutually exclusive per V-NEW-10), mirroring el_kripke.py's
+    # _delegation_chain_for_token() (AM-51/52); None/None for a Delegation
+    # with neither field, which falls back to free-text matching below.
     # (duplicates el_reasoner.delegation_graph but avoids import)
-    del_graph: Dict[str, List[Tuple[str, str, bool, bool]]] = {}
+    del_graph: Dict[str, List[Tuple[str, str, bool, bool, Optional[str], Optional[FrozenSet[str]]]]] = {}
     for d in model.elements:
         if type(d).__name__ != "Delegation":  # AM-18: DelegationDecl → Delegation
             continue
         from_name = getattr(getattr(d, "delegator", None), "name", None)
         to_name   = getattr(getattr(d, "delegate", None), "name", None)
         if from_name and to_name:
+            burden_ref  = getattr(d, "burden", None)
+            burden_name = getattr(burden_ref, "name", None) if burden_ref is not None else None
+            group_ref   = getattr(d, "token_group", None)
+            group_tokens = (
+                frozenset(getattr(t, "name", None) for t in getattr(group_ref, "tokens", []))
+                if group_ref is not None else None
+            )
             del_graph.setdefault(from_name, []).append((
                 to_name,
                 d.obligation,
                 getattr(d, "sub_delegation_allowed", False),
                 getattr(d, "revocable", False),
+                burden_name,
+                group_tokens,
             ))
 
-    def walk_chain(start: str, obl_text: str) -> List[str]:
-        """DFS to leaf; returns [start, …, leaf]."""
-        chain = [start]
+    def walk_chain(start: str, obl_text: str, token_name: str) -> Tuple[List[str], bool, bool]:
+        """DFS to leaf; returns ([start, …, leaf], sub_delegation_allowed,
+        revocable) — the last two taken from the Delegation that produced
+        the FINAL hop of THIS token's own walk (False/False if the walk
+        took zero hops), replacing AM-88a's pre-fix behaviour of scanning
+        all Delegations afterward for "the last one whose delegate ==
+        holder", which silently mixed unrelated tokens' delegations
+        together whenever two lineages converged on the same holder and
+        made the result depend on declaration order.
+
+        AM-88a: structural-first matching, mirroring el_kripke.py's
+        _delegation_chain_for_token() (AM-51/52) field-by-field, including
+        its fallthrough order: a Delegation transfers token_name if its
+        transfers_burden names it directly, OR ELSE (not "OR" — checked
+        only when the burden field is absent or names a different token)
+        token_name is a member of its transfers_token_group AND EITHER the
+        token has no Commitment of its own (trusted unconditionally — e.g.
+        a token rooted at ViolationResponse/Authorization instead) OR that
+        Commitment's own obligation text is contained in this Delegation's
+        obligation text (AM-52 text-relevance guard, rejecting a
+        token_group match that's pure incidental co-membership with an
+        unrelated Commitment-rooted token — see
+        _commitment_root_for_token()'s docstring for the concrete
+        gp_referral_scenario.el case this guards against).
+
+        V-NEW-10 declares transfers_burden/transfers_token_group mutually
+        exclusive, but does not make matching unambiguous in practice: at
+        least one real scenario (gp_referral_scenario.el's
+        gpToSpecialistDelegation) violates it today (parsed with
+        validate=False, so the violation goes unenforced — logged
+        separately, out of scope here) and declares BOTH fields. The
+        fallthrough above is what makes such a Delegation still resolve
+        correctly for a *different* group member than the one its burden
+        field names directly — checking burden first and stopping there
+        regardless of match would silently ignore the group field whenever
+        both happen to be set, unlike el_kripke.py's version.
+
+        Unlike el_kripke.py's version, no reachability conjunct is needed:
+        this is a forward walk that only ever considers del_graph[current]
+        — i.e. Delegations whose delegator IS the already-verified current
+        chain node — so structural continuity from `start` is guaranteed
+        by construction, not by a separate check.
+
+        Free-text obligation-substring matching remains the fallback for a
+        Delegation with NEITHER field set (ground-truth confirmed empty
+        across the corpus by AM-54; the grammar still permits it).
+
+        AM-88a, open item logged in docs/CONCEPTS_INDEX.md, not fixed here:
+        keeping candidates[0] below means more than one structurally
+        matching outgoing Delegation for the same token from the same node
+        is resolved by declaration order — such a spec is ill-formed
+        (§6.4.1/§7.8.7: a token has exactly one active holder) and the
+        validator does not currently flag it.
+        """
+        commitment_root = _commitment_root_for_token(model, token_name)
+        chain: List[str] = [start]
         visited: Set[str] = {start}
         current = start
+        sda, rev = False, False
         while True:
-            outgoing = [
-                (to, oblt, sda, rev)
-                for to, oblt, sda, rev in del_graph.get(current, [])
-                if obl_text.lower() in oblt.lower()
-            ]
-            if not outgoing or outgoing[0][0] in visited:
+            candidates: List[Tuple[str, str, bool, bool]] = []
+            for to, oblt, hop_sda, hop_rev, burden_name, group_tokens in del_graph.get(current, []):
+                if burden_name is None and group_tokens is None:
+                    matched = obl_text.lower() in oblt.lower()
+                else:
+                    matched = burden_name is not None and burden_name == token_name
+                    if not matched and group_tokens is not None and token_name in group_tokens:
+                        if commitment_root is None:
+                            matched = True
+                        else:
+                            _, commitment_obligation = commitment_root
+                            matched = commitment_obligation.lower() in oblt.lower()
+                if matched:
+                    candidates.append((to, oblt, hop_sda, hop_rev))
+            if not candidates or candidates[0][0] in visited:
                 break
-            to, oblt, sda, rev = outgoing[0]
+            to, oblt, sda, rev = candidates[0]
             chain.append(to)
             visited.add(to)
             current = to
-        return chain
+        return chain, sda, rev
 
     descriptors: Dict[str, ObligationDescriptor] = {}
 
@@ -1172,19 +1285,9 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
         if burden is None:
             return
 
-        deadline_str = getattr(burden, "deadline", None)
-        chain        = walk_chain(actor_name, obl_text)
-        holder       = chain[-1]
-
-        # Use sub_delegation_allowed / revocable from the LAST delegation link
-        # that terminates at holder, if any
-        sda, rev = False, False
-        for d in model.elements:
-            if type(d).__name__ != "Delegation":  # AM-18: DelegationDecl → Delegation
-                continue
-            if getattr(getattr(d, "delegate", None), "name", None) == holder:
-                sda = getattr(d, "sub_delegation_allowed", False)
-                rev = getattr(d, "revocable", False)
+        deadline_str        = getattr(burden, "deadline", None)
+        chain, sda, rev     = walk_chain(actor_name, obl_text, burden_name)
+        holder              = chain[-1]
 
         # P6: extract event wiring from the burden token
         triggered_by = getattr(getattr(burden, "triggered_by", None), "name", None)

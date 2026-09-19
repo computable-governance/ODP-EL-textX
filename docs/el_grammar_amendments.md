@@ -5935,3 +5935,144 @@ docstring + branch wiring); new
 `tests/test_am87_authorization_accountability_root.py`; this file (new
 entry); `docs/CONCEPTS_INDEX.md` (AM-86's open question marked
 RESOLVED).
+
+---
+
+## AM-88a (2026-09-19) — Multi-parent tracing, engine side: `walk_chain()` becomes structural-first and per-token (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED (2026-09-19). Layer 4 counterpart (`el_kripke.py`'s
+`_delegation_chain_for_token()`) is AM-88b, tracked separately.
+
+**Problem:** `_build_obligation_descriptors()` has two single-lineage flaws
+that only surface when two delegation lineages converge on one agent —
+never exercised by any scenario in the corpus today (confirmed by AM-88's
+recon ground-truth scan, logged in `docs/CONCEPTS_INDEX.md`), but real bugs
+in the code path itself:
+
+1. `walk_chain(start, obl_text)` picked its next hop by testing
+   `obl_text.lower() in oblt.lower()` against every outgoing `Delegation`
+   from the current node, and took `outgoing[0]` — it never consulted
+   which token a `Delegation` structurally transfers via `transfers_burden`/
+   `transfers_token_group`. Two Commitments sharing obligation text into
+   one delegate, each transferring a *different* burden onward at a further
+   hop, could have one token's walk silently continue along the *other*
+   token's onward `Delegation`, purely because the text matched.
+2. `sub_delegation_allowed`/`revocable` were computed after the walk by
+   scanning every `Delegation` in the model for "the last one whose
+   `delegate` equals the resolved `holder`" — independent of which token
+   was actually being resolved, and dependent on declaration order when
+   more than one `Delegation` shares that delegate.
+
+**Repro (see `tests/test_am88a_multi_parent_tracing.py`,
+`test_repro1_converging_lineages_resolve_per_token` /
+`test_repro2_sub_delegation_allowed_and_revocable_are_order_independent`):**
+`FinanceParty`/`LegalParty` each commit an obligation with identical text
+("Settle payments") into `SettlementAgent`, which sub-delegates only
+`settleBurdenA` (Finance's) onward to `SubAgent`. Pre-fix,
+`settleBurdenB`'s (Legal's) chain incorrectly continued onto `SubAgent`
+too, and both tokens' `sub_delegation_allowed`/`revocable` took on
+whichever of `finDel`/`legDel` was declared last.
+
+**What changed** (`toolchain/el_engine.py`):
+- New `_commitment_root_for_token(model, token_name)` — returns
+  `(actor_name, obligation_text)` for `token_name`'s own `Commitment`, or
+  `None`. Mirrors `el_kripke.py`'s identical function of the same name,
+  which keeps its own copy for now (AM-88b switches it to import this one
+  instead and deletes that copy — see that amendment for `el_kripke.py`'s
+  side; the two are not shared as of AM-88a). Written in `el_engine.py`'s
+  own idiom (inline `type(x).__name__` filtering) rather than importing
+  `el_kripke.py`'s `_collect()`/`_obj_name()` utilities, which don't exist
+  in `el_engine.py` — confirmed exactly equivalent.
+- `del_graph`'s per-edge tuple gains `burden_name`/`group_tokens` — the
+  structural transfer signals already read off each `Delegation` when the
+  graph is built, not re-fetched per candidate.
+- `walk_chain()` gains a `token_name` parameter and now returns
+  `(chain, sub_delegation_allowed, revocable)` in one call, with the latter
+  two taken from whichever `Delegation` produced the walk's *final* hop
+  (`False, False` if zero hops occurred) — replacing the separate post-walk
+  scan entirely. Matching per hop mirrors `el_kripke.py`'s fallthrough order
+  exactly, field by field: neither `transfers_burden` nor
+  `transfers_token_group` set → the original free-text substring match
+  (AM-54 ground-truth: no scenario in the corpus has a `Delegation` with
+  neither field, but the grammar permits it — exercised by a constructed
+  probe, `test_free_text_fallback_still_matches_when_delegation_has_no_structural_ref`).
+  Otherwise: `transfers_burden` names `token_name` → match. Else (not "or"
+  — checked only when the burden field is absent or names a different
+  token) `token_name` is a `transfers_token_group` member → match if the
+  token has no `Commitment` of its own (e.g. one rooted at
+  `ViolationResponse.creates_burden`/`Authorization.auth_burden` instead —
+  AM-86/AM-87), otherwise only if the `Commitment`'s own obligation text is
+  contained in this `Delegation`'s obligation text (the AM-52 guard, ported
+  from `el_kripke.py`). **Correction during review:** an earlier version of
+  this fix checked the burden field and, if present, never checked the
+  group field regardless of whether it matched `token_name` — reasoning
+  that V-NEW-10 makes the two fields mutually exclusive so only one could
+  ever be relevant. That reasoning doesn't hold in practice:
+  `gp_referral_scenario.el`'s `gpToSpecialistDelegation` violates V-NEW-10
+  today (declares both fields; parsed with `validate=False`, so unenforced
+  — logged separately, out of scope) and other-group-member matching for
+  such a Delegation would have silently broken without the fallthrough.
+  Fixed before commit; `test_both_fields_delegation_falls_through_to_group_for_other_member`
+  pins it, confirmed to fail against the pre-fallthrough code.
+  **No reachability conjunct** (the other half of `el_kripke.py`'s AM-52
+  guard) is needed here: `walk_chain()` only ever considers
+  `del_graph[current]` — Delegations whose `delegator` *is* the
+  already-verified current chain node — so structural continuity from
+  `start` is guaranteed by the walk's own construction, not by a separate
+  check. Confirmed empirically before deciding this, not assumed: a
+  version applying the token_group match unconditionally (no guard at all)
+  was prototyped against the full corpus and changed two real descriptors
+  in `scenarios/gp_referral/gp_referral_scenario.el`
+  (`referralInitiationBurden`/`clinicalHandoverBurden`, which pick up a
+  spurious extra hop onto `SpecialistClinician` from incidental
+  `referralBurdenGroup` co-membership with `referralResponseBurden`,
+  which *is* genuinely transferred by the same `Delegation`) — carrying
+  over the text-relevance conjunct (without reachability) gives zero diffs
+  across the full corpus and still fixes the repro; this is the version
+  implemented. `test_gp_referral_scenario_guard_case_unchanged` pins this
+  case directly.
+- `outgoing[0]`/now `candidates[0]` is still kept after structural
+  filtering — unchanged policy, now documented with a comment: more than
+  one structurally-matching outgoing `Delegation` for the same token from
+  the same node is ill-formed per §6.4.1/§7.8.7 (a token has exactly one
+  active holder) and is currently resolved by declaration order,
+  unflagged by the validator. Logged in `docs/CONCEPTS_INDEX.md` as a
+  known gap; a validator warning is future work, not part of this
+  amendment.
+
+**Standard reference(s):** §6.4.1/§7.8.7 (a `DeonticToken` is held by
+exactly one active enterprise object — the reason a single linear chain per
+token, not a DAG, is the correct model); §6.6.6/§7.10.1 (Delegation);
+V-NEW-10 (`transfers_burden`/`transfers_token_group` mutual exclusion,
+which is what makes the `burden_name is not None` branch unconditional).
+
+**`ObligationDescriptor.sub_delegation_allowed`/`.revocable` — stored-data
+fix only:** confirmed during AM-88 recon that neither field has any
+control-flow consumer today anywhere in `el_engine.py`/`el_kripke.py`
+(distinct from `DelegationLink.revocable`, AM-81's separate index, which
+*does* gate real T4 revocation and was already correctly per-burden before
+this amendment). This fix corrects stored data an agent-facing endpoint
+could read in the future; it changes no runtime behaviour today.
+
+**Empirical verification:** byte-identical regression via
+`dataclasses.asdict()` against a snapshot of the pre-fix code's output over
+every parseable scenario file (`tests/fixtures/am88a_obligation_descriptors_snapshot.json`,
+37 descriptors across 14 files — `scenarios/ecommerce/ecommerce_scenario.el`
+excluded, pre-existing syntax error, unrelated) — zero diffs, confirming
+this is a pure bug fix with no behavioural change to any existing scenario.
+New `tests/test_am88a_multi_parent_tracing.py` (19 tests: the snapshot
+check; Repro 1 and its engine/Kripke parity check, each across all 6
+declaration-order permutations of the 3 Delegations involved; Repro 2
+across both declaration orders; the free-text fallback probe; the
+unconditional-branch probe for a token rooted at `Authorization.auth_burden`
+via `transfers_token_group`; the both-fields-Delegation fallthrough probe
+(also an engine/Kripke parity check); and the `gp_referral_scenario.el`
+guard-case pin). Full suite: 412 passed, 1 xfailed (393/1 baseline + 19
+new, zero regressions).
+
+**Files changed:** `toolchain/el_engine.py` (`_commitment_root_for_token()`
+new; `del_graph` tuple shape; `walk_chain()` signature and matching logic;
+`_add_descriptor()`'s `sub_delegation_allowed`/`revocable` derivation
+simplified); new `tests/test_am88a_multi_parent_tracing.py`; new
+`tests/fixtures/am88a_obligation_descriptors_snapshot.json`; this file (new
+entry); `docs/CONCEPTS_INDEX.md` (new AM-88 findings section).

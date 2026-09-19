@@ -5011,3 +5011,138 @@ row added — nothing in that file changed; this is a state-shape
 question, not a new transition rule.
 
 ---
+
+## AM-88 — multi-parent authority join: recon findings and engine-side fix (AM-88a)
+
+**AM-88a RESOLVED (2026-09-19); the Kripke-side finding below (GuardProbe)
+remains OPEN, tracked as AM-88b.**
+
+**Ground truth (recon):** grepped every parseable scenario file (all of
+`scenarios/**/*.el` except the already-documented pre-existing syntax
+error in `scenarios/ecommerce/ecommerce_scenario.el:57`). Confirmed: (a)
+every `Delegation` in every file declares either `transfers_burden` or
+`transfers_token_group` — none rely on free-text-only matching, consistent
+with AM-54's own finding; (b) no scenario has two *distinct* `Delegation`s
+converging on the same `(token, delegate)` pair. The multi-parent-lineage
+convergence this amendment targets is not exercised by any scenario in the
+repo today — both repros below are synthetic, constructed to exercise a
+real bug in the code path itself.
+
+**Bug 1 (engine, fixed in AM-88a):** `el_engine.py`'s `walk_chain()`
+matched outgoing `Delegation`s by free-text obligation-substring
+containment, never by which token a `Delegation` structurally names.
+`Bug 2` (same commit): `sub_delegation_allowed`/`revocable` were
+re-derived after the walk by scanning for "the last `Delegation` whose
+`delegate` equals the resolved holder" — independent of which token was
+being resolved. Both fixed; full detail in `docs/el_grammar_amendments.md`,
+AM-88a.
+
+**Ill-formed multi-candidate case, logged not fixed:** `walk_chain()` (and,
+independently, `el_kripke.py`'s `_delegation_chain_for_token()`) both keep
+`candidates[0]`/`outgoing[0]` after structural filtering when more than one
+outgoing `Delegation` from the same node structurally matches the same
+token. Per §6.4.1/§7.8.7 a token has exactly one active holder, so more
+than one genuine structural match for the same token from the same node is
+an ill-formed spec — today this is silently resolved by declaration order
+in both functions, and the validator does not flag it. No scenario in the
+corpus exercises this. Future work: a validator rule (not scoped to
+AM-88).
+
+**GuardProbe — `el_kripke.py`'s AM-52 guard is itself declaration-order-dependent (OPEN, AM-88b)**
+
+`_delegation_chain_for_token()`'s AM-52 guard (added AM-51/52, "is this
+Delegation's `transfers_token_group` match trusted for a token that has its
+own Commitment") checks reachability from the Delegation's delegator up to
+the Commitment's actor via `principal_of` structural edges. That check
+(`_reachable()`) chases a **single** pointer through `structural_parent`, a
+dict built with `setdefault` — so when one agent has **two** `principal_of`
+parents, only the first-declared one is ever considered, and the guard's
+verdict (and therefore whether the whole token_group transfer is trusted at
+all) depends on which of the two parties happens to be declared first in
+the file:
+
+```
+enterprise specification GuardProbe
+party P1 { principal_of AgentA }
+party P2 { principal_of AgentA }
+agent AgentA
+agent AgentB
+burden burdenT { state: active }
+burden burdenU { state: active }
+token_group grpTU { member: burdenT  member: burdenU }
+commitment cT { by: P2 obligation: "Handle referral" creates_burden: burdenT }
+delegation grpDel { from: AgentA to: AgentB obligation: "Handle referral onward" transfers_token_group: grpTU }
+```
+
+Verified live: `_delegation_chain_for_token(model, "burdenT", "AgentB")`
+gives `['AgentB']` (guard rejects the match — wrong) when `P1` precedes
+`P2`, and the correct `['P2', 'AgentA', 'AgentB']` when `P2` precedes `P1`.
+**Fix (planned, AM-88b):** replace the single-pointer `structural_parent`
+map used *by the guard specifically* with a multi-map (every `principal_of`
+parent per agent) and a BFS reachability search over it. The existing
+single-valued `structural_parent` map used for the function's *final
+chain-extension* loop (`parent.setdefault(agent_name, principal_name)`,
+first-declared-wins) is a separate, narrower, pre-existing limitation and
+stays exactly as-is — out of scope for AM-88 (see the next finding).
+
+**Pre-exec vs. hybrid divergence on GuardProbe (intended — recon item f, confirmed):**
+GuardProbe's `burdenT` is Commitment-rooted at `P2`, but `P2 → AgentA` is a
+`principal_of` structural edge, not a `Delegation` — `el_engine.py`'s
+`walk_chain()` never crosses it (it only ever walks real `Delegation`
+edges), so pre-exec mode's descriptor is `chain=['P2'], holder='P2'`,
+**unchanged by AM-88a** (this is the pre-existing, already-logged
+"engine doesn't extend through `principal_of`" limitation, not a new gap).
+Verified live in hybrid mode (`build_kripke_from_runtime()`, `burdenT`
+granted directly to `AgentB`): `holder` is always `'AgentB'` (hybrid mode
+always takes the live token holder, by design — intended, not a bug), but
+`chain` is `['AgentB']` or `['P2','AgentA','AgentB']` depending on
+declaration order — i.e. **GuardProbe's chain divergence between pre-exec
+and hybrid mode is the intended `principal_of`-extension difference (recon
+item f); the order-*dependence* of hybrid's own chain is the separate,
+open AM-88b bug above.** `tests/test_am88a_multi_parent_tracing.py`
+therefore treats GuardProbe as a Kripke-only order-independence regression
+(once AM-88b lands), not an engine/Kripke parity case — asserting engine
+chain equals Kripke chain here would fail for the unrelated, already-known
+`principal_of`-extension reason, not the bug either amendment targets.
+
+**Repro 1 parity criterion, stated precisely (recon item 5 correction):**
+"no `principal_of` involved" is the wrong criterion — Repro 1's spec
+*does* declare `principal_of` lines (`FinanceParty`/`LegalParty` are each
+`principal_of` their `SettlementAgent`). The correct criterion, verified by
+running the parity test rather than asserting it: engine and Kripke chains
+agree whenever the token's root actor (the `Commitment`'s actor — here
+`FinanceParty`/`LegalParty`) has **no unpaired `principal_of` PARENT of its
+own** — i.e. nothing else's `principal_of` points at it. Both are top-level
+parties, never the target of anyone's `principal_of`, so Kripke's extra
+backward-through-`principal_of` step never fires for them, and the two
+chains are directly comparable. `principal_of` edges *outgoing* from the
+root actor (to its own agents, further down the chain) don't matter for
+this criterion — only an *incoming* one would.
+
+**`_is_standing_affiliation` twin, noted not unified:** `el_kripke.py`'s
+`_is_standing_affiliation()` and `el_reasoner.py`'s function of the same
+name (`el_reasoner.py:248`) are independent, hand-duplicated twins — AM-88
+does not move or share either (the engine has no caller for the reachable-
+from-a-Commitment-actor check that `el_kripke.py`'s copy exists to
+support, so relocating unused code buys nothing; `el_reasoner.py` is not
+imported by any toolchain module today, only by tests, so there's no cycle
+motivating unification there either). Both existing copies read the
+**single-valued** `agent.delegated_from` attribute — an agent can only be
+the paired-`delegated_from` counterpart of one `principal_of` relationship
+at a time, per the current grammar. Whether an agent should ever be able to
+declare more than one is a separate, later grammar question, not part of
+AM-88.
+
+**`ObligationDescriptor.sub_delegation_allowed`/`.revocable` — stored-data
+fix only:** neither field has any control-flow consumer today, anywhere in
+`el_engine.py` or `el_kripke.py` (distinct from `DelegationLink.revocable`,
+AM-81's separate per-burden index, which does gate real T4 revocation and
+was already correct). AM-88a's fix to these two fields corrects stored data
+with no behavioural effect on any code path today.
+
+**Files:** `docs/el_grammar_amendments.md`, AM-88a (engine fix, complete)
+and AM-88b (Kripke guard fix, planned). `tests/test_am88a_multi_parent_tracing.py`
+covers everything AM-88a-resolved above; GuardProbe's own regression test
+lands with AM-88b.
+
+---
