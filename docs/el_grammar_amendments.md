@@ -6212,12 +6212,16 @@ parent is unaffected either way (there's nothing to choose between).
 with NO `Commitment` of its own has no actor to prefer against — for that
 case the exported chain genuinely still depends on declaration order,
 verified live (`test_no_commitment_multi_parent_token_remains_order_dependent`).
-Defaulting to *some* parent there would be a guess dressed up as a fix,
-not a real resolution; the honest next step for a genuinely ambiguous
-multi-`principal_of` join with no Commitment to anchor against is a
-validator warning surfacing the ambiguity to the spec author, not a
-default-resolution rule in `_delegation_chain_for_token()`. Not scoped to
-AM-88c.
+Defaulting to *some* parent there without saying so would be a guess
+dressed up as a fix, not a real resolution. Planned resolution: **AM-91**
+(not yet scheduled at time of writing) — a `[W-16e]` warning for an agent
+with ≥2 `principal_of` parents, naming them (sorted) and noting that the
+exported chain for a Commitment-less token among them names only one,
+*plus* a sorted-first deterministic fallback in
+`_delegation_chain_for_token()` itself (replacing today's first-declared-
+wins, so the chosen parent is at least stable rather than order-dependent,
+while the warning makes the ambiguity visible rather than silent). Not
+scoped to AM-88c.
 
 **Standard reference(s):** same as AM-88a/b — §6.4.1/§7.8.7 (a token's
 holder — and, by extension here, its accountability chain — should not be
