@@ -6607,3 +6607,125 @@ final extension loop, `sorted(candidates)[0]` fallback branch); new
 `tests/test_am90_multi_parent_warnings.py` (see above); this file (AM-88c
 entry corrected, new AM-91 entry); `docs/CONCEPTS_INDEX.md` (residual:
 RESOLVED by AM-91; new AM-91 section).
+
+---
+
+## AM-92 (2026-09-19) — V-08 sub-delegation check becomes token-aware and order-independent (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-19). Closes §7 step 3 of DN_017.
+
+**Problem:** V-08 (`_validate_delegations()`) used `_find_parent_delegation()`,
+which returned the FIRST `Delegation` in declaration order whose `delegate`
+matched the sub-delegating agent — ignoring which token was actually being
+passed on, and ignoring every other incoming `Delegation`. With ≥2 distinct
+incoming `Delegation`s to one agent, the verdict depended on which was
+declared first.
+
+**Repro:** `FinanceParty`/`LegalParty` each commit a burden into
+`SettlementAgent` via their own `Commitment` (`finDel` permits
+sub-delegation, `legDel` doesn't); `SettlementAgent` sub-delegates only
+`FinanceParty`'s burden (`settleBurdenA`) onward via `subDel`. Pre-fix,
+declaring `finDel` before `legDel` gave `ok` (correct); swapping the two
+gave a false positive naming `legDel` — the WRONG delegation, since
+`subDel` never touched `legDel`'s token (`settleBurdenB`) at all. Passing
+on `settleBurdenB` instead should error in **both** orders, naming `legDel`.
+
+**What changed:**
+- `_validate_delegations()` gains a `model` parameter (its only caller,
+  `validate_spec()`, already has it), used to build one
+  `el_reasoner.delegation_graph(model)` call shared across every
+  `Delegation` in the loop — not a fourth copy of token-extraction logic.
+- V-08 itself is extracted into `_validate_sub_delegation()`, called once
+  per agent-delegator `Delegation`. Algorithm:
+  - **S1 (token-aware):** for each token `d` structurally transfers
+    (`transfers_burden`, or its `transfers_token_group`'s members — read
+    off `delegation_graph()`'s already-extracted `DelegationLink.burden_name`/
+    `.token_group_members`, never re-derived from `getattr(d, "burden"/
+    "token_group")` again), find the incoming, genuine (non-structural)
+    `Delegation`(s) to `d`'s delegator that structurally name that same
+    token. Any of them with `sub_delegation_allowed=false` is a genuine
+    violation for that token.
+  - **S2 (conservative fallback):** when a token is named by NO incoming
+    `Delegation` at all, or `d` has neither `transfers_burden` nor
+    `transfers_token_group` set, every incoming `Delegation` to the agent
+    must permit sub-delegation, regardless of what it transfers — the
+    pre-AM-92 check, kept as the fallback rather than replaced.
+  - **S3 (order-independent by construction):** "the incoming Delegations
+    to this agent" is a pre-built structural index
+    (`incoming_by_agent: Dict[str, List[DelegationLink]]`), not "the
+    first" one found by scanning — there is no first, only the set.
+  - **Deduplication:** one error per `(d, forbidding parent Delegation)`.
+    When one parent forbids several of `d`'s tokens, **all** of them are
+    named, sorted and comma-joined, in a single error — not one error per
+    token (tweak from the original proposal, which had suggested naming
+    only the sorted-first token; rejected in favour of naming all of them).
+- `_find_parent_delegation()` deleted — confirmed its only caller was V-08
+  itself, and no test referenced it directly.
+
+**Message formats — deliberately different by branch:**
+- S1 match: `[V-08] Delegation 'subDel': agent 'SettlementAgent' attempts
+  to sub-delegate 'settleBurdenB' but parent delegation 'legDel' has
+  sub_delegation_allowed=false. (§7.10.1)` — names the token(s)
+  (`'A', 'B'` when several map to the same forbidding parent).
+- S2 fallback: `[V-08] Delegation 'X': agent 'Y' attempts to sub-delegate
+  but parent delegation 'Z' has sub_delegation_allowed=false. (§7.10.1)`
+  — **byte-identical to the pre-AM-92 message**, no token named. For a
+  single-parent agent whose token happens to match structurally, S1's
+  branch is taken instead and the message *does* gain a token name — a
+  deliberate, approved change from the pre-AM-92 wording, since no test
+  or consumer depended on V-08's exact string before this amendment
+  (confirmed during recon: `_find_parent_delegation` and V-08's message
+  text were referenced nowhere except a descriptive "out of scope" note
+  in `tests/test_am89_warnings_channel.py`'s docstring).
+
+**Deliberate scope boundary, not an oversight:** an incoming `Delegation`
+with NEITHER `transfers_burden` nor `transfers_token_group` set can never
+S1-match a specific token — it has no structural token to match against,
+so it only ever participates in the S2 fallback. If some OTHER incoming
+Delegation structurally matches a token and permits it, a neither-field
+incoming Delegation to the same agent does **not** block that token, even
+though it itself forbids sub-delegation in general. S2 is reached only
+when NO incoming `Delegation` makes any structural claim on the token at
+all — this is conservative-on-single-parent by design, matching S2's own
+"identical to today's verdict" requirement for that case, not a gap.
+
+**Standard reference(s):** §7.10.1 (sub-delegation requires the parent
+delegation's explicit permission — unchanged; only *which* parent is
+consulted, and *how many*, changes).
+
+**Empirical verification:** ran the OLD and proposed verdicts side by
+side over every tracked `.el` file (`git ls-files scenarios`,
+`validate=True`) — **zero differences anywhere**; the tracked corpus has
+exactly two real agent-delegator sub-delegation chains
+(`consent_scenario.el`'s `specialistToAIDelegation`,
+`generated_governance.el`'s `TaskAiAgent001Delegation`), both single-parent
+with the sub-delegated token exactly matching the sole incoming
+Delegation's own token — so S1 and S2 collapse to the identical check in
+both live cases; neither exercises genuine multi-parent disambiguation.
+Live repro verified in all 6 declaration-order permutations, both token
+choices (`settleBurdenA` → no error anywhere; `settleBurdenB` → identical
+`legDel`-naming error everywhere). New `tests/test_am92_v08_token_aware.py`
+(14 tests): the repro (both token choices, all permutations); single-parent
+forbidden (error, message now names the token) and permitted (ok); an
+agent with no incoming Delegation at all (ok); group-transfer-permitted
+(ok); the S2 neither-field fallback with one of two parents forbidding,
+byte-identical message, both orders; the both-fields dedup case (one
+error naming both tokens); party-delegator (never checked); the
+deliberate scope-boundary case (a neither-field incoming Delegation does
+not block a token another incoming Delegation structurally permits); a
+multi-error spec, asserting the SET of `[V-08]` strings is identical
+across every declaration-order permutation of all four Delegations
+involved; a spot-check that `[W-16c]` (present) and `[W-16d]`/`[W-16e]`
+(absent) are unaffected by a spec that also triggers V-08;
+`validate_spec()`'s new-signature call still returns a flat list; the two
+named tracked reference scenarios (unchanged, no V-08). Full suite: 475
+passed, 1 xfailed (461/1 AM-91 baseline + 14 new, zero regressions) —
+reproduced identically on a clean `git worktree add` checkout with the
+diff applied.
+
+**Files changed:** `toolchain/el_validator.py`
+(`_validate_delegations()` gains `model` parameter; `_validate_sub_delegation()`
+new, replacing the inline V-08 block; `_find_parent_delegation()` deleted;
+module docstring rule list updated); new
+`tests/test_am92_v08_token_aware.py`; this file (new entry);
+`docs/CONCEPTS_INDEX.md` (new AM-92 note).

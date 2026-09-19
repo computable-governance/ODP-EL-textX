@@ -5340,3 +5340,40 @@ established — no new API/UI validation surface was added.
 order-dependence test is renamed and now asserts order-independence.
 
 ---
+
+## AM-92 — V-08 sub-delegation check is now token-aware and order-independent
+
+**RESOLVED (2026-09-19).**
+
+V-08 used to find "the parent delegation" for a sub-delegating agent via
+`_find_parent_delegation()` — the FIRST `Delegation` in declaration order
+whose `delegate` matched, regardless of which token was actually being
+passed on and ignoring every other incoming `Delegation`. With ≥2 distinct
+incoming `Delegation`s to one agent, the verdict depended on declaration
+order — confirmed live: swapping two incoming `Delegation`s' declaration
+order flipped a real spec from `ok` to a false positive blaming the wrong
+one. Full detail: `docs/el_grammar_amendments.md`, AM-92.
+
+**Fix, in one sentence:** for each token a sub-delegating `Delegation`
+transfers, check only the incoming `Delegation`(s) that structurally name
+*that* token (built on `el_reasoner.delegation_graph()`'s already-extracted
+fields, same shared-data principle as AM-90/AM-91); fall back to "every
+incoming `Delegation` must permit" only when no incoming `Delegation`
+makes any structural claim on the token at all. The fallback is
+byte-identical, verdict AND message, to the pre-AM-92 behaviour for a
+single-parent agent — confirmed by running old vs. new over the entire
+tracked corpus (zero differences) before writing any code.
+
+**Deliberate scope boundary:** a neither-field incoming `Delegation` can
+never structurally match a specific token, so it never blocks a token
+some OTHER incoming `Delegation` structurally permits — it only
+participates in the conservative fallback when no `Delegation` at all
+makes a structural claim on the token. Verified by a dedicated test.
+
+**`_find_parent_delegation()` deleted** — confirmed its only caller was
+V-08 itself and no test referenced it directly.
+
+**Files:** `docs/el_grammar_amendments.md`, AM-92.
+`tests/test_am92_v08_token_aware.py` covers everything above.
+
+---
