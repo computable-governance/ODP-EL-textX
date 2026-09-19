@@ -1,15 +1,17 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b, AM-88c, AM-89 and AM-90 implemented, committed,
-and pushed. AM-91 implemented and committed locally, pending push at time
-of writing. §7 steps 1, 2, 4 and 7 done; steps 3, 5 and 6 remain proposed.
+**Status:** AM-88a, AM-88b, AM-88c, AM-89, AM-90 and AM-91 implemented,
+committed, and pushed. AM-92 implemented and committed locally, pending
+push at time of writing. §7 steps 1, 2, 3, 4 and 7 done; steps 5 and 6
+remain proposed.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
-— fallback, AM-91), `toolchain/el_validator.py` (V-08; W-16c, W-16d —
-AM-90; W-16e — AM-91; future V-J1), `toolchain/el_parser.py`
-(`ParseResult` — `.warnings`, AM-89), `toolchain/el_reasoner.py`
-(`parents_of()` — AM-90; `standing_parents_of()` — AM-91), grammar rules
+— fallback, AM-91), `toolchain/el_validator.py` (V-08 — token-aware,
+AM-92; W-16c, W-16d — AM-90; W-16e — AM-91; future V-J1),
+`toolchain/el_parser.py` (`ParseResult` — `.warnings`, AM-89),
+`toolchain/el_reasoner.py` (`parents_of()` — AM-90; `standing_parents_of()`
+— AM-91; `delegation_graph()` — reused by AM-92), grammar rules
 `EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`.
 **Found:** design session 2026-09-19, prompted by an external enquiry about
 delegation graphs in which one child has more than one incoming parent.
@@ -43,7 +45,7 @@ by live probes:
 | 2 | engine descriptor `sub_delegation_allowed` / `revocable` | taken from the last-declared delegation targeting the holder, regardless of token | fixed, AM-88a (stored data only) |
 | 3 | verifier AM-52 guard reachability | chased one `principal_of` pointer; verdict depended on party declaration order | fixed, AM-88b |
 | 4 | verifier final chain extension | continued through the first-declared `principal_of` parent, giving a full-length chain with the wrong root | fixed for Commitment-rooted tokens, AM-88c |
-| 5 | validator V-08 `_find_parent_delegation()` | checks only the first delegation targeting an agent; verdict flips with declaration order | open |
+| 5 | validator V-08 `_find_parent_delegation()` | checked only the first delegation targeting an agent; verdict flipped with declaration order | fixed, AM-92 |
 | 6 | grammar `delegated_from` | single-valued; a second declaration is a syntax error | open |
 | 7 | validator warnings | as the code read, `[W-…]` diagnostics shared the error list, so `ParseResult.ok` was false whenever one was emitted | fixed, AM-89 |
 
@@ -108,13 +110,15 @@ by live probes:
 | AM-89 (`56939b9`) | parser | `ParseResult.warnings` added; `parse()` splits `[W-…]` by prefix; `validate_spec()` untouched; both CLIs (`el_reasoner.py`, `fhir_mapper.py`) print warnings, unaffected exit status | suite 424 → 433 |
 | AM-90 (`51416f8`) | reasoner + validator | `el_reasoner.parents_of()` (shared query); `[W-16c]` multi-parent notice, `[W-16d]` same-token conflict, both built from it | zero hits on tracked corpus; order-invariant across all permutations; suite 433 → 447 |
 | AM-91 (`f445ae3`) | reasoner + validator + verifier | `el_reasoner.standing_parents_of()` (shared query); `[W-16e]` standing-`principal_of` multi-parent notice; `_delegation_chain_for_token()`'s no-Commitment fallback becomes `sorted(candidates)[0]` | one real corpus hit (`federation_consent_scenario.el`, true positive, pinned); byte-identical on the 25-pair public snapshot; order-invariant and message/behaviour-parity tested; suite 448 → 461 |
+| AM-92 (`85c3de2`) | validator | V-08 becomes token-aware (S1) with an order-independent conservative fallback (S2); `_find_parent_delegation()` deleted | zero diffs on tracked corpus (old vs. new); order-invariant across all permutations of a multi-error spec; suite 461 → 475 |
 
 Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am88b_guard_multi_parent_reachability.py`,
 `tests/test_am88c_multi_parent_chain_extension.py`,
 `tests/test_am89_warnings_channel.py`,
 `tests/test_am90_multi_parent_warnings.py`,
-`tests/test_am91_standing_parent_warnings.py`, plus two snapshot fixtures
+`tests/test_am91_standing_parent_warnings.py`,
+`tests/test_am92_v08_token_aware.py`, plus two snapshot fixtures
 in `tests/fixtures/`. Full detail: `docs/el_grammar_amendments.md`,
 `docs/CONCEPTS_INDEX.md`.
 
@@ -165,8 +169,13 @@ holds identically on a clean clone (`760f99c`).
    token transferred to one delegate by ≥2 distinct Delegations, or by one
    delegator to ≥2 different delegates (sequential chains excluded by
    construction). Zero hits on the tracked corpus, confirmed live.
-3. **V-08.** Make the sub-delegation check token-aware or all-parents, and
-   independent of declaration order.
+3. **V-08 — done (AM-92).** The sub-delegation check is now token-aware
+   (checks only the incoming Delegation(s) that structurally transfer the
+   same token being sub-delegated) with a conservative, order-independent
+   fallback (every incoming Delegation must permit) when no incoming
+   Delegation makes any structural claim on the token at all.
+   `_find_parent_delegation()` deleted. Zero diffs against the pre-AM-92
+   verdict on the tracked corpus.
 4. **Parents query — done (AM-90).** `el_reasoner.parents_of(model,
    agent_name)` returns every incoming Delegation (parent, delegation name,
    tokens, `sub_delegation_allowed`, `revocable`) plus co-granted
@@ -264,7 +273,7 @@ class of bug before it reaches a public clone.
 - **Grouping key for V-J1.** Land AM-14 first, or accept free-text fragility.
 - **Parents query.** Shape and home — decided and implemented:
   `el_reasoner.parents_of(model, agent_name)` (AM-90).
-- **Push timing.** AM-88a/b/c, AM-89 and AM-90 pushed. AM-91 was pending
-  push at time of writing (committed locally as its own
+- **Push timing.** AM-88a/b/c, AM-89, AM-90 and AM-91 pushed. AM-92 was
+  pending push at time of writing (committed locally as its own
   individually-gated commit); the external reply that tracing is fixed is
   the maintainer's own next action, not part of this series' scope.
