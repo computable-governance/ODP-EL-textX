@@ -2714,8 +2714,29 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
             if frm and to:
                 parent[to] = frm
 
-    for agent_name, principal_name in structural_parent.items():
-        parent.setdefault(agent_name, principal_name)
+    # AM-88c: when an agent has more than one principal_of parent, the
+    # exported chain should continue through the one that's actually this
+    # token's own accountability root — not whichever happened to be
+    # declared first (structural_parent, kept below only as the fallback).
+    # Prefer an exact match against the Commitment's own actor; else the
+    # first (sorted, for determinism) candidate from which that actor is
+    # reachable via the same BFS the AM-52 guard above uses. A token with
+    # no Commitment of its own has no actor to prefer against, so it keeps
+    # the pre-AM-88c first-declared-wins behaviour unchanged — logged as a
+    # still-open residual in docs/CONCEPTS_INDEX.md, not fixed here.
+    for agent_name in structural_parent:
+        candidates = structural_parents_multi.get(agent_name, set())
+        chosen = None
+        if len(candidates) > 1 and commitment_root is not None:
+            actor_name, _ = commitment_root
+            if actor_name in candidates:
+                chosen = actor_name
+            else:
+                for candidate in sorted(candidates):
+                    if _reachable(candidate, actor_name):
+                        chosen = candidate
+                        break
+        parent.setdefault(agent_name, chosen if chosen is not None else structural_parent[agent_name])
 
     chain, cur = [holder], holder
     while cur in parent:

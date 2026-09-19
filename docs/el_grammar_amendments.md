@@ -6127,16 +6127,20 @@ live in both pre-exec-style direct calls and hybrid mode
   chase over `structural_parent` to a BFS over `structural_parents_multi`
   — this is the actual fix.
 
-**Deliberately NOT fixed, logged instead (`docs/CONCEPTS_INDEX.md`):** which
-of an agent's multiple `principal_of` parents the function's *exported
-chain* itself continues through (the final `parent.setdefault(agent_name,
-principal_name)` loop, using the untouched single-valued
-`structural_parent` map) is a separate, narrower, still-order-dependent
-question — GuardProbe's own chain is `['P1', 'AgentA', 'AgentB']` or
-`['P2', 'AgentA', 'AgentB']` depending on which party is declared first,
-even after this fix. What AM-88b fixes is *whether the transfer is trusted
-at all* (chain length 3 vs. the wrong, truncated length-1 `['AgentB']`) —
-that no longer depends on declaration order in either case.
+**Deliberately NOT fixed here, logged instead (`docs/CONCEPTS_INDEX.md`):**
+which of an agent's multiple `principal_of` parents the function's
+*exported chain* itself continues through (the final
+`parent.setdefault(agent_name, principal_name)` loop, using the untouched
+single-valued `structural_parent` map) is a separate, narrower,
+still-order-dependent question — GuardProbe's own chain is
+`['P1', 'AgentA', 'AgentB']` or `['P2', 'AgentA', 'AgentB']` depending on
+which party is declared first, even after this fix. What AM-88b fixes is
+*whether the transfer is trusted at all* (chain length 3 vs. the wrong,
+truncated length-1 `['AgentB']`) — that no longer depends on declaration
+order in either case. **Update:** this residual is itself narrowed by
+AM-88c below, for the Commitment-rooted case specifically — see that
+entry. A token with no Commitment of its own remains genuinely
+order-dependent even after AM-88c, by design.
 
 **Standard reference(s):** same as AM-88a — §6.4.1/§7.8.7, §7.10.1
 (`principal_of` structural affiliation).
@@ -6163,3 +6167,65 @@ new `tests/test_am88b_guard_multi_parent_reachability.py`; new
 `tests/fixtures/am88b_delegation_chain_for_token_snapshot.json`; this file
 (new entry); `docs/CONCEPTS_INDEX.md` (GuardProbe finding: OPEN →
 RESOLVED).
+
+---
+
+## AM-88c (2026-09-19) — `_delegation_chain_for_token()`'s final chain-extension loop prefers the token's own Commitment root over first-declared (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-19). Narrows the residual AM-88b left open.
+
+**Problem:** AM-88b fixed the AM-52 guard's *trust* decision (multi-map
+BFS reachability), but left the function's separate final chain-extension
+loop untouched — it still picked whichever of an agent's multiple
+`principal_of` parents was declared first (`structural_parent`,
+`setdefault`). For GuardProbe (`P1`/`P2` both `principal_of AgentA`; `P2`
+is the real `Commitment` actor for `burdenT`): declaring `P1` first made
+the exported chain `['P1', 'AgentA', 'AgentB']` — full length, structurally
+plausible-looking, and **wrong**. This is a worse failure mode than
+AM-88b's own pre-fix symptom: a visibly truncated `['AgentB']` at least
+signals something is missing, where a full-length chain naming the wrong
+root gives no signal at all.
+
+**What changed** (`toolchain/el_kripke.py`, `_delegation_chain_for_token()`'s
+final extension loop only): when an agent has more than one entry in
+`structural_parents_multi` AND the token has its own `Commitment`
+(`commitment_root is not None`), the loop now prefers, in order: (1) the
+parent that IS the Commitment's actor exactly; (2) failing that, the first
+(`sorted()`, for determinism) candidate from which that actor is reachable
+via the same BFS `_reachable()` the AM-52 guard already uses. If neither
+condition is met, or the token has no `Commitment` at all, the loop falls
+back to the pre-existing single-valued `structural_parent` entry
+(first-declared-wins) — unchanged. An agent with only one `principal_of`
+parent is unaffected either way (there's nothing to choose between).
+
+**Deliberately left open, logged (`docs/CONCEPTS_INDEX.md`):** a token
+with NO `Commitment` of its own has no actor to prefer against — for that
+case the exported chain genuinely still depends on declaration order,
+verified live (`test_no_commitment_multi_parent_token_remains_order_dependent`).
+Defaulting to *some* parent there would be a guess dressed up as a fix,
+not a real resolution; the honest next step for a genuinely ambiguous
+multi-`principal_of` join with no Commitment to anchor against is a
+validator warning surfacing the ambiguity to the spec author, not a
+default-resolution rule in `_delegation_chain_for_token()`. Not scoped to
+AM-88c.
+
+**Standard reference(s):** same as AM-88a/b — §6.4.1/§7.8.7 (a token's
+holder — and, by extension here, its accountability chain — should not be
+ambiguous); §7.10.1 (`principal_of` structural affiliation).
+
+**Empirical verification:** byte-identical regression against the AM-88b
+snapshot (`tests/fixtures/am88b_delegation_chain_for_token_snapshot.json`,
+same 37 pairs) — zero diffs; no existing scenario has an agent with more
+than one `principal_of` parent, so nothing changes for the real corpus.
+New `tests/test_am88c_multi_parent_chain_extension.py` (6 tests: the
+snapshot check; GuardProbe's full-chain order-independence, direct and
+hybrid, both declaration orders; and the no-Commitment residual, asserted
+as still order-dependent by design, not a bug). Full suite: 424 passed, 1
+xfailed (418/1 AM-88b baseline + 6 new, zero regressions).
+
+**Files changed:** `toolchain/el_kripke.py`
+(`_delegation_chain_for_token()`'s final extension loop only); new
+`tests/test_am88c_multi_parent_chain_extension.py`; this file (AM-88b
+entry's "Deliberately NOT fixed" note updated to cross-reference this
+entry; new AM-88c entry); `docs/CONCEPTS_INDEX.md` (residual: RESOLVED for
+Commitment-rooted tokens, OPEN for tokens without one).

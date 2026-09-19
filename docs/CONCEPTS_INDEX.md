@@ -5012,9 +5012,11 @@ question, not a new transition rule.
 
 ---
 
-## AM-88 — multi-parent authority join: recon findings and fixes (AM-88a, AM-88b)
+## AM-88 — multi-parent authority join: recon findings and fixes (AM-88a, AM-88b, AM-88c)
 
-**AM-88a RESOLVED (2026-09-19); AM-88b (GuardProbe) RESOLVED (2026-09-19).**
+**AM-88a RESOLVED (2026-09-19); AM-88b (GuardProbe trust) RESOLVED
+(2026-09-19); AM-88c (chain-extension root choice) RESOLVED for
+Commitment-rooted tokens, OPEN for tokens with no Commitment (2026-09-19).**
 
 **Ground truth (recon):** grepped every parseable scenario file (all of
 `scenarios/**/*.el` except the already-documented pre-existing syntax
@@ -5087,16 +5089,35 @@ length 3) in **both** declaration orders — verified live, both in direct
 (`build_kripke_from_runtime()`); regression-pinned in
 `tests/test_am88b_guard_multi_parent_reachability.py`.
 
-**Residual, deliberately NOT fixed:** the existing single-valued
-`structural_parent` map used for the function's own *final chain-extension*
-loop (`parent.setdefault(agent_name, principal_name)`, first-declared-wins)
-is unchanged — which of `P1`/`P2` the *exported chain* actually names as
-`chain[0]` still depends on declaration order (`['P1','AgentA','AgentB']`
-or `['P2','AgentA','AgentB']`). What AM-88b fixes is narrower and was the
-actual bug: *whether the transfer is trusted at all* (chain length 3 vs.
-the wrong, truncated `['AgentB']`) no longer depends on declaration order.
-This residual is a separate, narrower, pre-existing limitation — out of
-scope for AM-88 (see the next finding).
+**Residual — RESOLVED for Commitment-rooted tokens (AM-88c, 2026-09-19);
+OPEN for tokens with no Commitment of their own:** AM-88b's fix left the
+function's own *final chain-extension* loop untouched — it still picked
+whichever of `P1`/`P2` was declared first (`parent.setdefault(agent_name,
+principal_name)`, the single-valued `structural_parent` map,
+first-declared-wins). That meant GuardProbe's exported chain was
+`['P1','AgentA','AgentB']` or `['P2','AgentA','AgentB']` depending on
+declaration order — and the `P1` case is *worse* than AM-88b's own pre-fix
+symptom: a full-length, plausible-looking chain naming the wrong root gives
+no signal that anything is off, unlike the old visibly-truncated
+`['AgentB']`.
+
+**AM-88c fix:** when an agent has more than one `principal_of` parent and
+the token has its own `Commitment`, the loop now prefers the parent that
+IS the Commitment's actor, or (failing that) the first `sorted()` candidate
+reachable to that actor via the same BFS the guard uses — GuardProbe now
+resolves to `['P2','AgentA','AgentB']` in **both** declaration orders,
+direct and hybrid mode, verified live.
+
+**Still genuinely open, by design:** a token with NO `Commitment` of its
+own (e.g. rooted at `Authorization.auth_burden` instead) has no actor to
+prefer against — the chain for that case is still order-dependent after
+AM-88c (`test_no_commitment_multi_parent_token_remains_order_dependent`),
+and deliberately left that way: defaulting to some parent with nothing to
+anchor the choice against would be a guess, not a fix. **This is the case
+a future validator warning should surface** — a genuinely ambiguous
+multi-`principal_of` join with no Commitment to disambiguate it is worth
+flagging to the spec author, not silently resolving one way or the other.
+Not scoped to AM-88.
 
 **Pre-exec vs. hybrid divergence on GuardProbe (intended — recon item f, confirmed):**
 GuardProbe's `burdenT` is Commitment-rooted at `P2`, but `P2 → AgentA` is a
@@ -5157,9 +5178,11 @@ AM-81's separate per-burden index, which does gate real T4 revocation and
 was already correct). AM-88a's fix to these two fields corrects stored data
 with no behavioural effect on any code path today.
 
-**Files:** `docs/el_grammar_amendments.md`, AM-88a and AM-88b (both
-complete). `tests/test_am88a_multi_parent_tracing.py` covers everything
-AM-88a-resolved above; `tests/test_am88b_guard_multi_parent_reachability.py`
-covers GuardProbe.
+**Files:** `docs/el_grammar_amendments.md`, AM-88a, AM-88b, AM-88c.
+`tests/test_am88a_multi_parent_tracing.py` covers everything AM-88a-
+resolved above; `tests/test_am88b_guard_multi_parent_reachability.py`
+covers the AM-52 guard's trust decision; `tests/test_am88c_multi_parent_chain_extension.py`
+covers the final chain-extension root choice, including the still-open
+no-Commitment residual.
 
 ---
