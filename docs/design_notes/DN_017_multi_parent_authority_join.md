@@ -1,13 +1,15 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b and AM-88c implemented and committed locally (not
-yet pushed at time of writing). Steps in §7 are proposed, not started.
+**Status:** AM-88a, AM-88b, AM-88c, AM-89 and AM-90 implemented and
+committed locally (not yet pushed at time of writing). §7 steps 1, 2 and 4
+done; steps 3, 5 and 6 remain proposed.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`),
-`toolchain/el_validator.py` (V-08; future W-16c, W-16d, V-J1),
-`toolchain/el_parser.py` (`ParseResult`), grammar rules `EnterpriseObject`,
-`DelegatedFrom`, `Delegation`, `Authorization`.
+`toolchain/el_validator.py` (V-08; W-16c, W-16d — AM-90; future V-J1),
+`toolchain/el_parser.py` (`ParseResult` — `.warnings`, AM-89),
+`toolchain/el_reasoner.py` (`parents_of()` — AM-90), grammar rules
+`EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`.
 **Found:** design session 2026-09-19, prompted by an external enquiry about
 delegation graphs in which one child has more than one incoming parent.
 **DN number is provisional** — confirm the next free number before logging.
@@ -42,7 +44,7 @@ by live probes:
 | 4 | verifier final chain extension | continued through the first-declared `principal_of` parent, giving a full-length chain with the wrong root | fixed for Commitment-rooted tokens, AM-88c |
 | 5 | validator V-08 `_find_parent_delegation()` | checks only the first delegation targeting an agent; verdict flips with declaration order | open |
 | 6 | grammar `delegated_from` | single-valued; a second declaration is a syntax error | open |
-| 7 | validator warnings | as the code reads, `[W-…]` diagnostics share the error list, so `ParseResult.ok` is false whenever one is emitted | open — confirm live first |
+| 7 | validator warnings | as the code read, `[W-…]` diagnostics shared the error list, so `ParseResult.ok` was false whenever one was emitted | fixed, AM-89 |
 
 ## 3. Standard basis (ISO/IEC 15414:2015)
 
@@ -89,6 +91,11 @@ by live probes:
 7. **`any_parent` (OR) composition is deferred** until it can be implemented
    at every layer; grammar surface with no semantics behind it is the
    parsed-but-inert pattern already seen with `JoinLeaveEffect`.
+8. **Warnings are advisory and never affect `.ok`.** `[W-…]` diagnostics are
+   routed to a separate `ParseResult.warnings` list by prefix, not mixed
+   into `.errors` — `validate_spec()` itself is untouched (AM-89). This is
+   what makes decision 3's "surfaced as a warning" actually true rather
+   than aborting the load.
 
 ## 5. Implemented
 
@@ -97,10 +104,14 @@ by live probes:
 | AM-88a (`7b309ef`, docstring `0f876c4`) | engine | structural, per-token `walk_chain()`; per-token `sub_delegation_allowed`/`revocable`; `_commitment_root_for_token()` added | descriptors byte-identical on 37 descriptors / 14 files; suite 393 → 412 |
 | AM-88b (`e5c55e5`) | verifier | multi-map BFS reachability in the AM-52 guard; imports the engine's `_commitment_root_for_token()` | 37 chain pairs identical; suite 418 |
 | AM-88c (`e9fa28b`) | verifier | final extension prefers the token's own Commitment actor | 37 chain pairs identical; suite 424 |
+| AM-89 (`56939b9`) | parser | `ParseResult.warnings` added; `parse()` splits `[W-…]` by prefix; `validate_spec()` untouched; both CLIs (`el_reasoner.py`, `fhir_mapper.py`) print warnings, unaffected exit status | suite 424 → 433 |
+| AM-90 (`51416f8`) | reasoner + validator | `el_reasoner.parents_of()` (shared query); `[W-16c]` multi-parent notice, `[W-16d]` same-token conflict, both built from it | zero hits on tracked corpus; order-invariant across all permutations; suite 433 → 447 |
 
 Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am88b_guard_multi_parent_reachability.py`,
-`tests/test_am88c_multi_parent_chain_extension.py`, plus two snapshot fixtures
+`tests/test_am88c_multi_parent_chain_extension.py`,
+`tests/test_am89_warnings_channel.py`,
+`tests/test_am90_multi_parent_warnings.py`, plus two snapshot fixtures
 in `tests/fixtures/`. Full detail: `docs/el_grammar_amendments.md`,
 `docs/CONCEPTS_INDEX.md`.
 
@@ -125,6 +136,12 @@ holds identically on a clean clone (`760f99c`).
   (the engine does not extend through `principal_of`); pre-existing.
 - Descriptor `sub_delegation_allowed`/`revocable` have no control-flow
   consumer today; the AM-88a fix corrects stored data only.
+- No API/UI validation surface exists. `el_api.py` never calls
+  `validate_spec()` at all (every one of its `parse()` calls uses
+  `validate=False`), and no HTTP endpoint returns validation messages to a
+  caller. A spec author reaches `[W-16c]`/`[W-16d]` (or `[W-16b]`) only via
+  `ParseResult.warnings` directly, or via `el_reasoner.py`'s and
+  `fhir_mapper.py`'s CLIs, which print them to stderr.
 
 ## 7. Proposed next steps (in order)
 
@@ -133,17 +150,23 @@ holds identically on a clean clone (`760f99c`).
    `[W-…]` strings routed there by `parse()` (prefix split, `validate_spec()`
    itself untouched), `ok` now ignores them. Prerequisite for step 2, which
    remains open. Full detail: `docs/el_grammar_amendments.md`, AM-89.
-2. **W-16c and W-16d.** W-16c: a child that is the delegate of two or more
-   Delegations, regardless of token, lists every parent (sorted) with
-   delegation name and token. W-16d: the same token transferred twice to one
-   delegate, or by one delegator to two delegates (ill-formed; a warning
-   because delegations carry free-text conditions and may be alternatives).
-   Zero hits on the current corpus.
+2. **W-16c and W-16d — done (AM-90).** W-16c triggers on ≥2 DISTINCT parents
+   (not delegation count — one delegator with two Delegations to the same
+   delegate does not trigger), lists every parent (sorted) with each of its
+   delegations and tokens, and adds a separate permit-line clause for
+   co-granted Authorizations (worded as authority sources, not principals —
+   AM-31 §4.0b). Structural `principal_of` parents and `to_role`
+   Authorizations are documented out of scope, not counted. W-16d: the same
+   token transferred to one delegate by ≥2 distinct Delegations, or by one
+   delegator to ≥2 different delegates (sequential chains excluded by
+   construction). Zero hits on the tracked corpus, confirmed live.
 3. **V-08.** Make the sub-delegation check token-aware or all-parents, and
    independent of declaration order.
-4. **Parents query.** A small read-only query returning every incoming
-   delegation of an agent with its token, so an application rule can iterate
-   the parents. Suggested home: `el_reasoner.py`.
+4. **Parents query — done (AM-90).** `el_reasoner.parents_of(model,
+   agent_name)` returns every incoming Delegation (parent, delegation name,
+   tokens, `sub_delegation_allowed`, `revocable`) plus co-granted
+   Authorizations, deterministic and sorted; the W-16c/W-16d warnings are
+   built from this exact query, so message and API cannot diverge.
 5. **`delegated_from` as a list.** `(delegated_from+=DelegatedFrom)*`, with the
    five-file ripple (parser flattening, reasoner and verifier
    `_is_standing_affiliation`, FHIR mapper, domain dataclasses). Also consider
@@ -165,16 +188,26 @@ blocks an action that requires it.
 decide whether a child's scope "fits" its parents; or pick a composition rule
 (minimum, intersection, union, quorum, separation of duty).
 
-**The application must:** enumerate the parents (warning text, and the parents
-query once built), apply its own composition rule, and encode any per-parent
-condition (for example a numeric limit) as a per-parent permit or
-precondition supplied as facts.
+**The application must:** enumerate the parents, apply its own composition
+rule, and encode any per-parent condition (for example a numeric limit) as a
+per-parent permit or precondition supplied as facts. Two ways in, kept in
+sync by construction (AM-90 — same underlying query, no twin logic):
+- **Read warnings from `ParseResult.warnings`** (AM-89) — `[W-16c]`/`[W-16d]`
+  are advisory, never affect `.ok`, and are printed by `el_reasoner.py`'s
+  and `fhir_mapper.py`'s CLIs; anyone calling `parse()`/`parse_string()`
+  directly reads them off the returned `ParseResult`.
+- **Call `el_reasoner.parents_of(model, agent_name)`** directly for a
+  structured, deterministic, sorted answer (parent, delegation name,
+  tokens, `sub_delegation_allowed`, `revocable`, plus co-granted
+  Authorizations) — the same data the warning text is built from.
 
-Suggested warning wording:
-`[W-16c] Agent 'X' is the delegate of N Delegations: d1 (P1 → token t1),
-d2 (P2 → token t2). Principals are collectively responsible (§7.10.1).
-Composition of authority across these parents is application-defined; the
-toolchain does not compose them.`
+Actual `[W-16c]` wording (AM-90; supersedes the draft this section
+originally sketched):
+`[W-16c] Agent 'X' has 2 parents: P1 (d1 -> t1), P2 (d2 -> t2). Principals
+are collectively responsible (§7.10.1). If these parents' authorities
+overlap, how they combine is application-defined; the toolchain does not
+compose them. Permits granted to 'X' (authority sources, not necessarily
+principals): A1 (P1: p1). See el_reasoner.parents_of(model, 'X').`
 
 ## 9. Verification discipline
 
@@ -187,13 +220,28 @@ referral scenario), and a probe caught one more (the verifier's own guard was
 order-dependent). Keep external names, papers and figures out of code,
 comments, docs, tests and commit messages; use "multi-parent authority join".
 
+**Clean-worktree lesson (from a reported failure on a public clone):** a
+byte-identical snapshot test that globs `scenarios/**/*.el` passes locally
+but fails on a clean clone if the local checkout has additional,
+untracked scenario files a public clone never has — some local checkouts
+carry extra scenarios under `.git/info/exclude`, which is itself never
+shared. The fix: a snapshot-gated test must iterate the **snapshot
+fixture's own file list**, not a glob, and no tracked fixture may ever
+contain entries from a local-only scenario. Every AM-88/89/90 gate since
+has additionally been run in a clean `git worktree add` checkout with the
+diff applied (not committed) before commit, specifically to catch this
+class of bug before it reaches a public clone.
+
 ## 10. Open decisions for the maintainer
 
 - **No-Commitment fallback.** Keep first-declared (order-dependent, to be
   surfaced by the warning) or make it sorted-first (arbitrary but stable).
   Leaning: sorted, given decision 5 and that the warning is not yet built.
-- **W-16d severity.** Warning (recommended) or error.
+- **W-16d severity — decided: warning.** Implemented as advisory (AM-90),
+  consistent with W-16c and the AM-89 warnings channel.
 - **Grouping key for V-J1.** Land AM-14 first, or accept free-text fragility.
-- **Parents query.** Shape and home.
-- **Push timing.** Push AM-88a, b and c together, then reply to the external
-  party that tracing is fixed.
+- **Parents query.** Shape and home — decided and implemented:
+  `el_reasoner.parents_of(model, agent_name)` (AM-90).
+- **Push timing — done.** AM-88a/b/c, AM-89 and AM-90 committed locally as
+  five separate, individually-gated commits; push and external reply are
+  the maintainer's own next action, not part of this series' scope.
