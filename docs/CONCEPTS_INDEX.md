@@ -5216,9 +5216,57 @@ surface is ever added to `el_api.py`, it will need its own decision about
 whether/how to display `.warnings` — this amendment only opens the
 channel, it doesn't wire one up anywhere new.
 
-**Out of scope, not touched:** W-16c and W-16d (the planned multi-parent
-authority join follow-on warnings — the first rules that would actually
-populate this channel with a second message beyond `[W-16b]`), V-08's own
-order-dependence, and any strict/warnings-as-errors mode.
+**Out of scope, not touched here:** W-16c and W-16d (the planned
+multi-parent authority join follow-on warnings — the first rules that
+would actually populate this channel with a second message beyond
+`[W-16b]`) **— implemented by AM-90, below.** V-08's own order-dependence
+and any strict/warnings-as-errors mode remain out of scope.
+
+---
+
+## AM-90 — multi-parent authority join: `[W-16c]`/`[W-16d]` warnings and the shared `parents_of()` query
+
+**RESOLVED (2026-09-19).**
+
+`[W-16c]` (multi-parent notice) and `[W-16d]` (same-token conflict) are
+now live in `el_validator.py`, read through the AM-89 channel (`56939b9`,
+`ParseResult.warnings`) — both advisory, never affect `.ok`. Both are
+built from a single new public query, `el_reasoner.parents_of(model,
+agent_name)`, so the warning text and the query can never diverge (no
+twin logic). Full detail: `docs/el_grammar_amendments.md`, AM-90.
+
+**Ground truth confirmed live**, not assumed: ran both rules' actual
+trigger conditions against every tracked scenario file — zero warnings
+anywhere. Order-invariance verified across every permutation of both a
+2-Delegation probe and a combined 2-Delegation-plus-2-Authorization
+probe — identical message string regardless of declaration order in both
+cases, because `parents_of()` sorts by `(parent, delegation_name)` and the
+message builder never depends on iteration order.
+
+**Documented, deliberate scope boundary (not a gap):** a structural
+`principal_of` affiliation with no `Delegation` of its own does not count
+toward `[W-16c]`'s parent count, and a `to_role` Authorization does not
+appear in the co-granted-authorizations clause — neither resolves to a
+single attributable agent the way a genuine `Delegation`/`to_agent`
+Authorization does. An agent whose only "multi-parent" structure is two
+`principal_of` parents (zero real Delegations) produces no warning at all;
+this is intentional, verified by test, not an oversight.
+
+**Authorizations are authority sources, not co-principals (AM-31 §4.0b):**
+`[W-16c]`'s co-granted-authorizations clause is deliberately a separate
+sentence from "Principals are collectively responsible" — an authorizing
+party grants a permit; it does not thereby become a principal the way a
+`Delegation`'s delegator does. An `Authorization` from a third party who
+is not itself a delegator appears only in that clause, never counted
+among the "N parents."
+
+**Where a spec author sees these:** the same two places AM-89 already
+established — `el_reasoner.py`'s and `fhir_mapper.py`'s CLIs (stderr), and
+`ParseResult.warnings` for anyone calling `parse()`/`parse_string()`
+directly. No API/UI validation surface exists to route either warning to
+anywhere new (unchanged from AM-89's finding).
+
+**Files:** `docs/el_grammar_amendments.md`, AM-90.
+`tests/test_am90_multi_parent_warnings.py` covers everything above.
 
 ---

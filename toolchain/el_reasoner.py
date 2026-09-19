@@ -18,6 +18,9 @@ Secondary queries provided:
     can_perform(actor_name, action_name) — §6.4.6 deontic check
     policy_conflicts(spec)               — §7.9.1 cross-community check
     delegation_graph(spec)               — raw graph for visualisation
+    parents_of(spec, agent_name)         — AM-90: every Delegation naming
+                                            agent_name as delegate, plus
+                                            co-granted Authorizations
 
 Usage
 -----
@@ -355,6 +358,95 @@ def delegation_graph(model) -> Dict[str, List[DelegationLink]]:
             graph.setdefault(principal_name, []).append(link)
 
     return graph
+
+
+# ── Multi-parent authority join query (AM-90) ──────────────────────────────────
+
+@dataclass
+class ParentRecord:
+    """One Delegation naming agent_name as its delegate, as returned by
+    parents_of(). Deliberately excludes structural principal_of edges
+    (delegation_graph()'s link.structural) — see parents_of()'s docstring
+    for why those, and to_role Authorizations, are out of scope."""
+    parent: str
+    delegation_name: str
+    tokens: List[str]              # sorted; burden ∪ token_group members
+    sub_delegation_allowed: bool
+    revocable: bool
+
+
+@dataclass
+class CoGrantedAuthorization:
+    """One Authorization whose authorized_agent (to_agent) is agent_name.
+    An authorization's authority is an authority SOURCE for the granted
+    permit, not necessarily a co-principal of agent_name (AM-31 §4.0b: an
+    authorizing party does not thereby become a principal) — kept as a
+    separate structure from ParentRecord for exactly this reason, never
+    merged into the parents list."""
+    authorization_name: str
+    authority: str
+    permit: str
+
+
+def parents_of(
+    model, agent_name: str
+) -> Tuple[List[ParentRecord], List[CoGrantedAuthorization]]:
+    """AM-90: every genuine Delegation naming agent_name as its delegate,
+    plus every Authorization granting agent_name a permit as its
+    authorized_agent (to_agent) — the same query [W-16c]/[W-16d]
+    (el_validator.py) are built from, so the warning text and this public
+    read-only function can never diverge (no twin logic).
+
+    Deterministic and sorted: ParentRecords by (parent, delegation_name);
+    each record's own tokens sorted; CoGrantedAuthorizations by
+    authorization_name.
+
+    Documented out of scope (§6.4.1/§7.8.7, §7.10.1 — multi-parent is a
+    property of the agent, not the per-token chain, which stays linear):
+    - Structural principal_of edges (delegation_graph()'s
+      link.structural=True) — an organisational affiliation with no
+      Delegation of its own is not a "parent" in this query's sense.
+    - to_role Authorizations — authorized_role names a role, not a
+      resolved agent, so there is no single agent_name to attribute it to
+      here.
+    An agent_name matching neither returns ([], []) — never raises.
+
+    Reuses delegation_graph()'s already-extracted per-Delegation fields
+    (burden_name, token_group_members, sub_delegation_allowed, revocable)
+    rather than re-deriving them from the raw Delegation elements a third
+    time (el_engine.py's walk_chain() and el_kripke.py's
+    _delegation_chain_for_token() each already do this inline once)."""
+    graph = delegation_graph(model)
+    records = [
+        ParentRecord(
+            parent=link.from_obj,
+            delegation_name=link.delegation_name,
+            tokens=sorted(
+                ({link.burden_name} if link.burden_name else set())
+                | set(link.token_group_members)
+            ),
+            sub_delegation_allowed=link.sub_delegation_allowed,
+            revocable=link.revocable,
+        )
+        for links in graph.values()
+        for link in links
+        if link.to_obj == agent_name and not link.structural
+    ]
+    records.sort(key=lambda r: (r.parent, r.delegation_name))
+
+    auths = sorted(
+        (
+            CoGrantedAuthorization(
+                authorization_name=a.name,
+                authority=_obj_name(getattr(a, "authority", None)),
+                permit=_obj_name(getattr(a, "permit", None)),
+            )
+            for a in _collect(model, "Authorization")
+            if _obj_name(getattr(a, "authorized_agent", None)) == agent_name
+        ),
+        key=lambda a: a.authorization_name,
+    )
+    return records, auths
 
 
 # ── Last-resort fallback: static role anchor ───────────────────────────────────

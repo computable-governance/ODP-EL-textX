@@ -51,6 +51,14 @@ Rules implemented
         Delegation — static check for missing obligation descriptor. §6.4.2
   V-16b  SatisfactionCondition with a single member has no
         collective semantics — warn (not error).                 AM-29
+  W-16c  An agent/party that is the delegate of Delegations from
+        >=2 distinct delegators — multi-parent notice, warn (not
+        error): principals are collectively responsible, but the
+        toolchain does not compose overlapping authorities.      AM-90, §7.10.1
+  W-16d  One token (transfers_burden, or a transfers_token_group
+        member) transferred by >=2 distinct Delegations to the
+        same delegate, or by the same delegator to >=2 different
+        delegates — same-token conflict, warn (not error).       AM-90, §6.4.1
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -74,7 +82,7 @@ Usage
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -189,6 +197,12 @@ def validate_spec(model) -> List[str]:
 
     # V-16b — singleton SatisfactionCondition warning (AM-29)
     errors.extend(_validate_satisfaction_singleton(model))
+
+    # W-16c — multi-parent notice (AM-90, §7.10.1)
+    errors.extend(_validate_multi_parent_notice(model))
+
+    # W-16d — same-token conflict (AM-90, §6.4.1)
+    errors.extend(_validate_same_token_conflict(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -620,6 +634,127 @@ def _validate_satisfaction_singleton(model) -> List[str]:
                 f"has a single inline member '{arg_names[0]}' — no collective "
                 f"semantics. Consider whether a TokenGroup is needed. (AM-29)"
             )
+    return warnings
+
+
+def _validate_multi_parent_notice(model) -> List[str]:
+    """W-16c (AM-90): an agent/party that is the delegate of Delegations
+    from >=2 DISTINCT delegators — multi-parent is legitimate per
+    §7.10.1 ("the parties (collectively) become principal"), so this is
+    advisory, never an error; a token's own chain still resolves to
+    exactly one holder (§6.4.1/§7.8.7), this only names the agent's
+    surrounding authority structure.
+
+    Built entirely from el_reasoner.parents_of() — the message and that
+    public read-only query share the same data by construction, so they
+    cannot diverge. N counts DISTINCT parents, not delegations; a parent
+    with multiple delegations to this agent lists each one, grouped under
+    that parent.
+
+    Documented out of scope (see parents_of()'s own docstring): a
+    structural principal_of affiliation with no Delegation of its own,
+    and a to_role Authorization (no single resolved agent to attribute it
+    to)."""
+    from el_reasoner import delegation_graph, parents_of
+
+    graph = delegation_graph(model)
+    delegate_names = sorted(
+        {link.to_obj for links in graph.values() for link in links if not link.structural}
+    )
+
+    warnings: List[str] = []
+    for agent_name in delegate_names:
+        records, auths = parents_of(model, agent_name)
+        distinct_parents = sorted({r.parent for r in records})
+        if len(distinct_parents) < 2:
+            continue
+
+        parent_groups = []
+        for parent in distinct_parents:
+            pairs = [f"{r.delegation_name} -> {', '.join(r.tokens)}" for r in records if r.parent == parent]
+            parent_groups.append(f"{parent} ({'; '.join(pairs)})")
+
+        msg = (
+            f"[W-16c] Agent '{agent_name}' has {len(distinct_parents)} parents: "
+            f"{', '.join(parent_groups)}. "
+            f"Principals are collectively responsible (§7.10.1). "
+            f"If these parents' authorities overlap, how they combine is "
+            f"application-defined; the toolchain does not compose them."
+        )
+        if auths:
+            auth_parts = [f"{a.authorization_name} ({a.authority}: {a.permit})" for a in auths]
+            msg += (
+                f" Permits granted to '{agent_name}' (authority sources, not "
+                f"necessarily principals): {', '.join(auth_parts)}."
+            )
+        msg += f" See el_reasoner.parents_of(model, '{agent_name}')."
+        warnings.append(msg)
+
+    return warnings
+
+
+def _validate_same_token_conflict(model) -> List[str]:
+    """W-16d (AM-90): one token transferred by >=2 distinct Delegations to
+    the SAME delegate (double-source), or by the SAME delegator to >=2
+    DIFFERENT delegates (fork). Advisory, never an error — which transfer
+    actually governs is application-defined.
+
+    Sequential chains (P -> A, then A -> B carrying the same token onward)
+    do NOT trigger this: each Delegation's own transferred-token set is
+    scoped to that one hop, so grouping by (token, delegate) or
+    (token, delegator) never conflates a chain with a conflict. A single
+    Delegation declaring both transfers_burden and transfers_token_group
+    naming the same token (a V-NEW-10 violation — gp_referral_scenario.el
+    has this) does not self-flag: tokens are deduped per Delegation via
+    the same set-union parents_of() uses, before grouping.
+
+    Built on el_reasoner.delegation_graph()'s already-extracted
+    burden_name/token_group_members fields — no separate getattr(d,
+    "burden"/"token_group") expansion here, same shared-data principle as
+    parents_of() (§6.4.1/§7.8.7, §7.10.1)."""
+    from el_reasoner import delegation_graph
+
+    graph = delegation_graph(model)
+
+    token_transfers: Dict[str, List[Tuple[str, str, str]]] = {}
+    for links in graph.values():
+        for link in links:
+            if link.structural:
+                continue
+            tokens = ({link.burden_name} if link.burden_name else set()) | set(link.token_group_members)
+            for tok in tokens:
+                token_transfers.setdefault(tok, []).append(
+                    (link.from_obj, link.to_obj, link.delegation_name)
+                )
+
+    warnings: List[str] = []
+    for token_name in sorted(token_transfers):
+        by_delegate: Dict[str, Set[str]] = {}
+        by_delegator: Dict[str, Set[str]] = {}
+        for delegator, delegate, dname in token_transfers[token_name]:
+            by_delegate.setdefault(delegate, set()).add(dname)
+            by_delegator.setdefault(delegator, set()).add(delegate)
+
+        for delegate in sorted(by_delegate):
+            dnames = by_delegate[delegate]
+            if len(dnames) >= 2:
+                warnings.append(
+                    f"[W-16d] Token '{token_name}' is transferred to '{delegate}' "
+                    f"by {len(dnames)} distinct delegations: {', '.join(sorted(dnames))}. "
+                    f"Which transfer takes effect is application-defined; the "
+                    f"toolchain does not resolve it."
+                )
+
+        for delegator in sorted(by_delegator):
+            delegates = by_delegator[delegator]
+            if len(delegates) >= 2:
+                warnings.append(
+                    f"[W-16d] Token '{token_name}' is transferred by '{delegator}' "
+                    f"to {len(delegates)} distinct delegates: {', '.join(sorted(delegates))}. "
+                    f"Which transfer takes effect is application-defined; the "
+                    f"toolchain does not resolve it."
+                )
+
     return warnings
 
 

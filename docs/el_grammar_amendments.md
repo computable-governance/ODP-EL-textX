@@ -6338,3 +6338,118 @@ prints warnings); `toolchain/fhir_mapper.py` (`_print_parse_report()`
 extracted, prints warnings); new `tests/test_am89_warnings_channel.py`;
 this file (new entry); `docs/CONCEPTS_INDEX.md` (new note: warnings channel
 exists; no API/UI validation surface exists to update).
+
+---
+
+## AM-90 (2026-09-19) — multi-parent authority join: `[W-16c]`/`[W-16d]` warnings, shared `parents_of()` query (`toolchain/el_reasoner.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-19). Builds on AM-89's warnings channel
+(`ParseResult.warnings`, `56939b9`) — both new rules are advisory and never
+affect `.ok`.
+
+**Design settled beforehand (not re-litigated here):** multi-parent
+authority is legitimate per §7.10.1 ("the parties (collectively) become
+principal of that object"); the toolchain enumerates parents and never
+stays silent about the structure, but composing overlapping authorities
+across parents is application-defined — the toolchain does not do it.
+Per §6.4.1/§7.8.7 a token is still held by exactly one active object, so
+its own delegation chain stays linear (the AM-88 series); multi-parent is
+a property of the *agent*, not the per-token chain.
+
+**New public query** (`toolchain/el_reasoner.py`):
+- `ParentRecord` (parent, delegation_name, tokens, sub_delegation_allowed,
+  revocable) and `CoGrantedAuthorization` (authorization_name, authority,
+  permit) — two small dataclasses.
+- `parents_of(model, agent_name) -> (List[ParentRecord], List[CoGrantedAuthorization])`
+  — every genuine `Delegation` naming `agent_name` as its `delegate`, plus
+  every `Authorization` granting it a permit via `to_agent`. Built entirely
+  on `delegation_graph()`'s already-extracted per-`Delegation` fields
+  (`burden_name`, `token_group_members`, `sub_delegation_allowed`,
+  `revocable`) — no new `getattr(d, "burden"/"token_group")` expansion
+  anywhere, so this is not a third copy of that extraction (`el_engine.py`'s
+  `walk_chain()` and `el_kripke.py`'s `_delegation_chain_for_token()` each
+  already do it once). Deterministic and fully sorted (`ParentRecord`s by
+  `(parent, delegation_name)`, each record's own `tokens` sorted,
+  `CoGrantedAuthorization`s by `authorization_name`). An unknown
+  `agent_name` returns `([], [])`, never raises. Documented out of scope,
+  matching the design decision: structural `principal_of` affiliations
+  with no `Delegation` of their own (`delegation_graph()`'s
+  `link.structural`), and `to_role` Authorizations (no single resolved
+  agent to attribute them to).
+
+**Two new validator rules** (`toolchain/el_validator.py`), both built from
+`parents_of()`/`delegation_graph()` directly — no independent
+re-derivation, so the warning text and the public query can never diverge:
+
+- `[W-16c]` **multi-parent notice** — fires when an agent's *distinct*
+  parent count (via `parents_of()`) is ≥2 (delegation count doesn't
+  matter: one delegator with two Delegations to the same delegate does
+  **not** fire). Message groups by parent (sorted `(parent,
+  delegation_name)`), each parent showing every one of its Delegations as
+  `delegation -> tokens` joined by `"; "` when a parent has more than one;
+  parents joined by `", "`. Co-granted Authorizations render in a
+  **separate** sentence, worded as authority *sources*, not principals
+  (AM-31 §4.0b: an authorizing party does not thereby become a
+  co-principal) — omitted entirely when there are none. Ends with a
+  pointer to the query itself. Full shape:
+
+  `[W-16c] Agent 'X' has 2 parents: P1 (d1 -> t1), P2 (d2 -> t2). Principals are collectively responsible (§7.10.1). If these parents' authorities overlap, how they combine is application-defined; the toolchain does not compose them. Permits granted to 'X' (authority sources, not necessarily principals): A1 (P1: p1). See el_reasoner.parents_of(model, 'X').`
+
+- `[W-16d]` **same-token conflict** — one token (burden or a
+  `token_group` member, deduped per `Delegation` via the same set-union
+  `parents_of()` uses — this is exactly what stops a single `Delegation`
+  declaring both `transfers_burden` and a `transfers_token_group`
+  containing that same token, a real V-NEW-10 violation
+  `gp_referral_scenario.el` has, from flagging itself) transferred by ≥2
+  distinct Delegations to the same delegate (double-source), or by the
+  same delegator to ≥2 different delegates (fork). Grouping by
+  `(token, delegate)` and `(token, delegator)` separately means a
+  sequential chain (`P→A`, then `A→B` carrying the same token onward)
+  never trips this — each hop's transferred-token set is scoped to its
+  own `Delegation`, never conflated across hops.
+
+**Standard reference(s):** §7.10.1 (multi-parent principal accountability
+— `[W-16c]`); §6.4.1/§7.8.7 (one holder per token — the reason `[W-16d]`
+flags an ambiguous transfer as advisory rather than silently picking one);
+AM-31 §4.0b (an authorization's authority is a source, not a principal —
+the reason the co-granted-authorizations clause is worded and placed
+separately from the principals sentence).
+
+**Import graph:** confirmed cycle-free before writing any code —
+`el_reasoner.py` has zero internal toolchain imports at module level (its
+two `from el_parser import parse` occurrences are inside
+`if __name__ == "__main__":` or a docstring example, never executed on a
+normal `import el_reasoner`), and nothing internal imports `el_reasoner.py`
+today except tests. `el_validator.py` adding
+`from el_reasoner import delegation_graph, parents_of` is therefore a
+one-directional edge with no cycle — same shape as the already-established
+`el_kripke.py → el_engine.py` edge.
+
+**Empirical verification:** ran both rules' actual trigger conditions
+against every tracked `.el` file (`git ls-files scenarios`, `validate=True`)
+— zero `[W-16c]`/`[W-16d]` anywhere (`scenarios/ecommerce/ecommerce_scenario.el`
+still unparseable, unaffected, same pre-existing syntax error).
+Order-invariance verified live across all 6 permutations of a 2-Delegation
+probe and, separately, all 24 permutations of a combined
+2-Delegation-plus-2-Authorization probe — identical warning string every
+time in both cases. New `tests/test_am90_multi_parent_warnings.py` (14
+tests): the Repro-1-shaped multi-parent probe (exact message, then
+order-invariance across all permutations); single-parent chain and
+one-delegator-two-delegations negatives for `[W-16c]`; a `principal_of`-only
+negative (documented out-of-scope case); the both-fields-Delegation
+self-flag negative for `[W-16d]`; double-source and fork positives for
+`[W-16d]`; `parents_of()` on an unknown agent; `parents_of()`'s output
+checked to contain every string fragment the `[W-16c]` message uses (no
+twin logic); a third-authority-not-a-delegator case (authority-sources
+clause only, never counted as a parent); the one-parent-two-delegations
+grouping case; the two named tracked reference scenarios (no glob); and
+that warnings never affect `.ok`. Full suite: 447 passed, 1 xfailed (433/1
+AM-89 baseline + 14 new, zero regressions) — reproduced identically on a
+clean `git worktree add` checkout with the diff applied.
+
+**Files changed:** `toolchain/el_reasoner.py` (`ParentRecord`,
+`CoGrantedAuthorization`, `parents_of()`, module docstring); `toolchain/el_validator.py`
+(`_validate_multi_parent_notice()`, `_validate_same_token_conflict()`,
+dispatch wiring, module docstring, `Tuple` import); new
+`tests/test_am90_multi_parent_warnings.py`; this file (new entry);
+`docs/CONCEPTS_INDEX.md` (new AM-90 note).
