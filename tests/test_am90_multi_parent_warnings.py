@@ -207,10 +207,13 @@ delegation d2 { from: RootParty to: AgentA obligation: "Handle two" transfers_bu
     assert not any(w.startswith("[W-16c]") for w in result.warnings)
 
 
-def test_principal_of_only_multi_parent_structure_is_out_of_scope():
+def test_principal_of_only_multi_parent_structure_is_out_of_scope_for_w16c():
     """Adjustment 5(b): two principal_of parents with NO Delegations at
-    all must NOT trigger W-16c — structural affiliations are documented
-    out of scope, not silently promoted into the warning."""
+    all must NOT trigger W-16c — W-16c is documented as covering only
+    genuine Delegation-based parents. This exact shape is what AM-91's
+    [W-16e] covers instead (see tests/test_am91_standing_parent_warnings.py)
+    — updated from AM-90's original "no warning at all" assertion now that
+    AM-91 has landed; the scope boundary moved, it didn't disappear."""
     spec_text = """
 enterprise specification PrincipalOfOnlyProbe
 party P1 { principal_of AgentA }
@@ -219,7 +222,7 @@ agent AgentA
 """
     result = parse_string(spec_text, validate=True)
     assert result.ok is True
-    assert result.warnings == []
+    assert not any(w.startswith("[W-16c]") for w in result.warnings)
 
 
 def test_both_fields_delegation_does_not_self_flag_w16d():

@@ -22,14 +22,22 @@ has its own Commitment, the loop now prefers the parent that either IS the
 Commitment's actor, or from which that actor is reachable (via the same
 BFS the AM-52 guard already uses), breaking ties via `sorted()` for
 determinism. A token with NO Commitment of its own has no actor to prefer
-against — for that case the pre-AM-88c first-declared-wins behaviour is
-UNCHANGED and REMAINS order-dependent; a future validator warning for a
-genuinely ambiguous multi-parent join is the honest fix there, not a
-default resolution rule (see `docs/CONCEPTS_INDEX.md`, AM-88).
+against — AM-88c itself left that case unchanged and order-dependent;
+**AM-91 closed it** (`sorted(candidates)[0]` fallback plus a `[W-16e]`
+warning naming the agent's standing parents — see
+`tests/test_am91_standing_parent_warnings.py`).
 
-Regression: byte-identical against the AM-88b snapshot (no existing
-scenario has an agent with more than one principal_of parent, so nothing
-changes for the real corpus).
+Regression: byte-identical against the AM-88b snapshot.
+`scenarios/consent/federation_consent_scenario.el`'s `SpecialistParty`
+does have two standing `principal_of` parents (`GPParty`,
+`SpecialistPracticeParty`) — confirmed during AM-91's recon, correcting an
+earlier, imprecise claim here that no tracked scenario had this shape.
+AM-88c's/AM-91's fallback change is nonetheless inert for this file: both
+`SpecialistParty` and the only other structural child in it are *also*
+the delegate of a real `Delegation`, which sets that agent's chain-parent
+unconditionally before the fallback loop runs (`parent.setdefault(...)`
+is a no-op once a key already exists) — so this snapshot has never
+depended on, and still doesn't depend on, which fallback rule is used.
 """
 import json
 import os
@@ -170,18 +178,20 @@ delegation grpDel {{
 """
 
 
-def test_no_commitment_multi_parent_token_remains_order_dependent():
-    """AM-88c deliberately does NOT resolve this case: burdenNoCommit is
-    rooted at Authorization.auth_burden (P1), not a Commitment, so
-    _commitment_root_for_token() returns None for it and the loop has no
-    actor to prefer against — it falls back to the pre-AM-88c
-    first-declared-wins structural_parent map, unchanged. The chain
-    genuinely still depends on declaration order here, which is why this
-    is documented as an OPEN residual in docs/CONCEPTS_INDEX.md (AM-88)
-    rather than silently resolved: with no Commitment to anchor against,
-    picking a default parent would be a guess, not a fix. A future
-    validator warning for a genuinely ambiguous multi-principal_of join is
-    the honest next step, not a default resolution rule here."""
+def test_no_commitment_multi_parent_token_is_now_order_independent():
+    """Superseded by AM-91: this case used to be a documented OPEN
+    residual (chain order-dependent, no warning at all) — see
+    docs/CONCEPTS_INDEX.md's AM-88 section for the historical finding.
+    AM-91 closed it two ways: (1) el_kripke.py's fallback, when no
+    Commitment anchors the choice, is now sorted(candidates)[0] instead of
+    first-declared, so the chain is deterministic regardless of
+    declaration order; (2) el_validator.py's new [W-16e] names all of the
+    agent's standing principal_of parents so the arbitrariness is visible
+    rather than silent. burdenNoCommit is rooted at Authorization.auth_burden
+    (P1), not a Commitment, so _commitment_root_for_token() still returns
+    None for it and the fallback branch is exactly what's being exercised
+    here — see tests/test_am91_standing_parent_warnings.py for the [W-16e]
+    side and the message/behaviour parity test."""
     result_first = parse_string(_no_commitment_probe(order_swapped=False), validate=False)
     result_second = parse_string(_no_commitment_probe(order_swapped=True), validate=False)
     assert result_first.ok and result_second.ok
@@ -190,5 +200,4 @@ def test_no_commitment_multi_parent_token_remains_order_dependent():
     chain_p2_first = _delegation_chain_for_token(result_second.model, "burdenNoCommit", "AgentB")
 
     assert chain_p1_first == ["P1", "AgentA", "AgentB"]
-    assert chain_p2_first == ["P2", "AgentA", "AgentB"]
-    assert chain_p1_first != chain_p2_first
+    assert chain_p2_first == ["P1", "AgentA", "AgentB"]

@@ -2717,25 +2717,33 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
     # AM-88c: when an agent has more than one principal_of parent, the
     # exported chain should continue through the one that's actually this
     # token's own accountability root — not whichever happened to be
-    # declared first (structural_parent, kept below only as the fallback).
-    # Prefer an exact match against the Commitment's own actor; else the
-    # first (sorted, for determinism) candidate from which that actor is
-    # reachable via the same BFS the AM-52 guard above uses. A token with
-    # no Commitment of its own has no actor to prefer against, so it keeps
-    # the pre-AM-88c first-declared-wins behaviour unchanged — logged as a
-    # still-open residual in docs/CONCEPTS_INDEX.md, not fixed here.
+    # declared first (structural_parent, kept below only as the ultimate
+    # fallback). Prefer an exact match against the Commitment's own actor;
+    # else the first (sorted, for determinism) candidate from which that
+    # actor is reachable via the same BFS the AM-52 guard above uses.
+    # AM-91: a token with no Commitment of its own (so no actor to prefer
+    # against at all) no longer falls back to first-declared either — it
+    # falls back to sorted(candidates)[0], a deterministic-but-arbitrary
+    # choice, paired with el_validator.py's [W-16e] warning naming all of
+    # the agent's standing parents so the arbitrariness is visible rather
+    # than silent (docs/CONCEPTS_INDEX.md's former residual, now closed).
+    # Single-parent agents (len(candidates) <= 1) are unaffected either
+    # way — structural_parent[agent_name] already names that one parent.
     for agent_name in structural_parent:
         candidates = structural_parents_multi.get(agent_name, set())
         chosen = None
-        if len(candidates) > 1 and commitment_root is not None:
-            actor_name, _ = commitment_root
-            if actor_name in candidates:
-                chosen = actor_name
-            else:
-                for candidate in sorted(candidates):
-                    if _reachable(candidate, actor_name):
-                        chosen = candidate
-                        break
+        if len(candidates) > 1:
+            if commitment_root is not None:
+                actor_name, _ = commitment_root
+                if actor_name in candidates:
+                    chosen = actor_name
+                else:
+                    for candidate in sorted(candidates):
+                        if _reachable(candidate, actor_name):
+                            chosen = candidate
+                            break
+            if chosen is None:
+                chosen = sorted(candidates)[0]
         parent.setdefault(agent_name, chosen if chosen is not None else structural_parent[agent_name])
 
     chain, cur = [holder], holder

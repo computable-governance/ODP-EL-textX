@@ -59,6 +59,10 @@ Rules implemented
         member) transferred by >=2 distinct Delegations to the
         same delegate, or by the same delegator to >=2 different
         delegates — same-token conflict, warn (not error).       AM-90, §6.4.1
+  W-16e  An agent with >=2 DISTINCT standing principal_of parents
+        (one-sided structural affiliations, not paired with
+        delegated_from) — separate from W-16c, which only counts
+        genuine Delegation-based parents. Warn (not error).      AM-91, §7.10.1
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -203,6 +207,9 @@ def validate_spec(model) -> List[str]:
 
     # W-16d — same-token conflict (AM-90, §6.4.1)
     errors.extend(_validate_same_token_conflict(model))
+
+    # W-16e — standing principal_of multi-parent notice (AM-91, §7.10.1)
+    errors.extend(_validate_standing_multi_parent_notice(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -755,6 +762,46 @@ def _validate_same_token_conflict(model) -> List[str]:
                     f"toolchain does not resolve it."
                 )
 
+    return warnings
+
+
+def _validate_standing_multi_parent_notice(model) -> List[str]:
+    """W-16e (AM-91): an agent with >=2 DISTINCT standing principal_of
+    parents — a one-sided structural affiliation with no Delegation of its
+    own (el_reasoner.delegation_graph()'s link.structural=True), NOT a
+    paired principal_of+delegated_from relationship (already covered by a
+    real Delegation, per el_reasoner._is_standing_affiliation()). Advisory,
+    never an error — §7.10.1 makes multi-parent legitimate.
+
+    Distinct from W-16c, which counts only genuine Delegation-based
+    parents: an agent can trigger W-16c, W-16e, both, or neither,
+    independently, depending on which kind of parent edge it has.
+
+    Built entirely from el_reasoner.standing_parents_of() — the message
+    and that public read-only query share the same data by construction,
+    so they cannot diverge. This is also why the message's "the first
+    alphabetically" claim about chain-based views is safe to make: it is
+    exactly what el_kripke.py's _delegation_chain_for_token() now falls
+    back to (AM-91) when no Commitment anchors the choice."""
+    from el_reasoner import delegation_graph, standing_parents_of
+
+    graph = delegation_graph(model)
+    agent_names = sorted(
+        {link.to_obj for links in graph.values() for link in links if link.structural}
+    )
+
+    warnings: List[str] = []
+    for agent_name in agent_names:
+        parents = standing_parents_of(model, agent_name)
+        if len(parents) < 2:
+            continue
+        warnings.append(
+            f"[W-16e] Agent '{agent_name}' has {len(parents)} standing principal_of "
+            f"parents: {', '.join(parents)}. For a token with no Commitment of its own, "
+            f"chain-based views name one of them (the first alphabetically); the choice "
+            f"is stable but arbitrary. Which parent's authority applies is "
+            f"application-defined. See el_reasoner.standing_parents_of(model, '{agent_name}')."
+        )
     return warnings
 
 

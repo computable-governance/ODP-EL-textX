@@ -21,6 +21,9 @@ Secondary queries provided:
     parents_of(spec, agent_name)         — AM-90: every Delegation naming
                                             agent_name as delegate, plus
                                             co-granted Authorizations
+    standing_parents_of(spec, agent_name) — AM-91: every standing (one-
+                                            sided) principal_of parent of
+                                            agent_name
 
 Usage
 -----
@@ -447,6 +450,36 @@ def parents_of(
         key=lambda a: a.authorization_name,
     )
     return records, auths
+
+
+def standing_parents_of(model, agent_name: str) -> List[str]:
+    """AM-91: every STANDING principal_of parent of agent_name —
+    delegation_graph()'s structural links (a one-sided organisational
+    affiliation with no Delegation of its own; link.structural=True),
+    distinct from parents_of()'s genuine Delegation-based parents. The
+    same query [W-16e] (el_validator.py) is built from, so the warning
+    text and this public read-only function can never diverge.
+
+    Sorted, deterministic, returns every standing parent found (0, 1, or
+    more) — mirroring parents_of()'s shape, the >=2 multi-parent threshold
+    is the caller's decision (el_validator.py), not this query's. An
+    unknown agent_name returns [] — never raises.
+
+    Built entirely on delegation_graph() — no separate principal_of/
+    _is_standing_affiliation scan here. Confirmed equivalent to
+    el_kripke.py's own inline structural_parents_multi (AM-88b/c): both
+    iterate the identical EnterpriseObject/principal_of/
+    _is_standing_affiliation shape, just into different containers (see
+    AM-91's amendment entry for the equivalence argument)."""
+    graph = delegation_graph(model)
+    return sorted(
+        {
+            link.from_obj
+            for links in graph.values()
+            for link in links
+            if link.structural and link.to_obj == agent_name
+        }
+    )
 
 
 # ── Last-resort fallback: static role anchor ───────────────────────────────────
