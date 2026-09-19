@@ -19,7 +19,8 @@ Rules implemented
   V-07  Every DelegationDecl references a valid delegator and
         delegate (must be ObjectDecl of kind party or agent).    §7.10.1
   V-08  Sub-delegation is only possible when the parent
-        delegation has sub_delegation_allowed=True.              §7.10.1
+        delegation has sub_delegation_allowed=True. Token-aware,
+        order-independent (AM-92).                                §7.10.1
   V-09  A DeonticTokenDecl held by more than one ObjectDecl
         at the top level violates the "exactly one holder" rule. §6.4.1
   V-10  A CommitmentDecl's actor must be of kind 'party'
@@ -158,7 +159,7 @@ def validate_spec(model) -> List[str]:
             )
 
     # V-07, V-08 — delegation structural rules
-    errors.extend(_validate_delegations(delegations, commitments, all_objects))
+    errors.extend(_validate_delegations(delegations, commitments, all_objects, model))
 
     # AM-31-V1..V5 — authorization structural rules
     for a in _collect(model, "Authorization"):
@@ -300,8 +301,29 @@ def _validate_delegations(
     delegations: List[Any],
     commitments: List[Any],
     all_objects: Dict[str, Any],
+    model: Any,
 ) -> List[str]:
+    """V-07/V-08/V-NEW-10 over every Delegation.
+
+    AM-92: V-08 is now token-aware and order-independent — see
+    _validate_sub_delegation() below for the algorithm and rationale.
+    """
     errors: List[str] = []
+
+    from el_reasoner import delegation_graph
+    graph = delegation_graph(model)
+    links_by_name: Dict[str, Any] = {
+        link.delegation_name: link
+        for links in graph.values()
+        for link in links
+        if not link.structural
+    }
+    incoming_by_agent: Dict[str, List[Any]] = {}
+    for links in graph.values():
+        for link in links:
+            if link.structural:
+                continue
+            incoming_by_agent.setdefault(link.to_obj, []).append(link)
 
     for d in delegations:
         dname = d.name
@@ -321,19 +343,11 @@ def _validate_delegations(
                 f"must be 'party' or 'agent' (found '{delegate_obj.kind}'). (§7.10.1)"
             )
 
-        # V-08: sub-delegation check
+        # V-08: sub-delegation check (AM-92)
         if delegator_obj and delegator_obj.kind == "agent":
-            # This delegation comes FROM an agent — requires prior parent delegation
-            # to have sub_delegation_allowed=True
-            parent_delegation = _find_parent_delegation(
-                delegations, getattr(d.delegator, "name", None)
-            )
-            if parent_delegation and not getattr(parent_delegation, "sub_delegation_allowed", False):
-                errors.append(
-                    f"[V-08] Delegation '{dname}': agent '{delegator_obj.name}' "
-                    f"attempts to sub-delegate but parent delegation "
-                    f"'{parent_delegation.name}' has sub_delegation_allowed=false. (§7.10.1)"
-                )
+            errors.extend(_validate_sub_delegation(
+                d, dname, delegator_obj.name, incoming_by_agent, links_by_name
+            ))
 
         # V-NEW-10: transfers_burden and transfers_token_group are mutually
         # exclusive — a delegation either transfers a single burden or a
@@ -348,14 +362,105 @@ def _validate_delegations(
     return errors
 
 
-def _find_parent_delegation(delegations: List[Any], agent_name: Optional[str]) -> Optional[Any]:
-    """Return the delegation whose delegate is agent_name."""
-    if agent_name is None:
-        return None
-    for d in delegations:
-        if getattr(d.delegate, "name", None) == agent_name:
-            return d
-    return None
+def _validate_sub_delegation(
+    d: Any,
+    dname: str,
+    agent_name: str,
+    incoming_by_agent: Dict[str, List[Any]],
+    links_by_name: Dict[str, Any],
+) -> List[str]:
+    """V-08 (AM-92): d's delegator (agent_name) is an agent, so d is a
+    sub-delegation — it requires that every incoming, genuine (non-
+    structural) Delegation to agent_name which actually transfers one of
+    d's own tokens permits sub-delegation.
+
+    Token-aware (S1): for each token T that d structurally transfers
+    (transfers_burden, or its transfers_token_group's members — read off
+    delegation_graph()'s already-extracted DelegationLink fields, not
+    re-derived here), find the incoming Delegation(s) to agent_name that
+    structurally name T. If any such Delegation has
+    sub_delegation_allowed=false, that is a genuine V-08 violation for T.
+
+    Order-independent by construction (S3): "the incoming Delegations to
+    agent_name" is looked up from a pre-built structural index, not by
+    scanning for "the first" one — there is no first here, only the set
+    of genuine parents.
+
+    Conservative fallback (S2): if T is not named by ANY incoming
+    Delegation, or d itself has neither transfers_burden nor
+    transfers_token_group set at all, this falls back to the pre-AM-92
+    check: every incoming Delegation to agent_name must permit
+    sub-delegation, regardless of what it transfers. For a single-parent
+    agent this is IDENTICAL to the pre-AM-92 verdict AND to the pre-AM-92
+    message text (no token named) — confirmed empirically against every
+    tracked scenario (zero diffs) as part of AM-92's recon.
+
+    Deliberate scope boundary, not an oversight: an incoming Delegation
+    with NEITHER transfers_burden nor transfers_token_group set can never
+    S1-match a token (it has no structural token to match against) — it
+    only ever participates in the S2 fallback. So if some OTHER incoming
+    Delegation structurally matches and permits T, a neither-field
+    incoming Delegation to the same agent does not block T even though it
+    itself forbids sub-delegation in general — S1's per-token match is
+    authoritative once it succeeds; S2 only applies when no incoming
+    Delegation makes any structural claim on T at all.
+
+    One error per (d, forbidding parent Delegation) — deduplicated: if one
+    parent forbids several of d's tokens, they are all named, sorted and
+    comma-joined, in a single error, not one error per token."""
+    incoming = incoming_by_agent.get(agent_name, [])
+    link_d = links_by_name.get(dname)
+    tokens_d: Set[str] = set()
+    if link_d:
+        if link_d.burden_name:
+            tokens_d.add(link_d.burden_name)
+        tokens_d |= set(link_d.token_group_members)
+
+    forbidding_tokens: Dict[str, Set[str]] = {}
+
+    def _mark(parent_name: str, token: Optional[str]) -> None:
+        forbidding_tokens.setdefault(parent_name, set())
+        if token is not None:
+            forbidding_tokens[parent_name].add(token)
+
+    if tokens_d:
+        for token in sorted(tokens_d):
+            matching = [
+                inc for inc in incoming
+                if inc.burden_name == token or token in inc.token_group_members
+            ]
+            if matching:
+                for inc in matching:
+                    if not inc.sub_delegation_allowed:
+                        _mark(inc.delegation_name, token)
+            else:
+                # S2: this specific token is unmatched by any incoming Delegation
+                for inc in incoming:
+                    if not inc.sub_delegation_allowed:
+                        _mark(inc.delegation_name, None)
+    else:
+        # S2: d has neither transfers_burden nor transfers_token_group
+        for inc in incoming:
+            if not inc.sub_delegation_allowed:
+                _mark(inc.delegation_name, None)
+
+    errors: List[str] = []
+    for parent_name in sorted(forbidding_tokens):
+        toks = forbidding_tokens[parent_name]
+        if toks:
+            token_list = ", ".join(f"'{t}'" for t in sorted(toks))
+            errors.append(
+                f"[V-08] Delegation '{dname}': agent '{agent_name}' "
+                f"attempts to sub-delegate {token_list} but parent delegation "
+                f"'{parent_name}' has sub_delegation_allowed=false. (§7.10.1)"
+            )
+        else:
+            errors.append(
+                f"[V-08] Delegation '{dname}': agent '{agent_name}' "
+                f"attempts to sub-delegate but parent delegation "
+                f"'{parent_name}' has sub_delegation_allowed=false. (§7.10.1)"
+            )
+    return errors
 
 
 def _validate_authorization(a, all_objects: Dict[str, Any], all_tokens: Dict[str, Any]) -> List[str]:
