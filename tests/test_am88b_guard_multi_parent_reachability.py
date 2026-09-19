@@ -38,8 +38,8 @@ output is pinned against a pre-fix snapshot
 diffs, confirming this is a pure bug fix with no behavioural change to any
 existing scenario (none exercises the two-`principal_of`-parents case).
 """
-import glob
 import json
+import os
 
 import pytest
 
@@ -55,26 +55,34 @@ _SNAPSHOT_PATH = "tests/fixtures/am88b_delegation_chain_for_token_snapshot.json"
 # ── Byte-identical regression over the full corpus ─────────────────────────
 
 def test_delegation_chain_for_token_byte_identical_to_pre_fix_snapshot():
-    """Every (scenario, token) pair that has an ObligationDescriptor, compared
-    against the pre-AM-88b snapshot. Confirms the multi-map reachability
-    rewrite changes nothing for any existing scenario."""
+    """Every (scenario, token) pair listed in the snapshot, compared
+    against the pre-AM-88b chain. Confirms the multi-map reachability
+    rewrite changes nothing for any existing scenario.
+
+    Iterates the snapshot's own file/token list rather than globbing
+    scenarios/**/*.el and re-deriving tokens from live descriptors — see
+    tests/test_am88a_multi_parent_tracing.py's identical fix for why: some
+    local development checkouts have additional, untracked scenario files
+    a public clone never has, and a glob-based count would pass locally but
+    fail on a clean clone."""
     with open(_SNAPSHOT_PATH) as fh:
         snapshot = json.load(fh)
 
+    expected_total = sum(len(tokens) for tokens in snapshot.values())
     checked = 0
-    for f in sorted(glob.glob("scenarios/**/*.el", recursive=True)):
+    for f in sorted(snapshot):
+        assert os.path.exists(f), f"snapshot references missing file {f}"
         result = parse(f, validate=False)
-        if result.model is None:
-            continue  # scenarios/ecommerce/ecommerce_scenario.el: pre-existing syntax error
+        assert result.model is not None, f"failed to parse {f}: {result.errors}"
         descriptors = _build_obligation_descriptors(result.model)
-        for token_name, desc in descriptors.items():
+        for token_name in sorted(snapshot[f]):
+            assert token_name in descriptors, f"no descriptor for {f}::{token_name}"
             result2 = parse(f, validate=False)
-            chain = _delegation_chain_for_token(result2.model, token_name, desc.holder)
-            assert f in snapshot and token_name in snapshot[f], f"no snapshot entry for {f}::{token_name}"
+            chain = _delegation_chain_for_token(result2.model, token_name, descriptors[token_name].holder)
             assert chain == snapshot[f][token_name], f"chain mismatch for {f}::{token_name}"
             checked += 1
 
-    assert checked == 37
+    assert checked == expected_total
 
 
 # ── GuardProbe — the multi-parent reachability fix ─────────────────────────

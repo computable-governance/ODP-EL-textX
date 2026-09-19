@@ -41,9 +41,9 @@ existing scenario, same convention as
 tests/test_am86_obligation_descriptor_roots.py.
 """
 import dataclasses
-import glob
 import itertools
 import json
+import os
 
 import pytest
 
@@ -58,26 +58,33 @@ _SNAPSHOT_PATH = "tests/fixtures/am88a_obligation_descriptors_snapshot.json"
 # ── Byte-identical regression over the full corpus ─────────────────────────
 
 def test_descriptors_byte_identical_to_pre_fix_snapshot():
-    """Every parseable scenario file's full descriptor set, compared field-
-    by-field against the pre-AM-88a snapshot. Confirms the structural-first
+    """Every scenario file listed in the snapshot, compared field-by-field
+    against its pre-AM-88a descriptor set. Confirms the structural-first
     rewrite changes nothing for any existing scenario — none of them
     exercise the multi-parent-convergence case this amendment targets (see
-    docs/CONCEPTS_INDEX.md's AM-88 ground-truth scan)."""
+    docs/CONCEPTS_INDEX.md's AM-88 ground-truth scan).
+
+    Iterates the snapshot's own file list rather than globbing
+    scenarios/**/*.el: some local development checkouts have additional,
+    untracked scenario files (see docs/el_grammar_amendments.md's AM-88a
+    entry) that a public clone never has — a glob-based count would pass
+    locally and fail on a clean clone. The snapshot itself only ever
+    covers tracked, public scenarios."""
     with open(_SNAPSHOT_PATH) as fh:
         snapshot = json.load(fh)
 
+    expected_total = sum(len(v) for v in snapshot.values())
     checked = 0
-    for f in sorted(glob.glob("scenarios/**/*.el", recursive=True)):
+    for f in sorted(snapshot):
+        assert os.path.exists(f), f"snapshot references missing file {f}"
         result = parse(f, validate=False)
-        if result.model is None:
-            continue  # scenarios/ecommerce/ecommerce_scenario.el: pre-existing syntax error
-        assert f in snapshot, f"no snapshot entry for {f}"
+        assert result.model is not None, f"failed to parse {f}: {result.errors}"
         descriptors = _build_obligation_descriptors(result.model)
         actual = {name: dataclasses.asdict(d) for name, d in descriptors.items()}
         assert actual == snapshot[f], f"descriptor mismatch in {f}"
         checked += len(actual)
 
-    assert checked == 37
+    assert checked == expected_total
 
 
 # ── Repro 1 — two lineages carrying identical obligation text converge ─────

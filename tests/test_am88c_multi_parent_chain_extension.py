@@ -31,8 +31,8 @@ Regression: byte-identical against the AM-88b snapshot (no existing
 scenario has an agent with more than one principal_of parent, so nothing
 changes for the real corpus).
 """
-import glob
 import json
+import os
 
 import pytest
 
@@ -48,23 +48,30 @@ _SNAPSHOT_PATH = "tests/fixtures/am88b_delegation_chain_for_token_snapshot.json"
 def test_delegation_chain_for_token_still_byte_identical_to_am88b_snapshot():
     """AM-88c only changes behaviour for an agent with more than one
     principal_of parent AND a Commitment-rooted token reaching it — no
-    scenario in the corpus has that shape, so nothing changes here."""
+    scenario in the corpus has that shape, so nothing changes here.
+
+    Iterates the snapshot's own file/token list rather than globbing
+    scenarios/**/*.el — see tests/test_am88a_multi_parent_tracing.py's
+    identical fix for why: some local development checkouts have
+    additional, untracked scenario files a public clone never has."""
     with open(_SNAPSHOT_PATH) as fh:
         snapshot = json.load(fh)
 
+    expected_total = sum(len(tokens) for tokens in snapshot.values())
     checked = 0
-    for f in sorted(glob.glob("scenarios/**/*.el", recursive=True)):
+    for f in sorted(snapshot):
+        assert os.path.exists(f), f"snapshot references missing file {f}"
         result = parse(f, validate=False)
-        if result.model is None:
-            continue
+        assert result.model is not None, f"failed to parse {f}: {result.errors}"
         descriptors = _build_obligation_descriptors(result.model)
-        for token_name, desc in descriptors.items():
+        for token_name in sorted(snapshot[f]):
+            assert token_name in descriptors, f"no descriptor for {f}::{token_name}"
             result2 = parse(f, validate=False)
-            chain = _delegation_chain_for_token(result2.model, token_name, desc.holder)
+            chain = _delegation_chain_for_token(result2.model, token_name, descriptors[token_name].holder)
             assert chain == snapshot[f][token_name], f"chain mismatch for {f}::{token_name}"
             checked += 1
 
-    assert checked == 37
+    assert checked == expected_total
 
 
 def _guard_probe(order_swapped):

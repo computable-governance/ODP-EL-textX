@@ -47,52 +47,6 @@
       "SpecialistClinician"
     ]
   },
-  "scenarios/industrial_procedure/industrial_procedure_scenario.el": {
-    "compressorStartOblig": [
-      "PlantOperations",
-      "FieldOperatorAgent"
-    ],
-    "pressureCheckObligation": [
-      "PlantOperations",
-      "FieldOperatorAgent"
-    ],
-    "pressureInterlockTrip": [
-      "SafetyInterlockSystem"
-    ]
-  },
-  "scenarios/industrial_procedure/sop_4471_generated.el": {
-    "compressorStartObligation": [
-      "FieldOperator"
-    ],
-    "pressureCheckObligation": [
-      "FieldOperator"
-    ],
-    "pressureInterlockTripObligation": [
-      "SafetyInterlockSystem"
-    ]
-  },
-  "scenarios/industrial_procedure/sop_4471_generated_EMBARGO_CONFLICT_TEST.el": {
-    "compressorStartObligation": [
-      "FieldOperator"
-    ],
-    "pressureCheckObligation": [
-      "FieldOperator"
-    ],
-    "pressureInterlockTripObligation": [
-      "SafetyInterlockSystem"
-    ]
-  },
-  "scenarios/industrial_procedure/sop_4471_generated_MISMATCH_TEST.el": {
-    "compressorStartObligation": [
-      "FieldOperator"
-    ],
-    "pressureCheckObligation": [
-      "FieldOperator"
-    ],
-    "pressureInterlockTripObligation": [
-      "SafetyInterlockSystem"
-    ]
-  },
   "scenarios/probes/transfer_probe.el": {
     "ambiguousFromBurden": [
       "ActorA"
