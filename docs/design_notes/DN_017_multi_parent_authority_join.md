@@ -128,10 +128,11 @@ holds identically on a clean clone (`760f99c`).
 
 ## 7. Proposed next steps (in order)
 
-1. **Warnings channel.** Confirm live that a `[W-…]` diagnostic makes
-   `ParseResult.ok` false; if so add `ParseResult.warnings`, route `[W-…]`
-   strings there, and make `ok` ignore them. Prerequisite for step 2, and
-   plausibly a latent bug for the existing `[W-16b]`.
+1. **Warnings channel — done (AM-89).** Confirmed live that a `[W-…]`
+   diagnostic made `ParseResult.ok` false; `ParseResult.warnings` added,
+   `[W-…]` strings routed there by `parse()` (prefix split, `validate_spec()`
+   itself untouched), `ok` now ignores them. Prerequisite for step 2, which
+   remains open. Full detail: `docs/el_grammar_amendments.md`, AM-89.
 2. **W-16c and W-16d.** W-16c: a child that is the delegate of two or more
    Delegations, regardless of token, lists every parent (sorted) with
    delegation name and token. W-16d: the same token transferred twice to one
