@@ -91,7 +91,12 @@ from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
 # Layer 4 depends on, not the reverse. el_engine.py now owns them;
 # check_live_violations() there reuses the same logic build_kripke_model()
 # and build_kripke_from_runtime() below already relied on.
-from el_engine import ObligationDescriptor, _build_obligation_descriptors, _parse_deadline_steps
+from el_engine import (
+    ObligationDescriptor,
+    _build_obligation_descriptors,
+    _commitment_root_for_token,
+    _parse_deadline_steps,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2600,23 +2605,6 @@ def _is_standing_affiliation(principal_name: str, agent: Any) -> bool:
     return delegated_from is None or _obj_name(delegated_from) != principal_name
 
 
-def _commitment_root_for_token(spec: Any, token_name: str) -> Optional[Tuple[str, str]]:
-    """Returns (actor_name, obligation_text) for token_name's own Commitment,
-    if one exists, else None. Mirrors el_reasoner.py's `ultimate_accountability()`
-    root extraction (`root_name = _obj_name(c.actor)`) and el_engine.py's
-    `_build_obligation_descriptors()` (`obl_text = getattr(c, "obligation", ...)`)
-    — duplicated, not imported, per the established Layer 2/3/4 no-cross-import
-    convention `_find_action_for_burden`/`_is_standing_affiliation` already
-    follow (AM-52)."""
-    for c in _collect(spec, "Commitment"):
-        burden_ref = getattr(c, "burden", None)
-        if burden_ref and _obj_name(burden_ref) == token_name:
-            actor_name = _obj_name(getattr(c, "actor", None))
-            if actor_name:
-                return actor_name, c.obligation
-    return None
-
-
 def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List[str]:
     """Walk Delegation back-links to build [root, …, holder] for a token,
     then extend further back through any one-sided principal_of standing
@@ -2647,10 +2635,33 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
     no Commitment at all (fully delegation-sourced) is unaffected — the
     group match is trusted unconditionally, as before. The direct `.burden`
     match is unconditional and unaffected either way — an explicit
-    single-token reference is unambiguous, unlike group membership."""
-    # Structural principal_of edges (AM-50), built first so the token_group
-    # guard below can check delegator reachability against them.
+    single-token reference is unambiguous, unlike group membership.
+
+    AM-88b: the reachability check (a) above is a search over ALL of an
+    agent's principal_of parents, not a single pointer. Pre-fix, the
+    (a)/(b) guard chased one pointer through a single-valued
+    `structural_parent` map built with `setdefault` — when an agent had
+    TWO principal_of parents, only the first-declared one was ever
+    considered, so the guard's verdict (and therefore whether the whole
+    token_group transfer was trusted at all) silently depended on which
+    party happened to be declared first in the file. Confirmed live
+    (GuardProbe, docs/CONCEPTS_INDEX.md, AM-88): two parties each
+    principal_of the same agent, one of them the real Commitment root for
+    the token in question — the guard passed or failed purely based on
+    declaration order. `structural_parents_multi`/`_reachable()` below fix
+    this with a proper BFS over every parent; the single-valued
+    `structural_parent` map is kept, unchanged, for this function's own
+    *final chain-extension* loop below (out of scope for AM-88b — a
+    separate, narrower, first-declared-wins limitation on which principal
+    the *exported chain* itself continues through, not on whether a
+    token_group transfer is *trusted* in the first place)."""
+    # Structural principal_of edges (AM-50). Two maps, built in the same
+    # pass: `structural_parent` (single-valued, first-declared-wins, kept
+    # exactly as before AM-88b) drives the final chain-extension loop at
+    # the bottom of this function; `structural_parents_multi` (every
+    # parent) drives the AM-52 guard's reachability search below.
     structural_parent: Dict[str, str] = {}
+    structural_parents_multi: Dict[str, Set[str]] = {}
     for principal in _collect(spec, "EnterpriseObject"):
         principal_name = _obj_name(principal)
         if not principal_name:
@@ -2659,18 +2670,25 @@ def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List
             agent_name = _obj_name(agent)
             if agent_name and _is_standing_affiliation(principal_name, agent):
                 structural_parent.setdefault(agent_name, principal_name)
+                structural_parents_multi.setdefault(agent_name, set()).add(principal_name)
 
     def _reachable(descendant: str, ancestor: str) -> bool:
-        """True if ancestor == descendant, or ancestor is found by walking
-        structural_parent pointers upward from descendant."""
-        cur = descendant
-        seen = {cur}
-        while cur != ancestor and cur in structural_parent:
-            cur = structural_parent[cur]
-            if cur in seen:
-                return False
-            seen.add(cur)
-        return cur == ancestor
+        """True if ancestor == descendant, or ancestor is found by a BFS
+        over ALL of structural_parents_multi's parent edges from
+        descendant (AM-88b) — not just the first-declared one."""
+        if descendant == ancestor:
+            return True
+        seen = {descendant}
+        queue = deque([descendant])
+        while queue:
+            cur = queue.popleft()
+            for parent_name in structural_parents_multi.get(cur, ()):
+                if parent_name == ancestor:
+                    return True
+                if parent_name not in seen:
+                    seen.add(parent_name)
+                    queue.append(parent_name)
+        return False
 
     commitment_root = _commitment_root_for_token(spec, token_name)
 

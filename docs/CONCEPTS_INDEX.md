@@ -5012,10 +5012,9 @@ question, not a new transition rule.
 
 ---
 
-## AM-88 — multi-parent authority join: recon findings and engine-side fix (AM-88a)
+## AM-88 — multi-parent authority join: recon findings and fixes (AM-88a, AM-88b)
 
-**AM-88a RESOLVED (2026-09-19); the Kripke-side finding below (GuardProbe)
-remains OPEN, tracked as AM-88b.**
+**AM-88a RESOLVED (2026-09-19); AM-88b (GuardProbe) RESOLVED (2026-09-19).**
 
 **Ground truth (recon):** grepped every parseable scenario file (all of
 `scenarios/**/*.el` except the already-documented pre-existing syntax
@@ -5048,7 +5047,7 @@ in both functions, and the validator does not flag it. No scenario in the
 corpus exercises this. Future work: a validator rule (not scoped to
 AM-88).
 
-**GuardProbe — `el_kripke.py`'s AM-52 guard is itself declaration-order-dependent (OPEN, AM-88b)**
+**GuardProbe — `el_kripke.py`'s AM-52 guard is itself declaration-order-dependent (RESOLVED 2026-09-19, AM-88b)**
 
 `_delegation_chain_for_token()`'s AM-52 guard (added AM-51/52, "is this
 Delegation's `transfers_token_group` match trusted for a token that has its
@@ -5075,15 +5074,29 @@ delegation grpDel { from: AgentA to: AgentB obligation: "Handle referral onward"
 ```
 
 Verified live: `_delegation_chain_for_token(model, "burdenT", "AgentB")`
-gives `['AgentB']` (guard rejects the match — wrong) when `P1` precedes
-`P2`, and the correct `['P2', 'AgentA', 'AgentB']` when `P2` precedes `P1`.
-**Fix (planned, AM-88b):** replace the single-pointer `structural_parent`
-map used *by the guard specifically* with a multi-map (every `principal_of`
-parent per agent) and a BFS reachability search over it. The existing
-single-valued `structural_parent` map used for the function's *final
-chain-extension* loop (`parent.setdefault(agent_name, principal_name)`,
-first-declared-wins) is a separate, narrower, pre-existing limitation and
-stays exactly as-is — out of scope for AM-88 (see the next finding).
+gave `['AgentB']` (guard rejects the match — wrong) when `P1` preceded
+`P2`, and the correct `['P2', 'AgentA', 'AgentB']` when `P2` preceded `P1`,
+before this fix.
+
+**Fix (implemented, AM-88b):** the single-pointer `structural_parent` map
+used *by the guard specifically* is replaced by a new
+`structural_parents_multi` map (every `principal_of` parent per agent) and
+a BFS reachability search over it. The guard now trusts the transfer (chain
+length 3) in **both** declaration orders — verified live, both in direct
+`_delegation_chain_for_token()` calls and through hybrid mode
+(`build_kripke_from_runtime()`); regression-pinned in
+`tests/test_am88b_guard_multi_parent_reachability.py`.
+
+**Residual, deliberately NOT fixed:** the existing single-valued
+`structural_parent` map used for the function's own *final chain-extension*
+loop (`parent.setdefault(agent_name, principal_name)`, first-declared-wins)
+is unchanged — which of `P1`/`P2` the *exported chain* actually names as
+`chain[0]` still depends on declaration order (`['P1','AgentA','AgentB']`
+or `['P2','AgentA','AgentB']`). What AM-88b fixes is narrower and was the
+actual bug: *whether the transfer is trusted at all* (chain length 3 vs.
+the wrong, truncated `['AgentB']`) no longer depends on declaration order.
+This residual is a separate, narrower, pre-existing limitation — out of
+scope for AM-88 (see the next finding).
 
 **Pre-exec vs. hybrid divergence on GuardProbe (intended — recon item f, confirmed):**
 GuardProbe's `burdenT` is Commitment-rooted at `P2`, but `P2 → AgentA` is a
@@ -5093,17 +5106,21 @@ edges), so pre-exec mode's descriptor is `chain=['P2'], holder='P2'`,
 **unchanged by AM-88a** (this is the pre-existing, already-logged
 "engine doesn't extend through `principal_of`" limitation, not a new gap).
 Verified live in hybrid mode (`build_kripke_from_runtime()`, `burdenT`
-granted directly to `AgentB`): `holder` is always `'AgentB'` (hybrid mode
-always takes the live token holder, by design — intended, not a bug), but
-`chain` is `['AgentB']` or `['P2','AgentA','AgentB']` depending on
-declaration order — i.e. **GuardProbe's chain divergence between pre-exec
-and hybrid mode is the intended `principal_of`-extension difference (recon
-item f); the order-*dependence* of hybrid's own chain is the separate,
-open AM-88b bug above.** `tests/test_am88a_multi_parent_tracing.py`
-therefore treats GuardProbe as a Kripke-only order-independence regression
-(once AM-88b lands), not an engine/Kripke parity case — asserting engine
-chain equals Kripke chain here would fail for the unrelated, already-known
-`principal_of`-extension reason, not the bug either amendment targets.
+granted directly to `AgentB`), both before and after AM-88b: `holder` is
+always `'AgentB'` (hybrid mode always takes the live token holder, by
+design — intended, not a bug); `chain` was `['AgentB']` or
+`['P2','AgentA','AgentB']` depending on declaration order pre-AM-88b, and
+is now always length 3 (`['P1'or'P2','AgentA','AgentB']`) post-AM-88b — i.e.
+**GuardProbe's chain divergence between pre-exec and hybrid mode is the
+intended `principal_of`-extension difference (recon item f); the
+order-*dependence* of whether hybrid's chain extends at all was the
+AM-88b bug, now fixed; which of P1/P2 it names remains the separate
+residual noted above.** `tests/test_am88a_multi_parent_tracing.py` treats
+GuardProbe as a Kripke-only regression, not an engine/Kripke parity case —
+asserting engine chain equals Kripke chain here would fail for the
+unrelated, already-known `principal_of`-extension reason, not a bug either
+amendment targets. `tests/test_am88b_guard_multi_parent_reachability.py`
+covers the hybrid-mode check directly.
 
 **Repro 1 parity criterion, stated precisely (recon item 5 correction):**
 "no `principal_of` involved" is the wrong criterion — Repro 1's spec
@@ -5140,9 +5157,9 @@ AM-81's separate per-burden index, which does gate real T4 revocation and
 was already correct). AM-88a's fix to these two fields corrects stored data
 with no behavioural effect on any code path today.
 
-**Files:** `docs/el_grammar_amendments.md`, AM-88a (engine fix, complete)
-and AM-88b (Kripke guard fix, planned). `tests/test_am88a_multi_parent_tracing.py`
-covers everything AM-88a-resolved above; GuardProbe's own regression test
-lands with AM-88b.
+**Files:** `docs/el_grammar_amendments.md`, AM-88a and AM-88b (both
+complete). `tests/test_am88a_multi_parent_tracing.py` covers everything
+AM-88a-resolved above; `tests/test_am88b_guard_multi_parent_reachability.py`
+covers GuardProbe.
 
 ---

@@ -6076,3 +6076,90 @@ new; `del_graph` tuple shape; `walk_chain()` signature and matching logic;
 simplified); new `tests/test_am88a_multi_parent_tracing.py`; new
 `tests/fixtures/am88a_obligation_descriptors_snapshot.json`; this file (new
 entry); `docs/CONCEPTS_INDEX.md` (new AM-88 findings section).
+
+---
+
+## AM-88b (2026-09-19) — Multi-parent tracing, verifier side: `_delegation_chain_for_token()`'s AM-52 guard becomes a multi-parent search (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-19). Completes AM-88 (engine side: AM-88a).
+
+**Problem:** `_delegation_chain_for_token()`'s AM-52 guard — "is this
+Delegation's delegator reachable from the token's Commitment actor via
+`principal_of` structural edges?" — chased a single pointer through
+`structural_parent`, a dict built with `setdefault` (first-declared parent
+wins). When one agent had **two** `principal_of` parents, only the
+first-declared one was ever considered for the reachability check, so
+whether the guard trusted a `transfers_token_group` match at all — and
+therefore whether the chain extended past that agent — silently depended
+on declaration order.
+
+**Repro (GuardProbe, see `tests/test_am88b_guard_multi_parent_reachability.py`):**
+`P1`/`P2` are both `principal_of AgentA`; only `P2` has the `Commitment`
+for `burdenT`, transferred onward from `AgentA` to `AgentB` via
+`transfers_token_group`. Pre-fix: `_delegation_chain_for_token(model,
+"burdenT", "AgentB")` gave `['AgentB']` (guard wrongly rejected the
+transfer) when `P1` was declared before `P2`, and the correct
+`['P2', 'AgentA', 'AgentB']` when declared the other way round — verified
+live in both pre-exec-style direct calls and hybrid mode
+(`build_kripke_from_runtime()`).
+
+**What changed** (`toolchain/el_kripke.py`):
+- `_commitment_root_for_token()`'s local copy deleted; imports AM-88a's
+  version from `el_engine.py` instead (`el_kripke.py`'s import line at the
+  top of the file). No behavioural change — the two copies were already
+  identical modulo idiom.
+- `_is_standing_affiliation()` does **not** move — `el_engine.py` has no
+  caller for it (its own `walk_chain()` never crosses `principal_of` edges
+  at all; see AM-88a), so relocating unused code buys nothing. It stays in
+  `el_kripke.py`, unchanged. `el_reasoner.py`'s independent, pre-existing
+  twin of the same name is also untouched — `docs/CONCEPTS_INDEX.md`
+  records why unifying it isn't in scope here (nothing in the toolchain
+  imports `el_reasoner.py` today except tests, so there's no cycle
+  motivating it).
+- `_delegation_chain_for_token()` now builds **two** structural-parent
+  maps from the same `principal_of` scan, where it previously built one:
+  the pre-existing single-valued `structural_parent` (`setdefault`,
+  first-declared-wins) is kept **exactly as before**, still driving this
+  function's own *final chain-extension* loop at the bottom (deliberately
+  out of scope — see below); a new `structural_parents_multi: Dict[str,
+  Set[str]]` records **every** `principal_of` parent per agent. The
+  guard's local `_reachable()` closure is rewritten from a single-pointer
+  chase over `structural_parent` to a BFS over `structural_parents_multi`
+  — this is the actual fix.
+
+**Deliberately NOT fixed, logged instead (`docs/CONCEPTS_INDEX.md`):** which
+of an agent's multiple `principal_of` parents the function's *exported
+chain* itself continues through (the final `parent.setdefault(agent_name,
+principal_name)` loop, using the untouched single-valued
+`structural_parent` map) is a separate, narrower, still-order-dependent
+question — GuardProbe's own chain is `['P1', 'AgentA', 'AgentB']` or
+`['P2', 'AgentA', 'AgentB']` depending on which party is declared first,
+even after this fix. What AM-88b fixes is *whether the transfer is trusted
+at all* (chain length 3 vs. the wrong, truncated length-1 `['AgentB']`) —
+that no longer depends on declaration order in either case.
+
+**Standard reference(s):** same as AM-88a — §6.4.1/§7.8.7, §7.10.1
+(`principal_of` structural affiliation).
+
+**Empirical verification:** byte-identical regression via
+`_delegation_chain_for_token()`'s output for every `(scenario, token)` pair
+that has an `ObligationDescriptor`, compared against a pre-fix snapshot
+(`tests/fixtures/am88b_delegation_chain_for_token_snapshot.json`, 37 pairs
+across 12 files with at least one descriptor) — zero diffs, confirming no
+existing scenario exercises the two-`principal_of`-parents case. New
+`tests/test_am88b_guard_multi_parent_reachability.py` (6 tests: the
+snapshot check; GuardProbe's guard-trust order-independence in both
+declaration orders; a direct positive check of the fully correct chain
+when the real root is declared first; and the same order-independence
+check reached through hybrid mode, `build_kripke_from_runtime()`). Full
+suite: 418 passed, 1 xfailed (412/1 AM-88a baseline + 6 new, zero
+regressions).
+
+**Files changed:** `toolchain/el_kripke.py` (`_commitment_root_for_token()`
+local copy deleted, imported from `el_engine.py` instead;
+`_delegation_chain_for_token()` gains `structural_parents_multi` and a BFS
+`_reachable()`, `structural_parent`/its final-extension loop unchanged);
+new `tests/test_am88b_guard_multi_parent_reachability.py`; new
+`tests/fixtures/am88b_delegation_chain_for_token_snapshot.json`; this file
+(new entry); `docs/CONCEPTS_INDEX.md` (GuardProbe finding: OPEN →
+RESOLVED).

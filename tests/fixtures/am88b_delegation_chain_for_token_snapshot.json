@@ -1,0 +1,146 @@
+{
+  "scenarios/consent/consent_scenario.el": {
+    "reportingObligation": [
+      "GPPracticeParty"
+    ],
+    "seekConsentObligation": [
+      "GPPracticeParty",
+      "SpecialistAgent",
+      "AIDiagnosticAgent"
+    ]
+  },
+  "scenarios/consent/federation_consent_scenario.el": {
+    "seekConsentObligation": [
+      "GPPracticeParty"
+    ]
+  },
+  "scenarios/erequesting_claiming/erequesting_claiming_scenario.el": {
+    "providerAClaimBurden": [
+      "DiagnosticProviderA"
+    ],
+    "providerBClaimBurden": [
+      "DiagnosticProviderB"
+    ]
+  },
+  "scenarios/fhir/generated_governance.el": {
+    "ReferralSr001Obligation": [
+      "GpPractice001",
+      "SpecialistDrOkonkwo",
+      "AiDiagnosticAgent001"
+    ]
+  },
+  "scenarios/gp_referral/gp_referral_scenario.el": {
+    "assessmentSchedulingBurden": [
+      "SpecialistParty"
+    ],
+    "clinicalHandoverBurden": [
+      "GPPracticeParty"
+    ],
+    "escalationNoticeBurden": [
+      "SpecialistParty"
+    ],
+    "referralInitiationBurden": [
+      "GPPracticeParty"
+    ],
+    "referralResponseBurden": [
+      "GPPracticeParty",
+      "SpecialistClinician"
+    ]
+  },
+  "scenarios/industrial_procedure/industrial_procedure_scenario.el": {
+    "compressorStartOblig": [
+      "PlantOperations",
+      "FieldOperatorAgent"
+    ],
+    "pressureCheckObligation": [
+      "PlantOperations",
+      "FieldOperatorAgent"
+    ],
+    "pressureInterlockTrip": [
+      "SafetyInterlockSystem"
+    ]
+  },
+  "scenarios/industrial_procedure/sop_4471_generated.el": {
+    "compressorStartObligation": [
+      "FieldOperator"
+    ],
+    "pressureCheckObligation": [
+      "FieldOperator"
+    ],
+    "pressureInterlockTripObligation": [
+      "SafetyInterlockSystem"
+    ]
+  },
+  "scenarios/industrial_procedure/sop_4471_generated_EMBARGO_CONFLICT_TEST.el": {
+    "compressorStartObligation": [
+      "FieldOperator"
+    ],
+    "pressureCheckObligation": [
+      "FieldOperator"
+    ],
+    "pressureInterlockTripObligation": [
+      "SafetyInterlockSystem"
+    ]
+  },
+  "scenarios/industrial_procedure/sop_4471_generated_MISMATCH_TEST.el": {
+    "compressorStartObligation": [
+      "FieldOperator"
+    ],
+    "pressureCheckObligation": [
+      "FieldOperator"
+    ],
+    "pressureInterlockTripObligation": [
+      "SafetyInterlockSystem"
+    ]
+  },
+  "scenarios/probes/transfer_probe.el": {
+    "ambiguousFromBurden": [
+      "ActorA"
+    ],
+    "noFromRoleBurden": [
+      "ActorA"
+    ],
+    "probeBurden": [
+      "ActorA"
+    ],
+    "strictBurden": [
+      "ActorA"
+    ],
+    "unfilledToBurden": [
+      "ActorA"
+    ]
+  },
+  "scenarios/referral/referral_scenario.el": {
+    "aiExaminationBurden": [
+      "SpecialistPractice",
+      "SpecialistClinician",
+      "SpecialistAIAgent"
+    ],
+    "assessmentSchedulingBurden": [
+      "SpecialistPractice"
+    ],
+    "clinicalHandoverBurden": [
+      "GPPractice"
+    ],
+    "escalationNoticeBurden": [
+      "SpecialistPractice"
+    ],
+    "referralInitiationBurden": [
+      "GPPractice"
+    ],
+    "referralResponseBurden": [
+      "GPPractice"
+    ],
+    "reviewNonResponseAndDetermineNextStepsBurden": [
+      "GPPractice"
+    ]
+  },
+  "scenarios/specialist_pool/specialist_pool_scenario.el": {
+    "specialistAResponseBurden": [
+      "SpecialistOnCallA"
+    ],
+    "specialistBResponseBurden": [
+      "SpecialistOnCallB"
+    ]
+  }
+}
