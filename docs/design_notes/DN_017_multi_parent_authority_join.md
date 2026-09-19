@@ -104,6 +104,13 @@ Tests: `tests/test_am88a_multi_parent_tracing.py`,
 in `tests/fixtures/`. Full detail: `docs/el_grammar_amendments.md`,
 `docs/CONCEPTS_INDEX.md`.
 
+Portability note: the gate above ran over 37 descriptors/chain pairs
+including 12 from four local-only `scenarios/industrial_procedure/` files
+(untracked, excluded via local `.git/info/exclude`); the pinned public
+snapshot fixtures cover the 25 from tracked scenarios, and the tests
+iterate the snapshot's own file list rather than a local glob so the gate
+holds identically on a clean clone (`760f99c`).
+
 ## 6. Logged, not fixed
 
 - More than one structurally matching delegation for one token from one node

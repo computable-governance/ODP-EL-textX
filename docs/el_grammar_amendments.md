@@ -6057,7 +6057,7 @@ could read in the future; it changes no runtime behaviour today.
 **Empirical verification:** byte-identical regression via
 `dataclasses.asdict()` against a snapshot of the pre-fix code's output over
 every parseable scenario file (`tests/fixtures/am88a_obligation_descriptors_snapshot.json`,
-37 descriptors across 14 files — `scenarios/ecommerce/ecommerce_scenario.el`
+37 descriptors across 14 files at authoring time — `scenarios/ecommerce/ecommerce_scenario.el`
 excluded, pre-existing syntax error, unrelated) — zero diffs, confirming
 this is a pure bug fix with no behavioural change to any existing scenario.
 New `tests/test_am88a_multi_parent_tracing.py` (19 tests: the snapshot
@@ -6069,6 +6069,16 @@ via `transfers_token_group`; the both-fields-Delegation fallthrough probe
 (also an engine/Kripke parity check); and the `gp_referral_scenario.el`
 guard-case pin). Full suite: 412 passed, 1 xfailed (393/1 baseline + 19
 new, zero regressions).
+
+**Portability note (added after a clean-clone failure was reported):** the
+37-descriptor gate above included 12 descriptors from four scenario files
+under `scenarios/industrial_procedure/` that are untracked/local-only
+(excluded via a local `.git/info/exclude` entry, never pushed) — a public
+clone only has the 25 descriptors from tracked scenarios. The snapshot
+fixture and the test that reads it were fixed to iterate the snapshot's
+own file list rather than a local glob, so the pinned gate now covers
+exactly those 25 tracked-scenario descriptors regardless of what else
+exists in a given checkout; see the follow-up fix commit for detail.
 
 **Files changed:** `toolchain/el_engine.py` (`_commitment_root_for_token()`
 new; `del_graph` tuple shape; `walk_chain()` signature and matching logic;
