@@ -91,7 +91,11 @@ def test_repro1_produces_exactly_one_w16c_with_both_parents_and_permit_line():
 def test_repro1_order_invariant_across_all_permutations():
     """Delegations AND the Authorization, in every declaration order —
     identical warning string every time (deterministic sort inside both
-    parents_of() and the message builder, not declaration order)."""
+    parents_of() and the message builder, not declaration order). Only one
+    Authorization here, so this alone doesn't exercise sort order across
+    multiple Authorizations — see
+    test_order_invariant_across_all_permutations_with_two_authorizations
+    below for that."""
     seen = set()
     for order in itertools.permutations(_REPRO1_PARTS.keys()):
         result = parse_string(_repro1_spec(order), validate=True)
@@ -99,6 +103,65 @@ def test_repro1_order_invariant_across_all_permutations():
         assert len(w16c) == 1, order
         seen.add(w16c[0])
     assert seen == {_REPRO1_EXPECTED_W16C}
+
+
+_TWO_AUTH_PARTS = {
+    "finDel": 'delegation finDel { from: FinanceParty to: SettlementAgent '
+              'obligation: "Settle payments" transfers_burden: settleBurdenA }',
+    "legDel": 'delegation legDel { from: LegalParty to: SettlementAgent '
+              'obligation: "Settle payments" transfers_burden: settleBurdenB }',
+    "authFin": 'authorization authFin { authority: FinanceParty to_agent: SettlementAgent '
+               "grants_permit: facilitatePermit }",
+    "authThird": 'authorization authThird { authority: ThirdAuthority to_agent: SettlementAgent '
+                 "grants_permit: facilitatePermit2 }",
+}
+
+_TWO_AUTH_EXPECTED_W16C = (
+    "[W-16c] Agent 'SettlementAgent' has 2 parents: "
+    "FinanceParty (finDel -> settleBurdenA), LegalParty (legDel -> settleBurdenB). "
+    "Principals are collectively responsible (§7.10.1). "
+    "If these parents' authorities overlap, how they combine is application-defined; "
+    "the toolchain does not compose them. "
+    "Permits granted to 'SettlementAgent' (authority sources, not necessarily principals): "
+    "authFin (FinanceParty: facilitatePermit), authThird (ThirdAuthority: facilitatePermit2). "
+    "See el_reasoner.parents_of(model, 'SettlementAgent')."
+)
+
+
+def _two_auth_spec(parts_order):
+    body = "\n".join(_TWO_AUTH_PARTS[k] for k in parts_order)
+    return f"""
+enterprise specification TwoAuthOrderProbe
+party FinanceParty {{ principal_of SettlementAgent }}
+party LegalParty {{ principal_of SettlementAgent }}
+party ThirdAuthority
+agent SettlementAgent
+
+permit facilitatePermit {{ state: active }}
+permit facilitatePermit2 {{ state: active }}
+burden settleBurdenA {{ state: active }}
+burden settleBurdenB {{ state: active }}
+
+commitment cA {{ by: FinanceParty obligation: "Settle payments" creates_burden: settleBurdenA }}
+commitment cB {{ by: LegalParty obligation: "Settle payments" creates_burden: settleBurdenB }}
+
+{body}
+"""
+
+
+def test_order_invariant_across_all_permutations_with_two_authorizations():
+    """Two Delegations AND two Authorizations, all 24 permutations of
+    declaration order — identical warning string every time. Unlike the
+    single-Authorization test above, this actually exercises
+    parents_of()'s CoGrantedAuthorization sort (by authorization_name),
+    not just a trivially-order-invariant one-element list."""
+    seen = set()
+    for order in itertools.permutations(_TWO_AUTH_PARTS.keys()):
+        result = parse_string(_two_auth_spec(order), validate=True)
+        w16c = [w for w in result.warnings if w.startswith("[W-16c]")]
+        assert len(w16c) == 1, order
+        seen.add(w16c[0])
+    assert seen == {_TWO_AUTH_EXPECTED_W16C}
 
 
 # ── Negatives ────────────────────────────────────────────────────────────
