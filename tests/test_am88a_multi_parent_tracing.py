@@ -343,11 +343,17 @@ def test_both_fields_delegation_falls_through_to_group_for_other_member():
     walk correctly falls through to the group check after the burden field
     fails to match it, the guard trusts it unconditionally.
 
-    Pre-fix (checking burden_name is not None and stopping there
-    regardless of match, never falling through to check group_tokens at
-    all): both tokens' chains stayed at ['RootParty'] — confirmed by
-    running this exact probe against the pre-fix code. Fixed: both extend
-    onto DelegateAgent, matching el_kripke.py's
+    Under the very first, pre-AM-88a text-only walk_chain(), obligation
+    text alone decided every match ("Handle the direct matter" vs. "Handle
+    onward" share no substring), so both tokens' chains stayed at
+    ['RootParty'] — confirmed by running this exact probe against that
+    code. Under the intermediate, since-corrected version reviewed and
+    approved as part of AM-88a's own review round (checking burden_name is
+    not None and stopping there regardless of match, never falling through
+    to check group_tokens at all), directBurden already extended correctly
+    (its own burden field matches directly) but groupOnlyBurden stayed
+    truncated at ['RootParty'] — the specific gap this test pins. Fixed:
+    both extend onto DelegateAgent, matching el_kripke.py's
     _delegation_chain_for_token() exactly."""
     result = parse_string(_BOTH_FIELDS_PROBE, validate=False)
     assert result.ok, result.errors
