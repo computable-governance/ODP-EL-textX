@@ -2337,6 +2337,27 @@ def extract_encounter_context(bundle: dict) -> EncounterContext:
     )
 
 
+def _print_parse_report(el_path: str) -> None:
+    """Parse el_path and print a human-readable success/warning/error
+    report. Extracted from the CLI block below (AM-89) so it can be
+    unit-tested directly against a hand-written .el file — the mapper's
+    own generated output never contains a 'satisfaction:' clause, so it
+    can never exercise a "[W-" validator warning through the normal
+    bundle-mapping pipeline this CLI otherwise runs."""
+    import sys
+    from el_parser import parse
+    result = parse(el_path)
+    for w in result.warnings:  # AM-89: advisory only, printed regardless of .ok
+        print(w, file=sys.stderr)
+    if result.ok:
+        print(f"✓ Parsed successfully: {result.model.name}")
+        print(f"  Elements : {len(result.model.elements)}")
+    else:
+        print("✗ Parse errors:")
+        for e in result.errors:
+            print(f"  {e}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CLI entry point
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2360,15 +2381,7 @@ if __name__ == "__main__":
     # Validate by parsing
     try:
         sys.path.insert(0, ".")
-        from el_parser import parse
-        result = parse(output_file)
-        if result.ok:
-            print(f"✓ Parsed successfully: {result.model.name}")
-            print(f"  Elements : {len(result.model.elements)}")
-        else:
-            print("✗ Parse errors:")
-            for e in result.errors:
-                print(f"  {e}")
+        _print_parse_report(output_file)
     except ImportError:
         print("  (el_parser not available — skipping parse validation)")
     except Exception as e:

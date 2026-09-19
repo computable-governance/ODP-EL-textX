@@ -5186,3 +5186,39 @@ covers the final chain-extension root choice, including the still-open
 no-Commitment residual.
 
 ---
+
+## AM-89 — the validator now has a warnings channel; no API/UI validation surface exists to route it to
+
+**RESOLVED (2026-09-19).**
+
+`ParseResult.warnings` (`toolchain/el_parser.py`) now exists alongside
+`.errors`: `parse()` partitions `validate_spec()`'s single flat message
+list by the pre-existing `"[W-"` prefix convention (only `[W-16b]`,
+singleton `SatisfactionCondition`, exists today), so a spec triggering
+only an advisory warning is `.ok` again — previously it was not, because
+every validator message, error or warning, landed in `.errors` and `.ok`
+was `len(self.errors) == 0`. `validate_spec()` itself is unchanged. Full
+detail: `docs/el_grammar_amendments.md`, AM-89.
+
+**Where a spec author actually sees a warning today:** nowhere
+automatically beyond the two toolchain CLIs. Recon confirmed `el_api.py`
+never calls `validate_spec()` at all — every one of its 5 `parse()` calls
+uses `validate=False` (its 4 hardcoded scenario-runtime builders plus the
+`/kripke` spec-mode branch) — and no HTTP endpoint returns validation
+messages to a caller; there is no "submit/validate a spec" surface in the
+running API or any UI. The only places a warning is actually printed
+anywhere are `el_reasoner.py`'s and `fhir_mapper.py`'s `__main__` CLIs
+(both now print `result.warnings` to stderr, unconditionally, before the
+`.ok` check) and, for anyone calling `parse()`/`parse_string()` directly
+(every test in the suite, any future tooling), reading `.warnings` off the
+returned `ParseResult` themselves. If a future user-facing validate
+surface is ever added to `el_api.py`, it will need its own decision about
+whether/how to display `.warnings` — this amendment only opens the
+channel, it doesn't wire one up anywhere new.
+
+**Out of scope, not touched:** W-16c and W-16d (the planned multi-parent
+authority join follow-on warnings — the first rules that would actually
+populate this channel with a second message beyond `[W-16b]`), V-08's own
+order-dependence, and any strict/warnings-as-errors mode.
+
+---

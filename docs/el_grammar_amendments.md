@@ -6239,3 +6239,102 @@ xfailed (418/1 AM-88b baseline + 6 new, zero regressions).
 entry's "Deliberately NOT fixed" note updated to cross-reference this
 entry; new AM-88c entry); `docs/CONCEPTS_INDEX.md` (residual: RESOLVED for
 Commitment-rooted tokens, OPEN for tokens without one).
+
+---
+
+## AM-89 (2026-09-19) — validator warnings channel: `ParseResult.warnings` (`toolchain/el_parser.py`)
+
+**Status:** IMPLEMENTED (2026-09-19).
+
+**Problem:** `el_validator.validate_spec()` returns one flat `List[str]`
+mixing genuine errors (`[V-...]`/`[V-NEW-...]`) and advisory warnings
+(`[W-...]` — today, only `[W-16b]`, singleton `SatisfactionCondition`,
+AM-29). `el_parser.parse()` extended `ParseResult.errors` with that entire
+list, and `ParseResult.ok` was `len(self.errors) == 0` — so a spec
+triggering only a warning, with zero genuine errors, still made `.ok`
+`False`. Confirmed live: a `Community` whose `Objective` declares
+`satisfaction: all_discharged(singleToken)` (no `TokenGroup` needed —
+grammar's inline form) produces exactly one `[W-16b]` message and nothing
+else; `parse()` on it pre-fix returned `ok=False`, `errors=["[W-16b] ..."]`,
+with `.model` still populated (validation happens after `result.model` is
+set, so the model itself was never discarded — only `.ok` was wrong).
+
+Every consumer that gates on `.ok` would refuse that spec: 134 test-suite
+call sites of the `assert result.ok, result.errors` pattern (115 of the
+suite's 158 total `parse()`/`parse_string()` call sites actually run the
+validator, explicitly or via the `validate=True` default), plus
+`el_reasoner.py`'s and `fhir_mapper.py`'s CLI entry points (both parse with
+the default `validate=True`). Recon confirmed no tracked scenario triggers
+this today (scanned all 11 tracked `.el` files with `validate=True`, zero
+`[W-` output) — the bug was entirely latent, not yet a live regression, but
+a future warning-producing rule (a planned multi-parent-authority-join
+warning is out of scope for this amendment) would hit it immediately.
+`el_api.py` is unaffected either way: all 5 of its `parse()` calls already
+pass `validate=False`, so `validate_spec()` never runs there regardless of
+this fix — recon confirmed no HTTP endpoint surfaces validation messages
+to a caller today either.
+
+**What changed** (`toolchain/el_parser.py`):
+- `ParseResult` gains `warnings: List[str] = field(default_factory=list)`.
+  Confirmed before adding it: exactly one construction site exists in the
+  whole codebase (`el_parser.py`'s own `parse()`, no-arg `ParseResult()`),
+  so the new defaulted field breaks nothing.
+- `parse()`'s validation step now partitions `validate_spec()`'s return by
+  the existing `"[W-"` prefix — `.errors` gets everything else, `.warnings`
+  gets the rest. `validate_spec()` itself is **completely unchanged**: same
+  signature, same flat `List[str]` return, same ~17 internal rule
+  functions, zero edits to `el_validator.py`. `.ok` needed no code change —
+  it was already `len(self.errors) == 0`; warnings are simply never placed
+  there.
+- Routing choice (prefix vs. a structured severity field on every rule
+  function's return): prefix, because it keeps `validate_spec()`'s
+  contract untouched and matches the convention `el_parser.py` already
+  uses for `[SYNTAX]`/`[SEMANTIC]`/`[PARSE ERROR]` — a structured-severity
+  refactor would touch every rule function in `el_validator.py` for no
+  benefit this amendment needs.
+
+**What changed** (the two CLI entry points that parse with `validate=True`
+by default): `el_reasoner.py`'s and `fhir_mapper.py`'s `__main__` blocks
+now print `result.warnings` to stderr, unconditionally, before checking
+`.ok` — a warning-only spec is both reported and no longer aborted.
+`fhir_mapper.py`'s validate-and-report step was extracted into a new
+module-level `_print_parse_report(el_path)` function (identical logic,
+now callable in isolation) purely so it's unit-testable directly: the
+mapper's own generated output never contains a `satisfaction:` clause, so
+it can never exercise a `[W-` warning through the normal bundle-mapping
+pipeline — testing the fix required parsing a hand-written probe file
+directly rather than running the full FHIR pipeline. `el_reasoner.py`
+needed no such extraction — its `--policy-conflicts` CLI mode is already a
+clean, deterministic subprocess target.
+
+**Standard reference(s):** none — this is tooling/diagnostics
+infrastructure, not a grammar or accountability-semantics change; no ISO
+clause governs how a toolchain reports its own validation messages.
+
+**Empirical verification:** full suite 433 passed, 1 xfailed (424/1
+baseline + 9 new, zero regressions), reproduced identically on a clean
+`git worktree add` checkout with the diff applied (not just the normal
+working tree — the AM-88 portability lesson). New
+`tests/test_am89_warnings_channel.py` (9 tests): a warning-only spec is
+`ok` with the warning isolated in `.warnings`; a genuine error alongside
+the same warning splits correctly into `.errors`/`.warnings` with no
+cross-contamination; `validate_spec()` called directly still returns the
+old unsplit flat list (pins that the split is `parse()`-only); a
+warning-only spec loads through `Runtime.build_from_spec()` (the actual
+`validate=True`-by-default entry point a spec author's tooling goes
+through — not an `el_api.py` path, since none of `el_api.py`'s `parse()`
+calls validate); the two named, tracked reference scenarios
+(`referral_scenario.el`, `consent_scenario.el` — no glob, so this can never
+depend on a local-only file) produce zero warnings; both CLI fixes,
+verified via subprocess (`el_reasoner.py`) and direct call with `capsys`
+(`fhir_mapper.py`'s extracted function) for both the warning-only case
+(stderr has the warning, exit/success unaffected) and a genuine-error case
+(still reported, still fails, to guard against the fix accidentally
+swallowing real errors).
+
+**Files changed:** `toolchain/el_parser.py` (`ParseResult.warnings`,
+`parse()`'s partitioning, docstring); `toolchain/el_reasoner.py` (`__main__`
+prints warnings); `toolchain/fhir_mapper.py` (`_print_parse_report()`
+extracted, prints warnings); new `tests/test_am89_warnings_channel.py`;
+this file (new entry); `docs/CONCEPTS_INDEX.md` (new note: warnings channel
+exists; no API/UI validation surface exists to update).

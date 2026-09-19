@@ -917,6 +917,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     result = parse(sys.argv[1])
+    for w in result.warnings:  # AM-89: advisory only, printed regardless of .ok
+        print(w, file=sys.stderr)
     if not result.ok:
         for e in result.errors:
             print(e)

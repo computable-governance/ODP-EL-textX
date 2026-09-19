@@ -13,6 +13,8 @@ Usage
     result = parse("my_spec.el")
     if result.ok:
         spec = result.model
+        for warning in result.warnings:   # advisory only; does not affect .ok
+            print(warning)
     else:
         for err in result.errors:
             print(err)
@@ -53,9 +55,21 @@ GRAMMAR_PATH = _HERE.parent / "grammar" / "v2" / "el_grammar.tx"
 
 @dataclass
 class ParseResult:
-    """Holds a parsed model or a list of error strings."""
+    """Holds a parsed model, a list of error strings, and a list of
+    advisory warning strings.
+
+    AM-89: warnings (validator messages prefixed "[W-", e.g. "[W-16b]")
+    never affect .ok and are never mixed into .errors — see parse()'s
+    validation step below for where the split happens. Before this
+    amendment, a spec with only a warning and no genuine error still made
+    .ok False, which is wrong: every consumer that gates on .ok (this
+    module's own __main__, el_reasoner.py's and fhir_mapper.py's CLIs, and
+    134 test-suite call sites of the "assert result.ok, result.errors"
+    pattern) would refuse a spec that actually loaded and validated fine
+    apart from an advisory note."""
     model: Optional[Any] = None
     errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -386,8 +400,15 @@ def parse(source: str | Path, *, validate: bool = True) -> ParseResult:
 
     if validate:
         from el_validator import validate_spec
-        semantic_errors = validate_spec(model)
-        result.errors.extend(semantic_errors)
+        semantic_messages = validate_spec(model)
+        # AM-89: validate_spec() itself is untouched — it still returns one
+        # flat list mixing "[V-...]"/"[V-NEW-...]" errors with "[W-...]"
+        # warnings, same as always. The split into result.errors vs.
+        # result.warnings happens here, and only here, by prefix — the
+        # same "[W-" convention _validate_satisfaction_singleton() (V-16b)
+        # already used before any caller actually honoured it.
+        result.errors.extend(m for m in semantic_messages if not m.startswith("[W-"))
+        result.warnings.extend(m for m in semantic_messages if m.startswith("[W-"))
 
     return result
 
