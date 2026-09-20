@@ -1,17 +1,18 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b, AM-88c, AM-89, AM-90, AM-91 and AM-92
-implemented, committed, and pushed. AM-93 implemented and committed
-locally, pending push at time of writing. §7 steps 1, 2, 3, 4, 5 and 7
-done; step 6 remains proposed.
+**Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-93 implemented,
+committed, and pushed. AM-94 implemented and committed locally, pending
+push at time of writing. §7 steps 1 through 7 done.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
 — fallback, AM-91), `toolchain/el_validator.py` (V-08 — token-aware,
-AM-92; W-16c, W-16d — AM-90; W-16e — AM-91; future V-J1),
+AM-92; W-16c, W-16d — AM-90; W-16e — AM-91; W-16f, the V-J1 permit-side
+warning — AM-94),
 `toolchain/el_parser.py` (`ParseResult` — `.warnings`, AM-89),
 `toolchain/el_reasoner.py` (`parents_of()` — AM-90; `standing_parents_of()`
-— AM-91; `delegation_graph()` — reused by AM-92), grammar rules
+— AM-91; `permit_omissions()` — AM-94; `delegation_graph()` — reused by
+AM-92), grammar rules
 `EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`.
 **Found:** design session 2026-09-19, prompted by an external enquiry about
 delegation graphs in which one child has more than one incoming parent.
@@ -112,6 +113,7 @@ by live probes:
 | AM-91 (`f445ae3`) | reasoner + validator + verifier | `el_reasoner.standing_parents_of()` (shared query); `[W-16e]` standing-`principal_of` multi-parent notice; `_delegation_chain_for_token()`'s no-Commitment fallback becomes `sorted(candidates)[0]` | one real corpus hit (`federation_consent_scenario.el`, true positive, pinned); byte-identical on the 25-pair public snapshot; order-invariant and message/behaviour-parity tested; suite 448 → 461 |
 | AM-92 (`85c3de2`) | validator | V-08 becomes token-aware (S1) with an order-independent conservative fallback (S2); `_find_parent_delegation()` deleted | zero diffs on tracked corpus (old vs. new); order-invariant across all permutations of a multi-error spec; suite 461 → 475 |
 | AM-93 (`ae01801`) | grammar + parser + reasoner + verifier | `ObjectBody` takes `(delegated_from+=DelegatedFrom)*`; the model keeps a `List[DelegatedFrom]`; both `_is_standing_affiliation` twins use set membership (order-independent, duplicates accepted) | errors/warnings of the three named scenarios byte-identical; twins parity-tested over a 40-agent truth table, plus two mutation checks; FHIR mapper output byte-identical (golden test); suite 475 → 492 |
+| AM-94 (`995ed66`) | reasoner + validator | `[W-16f]`: an Action requires part of a permit set co-granted to one target (normalized non-empty `domain_scope`, >=2 distinct authorities) and leaves an authority unconsulted (authority-based); three read-only `el_reasoner` queries, message built from `permit_omissions()`; role Action bodies only (ConditionalAction excluded, §6) | corpus byte-identical, zero hits (3 Authorizations, no co-granted set); order-invariant across all permutations; query/message equality and verifier-index parity tested; suite 492 → 514 |
 
 Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am88b_guard_multi_parent_reachability.py`,
@@ -120,7 +122,8 @@ Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am90_multi_parent_warnings.py`,
 `tests/test_am91_standing_parent_warnings.py`,
 `tests/test_am92_v08_token_aware.py`,
-`tests/test_am93_delegated_from_list.py`, plus two snapshot fixtures
+`tests/test_am93_delegated_from_list.py`,
+`tests/test_am94_partial_permit_requirement.py`, plus two snapshot fixtures
 in `tests/fixtures/`. Full detail: `docs/el_grammar_amendments.md`,
 `docs/CONCEPTS_INDEX.md`.
 
@@ -153,6 +156,16 @@ holds identically on a clean clone (`760f99c`).
   and an undeclared `Customer`; it is not a corpus member for any check in
   this series and no test loads it. Archive-vs-rewrite is an open item in
   `docs/CONCEPTS_INDEX.md`.
+- `ConditionalAction.requires_permits` is set by the parser and read by
+  nothing, so a `requires_permit` on a ConditionalAction gates nothing.
+  The three loops that would consume ConditionalAction data
+  (`el_engine.py:898`, `el_kripke.py:503`, `el_kripke.py:1603`) iterate
+  `action.conditional_actions`, a field that exists only on `Role`, so they
+  never run (and would read `favoured_by`/`inhibited_by`, not
+  `requires_permits`, if they did). `[W-16f]` (AM-94) therefore covers role
+  Action bodies only: advising "add the missing requires_permit" would
+  change nothing on a ConditionalAction. Logged, not fixed; open finding in
+  `docs/CONCEPTS_INDEX.md`.
 - Pre-exec and hybrid verifier modes differ on `principal_of`-rooted tokens
   (the engine does not extend through `principal_of`); pre-existing.
 - Descriptor `sub_delegation_allowed`/`revocable` have no control-flow
@@ -160,7 +173,7 @@ holds identically on a clean clone (`760f99c`).
 - No API/UI validation surface exists. `el_api.py` never calls
   `validate_spec()` at all (every one of its `parse()` calls uses
   `validate=False`), and no HTTP endpoint returns validation messages to a
-  caller. A spec author reaches `[W-16c]`/`[W-16d]`/`[W-16e]` (or `[W-16b]`)
+  caller. A spec author reaches `[W-16c]`/`[W-16d]`/`[W-16e]`/`[W-16f]` (or `[W-16b]`)
   only via `ParseResult.warnings` directly, or via `el_reasoner.py`'s and
   `fhir_mapper.py`'s CLIs, which print them to stderr.
 
@@ -207,10 +220,16 @@ holds identically on a clean clone (`760f99c`).
    complete-parent-set check floated here was **not** done — out of scope
    for AM-93 and still open after a corpus check (`delegated_from` is not
    always paired). Full detail: `docs/el_grammar_amendments.md`, AM-93.
-6. **V-J1 (warning only).** An action requiring one of several permits granted
-   to one agent by distinct authorities should be flagged if it omits the
-   others. Grouping key is `domain_scope`, currently free text; AM-14
-   (cross-reference) should land first or the fragility accepted.
+6. **V-J1 — done (AM-94, as `[W-16f]`).** Warns when an Action requires >=1
+   permit of a set co-granted to one target (`to_agent` or `to_role`,
+   separate namespaces) in one normalized non-empty `domain_scope` by >=2
+   distinct authorities, and some authority of the set has none of its
+   permits required (authority-based: an authority whose permit the Action
+   names is consulted). Built from a new `el_reasoner.permit_omissions()`
+   query, so message and query cannot diverge. Role Action bodies only —
+   ConditionalAction is excluded (§6). Zero hits on the tracked corpus
+   (3 Authorizations, no co-granted set). Full detail:
+   `docs/el_grammar_amendments.md`, AM-94.
 7. **Standing `principal_of` multi-parent — done (AM-91).** `[W-16e]` warns
    on an agent with ≥2 standing `principal_of` parents (not covered by
    W-16c, which only counts genuine `Delegation`-based parents), built
@@ -291,10 +310,15 @@ class of bug before it reaches a public clone.
   parity test ties the two together so they cannot silently diverge.
 - **W-16d severity — decided: warning.** Implemented as advisory (AM-90),
   consistent with W-16c and the AM-89 warnings channel.
-- **Grouping key for V-J1.** Land AM-14 first, or accept free-text fragility.
+- **Grouping key for V-J1 — decided: AM-94.** Same target (`to_agent` or
+  `to_role`, separate namespaces) plus a trimmed, case-insensitive
+  non-empty `domain_scope`, from >=2 distinct authorities. `domain_scope`
+  stays free text, so a typo silently splits a set (documented fail-open);
+  AM-14 (typed cross-reference) remains a separate improvement, not a
+  prerequisite.
 - **Parents query.** Shape and home — decided and implemented:
   `el_reasoner.parents_of(model, agent_name)` (AM-90).
-- **Push timing.** AM-88a/b/c, AM-89, AM-90, AM-91 and AM-92 pushed. AM-93
+- **Push timing.** AM-88a/b/c and AM-89 through AM-93 pushed. AM-94
   was pending push at time of writing (committed locally as its own
   individually-gated commit); the external reply that tracing is fixed is
   the maintainer's own next action, not part of this series' scope.
