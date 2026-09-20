@@ -5377,3 +5377,75 @@ V-08 itself and no test referenced it directly.
 `tests/test_am92_v08_token_aware.py` covers everything above.
 
 ---
+
+## AM-93 — `delegated_from` is now a list of entries
+
+**RESOLVED (2026-09-20).**
+
+An object could declare at most one `delegated_from`; a second line was a
+syntax error, although §7.10.1 says several parties collectively become
+principal of an agent. `ObjectBody` now takes `(delegated_from+=DelegatedFrom)*`
+in the same position, each entry with its own optional `duration`.
+Declarative only — no composition semantics. Full detail:
+`docs/el_grammar_amendments.md`, AM-93.
+
+**Model shape:** `EnterpriseObject.delegated_from` is a `List[DelegatedFrom]`
+(`.delegator` + `.duration` together); `delegation_duration` is removed (it
+had no reader). An object with no entries has `[]`.
+
+**Set semantics, duplicates accepted:** both `_is_standing_affiliation`
+twins (`el_reasoner.py`, `el_kripke.py`, identical bodies) treat the entries
+as a set — a `principal_of` is standing iff that principal is not among ANY
+entry's delegator, so declaration order makes no difference. A delegator
+listed twice in one object parses and is accepted as written: no
+de-duplication, no new rule, no warning.
+
+**Why the twins had to change:** a reader still assuming one value would
+see `_obj_name(list) == None` and silently class every paired
+`principal_of` as standing — false `[W-16e]` warnings, no error raised.
+Pinned by a parity truth-table test over both twins.
+
+**Not changed:** how multi-parent structure is detected (`parents_of()`,
+`[W-16c]`/`[W-16d]`/`[W-16e]`, V-08 — all from Delegations / `principal_of`);
+the FHIR mapper (own single-valued model, valid output, no generated agent
+is the delegate of two distinct delegators); the `[Party]`-typing open
+finding for `DelegatedFrom.delegator` (still open, above).
+
+**Files:** `docs/el_grammar_amendments.md`, AM-93.
+`tests/test_am93_delegated_from_list.py` covers everything above.
+
+---
+
+## `ecommerce_scenario.el` is stale — decision pending: archive or rewrite — OPEN FINDING (2026-09-20)
+
+**Found:** 2026-09-20, during AM-93 recon. The file has not been edited.
+
+`scenarios/ecommerce/ecommerce_scenario.el` (listed as "Historical" in
+`scenarios/README.md`) does not parse, and AM-93 alone does not change
+that. Its second `delegated_from` (the original reported error) is now
+accepted by the grammar, but the file still fails, first at a stale
+`sub_delegation_allowed:` line in an object body. Behind that:
+
+- pre-AM-17 constructs across community bodies (`description:` before the
+  required `objective`), role bodies (`description:`, `actions: [...]`,
+  `excludes:`), permit/embargo bodies (`description:` before `for_action`)
+  and commitment bodies (`by:` / `creates_burden:` without `obligation`);
+- `--` comments, which the grammar does not accept;
+- `delegated_from Customer`, where `Customer` is declared nowhere in the
+  file (also recorded above under the `[Party]`-typing finding);
+- the double `delegated_from` on `eSystem` (`ECom` and `CFO`), now
+  grammatical, but see below.
+
+No test loads this file or asserts anything about its parse status.
+
+**Decision pending: archive vs rewrite.** A rewrite should follow
+ISO/IEC 15414 Annex B.1.9.5. Confirmed against the standard text: Annex
+B.1.9.5 presents the e-system as agent of the CFO in one specification and
+of e.com "in a different enterprise specification" — alternatives, not
+simultaneous principals. That is not what the current file's two
+`delegated_from` lines on `eSystem` express. So the newly allowed grammar
+shape is not a reason to keep that modelling.
+
+**Status:** OPEN. No edit to the scenario; nothing else is blocked on it.
+
+---

@@ -261,7 +261,8 @@ class DelegatedFrom(_ELParentable):
     """§6.6.8 NOTE 3 — static initial delegation declaration.
 
     Grammar rule: DelegatedFromDecl
-    Folded into EnterpriseObject by object processor (P2).
+    AM-93: one record per `delegated_from` line; an EnterpriseObject holds
+    a list of them (kept by object processor P2, not dissolved).
     """
     delegator: Optional[object] = None   # → EnterpriseObject ref
     duration:  Optional[str]   = None
@@ -293,7 +294,7 @@ class ObjectBody(_ELParentable):
     EnterpriseObject directly.
     """
     holds_tokens:    List = field(default_factory=list)  # List[HoldsToken]
-    delegated_from:  Optional[DelegatedFrom] = None
+    delegated_from:  List = field(default_factory=list)  # List[DelegatedFrom]
     principal_of:    List = field(default_factory=list)  # List[PrincipalOf]
 
 
@@ -319,8 +320,7 @@ class EnterpriseObject(_ELParentable):
 
     # Folded from ObjectBody by object processor P2:
     holds_tokens:   List = field(default_factory=list)  # List[DeonticToken]
-    delegated_from: Optional[object] = None  # → EnterpriseObject
-    delegation_duration: Optional[str] = None
+    delegated_from: List = field(default_factory=list)  # List[DelegatedFrom] (AM-93)
     principal_of:   List = field(default_factory=list)  # List[EnterpriseObject]
 
 

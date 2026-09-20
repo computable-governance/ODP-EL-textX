@@ -100,7 +100,7 @@ ObjectKind:
 
 ObjectBody:
     (holds_tokens+=HoldsToken)*
-    (delegated_from=DelegatedFrom)?
+    (delegated_from+=DelegatedFrom)*
     (principal_of+=PrincipalOf)*
 ;
 
@@ -112,6 +112,12 @@ HoldsToken:
  * DelegatedFrom captures the static initial delegation described
  * in §6.6.8 NOTE 3: "A specification may state that, in its initial
  * state, an active enterprise object is an agent of a party."
+ *
+ * AM-93: an object may carry several entries (§7.10.1: "the parties
+ * (collectively) become principal of that object"). Declarative only —
+ * each entry is an independent record with its own optional duration;
+ * no composition semantics, and no de-duplication (the same delegator
+ * listed twice is accepted as written).
  */
 DelegatedFrom:
     'delegated_from' delegator=[EnterpriseObject]

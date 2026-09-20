@@ -253,9 +253,12 @@ def _obj_name(ref) -> Optional[str]:
 
 def _is_standing_affiliation(principal_name: str, agent: Any) -> bool:
     """A principal_of entry is a standing (structural) affiliation edge —
-    not already represented by a genuine Delegation — when the agent's own
-    delegated_from is absent, or points to a different principal than this
-    one.
+    not already represented by a genuine Delegation — when this principal
+    is not among the agent's own delegated_from delegators (none declared,
+    or every entry names a different principal).
+
+    AM-93: delegated_from is a list of entries; the test is set membership
+    over them — declaration order and duplicate entries make no difference.
 
     Grounded in §7.10.1 alone ("by each such delegation, that active
     enterprise object becomes an agent of the parties delegating, and the
@@ -283,8 +286,10 @@ def _is_standing_affiliation(principal_name: str, agent: Any) -> bool:
     actually delegated for it (e.g. clinicalHandoverBurden riding through
     GPClinician → SpecialistClinician, which is real only for
     referralResponseBurden)."""
-    delegated_from = getattr(agent, "delegated_from", None)
-    return delegated_from is None or _obj_name(delegated_from) != principal_name
+    return not any(
+        _obj_name(entry.delegator) == principal_name
+        for entry in getattr(agent, "delegated_from", None) or ()
+    )
 
 
 def delegation_graph(model) -> Dict[str, List[DelegationLink]]:

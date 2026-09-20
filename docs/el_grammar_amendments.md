@@ -6729,3 +6729,115 @@ new, replacing the inline V-08 block; `_find_parent_delegation()` deleted;
 module docstring rule list updated); new
 `tests/test_am92_v08_token_aware.py`; this file (new entry);
 `docs/CONCEPTS_INDEX.md` (new AM-92 note).
+
+---
+
+## AM-93 (2026-09-20) — `delegated_from` as a list (`grammar/v2/el_grammar.tx`, `toolchain/el_parser.py`, `toolchain/el_domain.py`, `toolchain/el_reasoner.py`, `toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-20). Type: AM (grammar). Closes §7 step 5
+of DN_017. **Declarative only** — it lets an agent list several delegators;
+it adds no composition semantics.
+
+**Problem:** `ObjectBody` allowed at most one `delegated_from`
+(`(delegated_from=DelegatedFrom)?`), so a second line was a syntax error,
+although §7.10.1 says the parties (collectively) become principal of the
+agent they delegate to. Both `_is_standing_affiliation` twins
+(`el_reasoner.py`, `el_kripke.py`) read that single value.
+
+**What changed:**
+- **Grammar:** `ObjectBody` becomes `(delegated_from+=DelegatedFrom)*`, same
+  position (after `holds`, before `principal_of`). The `DelegatedFrom` rule
+  itself, including its per-entry optional `duration`, and its
+  `delegator=[EnterpriseObject]` typing are unchanged. Every existing spec
+  parses exactly as before.
+- **Model shape (decided by the maintainer):** `EnterpriseObject.delegated_from`
+  is now a `List[DelegatedFrom]` — one record per line, `.delegator` and
+  `.duration` kept together. Parser processor P2 keeps the entries
+  (`obj.delegated_from = list(obj.body.delegated_from)`), unlike
+  `principal_of`, whose wrapper is dissolved to bare refs — the difference
+  is deliberate: `DelegatedFrom` has a second field. `delegation_duration`
+  is removed (it had no reader anywhere). An absent duration is still `''`
+  (the textX default), and an object with no entries now has `[]` where it
+  had `None`. Rejected: a parallel durations list (index alignment, a
+  second attribute to keep in sync) and a compatibility shim exposing "the
+  first entry" (it would reintroduce the single-valued reading this
+  amendment removes).
+- **Both twins, identically:**
+  `return not any(_obj_name(entry.delegator) == principal_name for entry in getattr(agent, "delegated_from", None) or ())`.
+  A `principal_of` is standing iff that principal is not among ANY entry's
+  delegator. Single entry: same result as before; no entries: standing, as
+  before.
+
+**Semantics — set, not sequence:** the twins treat the entries as a set, so
+declaration order makes no difference, and **a delegator listed twice in
+one object parses and is accepted as written** — no de-duplication, no new
+rule, no warning; both entries are kept, each with its own duration.
+
+**Why the twin change is mandatory, not tidy-up:** with a list-valued
+attribute and the twins unchanged, `_obj_name(list)` returns `None`, so
+`None != principal_name` is true and every paired `principal_of` is
+silently classed as standing. Observed in a throwaway prototype: two
+false `[W-16e]` warnings, each counting a principal that was paired via
+`delegated_from` as if it were standing. Nothing raises; the output is
+just wrong. The parity truth-table test and
+the all-paired test below pin exactly this.
+
+**Deliberately untouched (out of scope):** how multi-parent structure is
+otherwise detected (`parents_of()`, `[W-16c]`/`[W-16d]`/`[W-16e]`, V-08 all
+work from Delegations / `principal_of`, not from `delegated_from`); any
+child-side "complete parent set" cross-check; composition semantics; the
+`[Party]`-typing question for `DelegatedFrom.delegator` (open finding in
+`docs/CONCEPTS_INDEX.md`); unifying the two twins (still independent
+copies, per the no-cross-import convention); the FHIR mapper (below);
+`scenarios/ecommerce/ecommerce_scenario.el` (not edited).
+
+**FHIR mapper — no change needed.** It has its own `ELObject.delegated_from:
+Optional[str]` and emits at most one `delegated_from` line, which is valid
+under the new grammar. Its first-wins `_set_delegated_from` would drop a
+second delegator, but no agent in any spec it produced — 85 captured (all
+bundle fixtures plus every spec built inside the mapper-related tests) — is
+the delegate of two distinct delegators. Regenerated
+`generated_governance.el` is byte-identical (existing golden test).
+
+**Standard reference(s):** §7.10.1 ("the parties (collectively) become
+principal of that object"); §6.6.8 NOTE 3 (static initial delegation) —
+unchanged, now allowed more than once.
+
+**Verification:** new `tests/test_am93_delegated_from_list.py` (17 tests,
+inline specs and named tracked files only): a single entry (model shape,
+duration `''` when absent, duration kept, no `delegation_duration`);
+objects with no entries (`[]`); two entries with durations on none / first
+/ second / both; position between `holds` and `principal_of`;
+`principal_of` before `delegated_from` still a syntax error; a duplicated
+delegator accepted with both entries kept; a truth table over every
+ordered delegator sequence of length 0–3 over {A,B,C} (40 agents) x four
+principals, asserting BOTH twins agree with each other and with set
+membership (plus agents with no attribute, `None`, `[]`); a `principal_of`
+paired with ANY of two delegators non-standing in both declaration orders
+(unpaired one standing, no `[W-16e]`); all principals paired → no standing
+parent and no warning; unpaired principals standing alongside a paired one
+(`[W-16e]` names them); the three named scenarios (`referral_scenario.el`,
+`consent_scenario.el`, `federation_consent_scenario.el`) unchanged in
+warnings, with their single entries. Two mutation checks in scratch copies
+were both caught: a reasoner twin reading only the first entry (4 test
+failures) and a verifier twin left on the old single-valued logic (the
+parity truth table fails). Errors and warnings of the three named
+scenarios are byte-identical before and after. Full suite: 492 passed, 1
+xfailed (475/1 baseline + 17 new, zero regressions).
+
+**Ecommerce, recorded as found (no edit):** with this grammar change alone
+`scenarios/ecommerce/ecommerce_scenario.el` still does not parse — its
+first error moves from the second `delegated_from` to a stale
+`sub_delegation_allowed:` line in an object body, and beyond that lie
+pre-AM-17 constructs in community, role, permit, embargo and commitment
+bodies, `--` comments, and a `delegated_from Customer` that references an
+object declared nowhere. See the open item in `docs/CONCEPTS_INDEX.md`.
+
+**Files changed:** `grammar/v2/el_grammar.tx` (`ObjectBody`; `DelegatedFrom`
+comment); `toolchain/el_parser.py` (P2); `toolchain/el_domain.py`
+(`DelegatedFrom` docstring; `ObjectBody.delegated_from` and
+`EnterpriseObject.delegated_from` to `List`; `delegation_duration`
+removed); `toolchain/el_reasoner.py` and `toolchain/el_kripke.py`
+(`_is_standing_affiliation`, identical bodies; reasoner docstring);
+new `tests/test_am93_delegated_from_list.py`; this file (new entry);
+`docs/CONCEPTS_INDEX.md` (new AM-93 note and the ecommerce open item).

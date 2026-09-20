@@ -2601,8 +2601,10 @@ def _is_standing_affiliation(principal_name: str, agent: Any) -> bool:
     imported — same Layer 3/4 no-cross-import convention
     _find_action_for_burden already follows). See that copy's docstring
     for the full rationale (AM-50)."""
-    delegated_from = getattr(agent, "delegated_from", None)
-    return delegated_from is None or _obj_name(delegated_from) != principal_name
+    return not any(
+        _obj_name(entry.delegator) == principal_name
+        for entry in getattr(agent, "delegated_from", None) or ()
+    )
 
 
 def _delegation_chain_for_token(spec: Any, token_name: str, holder: str) -> List[str]:

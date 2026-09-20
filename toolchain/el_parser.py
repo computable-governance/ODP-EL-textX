@@ -106,9 +106,9 @@ def process_enterprise_object(obj):
     """P2: flatten ObjectBody fields into EnterpriseObject; discard wrapper."""
     if obj.body:
         obj.holds_tokens = [ht.token for ht in obj.body.holds_tokens]
-        if obj.body.delegated_from:
-            obj.delegated_from = obj.body.delegated_from.delegator
-            obj.delegation_duration = obj.body.delegated_from.duration
+        # AM-93: entries are kept as DelegatedFrom records (.delegator +
+        # .duration together), not dissolved to bare refs like principal_of.
+        obj.delegated_from = list(obj.body.delegated_from)
         obj.principal_of = [po.agent for po in obj.body.principal_of]
         obj.body = None
 
