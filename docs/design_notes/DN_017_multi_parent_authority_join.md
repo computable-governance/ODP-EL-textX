@@ -1,10 +1,10 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b, AM-88c, AM-89, AM-90 and AM-91 implemented,
-committed, and pushed. AM-92 implemented and committed locally, pending
-push at time of writing. §7 steps 1, 2, 3, 4 and 7 done; steps 5 and 6
-remain proposed.
+**Status:** AM-88a, AM-88b, AM-88c, AM-89, AM-90, AM-91 and AM-92
+implemented, committed, and pushed. AM-93 implemented and committed
+locally, pending push at time of writing. §7 steps 1, 2, 3, 4, 5 and 7
+done; step 6 remains proposed.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
 — fallback, AM-91), `toolchain/el_validator.py` (V-08 — token-aware,
@@ -46,7 +46,7 @@ by live probes:
 | 3 | verifier AM-52 guard reachability | chased one `principal_of` pointer; verdict depended on party declaration order | fixed, AM-88b |
 | 4 | verifier final chain extension | continued through the first-declared `principal_of` parent, giving a full-length chain with the wrong root | fixed for Commitment-rooted tokens, AM-88c |
 | 5 | validator V-08 `_find_parent_delegation()` | checked only the first delegation targeting an agent; verdict flipped with declaration order | fixed, AM-92 |
-| 6 | grammar `delegated_from` | single-valued; a second declaration is a syntax error | open |
+| 6 | grammar `delegated_from` | single-valued; a second declaration is a syntax error | fixed, AM-93 |
 | 7 | validator warnings | as the code read, `[W-…]` diagnostics shared the error list, so `ParseResult.ok` was false whenever one was emitted | fixed, AM-89 |
 
 ## 3. Standard basis (ISO/IEC 15414:2015)
@@ -111,6 +111,7 @@ by live probes:
 | AM-90 (`51416f8`) | reasoner + validator | `el_reasoner.parents_of()` (shared query); `[W-16c]` multi-parent notice, `[W-16d]` same-token conflict, both built from it | zero hits on tracked corpus; order-invariant across all permutations; suite 433 → 447 |
 | AM-91 (`f445ae3`) | reasoner + validator + verifier | `el_reasoner.standing_parents_of()` (shared query); `[W-16e]` standing-`principal_of` multi-parent notice; `_delegation_chain_for_token()`'s no-Commitment fallback becomes `sorted(candidates)[0]` | one real corpus hit (`federation_consent_scenario.el`, true positive, pinned); byte-identical on the 25-pair public snapshot; order-invariant and message/behaviour-parity tested; suite 448 → 461 |
 | AM-92 (`85c3de2`) | validator | V-08 becomes token-aware (S1) with an order-independent conservative fallback (S2); `_find_parent_delegation()` deleted | zero diffs on tracked corpus (old vs. new); order-invariant across all permutations of a multi-error spec; suite 461 → 475 |
+| AM-93 (`ae01801`) | grammar + parser + reasoner + verifier | `ObjectBody` takes `(delegated_from+=DelegatedFrom)*`; the model keeps a `List[DelegatedFrom]`; both `_is_standing_affiliation` twins use set membership (order-independent, duplicates accepted) | errors/warnings of the three named scenarios byte-identical; twins parity-tested over a 40-agent truth table, plus two mutation checks; FHIR mapper output byte-identical (golden test); suite 475 → 492 |
 
 Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am88b_guard_multi_parent_reachability.py`,
@@ -118,7 +119,8 @@ Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am89_warnings_channel.py`,
 `tests/test_am90_multi_parent_warnings.py`,
 `tests/test_am91_standing_parent_warnings.py`,
-`tests/test_am92_v08_token_aware.py`, plus two snapshot fixtures
+`tests/test_am92_v08_token_aware.py`,
+`tests/test_am93_delegated_from_list.py`, plus two snapshot fixtures
 in `tests/fixtures/`. Full detail: `docs/el_grammar_amendments.md`,
 `docs/CONCEPTS_INDEX.md`.
 
@@ -140,7 +142,17 @@ holds identically on a clean clone (`760f99c`).
   AM-91**: the fallback is now `sorted(candidates)[0]` (deterministic),
   and `[W-16e]` names the agent's standing parents. See §10.
 - `_is_standing_affiliation()` exists as independent twins in the verifier and
-  reasoner, and both read the single-valued `delegated_from`.
+  reasoner. ~~Both read the single-valued `delegated_from`.~~ **Changed by
+  AM-93**: both now read the list with set semantics (a principal is
+  standing iff it is not among ANY entry's delegator). They remain
+  independent copies — unifying them is out of scope — pinned together by a
+  parity truth-table test.
+- `scenarios/ecommerce/ecommerce_scenario.el` does not parse, before or
+  after AM-93. Its second `delegated_from` (the originally reported error)
+  is now grammatical, but the file has further pre-AM-17 stale constructs
+  and an undeclared `Customer`; it is not a corpus member for any check in
+  this series and no test loads it. Archive-vs-rewrite is an open item in
+  `docs/CONCEPTS_INDEX.md`.
 - Pre-exec and hybrid verifier modes differ on `principal_of`-rooted tokens
   (the engine does not extend through `principal_of`); pre-existing.
 - Descriptor `sub_delegation_allowed`/`revocable` have no control-flow
@@ -181,11 +193,20 @@ holds identically on a clean clone (`760f99c`).
    tokens, `sub_delegation_allowed`, `revocable`) plus co-granted
    Authorizations, deterministic and sorted; the W-16c/W-16d warnings are
    built from this exact query, so message and API cannot diverge.
-5. **`delegated_from` as a list.** `(delegated_from+=DelegatedFrom)*`, with the
-   five-file ripple (parser flattening, reasoner and verifier
-   `_is_standing_affiliation`, FHIR mapper, domain dataclasses). Also consider
-   a child-side complete-parent-set check against the incoming delegations,
-   after a corpus check (`delegated_from` is not always paired).
+5. **`delegated_from` as a list — done (AM-93).**
+   `(delegated_from+=DelegatedFrom)*`, declarative only. The model keeps a
+   `List[DelegatedFrom]` (`.delegator` + `.duration` together;
+   `delegation_duration` dropped). A four-file ripple, not five: parser P2,
+   the reasoner and verifier `_is_standing_affiliation` twins (identical
+   set-membership bodies; a delegator listed twice is accepted, no
+   de-duplication), and the domain dataclasses. The FHIR mapper needed no
+   change (its own single-valued model, valid output, no generated agent is
+   the delegate of two distinct delegators). A reader that still assumed
+   one value would silently class every paired `principal_of` as standing,
+   which is why the twin change was mandatory. The child-side
+   complete-parent-set check floated here was **not** done — out of scope
+   for AM-93 and still open after a corpus check (`delegated_from` is not
+   always paired). Full detail: `docs/el_grammar_amendments.md`, AM-93.
 6. **V-J1 (warning only).** An action requiring one of several permits granted
    to one agent by distinct authorities should be flagged if it omits the
    others. Grouping key is `domain_scope`, currently free text; AM-14
@@ -273,7 +294,7 @@ class of bug before it reaches a public clone.
 - **Grouping key for V-J1.** Land AM-14 first, or accept free-text fragility.
 - **Parents query.** Shape and home — decided and implemented:
   `el_reasoner.parents_of(model, agent_name)` (AM-90).
-- **Push timing.** AM-88a/b/c, AM-89, AM-90 and AM-91 pushed. AM-92 was
-  pending push at time of writing (committed locally as its own
+- **Push timing.** AM-88a/b/c, AM-89, AM-90, AM-91 and AM-92 pushed. AM-93
+  was pending push at time of writing (committed locally as its own
   individually-gated commit); the external reply that tracing is fixed is
   the maintainer's own next action, not part of this series' scope.
