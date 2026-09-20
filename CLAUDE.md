@@ -148,7 +148,7 @@ ODP-EL-textX/
 │   │   ├── consent_scenario.el   Clinical AI consent (v2 grammar)
 │   │   └── consent.odpl          v1 grammar version
 │   ├── ecommerce/
-│   │   └── ecommerce_scenario.el (pre-existing syntax error at line 57)
+│   │   └── ecommerce_scenario.el (does not parse — see docs/CONCEPTS_INDEX.md (AM-93 note))
 │   ├── fhir/
 │   │   └── generated_governance.el  Output of FHIR mapper pipeline
 │   └── README.md
@@ -420,7 +420,7 @@ domain-independent. Never let clinical or FHIR concepts leak into
 |----------|------|---------|--------|
 | Clinical AI consent (v2) | `scenarios/consent/consent_scenario.el` | EDOC 2026 primary demonstration; Layer 4 validation | ✓ Complete |
 | Clinical AI consent (v1) | `scenarios/consent/consent.odpl` | v1 grammar version of same scenario | ✓ Stable |
-| E-commerce | `scenarios/ecommerce/ecommerce_scenario.el` | Secondary validation scenario | Pre-existing syntax error line 57 |
+| E-commerce | `scenarios/ecommerce/ecommerce_scenario.el` | Secondary validation scenario | Does not parse — see docs/CONCEPTS_INDEX.md (AM-93 note) |
 | FHIR-generated | `scenarios/fhir/generated_governance.el` | Output of FHIR mapper pipeline | ✓ Complete |
 | Kent Library | Annex B.2 of X.911 | Thomas's regression baseline (in pyodpel test suite) | ✓ Stable |
 | GP-referral | `scenarios/gp_referral/` (planned) | Multi-party delegation across primary/specialist care; federation scenario | **Not yet built** |
