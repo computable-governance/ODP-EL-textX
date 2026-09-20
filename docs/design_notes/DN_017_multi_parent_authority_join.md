@@ -1,9 +1,10 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-93 implemented,
-committed, and pushed. AM-94 implemented and committed locally, pending
-push at time of writing. §7 steps 1 through 7 done.
+**Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-94 implemented,
+committed, and pushed (origin/main = `6ac6e3e`). §7 steps 1 through 7
+done; the only item left is `any_parent` (OR) composition, deferred until
+it can be built at every layer.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
 — fallback, AM-91), `toolchain/el_validator.py` (V-08 — token-aware,
@@ -318,7 +319,6 @@ class of bug before it reaches a public clone.
   prerequisite.
 - **Parents query.** Shape and home — decided and implemented:
   `el_reasoner.parents_of(model, agent_name)` (AM-90).
-- **Push timing.** AM-88a/b/c and AM-89 through AM-93 pushed. AM-94
-  was pending push at time of writing (committed locally as its own
-  individually-gated commit); the external reply that tracing is fixed is
-  the maintainer's own next action, not part of this series' scope.
+- **Push timing.** AM-88a/b/c and AM-89 through AM-94 are all pushed. The
+  external reply that tracing is fixed is the maintainer's own next
+  action, not part of this series' scope.
