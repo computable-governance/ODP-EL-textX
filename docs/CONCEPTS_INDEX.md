@@ -5449,3 +5449,92 @@ shape is not a reason to keep that modelling.
 **Status:** OPEN. No edit to the scenario; nothing else is blocked on it.
 
 ---
+
+## AM-94 — `[W-16f]`: an Action that leaves a co-granting authority unconsulted
+
+**RESOLVED (2026-09-20).**
+
+The substitution failure on the permit side: an agent (or role) is
+authorized by two distinct authorities, each granting its own permit, and
+an Action requires only one authority's permit. The other authority is
+never consulted, and the Action still runs if that authorization is
+revoked. `[W-16f]` flags it — advisory, never an error, via the AM-89
+warnings channel. How the authorities combine is application-defined; the
+toolchain does not compose them. Full detail:
+`docs/el_grammar_amendments.md`, AM-94.
+
+**Co-granted set:** Authorizations with the same target (`to_agent` name,
+or `to_role` name — separate namespaces) and the same non-empty
+`domain_scope` (trimmed, case-insensitive), from >=2 distinct authorities.
+**Authority-based omission:** an (action, set) is flagged only when the
+Action requires >=1 permit of the set AND some authority of the set has
+none of its permits required by that Action — not merely "some permit is
+missing". The message names each unconsulted authority with its
+Authorization(s) and permit(s). Built from
+`el_reasoner.permit_omissions()`, so message and query cannot diverge.
+
+**Fail-open, documented:** an Authorization without a `domain_scope` never
+joins a set; `domain_scope` is free text (AM-14, a typed reference, is a
+separate improvement), so a typo in one scope silently splits a set. Not
+covered: permits obtained by role `holds`; Step, Prescription and
+Declaration requirements; role-to-agent resolution (the warning is about
+the permit set, not about who performs the action, so an Action in a role
+unrelated to the set's target can still be flagged).
+
+**Fourth independent required-permit extraction.** An Action's required
+permits are now extracted in four places, none refactored onto another:
+engine step 6 (`el_engine.py`), `can_perform` (`el_reasoner.py`), the
+verifier's `_build_permit_requirement_index()` (`el_kripke.py`), and
+`el_reasoner.required_permits_by_action()` (this amendment). The new one
+is separate because the verifier's index is keyed by bare action name
+(same-named actions in different roles collide, last wins) and importing
+it would pull `el_engine` into the validator. A parity test pins it to the
+verifier's index on the named tracked scenarios (unique action names) and
+an inline multi-permit case.
+
+**Not covered — ConditionalAction:** see the open finding below.
+
+**Files:** `docs/el_grammar_amendments.md`, AM-94.
+`tests/test_am94_partial_permit_requirement.py` covers everything above.
+
+---
+
+## `ConditionalAction.requires_permits` is set by the parser and read by nothing — OPEN FINDING (2026-09-20)
+
+**Found:** 2026-09-20, during AM-94 recon. Logged, not fixed.
+
+A `ConditionalAction` (declared inside a role body, `RoleBodyItem`) may
+carry `requires_permit`, `inhibited_by_embargo` and `favoured_by_burden`
+items. The parser stores the permits in `ca.requires_permits`
+(`el_parser.py:169`, `el_domain.py:856`) and the ConditionalAction itself
+in `role.conditional_actions`. **No other module reads
+`requires_permits`** — not the engine, the reasoner, the verifier or the
+validator. A `requires_permit` written on a ConditionalAction gates
+nothing, at runtime or in the Kripke model.
+
+**Three loops that never run:** `el_engine.py:898`, `el_kripke.py:503` and
+`el_kripke.py:1603` each iterate `getattr(action, "conditional_actions",
+[])`. `conditional_actions` is a field of `Role`, not of `Action`, so on an
+`Action` the `getattr` always returns `[]` and the loop body is dead code.
+(Their comments describe a two-tier Action/ConditionalAction pattern that
+therefore does not work. The reads inside them — `ca.favoured_by` at
+`el_engine.py:899` and `el_kripke.py:1604`, `ca.inhibited_by` at
+`el_kripke.py:504` — are unreachable for the same reason. Note that even
+if the loops did run, none of them reads `requires_permits`: that
+attribute would still be read by nothing.)
+
+**Consequence for AM-94:** `[W-16f]` deliberately does not cover
+ConditionalAction, because advising "add the missing requires_permit"
+would change nothing there. No tracked scenario declares a ConditionalAction
+with `requires_permit` (confirmed by scan of the 11 tracked `.el` files),
+so nothing currently observable is affected.
+
+**Decision pending:** either wire ConditionalAction into enforcement (the
+loops would need to iterate `role.conditional_actions`, and the engine and
+verifier would need to define what a ConditionalAction's permit gates), or
+narrow/deprecate the construct. Until then AM-94's scope and this gap are
+consistent: role Action bodies only.
+
+**Status:** OPEN. No code change.
+
+---

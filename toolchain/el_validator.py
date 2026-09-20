@@ -64,6 +64,12 @@ Rules implemented
         (one-sided structural affiliations, not paired with
         delegated_from) — separate from W-16c, which only counts
         genuine Delegation-based parents. Warn (not error).      AM-91, §7.10.1
+  W-16f  An Action requires >=1 permit of a set co-granted to one
+        target (to_agent or to_role) in one non-empty domain_scope
+        by >=2 distinct authorities, but an authority of the set has
+        none of its permits required — that authority is never
+        consulted. Advisory, never an error; role Action bodies
+        only (ConditionalAction is not read by anything).  AM-94, §6.6.4, §6.4.6
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -211,6 +217,9 @@ def validate_spec(model) -> List[str]:
 
     # W-16e — standing principal_of multi-parent notice (AM-91, §7.10.1)
     errors.extend(_validate_standing_multi_parent_notice(model))
+
+    # W-16f — action leaves a co-granting authority unconsulted (AM-94, §6.6.4, §6.4.6)
+    errors.extend(_validate_unconsulted_permit_authority(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -906,6 +915,52 @@ def _validate_standing_multi_parent_notice(model) -> List[str]:
             f"chain-based views name one of them (the first alphabetically); the choice "
             f"is stable but arbitrary. Which parent's authority applies is "
             f"application-defined. See el_reasoner.standing_parents_of(model, '{agent_name}')."
+        )
+    return warnings
+
+
+def _validate_unconsulted_permit_authority(model) -> List[str]:
+    """W-16f (AM-94): an Action requires >=1 permit of a set of permits
+    co-granted to one target (to_agent or to_role, separate namespaces) in
+    one non-empty domain_scope by >=2 distinct authorities, but at least
+    one of those authorities has none of its permits (within the set)
+    required by the Action — so that authority is never consulted, and the
+    Action still runs if its authorization is revoked. Advisory, never an
+    error: how the authorities combine is application-defined and the
+    toolchain does not compose them.
+
+    Built entirely from el_reasoner.permit_omissions() — the message and
+    that public read-only query share the same data by construction (no
+    twin logic). One warning per (action, set).
+
+    Documented out of scope: permits obtained by role `holds`; an
+    Authorization without a domain_scope (never joins a set — fail-open);
+    ConditionalAction (its requires_permit is read by nothing, so advising
+    "add the missing requires_permit" would change nothing — see the open
+    finding in docs/CONCEPTS_INDEX.md); Step, Prescription and Declaration
+    requirements; role-to-agent resolution (the warning is about the permit
+    set, not about who performs the action)."""
+    from el_reasoner import permit_omissions
+
+    warnings: List[str] = []
+    for om in permit_omissions(model):
+        a, cs = om.action, om.permit_set
+        unconsulted = "; ".join(
+            f"authority '{o.authority}' ("
+            + "; ".join(f"Authorization '{g.authorization_name}': permit '{g.permit}'" for g in o.grants)
+            + ")"
+            for o in om.omitted
+        )
+        warnings.append(
+            f"[W-16f] Action '{a.name}' (role '{a.role}', community '{a.community}') "
+            f"requires {', '.join(repr(p) for p in om.required)} from the permits co-granted "
+            f"to {cs.target_kind} '{cs.target}' in domain_scope '{cs.domain_scope}' by "
+            f"{len(cs.authorities)} distinct authorities ({', '.join(cs.authorities)}). "
+            f"Not consulted: {unconsulted}. "
+            f"If every listed authority must approve this action, add the missing "
+            f"requires_permit; if any one suffices, this is intended. How these "
+            f"authorities combine is application-defined; the toolchain does not "
+            f"compose them."
         )
     return warnings
 

@@ -24,6 +24,9 @@ Secondary queries provided:
     standing_parents_of(spec, agent_name) — AM-91: every standing (one-
                                             sided) principal_of parent of
                                             agent_name
+    permit_omissions(spec)               — AM-94: every (action, co-granted
+                                            permit set) where an authority
+                                            of the set is not consulted
 
 Usage
 -----
@@ -485,6 +488,179 @@ def standing_parents_of(model, agent_name: str) -> List[str]:
             if link.structural and link.to_obj == agent_name
         }
     )
+
+
+# ── AM-94: co-granted permit sets and unconsulted authorities ─────────────────
+
+@dataclass(frozen=True)
+class PermitGrant:
+    """AM-94: one Authorization's contribution to a co-granted permit set."""
+    authorization_name: str
+    authority: str
+    permit: str
+
+
+@dataclass(frozen=True)
+class CoGrantedPermitSet:
+    """AM-94: Authorizations sharing one TARGET (a to_agent name, or a
+    to_role name — kept in separate namespaces) and one non-empty
+    domain_scope (compared trimmed and case-insensitively), granted by >=2
+    DISTINCT authorities. The set is the permits those Authorizations
+    grant. `domain_scope` is the smallest trimmed spelling actually
+    declared (deterministic for display); the grouping key itself is
+    casefolded."""
+    target_kind: str                       # "agent" | "role"
+    target: str
+    domain_scope: str
+    grants: Tuple[PermitGrant, ...]        # sorted (authorization, authority, permit)
+
+    @property
+    def permits(self) -> Tuple[str, ...]:
+        return tuple(sorted({g.permit for g in self.grants}))
+
+    @property
+    def authorities(self) -> Tuple[str, ...]:
+        return tuple(sorted({g.authority for g in self.grants}))
+
+    def grants_of(self, authority: str) -> Tuple[PermitGrant, ...]:
+        return tuple(g for g in self.grants if g.authority == authority)
+
+
+@dataclass(frozen=True)
+class ActionPermitRequirement:
+    """AM-94: the permits one role Action names via requires_permit. `for
+    <role>` on a requirement is ignored, exactly as engine step 6 and
+    el_kripke.py's _build_permit_requirement_index() ignore it: every
+    named permit is required."""
+    community: str
+    role: str
+    name: str
+    permits: Tuple[str, ...]               # sorted, distinct
+
+
+@dataclass(frozen=True)
+class OmittedAuthority:
+    """AM-94: an authority of a co-granted set none of whose permits (within
+    that set) the action requires, with every grant it made in the set."""
+    authority: str
+    grants: Tuple[PermitGrant, ...]
+
+
+@dataclass(frozen=True)
+class PermitOmission:
+    """AM-94: `action` requires >=1 permit of `permit_set`, but at least one
+    authority of the set has none of its permits required by the action —
+    that authority is never consulted."""
+    action: ActionPermitRequirement
+    permit_set: CoGrantedPermitSet
+    required: Tuple[str, ...]              # the set's permits the action does name
+    omitted: Tuple[OmittedAuthority, ...]  # sorted by authority
+
+
+def co_granted_permit_sets(model) -> List[CoGrantedPermitSet]:
+    """AM-94: every co-granted permit set (see CoGrantedPermitSet).
+
+    An Authorization with no domain_scope never joins a set (documented,
+    fail-open); nor does one without exactly one of to_agent / to_role
+    (AM-31-V3 already reports that as an error). Deterministic and sorted
+    by (target_kind, target, casefolded scope). Permits an actor obtains by
+    role `holds` are not Authorizations and never appear here."""
+    groups: Dict[Tuple[str, str, str], List[Tuple[str, str, str, str]]] = {}
+    for a in _collect(model, "Authorization"):
+        scope = (getattr(a, "domain_scope", None) or "").strip()
+        if not scope:
+            continue
+        agent = _obj_name(getattr(a, "authorized_agent", None)) or ""
+        role = getattr(a, "authorized_role", "") or ""
+        if bool(agent) == bool(role):
+            continue
+        authority = _obj_name(getattr(a, "authority", None))
+        permit = _obj_name(getattr(a, "permit", None))
+        if not authority or not permit:
+            continue
+        key = ("agent" if agent else "role", agent or role, scope.casefold())
+        groups.setdefault(key, []).append((scope, a.name, authority, permit))
+
+    sets: List[CoGrantedPermitSet] = []
+    for key in sorted(groups):
+        rows = groups[key]
+        if len({r[2] for r in rows}) < 2:
+            continue
+        sets.append(CoGrantedPermitSet(
+            target_kind=key[0],
+            target=key[1],
+            domain_scope=min(r[0] for r in rows),
+            grants=tuple(
+                PermitGrant(authorization_name=r[1], authority=r[2], permit=r[3])
+                for r in sorted(rows, key=lambda r: (r[1], r[2], r[3]))
+            ),
+        ))
+    return sets
+
+
+def required_permits_by_action(model) -> List[ActionPermitRequirement]:
+    """AM-94: every role Action that names >=1 requires_permit, over
+    Community, Domain and Federation roles (the same coverage as
+    el_kripke.py's _build_permit_requirement_index()). Sorted by
+    (community, role, name); two same-named actions in different roles
+    stay separate records.
+
+    This is the FOURTH independent extraction of an Action's required
+    permits (engine step 6, can_perform, the verifier's index, this) —
+    none of the others is refactored onto it (AM-94).
+
+    Not covered, by design: ConditionalAction.requires_permits (set by the
+    parser, read by nothing — see the open finding in
+    docs/CONCEPTS_INDEX.md), Step requirements, Prescription/
+    Declaration.permit."""
+    out: List[ActionPermitRequirement] = []
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                names = {
+                    _obj_name(getattr(req, "token", None))
+                    for req in getattr(action, "deontic_requirements", [])
+                    if getattr(req, "kind", None) == "requires_permit"
+                } - {None}
+                if names:
+                    out.append(ActionPermitRequirement(
+                        el.name, role.name, action.name, tuple(sorted(names))))
+    out.sort(key=lambda r: (r.community, r.role, r.name))
+    return out
+
+
+def permit_omissions(model) -> List[PermitOmission]:
+    """AM-94: every (action, co-granted set) where the action requires >=1
+    of the set's permits AND at least one distinct authority of the set has
+    NONE of its permits (within the set) required by that action — the
+    substitution failure on the permit side: that authority is never
+    consulted, and the action still runs if its authorization is revoked.
+    An authority whose permits the action does name is consulted, however
+    many other permits it granted. The same query [W-16f]
+    (el_validator.py) is built from, so the warning text and this public
+    read-only function can never diverge.
+
+    Sorted, deterministic; one entry per (action, set)."""
+    sets = co_granted_permit_sets(model)
+    out: List[PermitOmission] = []
+    for req in required_permits_by_action(model):
+        named = set(req.permits)
+        for cs in sets:
+            required = tuple(p for p in cs.permits if p in named)
+            if not required:
+                continue
+            consulted = {g.authority for g in cs.grants if g.permit in named}
+            omitted = tuple(
+                OmittedAuthority(authority=a, grants=cs.grants_of(a))
+                for a in cs.authorities
+                if a not in consulted
+            )
+            if omitted:
+                out.append(PermitOmission(
+                    action=req, permit_set=cs, required=required, omitted=omitted))
+    return out
 
 
 # ── Last-resort fallback: static role anchor ───────────────────────────────────

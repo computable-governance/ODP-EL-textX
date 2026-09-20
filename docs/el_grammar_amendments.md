@@ -6841,3 +6841,120 @@ removed); `toolchain/el_reasoner.py` and `toolchain/el_kripke.py`
 (`_is_standing_affiliation`, identical bodies; reasoner docstring);
 new `tests/test_am93_delegated_from_list.py`; this file (new entry);
 `docs/CONCEPTS_INDEX.md` (new AM-93 note and the ecommerce open item).
+
+---
+
+## AM-94 (2026-09-20) — `[W-16f]`: an Action leaves a co-granting authority unconsulted (`toolchain/el_reasoner.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-20). Type: V-NEW (validator warning); no
+grammar change. Closes §7 step 6 of DN_017 ("V-J1"). Advisory, never an
+error; routed through the AM-89 warnings channel.
+
+**Problem — the substitution failure on the permit side:** an agent (or
+role) is authorized by two distinct authorities, each granting its own
+permit, and an Action requires only one authority's permit. The other
+authority is never consulted, and the Action still runs if that
+authority's authorization is revoked. Composition of such authorities is
+application-defined; the toolchain only flags the omission.
+
+**What changed:**
+- **Three public read-only queries in `el_reasoner.py`** (records:
+  `PermitGrant`, `CoGrantedPermitSet`, `ActionPermitRequirement`,
+  `OmittedAuthority`, `PermitOmission`):
+  - `co_granted_permit_sets(model)` — Authorizations with the same TARGET
+    (a `to_agent` name, or a `to_role` name; separate namespaces, so an
+    agent and a role with the same name are not conflated) and the same
+    NON-EMPTY `domain_scope` (compared trimmed and case-insensitively;
+    interior whitespace is not collapsed), from >=2 DISTINCT authorities.
+    The set is the permits they grant. Displayed `domain_scope` is the
+    smallest trimmed spelling actually declared, so output is
+    deterministic.
+  - `required_permits_by_action(model)` — every role Action that names
+    >=1 `requires_permit`, over Community, Domain and Federation roles.
+    `for <role>` is ignored, as engine step 6 and the verifier's index
+    ignore it.
+  - `permit_omissions(model)` — per (action, set), the required permits
+    of the set and the omitted authorities, each with the grants it made
+    in the set. Sorted and deterministic.
+- **The rule** `_validate_unconsulted_permit_authority()` builds `[W-16f]`
+  entirely from `permit_omissions()` (no twin logic). One warning per
+  (action, set).
+- **Message:** `[W-16f] Action 'X' (role 'R', community 'C') requires 'P1'
+  from the permits co-granted to agent 'Ag' in domain_scope 'S' by 2
+  distinct authorities (Auth1, Auth2). Not consulted: authority 'Auth2'
+  (Authorization 'a2': permit 'P2'). If every listed authority must
+  approve this action, add the missing requires_permit; if any one
+  suffices, this is intended. How these authorities combine is
+  application-defined; the toolchain does not compose them.`
+
+**Decisions:**
+- **Authority-based omission, not "any permit missing".** Warn only when
+  the Action requires >=1 permit of the set AND at least one distinct
+  authority of the set has NONE of its permits (within the set) required
+  by the Action. An authority is consulted if the Action names any permit
+  it granted. Example: Auth1 grants P1+P2, Auth2 grants P3 — requiring
+  P1+P3 is not flagged; requiring only P1, or only P1+P2, names Auth2 and
+  P3.
+- **ConditionalAction is excluded.** The warning advises "add the missing
+  requires_permit", which does nothing on a ConditionalAction:
+  `ConditionalAction.requires_permits` is set by the parser and read by
+  nothing. Logged as a new open finding in `docs/CONCEPTS_INDEX.md` and
+  DN_017 §6 (not fixed).
+- **Grouping key** is same target + normalized non-empty `domain_scope`.
+  `domain_scope` remains free text (AM-14, typed reference, stays a
+  separate improvement), so a typo in one Authorization's scope silently
+  splits a set — the documented fail-open.
+- **Fourth independent required-permit extraction.** Engine step 6,
+  `can_perform`, the verifier's `_build_permit_requirement_index()` and
+  `required_permits_by_action()`. A small shared helper was needed
+  because the verifier's index is name-keyed (last wins, so same-named
+  actions in different roles collide), drops role identity, and importing
+  it into the validator would pull `el_engine` into Layer 2. None of the
+  others is refactored. A parity test pins this helper to the verifier's
+  index (named tracked scenarios, unique action names, plus an inline
+  multi-permit case) so the two cannot silently drift.
+
+**Documented out of scope (unchanged):** permits obtained by role `holds`
+(not Authorizations, never form a set); an Authorization without a
+`domain_scope` (never joins a set — fail-open); Step, Prescription and
+Declaration requirements; role-to-agent resolution (the warning is about
+the permit set, not about who performs the action, so an Action in a role
+unrelated to the set's target can still be flagged — advisory);
+delegation/`principal_of` parents (W-16c/W-16e); errors and runtime
+enforcement; numeric ceilings; `any_parent`; an explicit group attribute.
+
+**Standard reference(s):** §6.6.4 and §7.10.2 (Authorization), §6.4.6
+(permit required by an action) — as cited in the grammar's own comments
+on `Authorization` and `DeonticRequirement`.
+
+**Verification:** new `tests/test_am94_partial_permit_requirement.py` (22
+tests, inline specs and named tracked files only): exact message wording;
+P1-only, P2-only, both, neither; different, missing and blank
+`domain_scope`; scope variants differing only in case/whitespace grouped;
+one authority granting two permits (not two authorities); `to_role`; an
+agent and a role with the same name not conflated; three authorities with
+an action requiring two; the authority-based cases above; every grant of
+an omitted authority listed; an authority that granted the required permit
+too is consulted; ConditionalAction not covered; permit via role `holds`
+not covered; same-named actions in different roles stay separate;
+order-invariance over all 36 permutations of the authorizations and
+actions (identical strings); the query's output equals what the message
+lists; the named tracked scenarios (`referral_scenario.el`,
+`consent_scenario.el`, `federation_consent_scenario.el`) have no `[W-16f]`
+and no co-granted set; parity with the verifier's index. Mutation checks
+in scratch copies were caught: a "consulted only if all its permits are
+required" rule, agent/role namespaces conflated, no scope normalisation, a
+multi-permit extraction drift, and a first-role-only coverage drift.
+Corpus: all 11 tracked `.el` files give identical errors and warnings
+before and after, zero `[W-16f]`; the tracked corpus has 3 Authorizations
+(one each in `generated_governance.el`, `gp_referral_scenario.el`,
+`referral_scenario.el`) and no co-granted set. Full suite: 514 passed, 1
+xfailed (492/1 AM-93 baseline + 22 new, zero regressions) — reproduced
+identically on a clean `git worktree add` checkout with the diff applied.
+
+**Files changed:** `toolchain/el_reasoner.py` (module docstring; the five
+records and three queries); `toolchain/el_validator.py` (module docstring
+rule list; `_validate_unconsulted_permit_authority()`; wiring in
+`validate_spec()`); new `tests/test_am94_partial_permit_requirement.py`;
+this file (new entry); `docs/CONCEPTS_INDEX.md` (new AM-94 note and the
+ConditionalAction open finding).
