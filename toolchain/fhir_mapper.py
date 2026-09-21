@@ -126,6 +126,19 @@ SERVICE_REQUEST_ACTION_MAP: Dict[Tuple[str, str], str] = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# R40 — Observation.interpretation critical-tier codes
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Critical-tier codes from the real v3-ObservationInterpretation CodeSystem
+# (confirmed against ~/.fhir/packages/hl7.fhir.r4.core#4.0.1/package/
+# CodeSystem-v3-ObservationInterpretation.json, 2026-09-22): HH "Critical
+# high", LL "Critical low", AA "Critical abnormal". Plain abnormal (H/L/A)
+# deliberately does NOT trigger — only the critical tier warrants a
+# strict/critical notification burden.
+CRITICAL_INTERPRETATION_CODES = {"HH", "LL", "AA"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # R09 — Task Group exclusion
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -668,6 +681,13 @@ class FHIRConsentMapper:
         gp_practice_el_id = self._find_earliest_referral_accountable_party(spec, by_type)
         for obs in by_type.get("Observation", []):
             self._map_observation(obs, spec, by_ref, gp_practice_el_id)  # R39
+
+        # 2f — Observation.interpretation (critical) → strict/critical
+        # notification burden (R40). Independent of R39/gp_practice_el_id —
+        # runs over the same Observation list, reusing R39's holder-
+        # resolution helper pattern only, not R39's own emitted objects.
+        for obs in by_type.get("Observation", []):
+            self._map_observation_critical_interpretation(obs, spec, by_ref)  # R40
 
         # 3 — Tasks → delegation chain
         # Sort: parent tasks (no partOf) first, then sub-tasks
@@ -1351,6 +1371,136 @@ class FHIRConsentMapper:
                 " [R39] No violation_response emitted — holder or GP "
                 "practice could not be resolved to a declared object."
             )
+
+    # ── R40 — Observation.interpretation (critical) → strict/critical
+    #         notification burden, causally linked via triggered_by/EventDecl ──
+    # No grammar change: reuses burden/EventDecl constructs exactly as R33/
+    # R07 already emit them. Static (mapper-only) — fires from the
+    # Observation's own coded field at map time, no runtime-event dimension.
+
+    def _map_observation_critical_interpretation(
+        self, obs: dict, spec: ELSpec, by_ref: Dict[str, dict]
+    ) -> None:
+        obs_id   = obs.get("id", "obs")
+        el_id    = _sanitize_id(f"Observation/{obs_id}")
+        fhir_ref = f"Observation/{obs_id}"
+
+        # Only a critical-tier interpretation code triggers this rule.
+        # Plain abnormal (H/L/A) or absent interpretation must not.
+        critical_coding = None
+        for interp in obs.get("interpretation", []):
+            for coding in interp.get("coding", []):
+                if coding.get("code", "") in CRITICAL_INTERPRETATION_CODES:
+                    critical_coding = coding
+                    break
+            if critical_coding:
+                break
+        if critical_coding is None:
+            return
+
+        # Holder resolution — identical to R39: .basedOn -> ServiceRequest ->
+        # that ServiceRequest's own already-resolved Commitment.by is
+        # PRIMARY (not .performer directly, which may resolve to the
+        # patient); .performer is only a fallback when .basedOn doesn't
+        # resolve, run through _resolve_commitment_accountable_party for
+        # consistency with every other rule's accountability resolution.
+        holder_el_id = ""
+        for ref_dict in obs.get("basedOn", []):
+            ref = ref_dict.get("reference", "")
+            sr = by_ref.get(ref) if ref else None
+            if not sr or sr.get("resourceType") != "ServiceRequest":
+                continue
+            sr_id = sr.get("id", "")
+            commitment = next(
+                (c for c in spec.commitments if c.fhir_ref == f"ServiceRequest/{sr_id}"),
+                None,
+            )
+            if commitment:
+                holder_el_id = commitment.by
+                break
+
+        if not holder_el_id:
+            performers = obs.get("performer", [{}])
+            holder_el_id, _ = _resolve_commitment_accountable_party(
+                performers[0] if performers else None, by_ref
+            )
+
+        if not holder_el_id:
+            # Same "nothing to link to" guard as R39: Commitment.by is a
+            # mandatory, non-optional cross-reference in the grammar — a
+            # blank "by: " would be a textX PARSE failure, not a validator
+            # warning. Skip creating anything for this Observation entirely.
+            return
+
+        code_text     = obs.get("code", {}).get("text", "")
+        code_display  = _coding_display(obs.get("code", {}).get("coding", []))
+        obs_label     = code_text or code_display or "observation"
+        interp_display = critical_coding.get("display", critical_coding.get("code", ""))
+
+        # R33-style causal event — provenance link for *why* this burden
+        # exists, exactly the shape _map_service_request emits for R33.
+        event_el_id = f"{el_id}CriticalResult"
+        if not any(e.el_id == event_el_id for e in spec.events):
+            spec.events.append(ELEvent(
+                el_id=event_el_id,
+                description=(
+                    f"Observation/{obs_id} reported critical interpretation "
+                    f"({interp_display})"
+                ),
+                fhir_ref=fhir_ref,
+            ))
+        spec.log("R40", fhir_ref, event_el_id)
+
+        obligation = f"Notify on critical result: {obs_label}"
+        burden_id  = f"{el_id}CriticalNotificationObligation"
+
+        if any(o.el_id == holder_el_id for o in spec.objects):
+            granted_holder = holder_el_id
+        else:
+            granted_holder = ""
+
+        token_description = (
+            f"[R40] {obligation} — Obligation arising from critical "
+            f"interpretation ({interp_display}) on Observation/{obs_id}"
+        )
+        if not granted_holder:
+            token_description += (
+                f" [R40] UNRESOLVED holder — burden not granted to any "
+                f"declared object (accountable party '{holder_el_id}' is "
+                f"not declared). Verify accountability manually."
+            )
+
+        # R07-style strict/critical shape: a critical result demands
+        # immediate action, not eventual discharge.
+        token = ELToken(
+            el_id=burden_id,
+            kind="burden",
+            for_action="notify_critical_result",
+            holder_el_id=granted_holder,
+            discharge_mode="strict",
+            priority="critical",
+            description=token_description,
+            fhir_ref=fhir_ref,
+            triggered_by=event_el_id,
+        )
+        spec.tokens.append(token)
+        spec.log("R40", fhir_ref, burden_id)
+        if granted_holder:
+            spec.log("R40", granted_holder, burden_id)
+
+        commitment = ELCommitment(
+            el_id=f"{el_id}CriticalNotificationCommitment",
+            by=holder_el_id,
+            obligation=obligation,
+            creates_burden=burden_id,
+            description=(
+                f"[R40] Commitment from Observation/{obs_id} critical "
+                f"interpretation ({interp_display})"
+            ),
+            fhir_ref=fhir_ref,
+        )
+        spec.commitments.append(commitment)
+        spec.log("R40", fhir_ref, commitment.el_id)
 
     # ── R34 — DiagnosticReport.basedOn → artefact provenance ───────────────────
     # (DN_008 Option A). See _map_service_request's R34 block for the
