@@ -1,0 +1,123 @@
+{
+  "resourceType": "Bundle",
+  "id": "connectedcare-pathology-stage1-bundle-001",
+  "type": "collection",
+  "timestamp": "2026-05-22T08:30:00+10:00",
+  "entry": [
+
+    {
+      "fullUrl": "Organization/westlake-pathology-services",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "westlake-pathology-services",
+        "name": "Westlake Pathology Services",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Organization/brightwater-cytology-lab",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "brightwater-cytology-lab",
+        "name": "Brightwater Cytology Laboratory",
+        "type": [{"coding": [{"code": "prov", "display": "Healthcare Provider"}]}]
+      }
+    },
+
+    {
+      "fullUrl": "Patient/patient-jane-smith",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-jane-smith",
+        "name": [{"family": "Smith", "given": ["Jane"]}],
+        "birthDate": "1985-03-15"
+      }
+    },
+
+    {
+      "fullUrl": "Practitioner/dr-alvarez",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "dr-alvarez",
+        "name": [{"family": "Alvarez", "given": ["Priya"]}],
+        "qualification": [{
+          "code": {"coding": [{"system": "http://snomed.info/sct", "code": "61207006", "display": "Cytopathologist"}]}
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "PractitionerRole/cytopathologist-dr-alvarez",
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "cytopathologist-dr-alvarez",
+        "practitioner": {"reference": "Practitioner/dr-alvarez"},
+        "organization": {"reference": "Organization/brightwater-cytology-lab"}
+      }
+    },
+
+    {
+      "fullUrl": "ServiceRequest/pathology-sr-001",
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "pathology-sr-001",
+        "status": "active",
+        "intent": "order",
+        "category": [{"coding": [{"system": "http://snomed.info/sct", "code": "108252007", "display": "Laboratory procedure"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "171149006", "display": "Cervical smear for cytology"}], "text": "Cervical screening collection"},
+        "subject": {"reference": "Patient/patient-jane-smith"},
+        "authoredOn": "2026-05-22T08:30:00+10:00",
+        "requester": {"reference": "Organization/westlake-pathology-services"},
+        "priority": "routine",
+        "note": [{"text": "Cervical screening sample collected for cytology review."}]
+      }
+    },
+
+    {
+      "fullUrl": "Observation/pathology-obs-001",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "pathology-obs-001",
+        "status": "final",
+        "category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory", "display": "Laboratory"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "171149006", "display": "Cervical smear for cytology"}], "text": "Cervical cytology (Pap) result"},
+        "subject": {"reference": "Patient/patient-jane-smith"},
+        "basedOn": [{"reference": "ServiceRequest/pathology-sr-001"}],
+        "effectiveDateTime": "2026-05-29T14:00:00+10:00",
+        "performer": [{"reference": "PractitionerRole/cytopathologist-dr-alvarez"}],
+        "valueCodeableConcept": {"coding": [{"system": "http://snomed.info/sct", "code": "88666009", "display": "High grade squamous intraepithelial lesion"}]},
+        "interpretation": [{
+          "coding": [{
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+            "code": "AA",
+            "display": "Critical abnormal"
+          }]
+        }]
+      }
+    },
+
+    {
+      "fullUrl": "Observation/pathology-obs-002",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "pathology-obs-002",
+        "status": "final",
+        "category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory", "display": "Laboratory"}]}],
+        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "171149006", "display": "Cervical smear for cytology"}], "text": "Cervical cytology (Pap) result"},
+        "subject": {"reference": "Patient/patient-jane-smith"},
+        "effectiveDateTime": "2026-06-05T14:00:00+10:00",
+        "performer": [{"reference": "PractitionerRole/cytopathologist-dr-alvarez"}],
+        "valueCodeableConcept": {"coding": [{"system": "http://snomed.info/sct", "code": "88666009", "display": "High grade squamous intraepithelial lesion"}]},
+        "interpretation": [{
+          "coding": [{
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+            "code": "AA",
+            "display": "Critical abnormal"
+          }]
+        }]
+      }
+    }
+
+  ]
+}
