@@ -2,18 +2,19 @@
 hand-off to application-level composition (AM-88 series)
 
 **Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-94 implemented,
-committed, and pushed (origin/main = `6ac6e3e`). §7 steps 1 through 7
+committed, and pushed (origin/main = `6ac6e3e`). AM-95 implemented and
+committed locally, pending push at time of writing. §7 steps 1 through 8
 done; the only item left is `any_parent` (OR) composition, deferred until
 it can be built at every layer.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
 — fallback, AM-91), `toolchain/el_validator.py` (V-08 — token-aware,
 AM-92; W-16c, W-16d — AM-90; W-16e — AM-91; W-16f, the V-J1 permit-side
-warning — AM-94),
+warning — AM-94; W-16g, the all-channel union — AM-95),
 `toolchain/el_parser.py` (`ParseResult` — `.warnings`, AM-89),
 `toolchain/el_reasoner.py` (`parents_of()` — AM-90; `standing_parents_of()`
-— AM-91; `permit_omissions()` — AM-94; `delegation_graph()` — reused by
-AM-92), grammar rules
+— AM-91; `permit_omissions()` — AM-94; `all_declared_parents_of()` —
+AM-95; `delegation_graph()` — reused by AM-92), grammar rules
 `EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`.
 **Found:** design session 2026-09-19, prompted by an external enquiry about
 delegation graphs in which one child has more than one incoming parent.
@@ -115,6 +116,15 @@ by live probes:
 | AM-92 (`85c3de2`) | validator | V-08 becomes token-aware (S1) with an order-independent conservative fallback (S2); `_find_parent_delegation()` deleted | zero diffs on tracked corpus (old vs. new); order-invariant across all permutations of a multi-error spec; suite 461 → 475 |
 | AM-93 (`ae01801`) | grammar + parser + reasoner + verifier | `ObjectBody` takes `(delegated_from+=DelegatedFrom)*`; the model keeps a `List[DelegatedFrom]`; both `_is_standing_affiliation` twins use set membership (order-independent, duplicates accepted) | errors/warnings of the three named scenarios byte-identical; twins parity-tested over a 40-agent truth table, plus two mutation checks; FHIR mapper output byte-identical (golden test); suite 475 → 492 |
 | AM-94 (`995ed66`) | reasoner + validator | `[W-16f]`: an Action requires part of a permit set co-granted to one target (normalized non-empty `domain_scope`, >=2 distinct authorities) and leaves an authority unconsulted (authority-based); three read-only `el_reasoner` queries, message built from `permit_omissions()`; role Action bodies only (ConditionalAction excluded, §6) | corpus byte-identical, zero hits (3 Authorizations, no co-granted set); order-invariant across all permutations; query/message equality and verifier-index parity tested; suite 492 → 514 |
+| AM-95 (pending) | reasoner + validator | `el_reasoner.all_declared_parents_of()` (shared query — the union of `parents_of()`, `standing_parents_of()`, and a new `_delegated_from_parents()`); `[W-16g]` fires when that union is >=2 and is not already exactly what `[W-16c]` or `[W-16e]` alone would name; a party declared via >1 channel to the same agent renders as one entry with every channel it came from | one real corpus hit (`referral_scenario.el`'s `SpecialistClinician`, true positive, pinned); `federation_consent_scenario.el` confirmed non-redundant against the real file; order-invariant; message/query parity tested; suite 523 → 541 (523 is HEAD at time of writing, `3e9d397` — not AM-94's own 514; see note below) |
+
+Note on the 514→523 gap between the AM-94 and AM-95 rows: two unrelated,
+already-committed, already-gated FHIR-mapper commits (`8b92511`: 514→519;
+`3e9d397`: 519→523) landed on `main` between AM-94's DN_017 push (`c09abcf`)
+and AM-95's work — not a stale count or an untracked file. Confirmed by
+`git log --oneline` (HEAD's parent chain is `3e9d397` → `8b92511` →
+`c09abcf`, not `c09abcf` directly) and by `git stash`-ing AM-95's changes
+back to a clean HEAD (523 passed, 1 xfailed) before restoring them (541).
 
 Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am88b_guard_multi_parent_reachability.py`,
@@ -124,9 +134,10 @@ Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am91_standing_parent_warnings.py`,
 `tests/test_am92_v08_token_aware.py`,
 `tests/test_am93_delegated_from_list.py`,
-`tests/test_am94_partial_permit_requirement.py`, plus two snapshot fixtures
-in `tests/fixtures/`. Full detail: `docs/el_grammar_amendments.md`,
-`docs/CONCEPTS_INDEX.md`.
+`tests/test_am94_partial_permit_requirement.py`,
+`tests/test_am95_all_channel_multi_parent_warnings.py`, plus two snapshot
+fixtures in `tests/fixtures/`. Full detail:
+`docs/el_grammar_amendments.md`, `docs/CONCEPTS_INDEX.md`.
 
 Portability note: the gate above ran over 37 descriptors/chain pairs
 including 12 from four local-only `scenarios/industrial_procedure/` files
@@ -174,7 +185,8 @@ holds identically on a clean clone (`760f99c`).
 - No API/UI validation surface exists. `el_api.py` never calls
   `validate_spec()` at all (every one of its `parse()` calls uses
   `validate=False`), and no HTTP endpoint returns validation messages to a
-  caller. A spec author reaches `[W-16c]`/`[W-16d]`/`[W-16e]`/`[W-16f]` (or `[W-16b]`)
+  caller. A spec author reaches
+  `[W-16c]`/`[W-16d]`/`[W-16e]`/`[W-16f]`/`[W-16g]` (or `[W-16b]`)
   only via `ParseResult.warnings` directly, or via `el_reasoner.py`'s and
   `fhir_mapper.py`'s CLIs, which print them to stderr.
 
@@ -218,9 +230,12 @@ holds identically on a clean clone (`760f99c`).
    the delegate of two distinct delegators). A reader that still assumed
    one value would silently class every paired `principal_of` as standing,
    which is why the twin change was mandatory. The child-side
-   complete-parent-set check floated here was **not** done — out of scope
-   for AM-93 and still open after a corpus check (`delegated_from` is not
-   always paired). Full detail: `docs/el_grammar_amendments.md`, AM-93.
+   complete-parent-set check floated here was **not** done — still out of
+   scope, and distinct from AM-95 (step 8, below): AM-95 gives a
+   *visibility* union over declared parents already on the model, not a
+   check that a child's declared parents are complete against any
+   external expectation. Full detail: `docs/el_grammar_amendments.md`,
+   AM-93.
 6. **V-J1 — done (AM-94, as `[W-16f]`).** Warns when an Action requires >=1
    permit of a set co-granted to one target (`to_agent` or `to_role`,
    separate namespaces) in one normalized non-empty `domain_scope` by >=2
@@ -240,6 +255,20 @@ holds identically on a clean clone (`760f99c`).
    no-Commitment case — closes the AM-88c residual (§6). One real hit on
    the tracked corpus (`federation_consent_scenario.el`), a true positive,
    scenario unmodified. Full detail: `docs/el_grammar_amendments.md`, AM-91.
+8. **Declared-parent union across all channels — done (AM-95).** AM-90's
+   `[W-16c]` and AM-91's `[W-16e]` each evaluate their own `>=2` threshold
+   independently, so an agent with exactly one parent per channel
+   (`Delegation`, standing `principal_of`, `delegated_from`) triggered
+   neither — a gap AM-93's own amendment entry logged and left open.
+   `[W-16g]` fires on `el_reasoner.all_declared_parents_of()`'s union of
+   all three channels when that union is `>=2` and is not already exactly
+   what `[W-16c]` or `[W-16e]` alone would name (so a channel already at
+   `>=2` on its own does not also get a redundant third warning); a party
+   declared via more than one channel to the same agent renders as one
+   entry naming every channel it came from. One real hit on the tracked
+   corpus (`referral_scenario.el`'s `SpecialistClinician`: `GPClinician` +
+   `SpecialistPractice`), a true positive, scenario unmodified. Full
+   detail: `docs/el_grammar_amendments.md`, AM-95.
 
 ## 8. The hand-off contract
 
@@ -319,6 +348,18 @@ class of bug before it reaches a public clone.
   prerequisite.
 - **Parents query.** Shape and home — decided and implemented:
   `el_reasoner.parents_of(model, agent_name)` (AM-90).
-- **Push timing.** AM-88a/b/c and AM-89 through AM-94 are all pushed. The
-  external reply that tracing is fixed is the maintainer's own next
-  action, not part of this series' scope.
+- **Declared-parent union across channels — resolved: AM-95.** AM-93's own
+  amendment entry logged, without closing, the gap that `parents_of()`,
+  `[W-16c]/[W-16d]/[W-16e]`, and V-08 all work from `Delegation`/
+  `principal_of`, never from `delegated_from` — so an agent with one
+  parent per channel had zero warnings. AM-95 closed it with
+  `el_reasoner.all_declared_parents_of()` (the union of all three
+  channels, deduplicated by name) and `[W-16g]`, firing only when that
+  union states something neither `[W-16c]` nor `[W-16e]` alone already
+  says. `delegated_from`'s own self-sufficiency (§6.6.8 NOTE 3) means this
+  is a visibility fix, not a "warn when unbacked" rule — deliberately not
+  built.
+- **Push timing.** AM-88a/b/c and AM-89 through AM-94 are all pushed.
+  AM-95 was pending push at time of writing (committed locally as its own
+  individually-gated commit); the external reply that tracing is fixed is
+  the maintainer's own next action, not part of this series' scope.
