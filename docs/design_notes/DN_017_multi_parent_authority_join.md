@@ -1,11 +1,13 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-95 implemented,
-committed, and pushed (origin/main = `61d2dee`). AM-96 implemented and
+**Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-96 implemented,
+committed, and pushed (origin/main = `0e45f18`). AM-97 implemented and
 committed locally, pending push at time of writing. §7 steps 1 through 9
 done; the only item left is `any_parent` (OR) composition, deferred until
-it can be built at every layer.
+it can be built at every layer. AM-97 is a reference-scenario content fix
+prompted by AM-96's own finding, not a new §7 step — see the scope note
+below.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
 — fallback, AM-91), `toolchain/el_validator.py` (V-08 — token-aware,
@@ -17,7 +19,9 @@ ungrantable permit requirement — AM-96),
 — AM-91; `permit_omissions()` — AM-94; `all_declared_parents_of()` —
 AM-95; `grantable_permit_names()` — AM-96; `delegation_graph()` — reused
 by AM-92), grammar rules
-`EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`.
+`EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`,
+`scenarios/consent/consent_scenario.el` (`seekConsent` action body —
+content fix, AM-97).
 **Found:** design session 2026-09-19, prompted by an external enquiry about
 delegation graphs in which one child has more than one incoming parent.
 **DN number is provisional** — confirm the next free number before logging.
@@ -27,6 +31,17 @@ check (a permit required but granted nowhere). It is logged here, not in
 a separate note, because it continues the same AM-89-through-9x validator-
 warnings series this note already tracks (shared channel, shared gate
 discipline, shared §5 table), not because it fits this note's title.
+**Scope note (AM-97):** even further from this note's title — AM-97 is a
+reference-scenario CONTENT fix (`scenarios/consent/consent_scenario.el`),
+not a toolchain, grammar, or validator-rule change. Logged here purely
+because it closes the specific finding AM-96 made (itself logged here).
+`consent_scenario.el` is now content-complete for `aiAnalysisPermit`: the
+permit is granted (`seekConsent`'s `effect create`) and required
+(`performAnalysis`'s `requires_permit`) — `[W-16h]` no longer fires on
+this file. See AM-97's amendment entry for the important distinction
+between "granted on the `seekConsent` action executing" and "granted on
+`seekConsentObligation`'s discharge" (the two do not currently coincide —
+cross-referenced open finding in `docs/CONCEPTS_INDEX.md`).
 
 ---
 
@@ -125,7 +140,8 @@ by live probes:
 | AM-93 (`ae01801`) | grammar + parser + reasoner + verifier | `ObjectBody` takes `(delegated_from+=DelegatedFrom)*`; the model keeps a `List[DelegatedFrom]`; both `_is_standing_affiliation` twins use set membership (order-independent, duplicates accepted) | errors/warnings of the three named scenarios byte-identical; twins parity-tested over a 40-agent truth table, plus two mutation checks; FHIR mapper output byte-identical (golden test); suite 475 → 492 |
 | AM-94 (`995ed66`) | reasoner + validator | `[W-16f]`: an Action requires part of a permit set co-granted to one target (normalized non-empty `domain_scope`, >=2 distinct authorities) and leaves an authority unconsulted (authority-based); three read-only `el_reasoner` queries, message built from `permit_omissions()`; role Action bodies only (ConditionalAction excluded, §6) | corpus byte-identical, zero hits (3 Authorizations, no co-granted set); order-invariant across all permutations; query/message equality and verifier-index parity tested; suite 492 → 514 |
 | AM-95 (`0c5e6be`) | reasoner + validator | `el_reasoner.all_declared_parents_of()` (shared query — the union of `parents_of()`, `standing_parents_of()`, and a new `_delegated_from_parents()`); `[W-16g]` fires when that union is >=2 and is not already exactly what `[W-16c]` or `[W-16e]` alone would name; a party declared via >1 channel to the same agent renders as one entry with every channel it came from | one real corpus hit (`referral_scenario.el`'s `SpecialistClinician`, true positive, pinned); `federation_consent_scenario.el` confirmed non-redundant against the real file; order-invariant; message/query parity tested; suite 523 → 541 (523 is HEAD at time of writing, `3e9d397` — not AM-94's own 514; see note below) |
-| AM-96 (pending) | reasoner + validator | `el_reasoner.grantable_permit_names()` (union of Authorization.grants_permit, EnterpriseObject/Role `holds`, and Action `effect create`); `el_reasoner.ungrantable_permit_requirements()` (built on AM-94's `required_permits_by_action()`, no fifth extraction); `[W-16h]` fires when a required permit is not grantable by any of those channels; Delegation transfer deliberately excluded as evidence (§6.4.7 NOTE 1) but named explicitly in the message when present | two real corpus hits (`consent_scenario.el`'s `aiAnalysisPermit`, required by two actions, true positive, pinned); Delegation-transfer-only case (`ghostPermit`) confirmed live to pass V-15/V-16a yet warn here, with distinct wording; order-invariant; message/query parity tested; suite 541 → 555 |
+| AM-96 (`fb159b3`) | reasoner + validator | `el_reasoner.grantable_permit_names()` (union of Authorization.grants_permit, EnterpriseObject/Role `holds`, and Action `effect create`); `el_reasoner.ungrantable_permit_requirements()` (built on AM-94's `required_permits_by_action()`, no fifth extraction); `[W-16h]` fires when a required permit is not grantable by any of those channels; Delegation transfer deliberately excluded as evidence (§6.4.7 NOTE 1) but named explicitly in the message when present | two real corpus hits (`consent_scenario.el`'s `aiAnalysisPermit`, required by two actions, true positive, pinned); Delegation-transfer-only case (`ghostPermit`) confirmed live to pass V-15/V-16a yet warn here, with distinct wording; order-invariant; message/query parity tested; suite 541 → 555 |
+| AM-97 (pending) | scenario content (`consent_scenario.el`) | `seekConsent`'s `requires_permit aiAnalysisPermit` replaced with `effect create aiAnalysisPermit to aiAgentRole`; `performAnalysis` unchanged. No toolchain, grammar, or validator-rule change | both AM-96 `[W-16h]` hits gone, zero new warnings/errors; confirmed live: no new co-granted set, pinned burden descriptors (seekConsentObligation, reportingObligation) and Kripke AF/EF + world/edge counts (30/13) byte-identical before/after; full blast-radius check across every test/fixture pinning this file's output; suite 555 → 555 (content fix + reverted assertions, no new tests) |
 
 Note on the 514→523 gap between the AM-94 and AM-95 rows: two unrelated,
 already-committed, already-gated FHIR-mapper commits (`8b92511`: 514→519;
@@ -397,8 +413,17 @@ class of bug before it reaches a public clone.
   Delegation-transferred-only permit passes V-15/V-16a with zero errors
   while still held nowhere), but named explicitly in the message when
   present so the warning isn't confusing on that shape.
-- **Push timing.** AM-88a/b/c and AM-89 through AM-95 are all pushed
-  (origin/main = `61d2dee`). AM-96 is pending push at time of writing
+- **`consent_scenario.el` content-complete for `aiAnalysisPermit` —
+  resolved: AM-97.** AM-96's two `[W-16h]` hits in the flagship reference
+  scenario were a genuine content gap, not a toolchain bug. `seekConsent`
+  now grants `aiAnalysisPermit` via `effect create`, as a side effect of
+  that action executing — explicitly NOT as a consequence of
+  `seekConsentObligation`'s discharge, since no discharge mechanism
+  reaches that burden in this file today (open finding,
+  `docs/CONCEPTS_INDEX.md`). `performAnalysis` is unchanged, still gated
+  by the permit.
+- **Push timing.** AM-88a/b/c and AM-89 through AM-96 are all pushed
+  (origin/main = `0e45f18`). AM-97 is pending push at time of writing
   (committed locally as its own individually-gated commit); the external
   reply that tracing is fixed is the maintainer's own next action, not
   part of this series' scope.
