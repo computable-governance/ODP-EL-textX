@@ -70,6 +70,12 @@ Rules implemented
         none of its permits required — that authority is never
         consulted. Advisory, never an error; role Action bodies
         only (ConditionalAction is not read by anything).  AM-94, §6.6.4, §6.4.6
+  W-16g  An agent with >=2 DISTINCT declared parents across the
+        UNION of all three channels (Delegation, standing
+        principal_of, delegated_from), where neither W-16c nor
+        W-16e alone already names that exact union — closes the
+        blind spot where each channel has only 1 parent on its own.
+        Advisory, never an error.                          AM-95, §7.10.1
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -220,6 +226,9 @@ def validate_spec(model) -> List[str]:
 
     # W-16f — action leaves a co-granting authority unconsulted (AM-94, §6.6.4, §6.4.6)
     errors.extend(_validate_unconsulted_permit_authority(model))
+
+    # W-16g — declared-parent union across all channels (AM-95, §7.10.1)
+    errors.extend(_validate_all_channel_multi_parent_notice(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -915,6 +924,90 @@ def _validate_standing_multi_parent_notice(model) -> List[str]:
             f"chain-based views name one of them (the first alphabetically); the choice "
             f"is stable but arbitrary. Which parent's authority applies is "
             f"application-defined. See el_reasoner.standing_parents_of(model, '{agent_name}')."
+        )
+    return warnings
+
+
+def _validate_all_channel_multi_parent_notice(model) -> List[str]:
+    """W-16g (AM-95): an agent with >=2 DISTINCT declared parents across
+    the UNION of all three channels — genuine Delegation (parents_of()),
+    standing principal_of (standing_parents_of()), and delegated_from
+    (el_reasoner._delegated_from_parents()) — where that union is not
+    already exactly what W-16c or W-16e alone would name. Advisory,
+    never an error — §7.10.1 makes multi-parent legitimate; §6.6.8
+    NOTE 3 makes delegated_from a self-sufficient declaration needing no
+    backing Delegation, so it is counted here on its own terms, never
+    requiring a matching Delegation to be visible.
+
+    Built entirely from el_reasoner.all_declared_parents_of()'s three
+    underlying primitives — the message and that public read-only query
+    share the same data by construction, so they cannot diverge.
+
+    Non-redundancy rule: fires iff len(union) >= 2 AND union != the
+    Delegation-only parent set (what W-16c would name) AND union != the
+    standing-only parent set (what W-16e would name). If either channel
+    alone already explains the whole union, that channel's own warning
+    already says it — a third warning naming the exact same set would be
+    redundant. When W-16c or W-16e fires for a strict subset of the
+    union (a third, distinct parent from another channel), W-16g fires
+    alongside it — that extra parent is new information neither of them
+    stated.
+
+    A parent declared via more than one channel to the same agent (e.g.
+    a real Delegation paired with a matching delegated_from entry from
+    the same party — referral_scenario.el's and consent_scenario.el's
+    own idiom for a genuine delegated principal-agent relationship, per
+    el_reasoner._is_standing_affiliation()'s docstring) renders as ONE
+    entry naming every channel it came from, never duplicated.
+
+    [W-16c], [W-16d], and [W-16e] are unchanged by this rule — same
+    triggers, same wording, same tests."""
+    from el_reasoner import (
+        _collect,
+        _delegated_from_parents,
+        _obj_name,
+        parents_of,
+        standing_parents_of,
+    )
+
+    agent_names = sorted(
+        {n for o in _collect(model, "EnterpriseObject") if (n := _obj_name(o))}
+    )
+
+    warnings: List[str] = []
+    for agent_name in agent_names:
+        records, _ = parents_of(model, agent_name)
+        delegation_parents = {r.parent for r in records}
+        standing = set(standing_parents_of(model, agent_name))
+        delegated_from_parents = _delegated_from_parents(model, agent_name)
+        union = delegation_parents | standing | delegated_from_parents
+
+        if len(union) < 2 or union == delegation_parents or union == standing:
+            continue
+
+        delegation_names_by_parent: Dict[str, List[str]] = {}
+        for r in records:
+            delegation_names_by_parent.setdefault(r.parent, []).append(r.delegation_name)
+
+        parts = []
+        for parent in sorted(union):
+            tags: List[str] = []
+            if parent in delegation_parents:
+                tags.extend(sorted(delegation_names_by_parent.get(parent, [])))
+            if parent in standing:
+                tags.append("standing principal_of")
+            if parent in delegated_from_parents:
+                tags.append("delegated_from")
+            parts.append(f"{parent} ({', '.join(tags)})")
+
+        warnings.append(
+            f"[W-16g] Agent '{agent_name}' has {len(union)} declared parents across "
+            f"all channels: {', '.join(parts)}. Principals are collectively "
+            f"responsible (§7.10.1); delegated_from is itself a self-sufficient "
+            f"static declaration (§6.6.8 NOTE 3) and is counted here even with no "
+            f"backing Delegation. How these authorities combine is "
+            f"application-defined; the toolchain does not compose them. "
+            f"See el_reasoner.all_declared_parents_of(model, '{agent_name}')."
         )
     return warnings
 

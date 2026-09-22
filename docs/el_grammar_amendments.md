@@ -6958,3 +6958,165 @@ rule list; `_validate_unconsulted_permit_authority()`; wiring in
 `validate_spec()`); new `tests/test_am94_partial_permit_requirement.py`;
 this file (new entry); `docs/CONCEPTS_INDEX.md` (new AM-94 note and the
 ConditionalAction open finding).
+
+---
+
+## AM-95 (2026-09-23) — `[W-16g]`: declared-parent union across all channels (`toolchain/el_reasoner.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-23). Type: V-NEW (validator warning); no
+grammar change. Advisory, never an error; routed through the AM-89
+warnings channel.
+
+**Problem:** AM-90's `[W-16c]` counts only genuine `Delegation`-based
+parents; AM-91's `[W-16e]` counts only standing `principal_of` parents.
+Each rule evaluates its own `>=2` threshold independently against its own
+channel. An agent with exactly one parent in each of two or three
+channels — one via a real `Delegation`, one via a standing
+`principal_of`, one via a bare `delegated_from` with neither a matching
+`Delegation` nor a matching `principal_of` — triggered NEITHER warning,
+even though it has 2 or 3 genuinely distinct declared parents. AM-93's
+own amendment entry logged this gap explicitly ("deliberately untouched
+... `parents_of()`, `[W-16c]/[W-16d]/[W-16e]`, V-08 all work from
+Delegations / `principal_of`, not from `delegated_from`") without closing
+it. `delegation_graph()` never emits an edge for a bare `delegated_from`
+at all — it is read only by `_is_standing_affiliation()`, to decide
+whether a `principal_of` edge is structural, never as a parent-declaring
+edge in its own right — so a `delegated_from`-only parent was invisible
+not just to the two warnings but to the graph itself.
+
+**Standard basis:** `delegated_from` is itself a self-sufficient static
+declaration (§6.6.8 NOTE 3: "a specification may state that, in its
+initial state, an active enterprise object is an agent of a party") — it
+does not need a matching `Delegation` to be legitimate, so the fix is
+NOT "warn when `delegated_from` lacks a backing `Delegation`" (that would
+misfire on every correct spec using the construct as designed). The fix
+recognises `delegated_from` as a genuine parent-source for VISIBILITY
+purposes, and counts total distinct parents as the union across all three
+channels, per §7.10.1 ("the parties (collectively) become principal").
+
+**What changed:**
+- **`el_reasoner.py`** — two new functions, placed after
+  `standing_parents_of()`:
+  - `_delegated_from_parents(model, agent_name)` — every delegator named
+    in `agent_name`'s own `delegated_from` entries (AM-93's list), as a
+    `Set[str]`. Deliberately not built from `delegation_graph()` — see
+    Problem, above.
+  - `all_declared_parents_of(model, agent_name) -> List[str]` — the
+    union of `parents_of()`'s Delegation-based parent names,
+    `standing_parents_of()`'s standing parent names, and
+    `_delegated_from_parents()`'s names. Sorted, deduplicated by
+    construction (Python set union) — a party declared as a parent via
+    more than one channel to the same agent counts once, not once per
+    channel. Unknown `agent_name` returns `[]`, never raises, matching
+    `parents_of()`/`standing_parents_of()`'s own contract.
+- **`el_validator.py`** — `_validate_all_channel_multi_parent_notice()`,
+  `[W-16g]`, wired into `validate_spec()` after `[W-16f]`. Built entirely
+  from the same three primitives `all_declared_parents_of()` composes (no
+  twin logic). Iterates every `EnterpriseObject` name in the model (not
+  just names already appearing in `delegation_graph()`, since a
+  `delegated_from`-only parent has no graph edge at all).
+  - **Non-redundancy rule:** fires iff `len(union) >= 2` AND
+    `union != delegation_parents` (what `[W-16c]` would name) AND
+    `union != standing` (what `[W-16e]` would name) — i.e. only when the
+    union states something neither channel's own warning already said in
+    full. If a channel's own set already equals the union, that channel's
+    warning already names it and a third, redundant warning is
+    suppressed. If `[W-16c]` or `[W-16e]` fires for a strict SUBSET of
+    the union (a third, distinct parent from another channel), `[W-16g]`
+    fires alongside it — verified: a 2-Delegation probe that already
+    triggers `[W-16c]` for `{X, Y}`, plus one distinct standing parent
+    `C`, triggers `[W-16c]` AND `[W-16g]` (naming all three), not
+    `[W-16c]` alone.
+  - **Same-name, multiple channels → one entry, multiple tags:** a party
+    declared via more than one channel to the same agent (the common
+    corpus idiom — a real `Delegation` paired with a matching
+    `delegated_from` entry from the same party, per
+    `_is_standing_affiliation()`'s own docstring) renders as ONE list
+    entry naming every channel it came from
+    (`"GPClinician (gpToSpecialistDelegation, delegated_from)"`), never
+    as two separate entries for the same name — pinned by an exact-string
+    test, not just a set-membership check.
+  - **Message:** names every union member with its channel tag(s) —
+    the Delegation name(s) for the delegation channel (mirroring
+    `[W-16c]`'s own per-parent detail), `"standing principal_of"`, or
+    `"delegated_from"` — then the standard §7.10.1 collective-
+    responsibility sentence, the §6.6.8 NOTE 3 self-sufficiency note, and
+    the SAME hand-off sentence `[W-16c]` uses ("How these authorities
+    combine is application-defined; the toolchain does not compose
+    them."), then a pointer to `el_reasoner.all_declared_parents_of()`.
+  - **`[W-16c]`, `[W-16d]`, `[W-16e]` are unchanged** — same triggers,
+    same wording, same existing tests, verified by rerunning the full
+    suite with only the AM-95 addition present before writing any new
+    tests.
+
+**One real, tracked-corpus hit — a true positive, not modified** (same
+pattern as AM-91's `federation_consent_scenario.el` finding):
+`scenarios/referral/referral_scenario.el`'s `SpecialistClinician` has two
+genuinely distinct declared parents — `GPClinician` (both a real
+`Delegation`, `gpToSpecialistDelegation`, AND a paired `delegated_from`
+entry — the file's own documented idiom, header lines 780-782, for "a
+GENUINE, if temporary, delegated principal-agent relationship") and
+`SpecialistPractice` (a standing `principal_of` parent, organisational
+affiliation only). Neither channel alone reaches its own `>=2` threshold
+(one distinct parent each), so this was previously silent on both
+`[W-16c]` and `[W-16e]`. `[W-16g]` now fires exactly once, naming
+`GPClinician (gpToSpecialistDelegation, delegated_from), SpecialistPractice
+(standing principal_of)` — advisory, and the scenario file itself is
+unchanged. `scenarios/consent/federation_consent_scenario.el`'s
+`SpecialistParty` (AM-91's own tracked-corpus hit) was also checked: its
+union equals its `[W-16e]` standing set exactly, so the non-redundancy
+rule correctly keeps `[W-16g]` silent there — confirmed against the real
+file, not only a synthetic case. `consent_scenario.el` and every other
+tracked, parsing scenario produce no `[W-16g]`. `gp_referral_scenario.el`
+still fails to parse on a pre-existing, unrelated `V-NEW-10` error, out of
+scope here; `ecommerce_scenario.el` remains the documented non-parsing
+open item.
+
+**Standard reference(s):** §7.10.1 ("the parties (collectively) become
+principal of that object"); §6.6.8 NOTE 3 (delegated_from is a
+self-sufficient static declaration).
+
+**Verification:** new `tests/test_am95_all_channel_multi_parent_warnings.py`
+(18 tests): a ThreeChannelProbe (one parent per channel, fires once,
+names all three, exact string); each 2-of-3 channel pairing (fires); each
+single channel alone (silent); a channel already at `>=2` on its own via
+`[W-16c]` (no redundant `[W-16g]`) and the symmetric case via `[W-16e]`;
+`[W-16c]` at `>=2` plus one distinct extra parent from another channel
+(`[W-16g]` fires alongside it, naming all three); the same-party
+two-channel case rendering as one entry with both tags (exact string,
+`.count("SameParty") == 1`); order-invariance across every permutation of
+a 3-channel probe's declaration order; `all_declared_parents_of()` on an
+unknown agent (`[]`) and its parity with the message's content; warnings
+never affect `.ok`; the named tracked scenarios
+(`referral_scenario.el` pinned to its one true-positive `[W-16g]`,
+`consent_scenario.el` and `federation_consent_scenario.el` confirmed to
+produce none). Four pre-existing tests in
+`tests/test_am89_warnings_channel.py`, `tests/test_am91_standing_parent_warnings.py`,
+and `tests/test_am93_delegated_from_list.py` asserted `warnings == []` (or
+no-warning) on `referral_scenario.el` or on a synthetic all-paired-parents
+probe that is itself a genuine new `[W-16g]` true positive
+(`AgentA` with two parents declared via `delegated_from` alone, both
+paired with `principal_of` and so correctly NOT standing) — updated to
+assert the exact new warning, with an AM-95 note explaining why; `[W-16c]`-
+and `[W-16e]`-specific assertions in those same files are untouched. Full
+suite: 541 passed, 1 xfailed (523/1 baseline + 18 new, zero regressions),
+reproduced identically on a clean `git worktree add` checkout with the
+diff applied. The 523 baseline is HEAD at the time of this work
+(`3e9d397`), not AM-94's own commit-time count (514, at `995ed66`/`c09abcf`)
+— two unrelated, already-committed FHIR-mapper commits (`8b92511`: 514→519;
+`3e9d397`: 519→523) landed on `main` between AM-94's DN_017 push and this
+amendment, each independently verified by its own gate. Reconciled by
+`git stash`-ing this amendment's changes back to a clean HEAD and rerunning
+(523 passed, 1 xfailed), then restoring and rerunning (541, 1 xfailed) —
+not a typo, a stale carried-over count, or an untracked file.
+
+**Files changed:** `toolchain/el_reasoner.py` (`_delegated_from_parents()`,
+`all_declared_parents_of()`); `toolchain/el_validator.py` (module
+docstring rule list; `_validate_all_channel_multi_parent_notice()`; wiring
+in `validate_spec()`); new
+`tests/test_am95_all_channel_multi_parent_warnings.py`;
+`tests/test_am89_warnings_channel.py`,
+`tests/test_am91_standing_parent_warnings.py`,
+`tests/test_am93_delegated_from_list.py` (updated referral_scenario.el /
+all-paired-probe assertions); this file (new entry); `docs/CONCEPTS_INDEX.md`
+(new AM-95 note).

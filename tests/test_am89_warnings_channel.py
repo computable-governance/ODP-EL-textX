@@ -132,14 +132,28 @@ def test_tracked_reference_scenarios_have_no_warnings():
     scenarios/consent/consent_scenario.el, named explicitly — no glob over
     scenarios/**, so this never depends on a local-only file (the AM-88
     portability lesson: some local checkouts have additional, untracked
-    scenario files a public clone never has)."""
-    for path in (
-        "scenarios/referral/referral_scenario.el",
-        "scenarios/consent/consent_scenario.el",
-    ):
-        result = parse(path, validate=True)
-        assert result.ok, result.errors
-        assert result.warnings == [], f"{path} unexpectedly produced warnings: {result.warnings}"
+    scenario files a public clone never has).
+
+    AM-95: referral_scenario.el's SpecialistClinician is a genuine,
+    tracked-corpus [W-16g] true positive (GPClinician + SpecialistPractice
+    — see AM-95's amendment entry) — not modified, expected here.
+    consent_scenario.el remains warning-free."""
+    result = parse("scenarios/referral/referral_scenario.el", validate=True)
+    assert result.ok, result.errors
+    assert result.warnings == [
+        "[W-16g] Agent 'SpecialistClinician' has 2 declared parents across all "
+        "channels: GPClinician (gpToSpecialistDelegation, delegated_from), "
+        "SpecialistPractice (standing principal_of). Principals are collectively "
+        "responsible (§7.10.1); delegated_from is itself a self-sufficient static "
+        "declaration (§6.6.8 NOTE 3) and is counted here even with no backing "
+        "Delegation. How these authorities combine is application-defined; the "
+        "toolchain does not compose them. See "
+        "el_reasoner.all_declared_parents_of(model, 'SpecialistClinician')."
+    ]
+
+    result = parse("scenarios/consent/consent_scenario.el", validate=True)
+    assert result.ok, result.errors
+    assert result.warnings == [], f"unexpectedly produced warnings: {result.warnings}"
 
 
 # ── Test 6: el_reasoner.py's CLI prints warnings to stderr, exit status ok ─

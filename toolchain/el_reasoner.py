@@ -490,6 +490,57 @@ def standing_parents_of(model, agent_name: str) -> List[str]:
     )
 
 
+# ── AM-95: declared-parent union across all channels ───────────────────────
+
+def _delegated_from_parents(model, agent_name: str) -> Set[str]:
+    """Every delegator named in agent_name's own delegated_from entries
+    (AM-93: EnterpriseObject.delegated_from is a List[DelegatedFrom]).
+
+    delegated_from is itself a self-sufficient static declaration (§6.6.8
+    NOTE 3: "a specification may state that, in its initial state, an
+    active enterprise object is an agent of a party") — it needs no
+    backing Delegation or principal_of to be a genuine declared parent.
+    Deliberately not built from delegation_graph(): that graph only uses
+    delegated_from to decide whether a principal_of edge is standing
+    (_is_standing_affiliation) — it never emits an edge for a bare
+    delegated_from with no Delegation and no principal_of, which is
+    exactly the visibility gap this function closes."""
+    return {
+        n
+        for obj in _collect(model, "EnterpriseObject")
+        if _obj_name(obj) == agent_name
+        for entry in (getattr(obj, "delegated_from", None) or ())
+        if (n := _obj_name(entry.delegator))
+    }
+
+
+def all_declared_parents_of(model, agent_name: str) -> List[str]:
+    """AM-95: the union of every channel through which agent_name has a
+    declared parent —
+
+    - genuine Delegation-based parents (parents_of())
+    - standing principal_of parents (standing_parents_of())
+    - delegated_from delegators (_delegated_from_parents(), above)
+
+    — deduplicated by name across channels: a party declared as a parent
+    via more than one channel (e.g. a real Delegation paired with a
+    matching delegated_from entry from the same party — the common
+    idiom in referral_scenario.el and consent_scenario.el) counts once,
+    not once per channel. Sorted, deterministic.
+
+    Closes the blind spot neither parents_of() nor standing_parents_of()
+    covers alone: each channel's own >=2 threshold is evaluated
+    independently, so a parent declared once in each of two or three
+    channels was previously invisible to every existing check. [W-16g]
+    (el_validator.py) is built from these same three primitives, so the
+    query and warning can never diverge. An unknown agent_name returns
+    [] — never raises."""
+    records, _ = parents_of(model, agent_name)
+    delegation_parents = {r.parent for r in records}
+    standing = set(standing_parents_of(model, agent_name))
+    return sorted(delegation_parents | standing | _delegated_from_parents(model, agent_name))
+
+
 # ── AM-94: co-granted permit sets and unconsulted authorities ─────────────────
 
 @dataclass(frozen=True)

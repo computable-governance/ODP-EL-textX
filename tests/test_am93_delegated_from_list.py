@@ -247,7 +247,13 @@ def test_principal_of_paired_with_any_delegator_is_non_standing(order):
 def test_all_principals_paired_leaves_no_standing_parent_and_no_warning():
     """Guards the failure mode a list-valued attribute would otherwise
     cause: a reader that still saw `delegated_from` as one object would
-    treat every paired principal_of as standing and emit a false [W-16e]."""
+    treat every paired principal_of as standing and emit a false [W-16e].
+    [W-16e] itself stays silent here, as asserted.
+
+    AM-95: P1 and P2 are still genuine declared parents of AgentA via the
+    delegated_from channel alone (§6.6.8 NOTE 3 — no backing Delegation
+    required), so [W-16g] correctly fires for them; it is a distinct
+    channel from the principal_of/standing one this test guards."""
     result = parse_string("""
 enterprise specification AllPairedProbe
 party P1 { principal_of AgentA }
@@ -259,7 +265,16 @@ agent AgentA {
 """, validate=True)
     assert result.ok, result.errors
     assert standing_parents_of(result.model, "AgentA") == []
-    assert result.warnings == []
+    assert not any(w.startswith("[W-16e]") for w in result.warnings)
+    assert result.warnings == [
+        "[W-16g] Agent 'AgentA' has 2 declared parents across all channels: "
+        "P1 (delegated_from), P2 (delegated_from). Principals are collectively "
+        "responsible (§7.10.1); delegated_from is itself a self-sufficient static "
+        "declaration (§6.6.8 NOTE 3) and is counted here even with no backing "
+        "Delegation. How these authorities combine is application-defined; the "
+        "toolchain does not compose them. See "
+        "el_reasoner.all_declared_parents_of(model, 'AgentA')."
+    ]
 
 
 def test_unpaired_principals_are_standing_alongside_a_paired_one():
@@ -282,9 +297,21 @@ agent AgentA {
 # ── 6. named tracked scenarios: single entries, warnings unchanged ───────
 
 def test_named_scenarios_single_entries_and_warnings_unchanged():
+    """AM-95: referral_scenario.el now carries exactly one [W-16g] (a
+    genuine tracked-corpus true positive — see AM-95's amendment entry);
+    the delegated_from entries themselves are unaffected by it."""
     referral = parse("scenarios/referral/referral_scenario.el", validate=True)
     assert referral.ok, referral.errors
-    assert referral.warnings == []
+    assert referral.warnings == [
+        "[W-16g] Agent 'SpecialistClinician' has 2 declared parents across all "
+        "channels: GPClinician (gpToSpecialistDelegation, delegated_from), "
+        "SpecialistPractice (standing principal_of). Principals are collectively "
+        "responsible (§7.10.1); delegated_from is itself a self-sufficient static "
+        "declaration (§6.6.8 NOTE 3) and is counted here even with no backing "
+        "Delegation. How these authorities combine is application-defined; the "
+        "toolchain does not compose them. See "
+        "el_reasoner.all_declared_parents_of(model, 'SpecialistClinician')."
+    ]
     assert _entries(referral.model, "SpecialistClinician") == [("GPClinician", "referral episode")]
     assert _entries(referral.model, "SpecialistAIAgent") == [("SpecialistClinician", "referral episode")]
 

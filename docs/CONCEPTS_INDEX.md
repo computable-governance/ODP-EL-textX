@@ -5538,3 +5538,74 @@ consistent: role Action bodies only.
 **Status:** OPEN. No code change.
 
 ---
+
+## AM-95 — `[W-16g]`: declared-parent union across all channels
+
+**RESOLVED (2026-09-23).**
+
+Closes the gap AM-93 documented but deliberately left open ("`parents_of()`,
+`[W-16c]/[W-16d]/[W-16e]`, V-08 all work from Delegations / `principal_of`,
+not from `delegated_from`"): AM-90's `[W-16c]` counts only genuine
+`Delegation`-based parents, and AM-91's `[W-16e]` counts only standing
+`principal_of` parents, each independently against its own `>=2`
+threshold. The union of an agent's declared parents across all three
+channels — `Delegation`, standing `principal_of`, and bare `delegated_from`
+— was never computed, so an agent with exactly one parent per channel had
+zero warnings despite having 2 or 3 genuinely distinct declared parents.
+`el_reasoner.all_declared_parents_of(model, agent_name)` (new query, the
+union of `parents_of()`, `standing_parents_of()`, and the new
+`_delegated_from_parents()`) and `el_validator`'s new `[W-16g]` (built
+from that exact query — no twin logic) close it. Full detail:
+`docs/el_grammar_amendments.md`, AM-95.
+
+**Standard basis:** `delegated_from` is itself a self-sufficient static
+declaration (§6.6.8 NOTE 3) — it needs no backing `Delegation` to be a
+genuine declared parent, so this is NOT "warn when `delegated_from` lacks
+a backing `Delegation`" (that would misfire on the construct's normal,
+correct use). It is purely a visibility fix: count `delegated_from`
+parents on their own terms, alongside the two channels already counted.
+
+**Non-redundant by construction:** `[W-16g]` fires only when the union of
+all three channels is not already exactly what `[W-16c]` or `[W-16e]`
+alone would name — so an agent whose only multi-parent structure is a
+single channel already at `>=2` gets that channel's existing warning and
+no redundant third one, verified by test on both channels independently.
+When one channel is at `>=2` AND a different channel contributes a
+further, distinct parent, both warnings fire — the extra parent is new
+information neither channel's own message states alone.
+
+**Same party, multiple channels, one entry:** a party declared as a
+parent via more than one channel to the same agent (a real `Delegation`
+paired with a matching `delegated_from` entry from the same party — the
+corpus's own idiom for "a GENUINE, if temporary, delegated principal-agent
+relationship", `referral_scenario.el` header lines 62-64/780-782) renders
+as ONE list entry naming every channel it came from
+(`"GPClinician (gpToSpecialistDelegation, delegated_from)"`), never
+duplicated — pinned by an exact-string test.
+
+**One real, tracked-corpus hit — a true positive, not modified** (same
+pattern as AM-91's `federation_consent_scenario.el` finding, above):
+`referral_scenario.el`'s `SpecialistClinician` has two genuinely distinct
+declared parents — `GPClinician` (a real `Delegation`,
+`gpToSpecialistDelegation`, paired with a `delegated_from` entry) and
+`SpecialistPractice` (a standing `principal_of` parent) — found during
+AM-95's own recon. Neither `[W-16c]` nor `[W-16e]` reaches its own `>=2`
+threshold for this agent on its own (one distinct parent per channel), so
+this was previously silent on both. `[W-16g]` now fires exactly once,
+naming both parents and both of the channels `GPClinician` came through;
+the scenario file itself is unchanged.
+`consent/federation_consent_scenario.el`'s `SpecialistParty` (AM-91's own
+tracked hit) was also checked: its union equals its `[W-16e]` standing set
+exactly, so the non-redundancy rule correctly keeps `[W-16g]` silent
+there — confirmed against the real file, not only a synthetic probe.
+
+**Where a spec author sees this:** the same AM-89 channel as
+`[W-16c]/[W-16d]/[W-16e]/[W-16f]` — `el_reasoner.py`'s and
+`fhir_mapper.py`'s CLIs (stderr), and `ParseResult.warnings` for anyone
+calling `parse()`/`parse_string()` directly.
+
+**Files:** `docs/el_grammar_amendments.md`, AM-95.
+`tests/test_am95_all_channel_multi_parent_warnings.py` covers everything
+above.
+
+---

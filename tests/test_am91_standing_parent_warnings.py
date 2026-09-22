@@ -236,13 +236,29 @@ def test_standing_parents_of_unknown_agent_returns_empty():
 # ── Named tracked scenarios ──────────────────────────────────────────────
 
 def test_named_referral_and_consent_scenarios_unchanged():
-    for path in (
-        "scenarios/referral/referral_scenario.el",
-        "scenarios/consent/consent_scenario.el",
-    ):
-        result = parse(path, validate=True)
-        assert result.ok, result.errors
-        assert result.warnings == [], f"{path} unexpectedly produced: {result.warnings}"
+    """[W-16e] itself fires on neither file, unaffected by AM-95.
+
+    AM-95: referral_scenario.el now carries exactly one [W-16g] — a
+    genuine tracked-corpus true positive (SpecialistClinician:
+    GPClinician + SpecialistPractice), not a regression; see AM-95's
+    amendment entry. consent_scenario.el remains warning-free."""
+    result = parse("scenarios/referral/referral_scenario.el", validate=True)
+    assert result.ok, result.errors
+    assert not any(w.startswith("[W-16e]") for w in result.warnings)
+    assert result.warnings == [
+        "[W-16g] Agent 'SpecialistClinician' has 2 declared parents across all "
+        "channels: GPClinician (gpToSpecialistDelegation, delegated_from), "
+        "SpecialistPractice (standing principal_of). Principals are collectively "
+        "responsible (§7.10.1); delegated_from is itself a self-sufficient static "
+        "declaration (§6.6.8 NOTE 3) and is counted here even with no backing "
+        "Delegation. How these authorities combine is application-defined; the "
+        "toolchain does not compose them. See "
+        "el_reasoner.all_declared_parents_of(model, 'SpecialistClinician')."
+    ]
+
+    result = parse("scenarios/consent/consent_scenario.el", validate=True)
+    assert result.ok, result.errors
+    assert result.warnings == [], f"unexpectedly produced: {result.warnings}"
 
 
 def test_federation_consent_scenario_produces_exactly_one_w16e():
