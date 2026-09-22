@@ -7120,3 +7120,132 @@ in `validate_spec()`); new
 `tests/test_am93_delegated_from_list.py` (updated referral_scenario.el /
 all-paired-probe assertions); this file (new entry); `docs/CONCEPTS_INDEX.md`
 (new AM-95 note).
+
+---
+
+## AM-96 (2026-09-23) — `[W-16h]`: ungrantable permit requirement (`toolchain/el_reasoner.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-23). Type: V-NEW (validator warning); no
+grammar change. Advisory, never an error; routed through the AM-89
+warnings channel.
+
+**Problem:** an Action's `requires_permit` can name a permit that nothing
+in the specification ever grants — no `Authorization`, no `holds` clause,
+no action `effect create`. Today this is caught only at runtime
+(`el_engine` step 6 / `Runtime.advance()` blocks it correctly, and the
+Layer-2 static reasoner `can_perform()` reports it too — both confirmed
+live against a probe) — with zero static diagnostic. Distinct from
+AM-94's `[W-16f]` (a choice between permits co-granted by >=2 authorities
+— a substitution risk): this is a requirement with no path to
+satisfaction at all, a dead end, not a composition question.
+
+**What changed:**
+- **`el_reasoner.py`** — three new pieces, placed after `permit_omissions()`
+  (AM-94), reusing `required_permits_by_action()` rather than adding a
+  fifth independent extraction of an action's required permits:
+  - `grantable_permit_names(model) -> Set[str]` — the union of every
+    token name with at least one static source: `Authorization.
+    grants_permit`; `EnterpriseObject.holds_tokens`; `Role.holds_tokens`
+    (a Role's own `holds`, distinct from an EnterpriseObject's — included
+    on the same basis V-15 and V-16a already use, both already treating
+    "a Role `holds` it" as valid static grounding: `_validate_
+    obligation_chain()`'s `role_held_token_names`, `_validate_
+    token_group_provenance()`'s `backed_by_role_holds`); and an Action's
+    own `effect create <token>` (the only `TokenOp` that fabricates a
+    brand-new `TokenInstance` from nothing — confirmed by reading
+    `el_engine.py`: `transfer`/`clone` both require an existing instance,
+    `activate`/`pend`/`destroy` only change state of one). Deliberately
+    NOT built from Delegation `transfers_burden`/`transfers_token_group`
+    — see the dedicated paragraph below.
+  - `delegation_transferred_token_names(model) -> Set[str]` — every token
+    name transferred by a genuine Delegation, used only to annotate the
+    warning message when an ungrantable permit is also named in one.
+  - `ungrantable_permit_requirements(model) -> List[UngrantablePermitRequirement]`
+    — every (action, permit) pair from `required_permits_by_action()`
+    whose permit is not in `grantable_permit_names()`.
+- **`el_validator.py`** — `_validate_ungrantable_permit_requirement()`,
+  `[W-16h]`, wired into `validate_spec()` after `[W-16g]`. Built entirely
+  from `ungrantable_permit_requirements()` (no twin logic).
+  - **Message tone, deliberately different from `[W-16c]`/`[W-16e]`/
+    `[W-16f]`/`[W-16g]`'s "application-defined; the toolchain does not
+    compose them" closing:** worded as a spec-authoring defect to fix
+    ("The requirement can never be satisfied. Add a grant for '<permit>',
+    or remove the requirement if it is no longer needed.") — this is not
+    a choice between legitimate alternatives, it is a dead end.
+  - **Delegation-transfer annotation:** when the ungrantable permit is
+    also named in a Delegation transfer, the message appends ", though it
+    is named in a Delegation transfer (which presupposes, not creates,
+    the token)" before continuing — so a spec author isn't left wondering
+    why a permit that is "transferred somewhere" still triggers the rule.
+    A distinct, exact-string-pinned wording variant from the plain
+    ungranted-anywhere case.
+
+**Delegation-transfer exclusion — decided and confirmed live, not
+assumed.** A Delegation transfers an EXISTING token between holders; it
+does not create one — §6.4.7 NOTE 1 describes delegation as "literal
+token transfer", which presupposes prior existence. Treating "some
+Delegation transfers it" as evidence of grantability would reproduce
+`_validate_token_group_provenance()`'s (V-16a) own circularity
+(`backed_by_delegation` treats TokenGroup membership in a Delegation's
+transfer as itself sufficient backing) for the different, stricter
+question this rule asks. Confirmed live with a probe: a `TokenGroup` with
+one Commitment-grounded member and one otherwise-ungrounded permit,
+transferred whole by a real `Delegation`, passes both V-15 (at least one
+referenced token is grounded) and V-16a (the permit is "backed_by_
+delegation") with zero errors — yet the permit is held nowhere. This
+exact shape is `tests/test_am96_ungrantable_permit_warnings.py`'s
+`test_delegation_transfer_only_warns_with_transfer_note` — the excluded
+channel still produces the warning, with its own wording.
+
+**Two real, tracked-corpus hits — true positives, not modified** (same
+pattern as AM-91's `federation_consent_scenario.el` finding and AM-95's
+`referral_scenario.el` finding): `scenarios/consent/consent_scenario.el`
+— the primary EDOC 2026 demonstration scenario — declares `permit
+aiAnalysisPermit` ("Permission to perform AI diagnostic analysis —
+requires prior consent"), required by `aiAgentRole`'s `seekConsent` and
+`performAnalysis` actions, but never grants it: this file has no
+`Authorization` at all, no `holds` clause names it, and no `effect
+create` targets it. `[W-16h]` now fires twice, once per action; advisory,
+and the scenario file itself is unchanged. Every other tracked, parsing
+scenario produces zero `[W-16h]` hits (checked: `referral_scenario.el`,
+`federation_consent_scenario.el`, `ereferral_model.el`,
+`erequesting_claiming_scenario.el`, `generated_governance.el`,
+`transfer_probe.el`, `specialist_pool_scenario.el`, `ai_vendor_probe.el`).
+`gp_referral_scenario.el` still fails to parse on the pre-existing,
+unrelated `V-NEW-10` error.
+
+**Standard reference(s):** §6.4.6 (conditional action / requires_permit
+semantics); §7.10.1 (delegation as literal token transfer, §6.4.7 NOTE 1).
+
+**Verification:** new `tests/test_am96_ungrantable_permit_warnings.py`
+(14 tests): a permit granted nowhere (fires, exact message); each grant
+channel alone — Authorization, EnterpriseObject `holds`, Role `holds`,
+`effect create` — silences it; granted-and-required silent; the
+Delegation-transfer-only (`ghostPermit`) case fires with the distinct
+transfer-note wording, exact string pinned; order-invariance across every
+permutation of a two-permit probe's declaration order;
+`grantable_permit_names()`/`ungrantable_permit_requirements()` parity
+with the message; warnings never affect `.ok`; the named tracked
+scenarios (`consent_scenario.el` pinned to its two true-positive
+`[W-16h]`s, `referral_scenario.el` and `federation_consent_scenario.el`
+confirmed to produce none). Three pre-existing tests in
+`tests/test_am89_warnings_channel.py`, `tests/test_am91_standing_parent_warnings.py`,
+and `tests/test_am93_delegated_from_list.py` asserted `warnings == []`
+(or an unrelated subset) on `consent_scenario.el` — updated to assert the
+exact two new warnings, with an AM-96 note explaining why;
+`[W-16c]`/`[W-16d]`/`[W-16e]`/`[W-16f]`/`[W-16g]`-specific assertions in
+those same files are untouched. Full suite: 555 passed, 1 xfailed (541/1
+baseline + 14 new, zero regressions), reproduced identically on a clean
+`git worktree add` checkout at the correct base commit with the tracked
+diff applied via `git apply` (not manual copying — the AM-95 lesson).
+
+**Files changed:** `toolchain/el_reasoner.py` (`grantable_permit_names()`,
+`delegation_transferred_token_names()`, `UngrantablePermitRequirement`,
+`ungrantable_permit_requirements()`); `toolchain/el_validator.py` (module
+docstring rule list; `_validate_ungrantable_permit_requirement()`; wiring
+in `validate_spec()`); new `tests/test_am96_ungrantable_permit_warnings.py`;
+`tests/test_am89_warnings_channel.py`,
+`tests/test_am91_standing_parent_warnings.py`,
+`tests/test_am93_delegated_from_list.py` (updated consent_scenario.el
+assertions); this file (new entry); `docs/CONCEPTS_INDEX.md` (new AM-96
+note).

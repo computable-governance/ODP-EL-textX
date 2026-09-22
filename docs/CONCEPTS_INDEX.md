@@ -5609,3 +5609,80 @@ calling `parse()`/`parse_string()` directly.
 above.
 
 ---
+
+## AM-96 — `[W-16h]`: ungrantable permit requirement
+
+**RESOLVED (2026-09-23).**
+
+An Action's `requires_permit` can name a permit that nothing in the
+specification ever grants — no `Authorization`, no `holds` clause
+(object or role), no action `effect create`. Confirmed live: a probe with
+one action requiring a permit granted nowhere parses with zero errors and
+zero warnings, yet `el_reasoner.can_perform()` (Layer 2) reports it
+missing and `Runtime.advance()` (Layer 3, the live engine) blocks it at
+runtime with the reason "required permit '...' not held by actor" — a
+genuine static-diagnostic gap, not a hypothetical one.
+`el_reasoner.grantable_permit_names(model)` (new query — the union of
+`Authorization.grants_permit`, `EnterpriseObject.holds_tokens`,
+`Role.holds_tokens`, and any Action's `effect create`) and
+`el_validator`'s new `[W-16h]` (built from `ungrantable_permit_
+requirements()`, itself built on `required_permits_by_action()`, AM-94,
+reused rather than a fifth extraction) close it. Full detail:
+`docs/el_grammar_amendments.md`, AM-96.
+
+**Distinct from `[W-16f]` (AM-94):** `[W-16f]` is a substitution risk — a
+choice between permits legitimately co-granted by >=2 authorities.
+`[W-16h]` is a dead end — the requirement has no path to satisfaction at
+all. The message tone reflects this: `[W-16c]/[W-16e]/[W-16f]/[W-16g]`
+all close with "application-defined; the toolchain does not compose
+them" (a hand-off to the application); `[W-16h]` closes with "Add a
+grant... or remove the requirement" (a spec-authoring defect to fix).
+
+**Delegation-transfer is deliberately excluded as evidence, and this was
+tested, not assumed.** A Delegation transfers an EXISTING token, it does
+not create one (§6.4.7 NOTE 1, "literal token transfer" — presupposes
+prior existence). Treating "some Delegation transfers it" as sufficient
+would reproduce `_validate_token_group_provenance()`'s (V-16a) own
+circularity — that rule's `backed_by_delegation` already treats
+TokenGroup membership in a Delegation's transfer as itself sufficient
+backing, for a different, weaker question (will an obligation descriptor
+exist at runtime) than "does anyone ever hold this permit." Confirmed
+live: a `TokenGroup` with one Commitment-grounded burden and one
+otherwise-ungrounded permit, transferred whole by a real `Delegation`,
+passes V-15 and V-16a with zero errors — the permit is still held
+nowhere. When this shape occurs, `[W-16h]` still fires, with an extra
+clause naming the Delegation-transfer fact explicitly (a distinct,
+tested wording variant) so a spec author isn't confused about why a
+"transferred" permit still triggers the rule.
+
+**`Role.holds_tokens` included as a fourth grantability channel**,
+beyond the three originally proposed (Authorization, EnterpriseObject
+`holds`, Delegation transfer — the last since replaced by `effect
+create`) — on the same basis V-15 and V-16a already use: both already
+treat "a Role `holds` it" as valid static grounding
+(`_validate_obligation_chain()`'s `role_held_token_names`,
+`_validate_token_group_provenance()`'s `backed_by_role_holds`), so
+`grantable_permit_names()` stays consistent with the validator's own
+established vocabulary.
+
+**Two real, tracked-corpus hits — true positives, not modified**, found
+during AM-96's own recon (same pattern as AM-91's
+`federation_consent_scenario.el` finding and AM-95's
+`referral_scenario.el` finding): `consent_scenario.el` — the primary
+EDOC 2026 demonstration scenario — declares `permit aiAnalysisPermit`,
+required by `aiAgentRole`'s `seekConsent` and `performAnalysis` actions,
+but never grants it anywhere: this file has no `Authorization` at all, no
+`holds` clause names it, and no `effect create` targets it. `[W-16h]`
+now fires exactly twice, once per action; advisory, and the scenario
+file itself is unchanged. Every other tracked, parsing scenario produces
+zero `[W-16h]` hits.
+
+**Where a spec author sees this:** the same AM-89 channel as
+`[W-16c]/[W-16d]/[W-16e]/[W-16f]/[W-16g]` — `el_reasoner.py`'s and
+`fhir_mapper.py`'s CLIs (stderr), and `ParseResult.warnings` for anyone
+calling `parse()`/`parse_string()` directly.
+
+**Files:** `docs/el_grammar_amendments.md`, AM-96.
+`tests/test_am96_ungrantable_permit_warnings.py` covers everything above.
+
+---

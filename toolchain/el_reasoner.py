@@ -714,6 +714,125 @@ def permit_omissions(model) -> List[PermitOmission]:
     return out
 
 
+# ── AM-96: ungrantable permit requirements ─────────────────────────────────────
+
+def grantable_permit_names(model) -> Set[str]:
+    """AM-96: every token name with at least one static source that could
+    make it held — the union of:
+
+    - `Authorization.grants_permit`
+    - `EnterpriseObject.holds_tokens` (a static `holds` clause)
+    - `Role.holds_tokens` (a Role's own `holds`, distinct from an
+      EnterpriseObject's) — included on the same basis V-15 and V-16a
+      already use: both treat "a Role `holds` it" as valid static
+      grounding (`_validate_obligation_chain()`'s `role_held_token_names`;
+      `_validate_token_group_provenance()`'s `backed_by_role_holds`), so
+      this query stays consistent with the validator's own established
+      vocabulary rather than inventing a narrower one.
+    - An Action's own `effect create <token>` (`DeonticEffect`,
+      `operation == 'create'`) — the only `TokenOp` that fabricates a
+      brand-new `TokenInstance` from nothing (el_engine.py: `transfer`
+      and `clone` both require an existing instance; `activate`/`pend`/
+      `destroy` only change state of one that already exists). Whether
+      that effect actually executes on any given run is a reachability
+      question (Layer 4, out of scope here) — same as whether an
+      Authorization is ever exercised.
+
+    Deliberately NOT built from Delegation `transfers_burden` /
+    `transfers_token_group`: a Delegation transfers an EXISTING token
+    between holders, it does not create one — §6.4.7 NOTE 1 describes
+    delegation as "literal token transfer", which presupposes prior
+    existence. Treating "some Delegation transfers it" as evidence on its
+    own would reproduce V-16a's own circularity (`backed_by_delegation`
+    treats TokenGroup membership in a Delegation's transfer as itself
+    sufficient backing — a different, weaker question than "does anyone
+    ever hold this") for the stricter question this query answers.
+    Confirmed live: a TokenGroup with one Commitment-grounded member and
+    one otherwise-ungrounded permit, transferred whole by a real
+    Delegation, passes V-15 and V-16a with zero errors, yet the permit is
+    held nowhere — the exact case this exclusion prevents from being
+    silently accepted as grantable.
+
+    Not a name-per-kind filter: returns every name from these sources
+    regardless of DeonticKind, since a caller only cares about the names
+    actually required as permits (`required_permits_by_action()`)."""
+    names: Set[str] = set()
+    for a in _collect(model, "Authorization"):
+        n = _obj_name(getattr(a, "permit", None))
+        if n:
+            names.add(n)
+    for obj in _collect(model, "EnterpriseObject"):
+        for tok in getattr(obj, "holds_tokens", None) or ():
+            n = _obj_name(tok)
+            if n:
+                names.add(n)
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for tok in getattr(role, "holds_tokens", None) or ():
+                n = _obj_name(tok)
+                if n:
+                    names.add(n)
+            for action in getattr(role, "actions", []):
+                for eff in getattr(action, "deontic_effects", None) or ():
+                    if getattr(eff, "operation", None) == "create":
+                        n = _obj_name(getattr(eff, "token", None))
+                        if n:
+                            names.add(n)
+    return names
+
+
+def delegation_transferred_token_names(model) -> Set[str]:
+    """AM-96: every token name transferred by at least one genuine
+    Delegation (transfers_burden or a transfers_token_group member) —
+    used only to annotate an [W-16h] warning when the ungrantable permit
+    is ALSO named in a Delegation transfer (the case grantable_permit_names()
+    deliberately excludes as evidence), so a spec author isn't confused
+    about why a permit that is "transferred somewhere" still triggers the
+    rule. Built on delegation_graph()'s already-extracted burden_name/
+    token_group_members fields, real Delegations only (link.structural
+    excludes principal_of-derived edges, which never carry a token
+    reference anyway)."""
+    graph = delegation_graph(model)
+    return {
+        n
+        for links in graph.values()
+        for link in links
+        if not link.structural
+        for n in ({link.burden_name} if link.burden_name else set())
+        | set(link.token_group_members)
+        if n
+    }
+
+
+@dataclass(frozen=True)
+class UngrantablePermitRequirement:
+    """AM-96: one (action, permit) pair where the action's requires_permit
+    names a permit not in grantable_permit_names(model) — the requirement
+    can never be satisfied by any static grant in this specification."""
+    action: ActionPermitRequirement
+    permit: str
+
+
+def ungrantable_permit_requirements(model) -> List[UngrantablePermitRequirement]:
+    """AM-96: every (action, permit) pair from required_permits_by_action()
+    (AM-94 — reused, not a fifth independent extraction of an action's
+    required permits) whose permit is not in grantable_permit_names(model).
+    The same query [W-16h] (el_validator.py) is built from, so the warning
+    text and this public read-only function can never diverge.
+
+    Deterministic: required_permits_by_action() is sorted by (community,
+    role, name); each entry's own permits tuple is sorted and distinct."""
+    grantable = grantable_permit_names(model)
+    return [
+        UngrantablePermitRequirement(action=r, permit=p)
+        for r in required_permits_by_action(model)
+        for p in r.permits
+        if p not in grantable
+    ]
+
+
 # ── Last-resort fallback: static role anchor ───────────────────────────────────
 
 def _find_role_anchors_for_obligation(model, obligation: str) -> List[StaticRoleAnchor]:

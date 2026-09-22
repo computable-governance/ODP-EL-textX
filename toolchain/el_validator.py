@@ -76,6 +76,12 @@ Rules implemented
         W-16e alone already names that exact union — closes the
         blind spot where each channel has only 1 parent on its own.
         Advisory, never an error.                          AM-95, §7.10.1
+  W-16h  An Action's requires_permit names a permit that no
+        Authorization, holds clause (object or role), or action
+        effect create grants anywhere in the specification — the
+        requirement can never be satisfied. Advisory, never an
+        error; role Action bodies only (ConditionalAction is not
+        read by anything).                         AM-96, §6.4.6, §7.10.1
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -229,6 +235,9 @@ def validate_spec(model) -> List[str]:
 
     # W-16g — declared-parent union across all channels (AM-95, §7.10.1)
     errors.extend(_validate_all_channel_multi_parent_notice(model))
+
+    # W-16h — ungrantable permit requirement (AM-96, §6.4.6, §7.10.1)
+    errors.extend(_validate_ungrantable_permit_requirement(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1054,6 +1063,60 @@ def _validate_unconsulted_permit_authority(model) -> List[str]:
             f"requires_permit; if any one suffices, this is intended. How these "
             f"authorities combine is application-defined; the toolchain does not "
             f"compose them."
+        )
+    return warnings
+
+
+def _validate_ungrantable_permit_requirement(model) -> List[str]:
+    """W-16h (AM-96): an Action's requires_permit names a permit that
+    el_reasoner.grantable_permit_names() does not contain — no
+    Authorization grants it, no holds clause (EnterpriseObject or Role)
+    names it, and no action effect creates it, anywhere in the
+    specification. Advisory, never an error, but worded as a
+    spec-authoring defect to fix (distinct from W-16c/e/f/g's
+    "application-defined, the toolchain does not compose them" closing):
+    unlike those, this is not a composition question between legitimate
+    alternatives — the requirement is unsatisfiable from the start, a
+    dead end, not a substitution risk. Runtime enforcement already blocks
+    it correctly (el_engine step 6 / Runtime.advance()); this only adds
+    the missing static diagnostic.
+
+    Built entirely from el_reasoner.ungrantable_permit_requirements() —
+    the message and that public read-only query share the same data by
+    construction, so they cannot diverge.
+
+    When the ungrantable permit is ALSO named in a Delegation transfer
+    (el_reasoner.delegation_transferred_token_names()) — the case
+    grantable_permit_names() deliberately excludes as evidence, since a
+    Delegation transfers an existing token rather than creating one
+    (§6.4.7 NOTE 1) — the message says so explicitly, so a spec author
+    isn't left wondering why a permit that is "transferred somewhere"
+    still triggers the rule.
+
+    Documented out of scope, same as W-16f: ConditionalAction (its
+    requires_permits is read by nothing — see the open finding in
+    docs/CONCEPTS_INDEX.md); Step, Prescription and Declaration
+    requirements."""
+    from el_reasoner import delegation_transferred_token_names, ungrantable_permit_requirements
+
+    transferred = delegation_transferred_token_names(model)
+
+    warnings: List[str] = []
+    for req in ungrantable_permit_requirements(model):
+        a = req.action
+        delegation_note = (
+            ", though it is named in a Delegation transfer (which "
+            "presupposes, not creates, the token)"
+            if req.permit in transferred else ""
+        )
+        warnings.append(
+            f"[W-16h] Action '{a.name}' (role '{a.role}', community '{a.community}') "
+            f"requires permit '{req.permit}', but nothing in this specification "
+            f"grants it — no Authorization names it, no holds clause (object or "
+            f"role) names it, and no action effect creates it{delegation_note}. "
+            f"The requirement can never be satisfied. Add a grant for "
+            f"'{req.permit}', or remove the requirement if it is no longer needed. "
+            f"See el_reasoner.ungrantable_permit_requirements(model)."
         )
     return warnings
 

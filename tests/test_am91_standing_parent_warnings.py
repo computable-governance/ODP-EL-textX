@@ -241,7 +241,11 @@ def test_named_referral_and_consent_scenarios_unchanged():
     AM-95: referral_scenario.el now carries exactly one [W-16g] — a
     genuine tracked-corpus true positive (SpecialistClinician:
     GPClinician + SpecialistPractice), not a regression; see AM-95's
-    amendment entry. consent_scenario.el remains warning-free."""
+    amendment entry.
+
+    AM-96: consent_scenario.el now carries two genuine tracked-corpus
+    [W-16h] true positives (aiAnalysisPermit, required but never
+    granted), not a regression; see AM-96's amendment entry."""
     result = parse("scenarios/referral/referral_scenario.el", validate=True)
     assert result.ok, result.errors
     assert not any(w.startswith("[W-16e]") for w in result.warnings)
@@ -258,7 +262,22 @@ def test_named_referral_and_consent_scenarios_unchanged():
 
     result = parse("scenarios/consent/consent_scenario.el", validate=True)
     assert result.ok, result.errors
-    assert result.warnings == [], f"unexpectedly produced: {result.warnings}"
+    assert result.warnings == [
+        "[W-16h] Action 'performAnalysis' (role 'aiAgentRole', community "
+        "'ConsentCommunity') requires permit 'aiAnalysisPermit', but nothing in "
+        "this specification grants it — no Authorization names it, no holds "
+        "clause (object or role) names it, and no action effect creates it. The "
+        "requirement can never be satisfied. Add a grant for 'aiAnalysisPermit', "
+        "or remove the requirement if it is no longer needed. See "
+        "el_reasoner.ungrantable_permit_requirements(model).",
+        "[W-16h] Action 'seekConsent' (role 'aiAgentRole', community "
+        "'ConsentCommunity') requires permit 'aiAnalysisPermit', but nothing in "
+        "this specification grants it — no Authorization names it, no holds "
+        "clause (object or role) names it, and no action effect creates it. The "
+        "requirement can never be satisfied. Add a grant for 'aiAnalysisPermit', "
+        "or remove the requirement if it is no longer needed. See "
+        "el_reasoner.ungrantable_permit_requirements(model).",
+    ], f"unexpectedly produced: {result.warnings}"
 
 
 def test_federation_consent_scenario_produces_exactly_one_w16e():
