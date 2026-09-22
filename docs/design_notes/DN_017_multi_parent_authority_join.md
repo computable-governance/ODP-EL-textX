@@ -1,24 +1,32 @@
 # DN_017 — Multi-parent authority join: tracing, signalling, and the
 hand-off to application-level composition (AM-88 series)
 
-**Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-94 implemented,
-committed, and pushed (origin/main = `6ac6e3e`). AM-95 implemented and
-committed locally, pending push at time of writing. §7 steps 1 through 8
+**Status:** AM-88a, AM-88b, AM-88c and AM-89 through AM-95 implemented,
+committed, and pushed (origin/main = `61d2dee`). AM-96 implemented and
+committed locally, pending push at time of writing. §7 steps 1 through 9
 done; the only item left is `any_parent` (OR) composition, deferred until
 it can be built at every layer.
 **Relates to:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`,
 `walk_chain()`), `toolchain/el_kripke.py` (`_delegation_chain_for_token()`
 — fallback, AM-91), `toolchain/el_validator.py` (V-08 — token-aware,
 AM-92; W-16c, W-16d — AM-90; W-16e — AM-91; W-16f, the V-J1 permit-side
-warning — AM-94; W-16g, the all-channel union — AM-95),
+warning — AM-94; W-16g, the all-channel union — AM-95; W-16h, the
+ungrantable permit requirement — AM-96),
 `toolchain/el_parser.py` (`ParseResult` — `.warnings`, AM-89),
 `toolchain/el_reasoner.py` (`parents_of()` — AM-90; `standing_parents_of()`
 — AM-91; `permit_omissions()` — AM-94; `all_declared_parents_of()` —
-AM-95; `delegation_graph()` — reused by AM-92), grammar rules
+AM-95; `grantable_permit_names()` — AM-96; `delegation_graph()` — reused
+by AM-92), grammar rules
 `EnterpriseObject`, `DelegatedFrom`, `Delegation`, `Authorization`.
 **Found:** design session 2026-09-19, prompted by an external enquiry about
 delegation graphs in which one child has more than one incoming parent.
 **DN number is provisional** — confirm the next free number before logging.
+**Scope note (AM-96):** AM-96's `[W-16h]` is not itself a multi-parent or
+authority-composition finding — it is a plain unsatisfiable-requirement
+check (a permit required but granted nowhere). It is logged here, not in
+a separate note, because it continues the same AM-89-through-9x validator-
+warnings series this note already tracks (shared channel, shared gate
+discipline, shared §5 table), not because it fits this note's title.
 
 ---
 
@@ -116,7 +124,8 @@ by live probes:
 | AM-92 (`85c3de2`) | validator | V-08 becomes token-aware (S1) with an order-independent conservative fallback (S2); `_find_parent_delegation()` deleted | zero diffs on tracked corpus (old vs. new); order-invariant across all permutations of a multi-error spec; suite 461 → 475 |
 | AM-93 (`ae01801`) | grammar + parser + reasoner + verifier | `ObjectBody` takes `(delegated_from+=DelegatedFrom)*`; the model keeps a `List[DelegatedFrom]`; both `_is_standing_affiliation` twins use set membership (order-independent, duplicates accepted) | errors/warnings of the three named scenarios byte-identical; twins parity-tested over a 40-agent truth table, plus two mutation checks; FHIR mapper output byte-identical (golden test); suite 475 → 492 |
 | AM-94 (`995ed66`) | reasoner + validator | `[W-16f]`: an Action requires part of a permit set co-granted to one target (normalized non-empty `domain_scope`, >=2 distinct authorities) and leaves an authority unconsulted (authority-based); three read-only `el_reasoner` queries, message built from `permit_omissions()`; role Action bodies only (ConditionalAction excluded, §6) | corpus byte-identical, zero hits (3 Authorizations, no co-granted set); order-invariant across all permutations; query/message equality and verifier-index parity tested; suite 492 → 514 |
-| AM-95 (pending) | reasoner + validator | `el_reasoner.all_declared_parents_of()` (shared query — the union of `parents_of()`, `standing_parents_of()`, and a new `_delegated_from_parents()`); `[W-16g]` fires when that union is >=2 and is not already exactly what `[W-16c]` or `[W-16e]` alone would name; a party declared via >1 channel to the same agent renders as one entry with every channel it came from | one real corpus hit (`referral_scenario.el`'s `SpecialistClinician`, true positive, pinned); `federation_consent_scenario.el` confirmed non-redundant against the real file; order-invariant; message/query parity tested; suite 523 → 541 (523 is HEAD at time of writing, `3e9d397` — not AM-94's own 514; see note below) |
+| AM-95 (`0c5e6be`) | reasoner + validator | `el_reasoner.all_declared_parents_of()` (shared query — the union of `parents_of()`, `standing_parents_of()`, and a new `_delegated_from_parents()`); `[W-16g]` fires when that union is >=2 and is not already exactly what `[W-16c]` or `[W-16e]` alone would name; a party declared via >1 channel to the same agent renders as one entry with every channel it came from | one real corpus hit (`referral_scenario.el`'s `SpecialistClinician`, true positive, pinned); `federation_consent_scenario.el` confirmed non-redundant against the real file; order-invariant; message/query parity tested; suite 523 → 541 (523 is HEAD at time of writing, `3e9d397` — not AM-94's own 514; see note below) |
+| AM-96 (pending) | reasoner + validator | `el_reasoner.grantable_permit_names()` (union of Authorization.grants_permit, EnterpriseObject/Role `holds`, and Action `effect create`); `el_reasoner.ungrantable_permit_requirements()` (built on AM-94's `required_permits_by_action()`, no fifth extraction); `[W-16h]` fires when a required permit is not grantable by any of those channels; Delegation transfer deliberately excluded as evidence (§6.4.7 NOTE 1) but named explicitly in the message when present | two real corpus hits (`consent_scenario.el`'s `aiAnalysisPermit`, required by two actions, true positive, pinned); Delegation-transfer-only case (`ghostPermit`) confirmed live to pass V-15/V-16a yet warn here, with distinct wording; order-invariant; message/query parity tested; suite 541 → 555 |
 
 Note on the 514→523 gap between the AM-94 and AM-95 rows: two unrelated,
 already-committed, already-gated FHIR-mapper commits (`8b92511`: 514→519;
@@ -135,7 +144,8 @@ Tests: `tests/test_am88a_multi_parent_tracing.py`,
 `tests/test_am92_v08_token_aware.py`,
 `tests/test_am93_delegated_from_list.py`,
 `tests/test_am94_partial_permit_requirement.py`,
-`tests/test_am95_all_channel_multi_parent_warnings.py`, plus two snapshot
+`tests/test_am95_all_channel_multi_parent_warnings.py`,
+`tests/test_am96_ungrantable_permit_warnings.py`, plus two snapshot
 fixtures in `tests/fixtures/`. Full detail:
 `docs/el_grammar_amendments.md`, `docs/CONCEPTS_INDEX.md`.
 
@@ -186,7 +196,7 @@ holds identically on a clean clone (`760f99c`).
   `validate_spec()` at all (every one of its `parse()` calls uses
   `validate=False`), and no HTTP endpoint returns validation messages to a
   caller. A spec author reaches
-  `[W-16c]`/`[W-16d]`/`[W-16e]`/`[W-16f]`/`[W-16g]` (or `[W-16b]`)
+  `[W-16c]`/`[W-16d]`/`[W-16e]`/`[W-16f]`/`[W-16g]`/`[W-16h]` (or `[W-16b]`)
   only via `ParseResult.warnings` directly, or via `el_reasoner.py`'s and
   `fhir_mapper.py`'s CLIs, which print them to stderr.
 
@@ -269,6 +279,24 @@ holds identically on a clean clone (`760f99c`).
    corpus (`referral_scenario.el`'s `SpecialistClinician`: `GPClinician` +
    `SpecialistPractice`), a true positive, scenario unmodified. Full
    detail: `docs/el_grammar_amendments.md`, AM-95.
+9. **Ungrantable permit requirement — done (AM-96), not a multi-parent
+   finding (see the scope note above).** An Action's `requires_permit`
+   can name a permit that no `Authorization`, `holds` clause, or action
+   `effect create` grants anywhere — a dead end caught only at runtime
+   before this. `[W-16h]` fires on `el_reasoner.ungrantable_permit_
+   requirements()` (built on AM-94's `required_permits_by_action()`, no
+   fifth extraction). Delegation transfer is deliberately excluded as
+   evidence (§6.4.7 NOTE 1: a Delegation transfers an existing token, it
+   does not create one) — confirmed live rather than assumed: a
+   `TokenGroup` with one Commitment-grounded member and one otherwise-
+   ungrounded permit, transferred whole by a real `Delegation`, passes
+   V-15 and V-16a with zero errors, yet the permit is held nowhere; when
+   this shape occurs `[W-16h]` still fires, naming the Delegation
+   transfer explicitly so the message isn't confusing. Two real hits on
+   the tracked corpus (`consent_scenario.el`'s `aiAnalysisPermit`,
+   required by both `seekConsent` and `performAnalysis`, never granted
+   anywhere in that file), true positives, scenario unmodified. Full
+   detail: `docs/el_grammar_amendments.md`, AM-96.
 
 ## 8. The hand-off contract
 
@@ -359,7 +387,18 @@ class of bug before it reaches a public clone.
   says. `delegated_from`'s own self-sufficiency (§6.6.8 NOTE 3) means this
   is a visibility fix, not a "warn when unbacked" rule — deliberately not
   built.
-- **Push timing.** AM-88a/b/c and AM-89 through AM-94 are all pushed.
-  AM-95 was pending push at time of writing (committed locally as its own
-  individually-gated commit); the external reply that tracing is fixed is
-  the maintainer's own next action, not part of this series' scope.
+- **Ungrantable permit requirement — resolved: AM-96.** An Action's
+  `requires_permit` could name a permit granted nowhere with zero static
+  diagnostic (runtime-only, via `el_engine` step 6 / `can_perform()`).
+  `el_reasoner.grantable_permit_names()` (Authorization, EnterpriseObject/
+  Role `holds`, Action `effect create`) and `[W-16h]` close it. Delegation
+  transfer decided OUT as evidence (§6.4.7 NOTE 1 — a Delegation transfers
+  an existing token, it does not create one; confirmed live that a
+  Delegation-transferred-only permit passes V-15/V-16a with zero errors
+  while still held nowhere), but named explicitly in the message when
+  present so the warning isn't confusing on that shape.
+- **Push timing.** AM-88a/b/c and AM-89 through AM-95 are all pushed
+  (origin/main = `61d2dee`). AM-96 is pending push at time of writing
+  (committed locally as its own individually-gated commit); the external
+  reply that tracing is fixed is the maintainer's own next action, not
+  part of this series' scope.
