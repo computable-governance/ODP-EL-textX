@@ -7129,6 +7129,8 @@ all-paired-probe assertions); this file (new entry); `docs/CONCEPTS_INDEX.md`
 grammar change. Advisory, never an error; routed through the AM-89
 warnings channel.
 
+**consent_scenario.el's two true-positive hits below — fixed by AM-97.**
+
 **Problem:** an Action's `requires_permit` can name a permit that nothing
 in the specification ever grants — no `Authorization`, no `holds` clause,
 no action `effect create`. Today this is caught only at runtime
@@ -7249,3 +7251,140 @@ in `validate_spec()`); new `tests/test_am96_ungrantable_permit_warnings.py`;
 `tests/test_am93_delegated_from_list.py` (updated consent_scenario.el
 assertions); this file (new entry); `docs/CONCEPTS_INDEX.md` (new AM-96
 note).
+
+---
+
+## AM-97 (2026-09-23) — reference-scenario content fix: `consent_scenario.el`'s `aiAnalysisPermit` becomes grantable (`scenarios/consent/consent_scenario.el`)
+
+**Status:** IMPLEMENTED (2026-09-23). Type: DOC/content (reference
+scenario fix); no grammar, toolchain, or validator-rule change. Prompted
+directly by AM-96's own finding — `[W-16h]` working as designed, not a
+toolchain bug.
+
+**Problem:** AM-96 found two genuine `[W-16h]` hits in the primary EDOC
+2026 demonstration scenario: `permit aiAnalysisPermit` ("Permission to
+perform AI diagnostic analysis — requires prior consent"), required by
+`aiAgentRole`'s `seekConsent` and `performAnalysis` actions, granted
+nowhere. Reading the file's narrative: `seekConsentObligation` flows
+GP → Specialist → AI agent via two Delegations (`discharge_mode: strict`
+is the file's whole Layer-4 demonstration point); `aiAnalysisPermit` is
+clearly meant to represent "the AI agent may now analyse, because
+consent was obtained" — a content gap, not an independent, unconnected
+static declaration.
+
+**What changed — a 2-line fix to `seekConsent`'s action body:**
+```diff
+                 action seekConsent {
+                     description: "AI agent seeks and records informed patient consent"
+                     actor: aiAgentRole
+                     precondition: "Patient must be contactable"
+-                    requires_permit aiAnalysisPermit for aiAgentRole
++                    effect create aiAnalysisPermit to aiAgentRole
+                 }
+```
+`performAnalysis` is unchanged — it keeps `requires_permit aiAnalysisPermit
+for aiAgentRole`, the action the permit should actually gate. Removing
+the requirement from `seekConsent` is necessary, not cosmetic: engine
+step 6 (permit check) runs before step 7 (effect application), so
+`seekConsent` requiring the very permit it is about to create would be a
+standing deadlock. `to aiAgentRole` matches this file's own established
+style (both existing `effect create` uses in this file always name an
+explicit `to <role>`).
+
+**Precedent, confirmed not assumed:** the established idiom for "action X
+causes token Y to become available" in this grammar/engine is
+`effect create <token>` placed directly in the action that causes it —
+NOT a `triggered_by`/`discharged_by`/`emits` chain. `referral_scenario.el`'s
+own header comment (lines 128-144) documents that the event-driven
+mechanism was tried for an equivalent case and reverted same-day
+("it requires a pre-existing pending token that nothing ever granted...
+`effect create` matches the precedent `initiateReferral` already uses").
+`consent_scenario.el` itself already used this idiom once
+(`initiateReferral`'s `effect create seekConsentObligation to
+specialistRole`) — AM-97 is the first tracked use of `effect create` for
+a **permit** specifically, rather than a burden.
+
+**Important distinction — stated explicitly, not left implicit (per the
+maintainer's instruction):** this fix grants `aiAnalysisPermit` as a side
+effect of the `seekConsent` ACTION executing, not as a formal consequence
+of `seekConsentObligation` being DISCHARGED. No `discharged_by`-style
+mechanism exists in this grammar to hang a grant off a burden's discharge
+transition — the engine has no such hook (see the cross-referenced open
+finding, below). The two would coincide in practice only if
+`seekConsentObligation` were also actually discharged by an action named
+`seekConsent` performing that role — which, per the finding below, it
+currently is not. A future reader should understand this as "grant on
+the seeking of consent" (the narrative act `seekConsent` performs),
+**not** "grant on discharge of the consent obligation" (a formal engine
+event that does not currently occur here).
+
+**Bonus finding, logged as its own open item, NOT fixed here:**
+`seekConsentObligation.for_action` is `"seek_patient_consent"`, but no
+action named `seekConsent` (or any other) ever matches it — engine step
+3's discharge check is a literal string `tok.for_action == action_name`
+(`el_engine.py:469`), and `"seek_patient_consent" != "seekConsent"`. No
+action in this file currently discharges `seekConsentObligation` via the
+engine's automatic mechanism at all. Pre-existing, independent of AM-96/
+AM-97's permit issue — confirmed live, not fixed as part of this
+amendment (out of scope: touching the file's primary obligation's
+discharge wiring is a bigger, separate content decision). Logged as its
+own open finding in `docs/CONCEPTS_INDEX.md`.
+
+**Blast radius — every test/fixture pinning `consent_scenario.el`'s exact
+output, checked (not assumed) before proposing the fix:**
+- `tests/test_am89_warnings_channel.py`, `tests/test_am91_standing_parent_warnings.py`,
+  `tests/test_am93_delegated_from_list.py` — each asserted the exact two
+  `[W-16h]` strings AM-96 introduced; reverted to `result.warnings == []`.
+- `tests/test_am96_ungrantable_permit_warnings.py` —
+  `test_consent_scenario_produces_exactly_two_w16h_true_positives`
+  renamed to `test_consent_scenario_no_longer_produces_w16h`, now
+  asserting `result.warnings == []`, with a docstring explaining the
+  AM-97 fix; the rule's own correctness (trigger, exact wording, the
+  Delegation-transfer variant) remains fully covered by this file's
+  inline probes, independent of the scenario.
+- `tests/test_am86_obligation_descriptor_roots.py`'s pinned
+  `dataclasses.asdict()` snapshot of `seekConsentObligation`'s and
+  `reportingObligation`'s obligation descriptors, and both
+  `tests/fixtures/am88a_obligation_descriptors_snapshot.json` /
+  `am88b_delegation_chain_for_token_snapshot.json` — confirmed
+  unaffected: `_build_obligation_descriptors()` filters `kind == "burden"`
+  only, and both JSON fixtures key exclusively on `reportingObligation`/
+  `seekConsentObligation`; `aiAnalysisPermit` never appears in either.
+  Verified byte-identical before/after in scratch, not assumed. No
+  changes needed; re-run as part of the gate.
+- `tests/test_am90_multi_parent_warnings.py`, `tests/test_am92_v08_token_aware.py`,
+  `tests/test_am94_partial_permit_requirement.py`,
+  `tests/test_am95_all_channel_multi_parent_warnings.py` — each filters
+  for its own warning code or checks `.ok`/absence of a specific error;
+  unaffected either way. No changes needed; re-run as part of the gate.
+- `docs/DSL_TOOLCHAIN_REFERENCE.md`'s worked Bellman/AF/EF example (about
+  `seekConsentObligation`/`reportingObligation` only) — not a pinned
+  test, but confirmed unaffected: Kripke world/edge counts are
+  byte-identical before/after (30 worlds / 13 edges both times).
+
+**Verification, in scratch before touching the real file:** built the
+exact fix as a scratch copy and ran it through `parse()`,
+`co_granted_permit_sets()`/`permit_omissions()` (no new `[W-16f]` risk —
+no Authorization is added), `_build_obligation_descriptors()` (both
+pinned burden descriptors byte-identical), and `build_kripke_model()`
+(AF/EF for `discharged:seekConsentObligation` both `True` before and
+after; world/edge counts identical, 30/13). After the real edit: `ok=True,
+errors=[], warnings=[]` — both `[W-16h]` hits gone, zero new warnings of
+any kind. Full suite: 555 passed, 1 xfailed (same count as AM-96's own
+endpoint — a content fix plus reverted assertions, no new tests),
+reproduced identically on a clean `git worktree add` checkout at the
+correct base commit with the tracked diff applied via `git apply`.
+
+**Standard reference(s):** none new — this is a scenario-content fix, not
+a grammar or validator change. The scenario's own accountability chain
+remains grounded in §6.6.6/§7.10.1 (Delegation) exactly as before.
+
+**Files changed:** `scenarios/consent/consent_scenario.el` (`seekConsent`
+action body, 2 lines); `tests/test_am89_warnings_channel.py`,
+`tests/test_am91_standing_parent_warnings.py`,
+`tests/test_am93_delegated_from_list.py` (reverted `consent_scenario.el`
+assertions to `[]`); `tests/test_am96_ungrantable_permit_warnings.py`
+(renamed true-positive test); this file (new entry, and a one-line
+forward-pointer added to AM-96's own entry above); `docs/CONCEPTS_INDEX.md`
+(new AM-97 note, a forward-pointer on AM-96's entry, and a new open
+finding for the `for_action` mismatch).

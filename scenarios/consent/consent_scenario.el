@@ -145,7 +145,7 @@ community ConsentCommunity
                     description: "AI agent seeks and records informed patient consent"
                     actor: aiAgentRole
                     precondition: "Patient must be contactable"
-                    requires_permit aiAnalysisPermit for aiAgentRole
+                    effect create aiAnalysisPermit to aiAgentRole
                 }
 
                 action performAnalysis {

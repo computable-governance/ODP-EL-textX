@@ -5614,6 +5614,8 @@ above.
 
 **RESOLVED (2026-09-23).**
 
+**`consent_scenario.el`'s two true-positive hits below — fixed by AM-97.**
+
 An Action's `requires_permit` can name a permit that nothing in the
 specification ever grants — no `Authorization`, no `holds` clause
 (object or role), no action `effect create`. Confirmed live: a probe with
@@ -5684,5 +5686,95 @@ calling `parse()`/`parse_string()` directly.
 
 **Files:** `docs/el_grammar_amendments.md`, AM-96.
 `tests/test_am96_ungrantable_permit_warnings.py` covers everything above.
+
+---
+
+## AM-97 — reference-scenario content fix: `consent_scenario.el`'s `aiAnalysisPermit` becomes grantable
+
+**RESOLVED (2026-09-23).**
+
+AM-96's two `[W-16h]` hits in `consent_scenario.el` — `aiAnalysisPermit`
+required by `aiAgentRole`'s `seekConsent` and `performAnalysis` but
+granted nowhere — were a genuine content gap in the flagship reference
+scenario, not a toolchain bug: `[W-16h]` worked exactly as designed.
+`seekConsent`'s body now reads `effect create aiAnalysisPermit to
+aiAgentRole` instead of `requires_permit aiAnalysisPermit for
+aiAgentRole` (removing the requirement from `seekConsent` is necessary,
+not cosmetic — a permit check before its own granting effect would be a
+standing deadlock). `performAnalysis` is unchanged, still gated by the
+permit. Full detail: `docs/el_grammar_amendments.md`, AM-97.
+
+**What this fix actually represents — stated explicitly, not left
+implicit:** the grant is a side effect of the `seekConsent` ACTION
+executing, not a formal consequence of `seekConsentObligation` being
+DISCHARGED. This grammar/engine has no `discharged_by`-style mechanism to
+hang a grant off a burden's discharge transition — see the cross-
+referenced open finding immediately below, which is precisely why the
+two are not (yet) the same thing here. Read this as "grant on the
+seeking of consent," not "grant on discharge of the consent obligation."
+
+**Idiom precedent, confirmed not assumed:** `effect create <token>`,
+placed directly in the causing action, is the established mechanism for
+this pattern — `referral_scenario.el`'s own header comment documents that
+an `emits`/`triggered_by` alternative was tried for an equivalent case
+and reverted same-day. `consent_scenario.el` already used this idiom once
+for a burden (`initiateReferral`'s `effect create seekConsentObligation
+to specialistRole`); AM-97 is the first tracked use of `effect create`
+for a **permit**.
+
+**Verified, not assumed, before touching the real file:** the fix was
+built as a scratch copy first and checked for every risk this kind of
+change could introduce — no new `[W-16f]` (no Authorization added), no
+change to `seekConsentObligation`'s or `reportingObligation`'s pinned
+obligation descriptors (`_build_obligation_descriptors()` only reads
+burden-kind tokens; a permit-kind `effect create` is invisible to it),
+and byte-identical Kripke `AF`/`EF` results and world/edge counts (30/13)
+for `discharged:seekConsentObligation` before and after — the file's
+documented Layer-4 demonstration point is fully preserved.
+
+**Files:** `docs/el_grammar_amendments.md`, AM-97. Test updates listed
+there; `tests/test_am96_ungrantable_permit_warnings.py`'s renamed
+`test_consent_scenario_no_longer_produces_w16h` covers the scenario-level
+regression guard.
+
+---
+
+## `seekConsentObligation.for_action` never matches any action name — nothing discharges it via the engine's automatic mechanism — OPEN FINDING (2026-09-23)
+
+**Found:** 2026-09-23, during AM-97 recon. Logged, not fixed — cross-
+referenced from AM-97's amendment entry (`docs/el_grammar_amendments.md`)
+and CONCEPTS_INDEX note, above.
+
+`scenarios/consent/consent_scenario.el`'s `seekConsentObligation` burden
+declares `for_action: "seek_patient_consent"`. Engine step 3's automatic
+discharge-key detection (`el_engine.py:469`) is a literal string
+comparison, `tok.for_action == action_name` — and the file's action is
+named `seekConsent`, not `seek_patient_consent`. No action in this file
+carries an explicit `effect destroy seekConsentObligation` either, and no
+`discharged_by`/`emits` pairing exists for it. Confirmed live: none of
+the three discharge-key paths (`explicit_destroys`, `for_action` match,
+`event_discharged`) fire for this burden in this file, for any action.
+
+**Consequence:** `seekConsentObligation` cannot currently be discharged
+by any action in `consent_scenario.el` via the live runtime engine
+(`el_engine`/`Runtime.advance()`). This does not affect the file's
+documented Layer-4 point — `AF(discharged:seekConsentObligation)` is a
+Kripke-model question, evaluated over the abstract world-construction in
+`el_kripke.py`, not over whether the concrete engine has ever actually
+discharged it in a live run — but it does mean AM-97's `effect create
+aiAnalysisPermit` (placed in `seekConsent`, on the theory that
+"performing `seekConsent` is the narrative act of obtaining consent")
+and `seekConsentObligation`'s own formal discharge are two independent
+facts that happen not to coincide today, per AM-97's own note above.
+
+**Not fixed here:** deciding whether to rename the burden's `for_action`
+to match `seekConsent`, add an explicit `effect destroy
+seekConsentObligation` to some action, or leave the discharge mechanism
+undecided is a separate, larger content decision about the scenario's
+primary obligation — out of scope for AM-96/AM-97's specific permit
+finding. Flagged for a future session.
+
+**Status:** OPEN. No code or scenario change beyond AM-97's `seekConsent`
+edit (which does not touch this).
 
 ---

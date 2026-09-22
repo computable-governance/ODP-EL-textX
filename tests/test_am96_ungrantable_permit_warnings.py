@@ -373,33 +373,23 @@ def test_warnings_never_affect_ok():
 
 # ── Named tracked scenarios ─────────────────────────────────────────────
 
-def test_consent_scenario_produces_exactly_two_w16h_true_positives():
-    """The two real, tracked-corpus hits found during AM-96 recon --
-    matching the AM-91/AM-95 precedent: consent_scenario.el's
-    aiAnalysisPermit is required by both aiAgentRole actions
-    (seekConsent, performAnalysis) but never granted anywhere -- no
-    Authorization exists in this file at all, no holds clause names it,
-    no effect creates it. True positives, advisory, and the scenario
-    file itself is not modified -- pinning the exact strings here, on
-    the named tracked file, per the maintainer's instruction."""
+def test_consent_scenario_no_longer_produces_w16h():
+    """AM-96 found two real, tracked-corpus [W-16h] hits here --
+    consent_scenario.el's aiAnalysisPermit was required by both
+    aiAgentRole actions (seekConsent, performAnalysis) but granted
+    nowhere. AM-97 fixed the scenario content: seekConsent now grants
+    aiAnalysisPermit via `effect create ... to aiAgentRole` as a side
+    effect of the action executing (the file has no discharged_by-style
+    mechanism to hang the grant off seekConsentObligation's discharge
+    instead -- see AM-97's amendment entry and the cross-referenced open
+    finding in docs/CONCEPTS_INDEX.md). performAnalysis is unchanged,
+    still gated by the permit. The rule's own correctness (W-16h firing
+    at all, its exact wording, the Delegation-transfer variant) remains
+    fully covered by this file's inline probes above, independent of
+    this scenario file."""
     result = parse("scenarios/consent/consent_scenario.el", validate=True)
     assert result.ok, result.errors
-    assert result.warnings == [
-        "[W-16h] Action 'performAnalysis' (role 'aiAgentRole', community "
-        "'ConsentCommunity') requires permit 'aiAnalysisPermit', but nothing in "
-        "this specification grants it — no Authorization names it, no holds "
-        "clause (object or role) names it, and no action effect creates it. The "
-        "requirement can never be satisfied. Add a grant for 'aiAnalysisPermit', "
-        "or remove the requirement if it is no longer needed. See "
-        "el_reasoner.ungrantable_permit_requirements(model).",
-        "[W-16h] Action 'seekConsent' (role 'aiAgentRole', community "
-        "'ConsentCommunity') requires permit 'aiAnalysisPermit', but nothing in "
-        "this specification grants it — no Authorization names it, no holds "
-        "clause (object or role) names it, and no action effect creates it. The "
-        "requirement can never be satisfied. Add a grant for 'aiAnalysisPermit', "
-        "or remove the requirement if it is no longer needed. See "
-        "el_reasoner.ungrantable_permit_requirements(model).",
-    ]
+    assert result.warnings == []
 
 
 def test_referral_scenario_produces_no_w16h():
