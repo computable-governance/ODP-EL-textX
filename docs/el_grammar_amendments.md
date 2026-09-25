@@ -7388,3 +7388,69 @@ assertions to `[]`); `tests/test_am96_ungrantable_permit_warnings.py`
 forward-pointer added to AM-96's own entry above); `docs/CONCEPTS_INDEX.md`
 (new AM-97 note, a forward-pointer on AM-96's entry, and a new open
 finding for the `for_action` mismatch).
+
+---
+
+## AM-98 (2026-09-25) — `DurationUnit` lists plurals first so plural units parse (`grammar/v2/el_grammar.tx`)
+
+**Status:** IMPLEMENTED (2026-09-25). Type: AM (grammar bug fix). No
+toolchain, domain-class, or validator-rule change.
+
+**Problem:** `DurationUnit` (introduced by AM-23) listed each singular
+before its plural — `'minute' | 'minutes' | 'hour' | 'hours' | ...`.
+PEG ordered choice commits to the first alternative that matches, so
+`'hour'` matched the prefix of `hours` and the enclosing rule then failed
+on the trailing `s`. Every plural unit was unparseable wherever `Duration`
+is used: `Policy.initial_value` / envelope values (via `PolicyValue`) and
+`NormativePolicy.review_cycle`. Reproduced before the fix: `24 hours`,
+`3 days` and `12 months` all failed with a `[SYNTAX]` error pointing at
+the `s` (`24 hour*s`); the singular forms parsed.
+
+**What changed:** each plural now precedes its singular:
+```diff
+ DurationUnit:
+-    'minute' | 'minutes' | 'hour' | 'hours' | 'day' | 'days'
+-    | 'week' | 'weeks' | 'month' | 'months' | 'year' | 'years'
++    'minutes' | 'minute' | 'hours' | 'hour' | 'days' | 'day'
++    | 'weeks' | 'week' | 'months' | 'month' | 'years' | 'year'
+ ;
+```
+plus a two-line comment above the rule explaining why the order matters.
+Singular forms are unaffected (`1 hour` still parses to unit `'hour'`).
+The `DurationUnit` enum in `toolchain/el_domain.py` already carried both
+singular and plural members, so no domain-class change was needed.
+`_DEADLINE_UNIT_STEPS` in `toolchain/el_engine.py` operates on free-text
+deadline strings, not `Duration`, and is unaffected.
+
+**Scenario workaround reverted:** `scenarios/terms_of_engagement/external_agent_access_scenario.el`'s
+`RefusalQuarantinePolicy` used `initial_value: 1 day` only to avoid this
+bug; it is now `initial_value: 24 hours`, as intended. The scenario still
+validates cleanly before and after (`ok=True, errors=[], warnings=[]`),
+and parses the value as `24` / `'hours'`. `RefusalReviewPolicy`'s
+`initial_value: 1 day` in the same file is intentional (it matches
+`refusalReviewBurden`'s deadline) and is deliberately left unchanged.
+
+**Tests:** new `tests/test_am98_duration_plural_units.py`, four tests,
+each asserting the parsed unit string as well as successful parsing, so a
+future reorder cannot silently collapse a plural onto its singular:
+`Policy.initial_value` `24 hours` → `'hours'` and `1 hour` → `'hour'`;
+`NormativePolicy.review_cycle` `12 months` → `'months'` and `1 month` →
+`'month'`. **Undo-and-rerun check:** with the grammar change temporarily
+stashed, the two plural tests fail and the two singular tests pass —
+confirming the tests actually detect this bug rather than passing
+vacuously. With the fix restored, all four pass.
+
+**Verification:** full suite (`.venv/bin/python3.13 -m pytest`) — 559
+passed, 1 xfailed, against the 555 passed / 1 xfailed baseline at
+`2cfe669` (AM-97's endpoint). The +4 are exactly the new AM-98 tests; no
+existing test changed outcome. The suite was re-run after each step
+(grammar, tests, scenario) with the same result at each point.
+
+**Standard reference(s):** none new — a parser-level fix to AM-23's
+typed policy values (§6.5, §7.9 policy concepts), restoring the
+intended surface syntax.
+
+**Files changed:** `grammar/v2/el_grammar.tx` (`DurationUnit`
+alternative order, plus comment); `tests/test_am98_duration_plural_units.py`
+(new); `scenarios/terms_of_engagement/external_agent_access_scenario.el`
+(`RefusalQuarantinePolicy.initial_value`); this file (new entry).

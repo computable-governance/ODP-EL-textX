@@ -143,7 +143,7 @@ policy TokenScopePolicy : string {
 
 policy RefusalQuarantinePolicy : duration {
     description: "After a refusal, the calling identity is quarantined"
-    initial_value: 1 day
+    initial_value: 24 hours
     prohibition on externalRequesterRole: "further requests during quarantine"
     affects role externalRequesterRole
     enforcement policed pessimistic mechanism: "gateway identity quarantine and rate limit"

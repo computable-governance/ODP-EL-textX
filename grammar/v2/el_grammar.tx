@@ -232,9 +232,11 @@ Duration:
     value=INT unit=DurationUnit
 ;
 
+// AM-98: each plural must precede its singular — PEG ordered choice
+// would otherwise match 'hour' in 'hours' and fail on the trailing 's'.
 DurationUnit:
-    'minute' | 'minutes' | 'hour' | 'hours' | 'day' | 'days'
-    | 'week' | 'weeks' | 'month' | 'months' | 'year' | 'years'
+    'minutes' | 'minute' | 'hours' | 'hour' | 'days' | 'day'
+    | 'weeks' | 'week' | 'months' | 'month' | 'years' | 'year'
 ;
 
 NumberInterval:
