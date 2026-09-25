@@ -230,8 +230,8 @@ class World:
                             before AM-99b).
                             Obligations PENDING at w0 are not recorded
                             (implicit activation step 0). Populated by
-                            the static builder's P6a cascade only;
-                            hybrid-mode worlds leave it empty.
+                            the static builder's P6a cascade and Rule T11
+                            only; hybrid-mode worlds leave it empty.
       - step              : discrete time step (0 = initial)
 
     Frozen so that worlds are hashable and can appear in sets/dict keys.
@@ -1850,6 +1850,49 @@ def _build_any_discharged_groups(model: Any) -> Set[str]:
     return result
 
 
+def _build_event_firing_index(
+    model: Any,
+    descriptors: Dict[str, ObligationDescriptor],
+    permit_requirement_index: Dict[str, List[str]],
+) -> Dict[str, List[str]]:
+    """
+    AM-99a: map event_name -> [action_name, ...] for the actions Rule T11
+    may fire. Walks every action in every Community/Domain/Federation, the
+    same way _build_permit_requirement_index does, keeping an action only
+    if it:
+      - has `emits` (EmitsDecl, AM-22);
+      - is not deontically gated (no `requires_permit`, i.e. absent from
+        permit_requirement_index) — gated actions never fire through T11;
+      - is not a discharging action: not any descriptor's for_action, and
+        its emitted event is not any descriptor's fires_event
+        (discharged_by). Events raised by discharge already fire through
+        T1's P6a cascade; firing them here as well would activate the
+        dependents without the discharge ever happening.
+    State-free, built once before the BFS like every other index.
+    """
+    discharging_actions = {d.for_action for d in descriptors.values() if d.for_action}
+    discharge_events = {d.fires_event for d in descriptors.values() if d.fires_event}
+    index: Dict[str, List[str]] = {}
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                emits = getattr(action, "emits", None)
+                # P-processing leaves the EventDecl itself on .emits (the
+                # engine reads grammar_action.emits.name); tolerate the
+                # EmitsDecl wrapper too.
+                event = _obj_name(getattr(emits, "event", None) or emits)
+                if not event:
+                    continue
+                if action.name in permit_requirement_index:
+                    continue
+                if action.name in discharging_actions or event in discharge_events:
+                    continue
+                index.setdefault(event, []).append(action.name)
+    return index
+
+
 def _build_claim_evaluations(model: Any) -> Dict[str, List[Any]]:
     """
     AM-61 (see DN_003): map each DeonticToken name to the
@@ -2074,6 +2117,20 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            static/pre-exec builder, same hybrid-only gap T4/T7/T8 also
            have here.
 
+         Rule T11 — EVENT FIRING (action-emitted triggers, AM-99a):
+           For each event that some WAITING obligation is triggered_by and
+           that an eligible action emits (see _build_event_firing_index:
+           has `emits`, no `requires_permit`, not a discharging action),
+           if that action has not already occurred in w, add an edge
+           w → w' where every WAITING obligation triggered_by the event
+           becomes PENDING (activation step recorded, as P6a does) and
+           the action is added to occurred_actions. No step advance.
+           Suppressed while a strict obligation is PENDING with an ACTIVE
+           holder — the same condition as T3, mirroring the engine's
+           Step 3.5 guard (a T11 action discharges nothing). Verifier
+           counterpart of the engine's Step 7c (_activate_triggered_tokens(),
+           el_engine.py). Static builder only; hybrid is AM-99b.
+
     Parameters
     ----------
     model   : parsed EnterpriseSpec (output of el_parser.parse)
@@ -2091,6 +2148,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     group_index = _build_group_index(model)
     any_discharged_groups = _build_any_discharged_groups(model)
     claim_evaluations = _build_claim_evaluations(model)  # AM-61 — see DN_003
+    event_firing_index = _build_event_firing_index(  # AM-99a — Rule T11
+        model, descriptors, permit_requirement_index)
     satisfaction_conditions = _build_satisfaction_conditions(model)
 
     # A permit/embargo-only spec (no burdens) must not hit the trivial-model
@@ -2460,6 +2519,47 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             edges.setdefault(w, set()).add(w_prime)
             labels[(w, w_prime)] = label
             successors_for_w.add(w_prime)
+
+        # ── Rule T11: EVENT FIRING (action-emitted triggers, AM-99a) ─────────
+        # Static builder only; hybrid is AM-99b. Same strict guard as T3:
+        # a T11 action discharges nothing, so it is a no-progress action
+        # the engine's Step 3.5 blocks while a strict burden is actionable.
+        strict_blocks = any(
+            current_obligs.get(oid) == ObligationState.PENDING
+            and d.discharge_mode == "strict"
+            and current_actors.get(d.holder) == ActorStatus.ACTIVE
+            for oid, d in descriptors.items()
+        )
+        for event, actions in ([] if strict_blocks else event_firing_index.items()):
+            targets = [
+                oid for oid, d in descriptors.items()
+                if d.triggered_by == event
+                and current_obligs.get(oid) == ObligationState.WAITING
+            ]
+            if not targets:
+                continue
+            for action_name in actions:
+                if action_name in current_occurred:
+                    continue  # already occurred on this path — as T5
+
+                new_obligs = dict(current_obligs)
+                new_activation = dict(w.activation_steps)
+                for oid in targets:
+                    new_obligs[oid] = ObligationState.PENDING
+                    new_activation[oid] = w.step
+                new_occurred = current_occurred | {action_name}
+                w_prime = _make_world(new_obligs, current_actors, new_occurred,
+                                      activation_steps=new_activation, step=w.step)
+                label   = f"fire:{event} via {action_name}"
+
+                if w_prime not in worlds:
+                    worlds.add(w_prime)
+                    if w_prime.step < horizon:
+                        queue.append(w_prime)
+
+                edges.setdefault(w, set()).add(w_prime)
+                labels[(w, w_prime)] = label
+                successors_for_w.add(w_prime)
 
     print(f"[Kripke] Converged in {_iter_count} iterations")
 

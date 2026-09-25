@@ -1670,6 +1670,14 @@ event-triggered obligations — is logged as its own open finding, "Engine
 counts event-triggered deadlines from grant, not activation" (end of this
 file).
 
+*Update 2026-09-25 (AM-99a part 2), partial resolution:* the static Kripke
+builder now fires events emitted by Actions (Rule T11), the verifier
+counterpart of the engine's Step 7c, so action-emitted triggers are no
+longer invisible to the verifier. Still open: the hybrid builder (AM-99b);
+the deadline-counting divergence above; T11 does not fire gated actions,
+which the engine does once the permit is held; and there is still no
+shared abstraction between the two sides.
+
 ## Engine/Kripke unification — what a shared design would and wouldn't merge
 
 Following up on the symmetry gap above: the operational/modal split itself

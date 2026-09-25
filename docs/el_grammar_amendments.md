@@ -7538,3 +7538,120 @@ lifecycle): a token's obligation is in force from activation, not before.
 (new); `docs/KRIPKE_TRANSITION_RULES.md` (T2 row, last-updated note);
 `docs/CONCEPTS_INDEX.md` (new open finding, plus a forward pointer on the
 "Engine/Kripke event-model symmetry gap" finding); this file (new entry).
+
+---
+
+## AM-99a (2026-09-25) — part 2 of 3: Rule T11, action-emitted events fire in the static builder (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-25). Type: toolchain change (Layer 4,
+static builder only; hybrid is AM-99b). No grammar or validator change.
+
+**Problem:** in `build_kripke_model()` a WAITING obligation could only
+become PENDING through P6a, i.e. when another obligation's discharge
+raised its `triggered_by` event (`fires_event`, from `discharged_by`).
+Events raised by an Action's `emits` (AM-22), which the live engine fires
+at Step 7c, were invisible to the verifier. In
+`scenarios/terms_of_engagement/external_agent_access_scenario.el`,
+`refusalRecordBurden` (`triggered_by: accessRefused`, emitted by
+`refuseRequest`) and `incidentNotificationBurden`
+(`triggered_by: vendorIncidentDetected`, emitted by `detectIncident`)
+therefore stayed WAITING. `refusalReviewBurden`, which depends on the
+first, stayed WAITING too. The BFS dead-ended at 4 worlds, with AF and EF
+false for all three.
+
+**What changed — Rule T11 (EVENT FIRING):**
+- New `_build_event_firing_index()` maps each event to the eligible
+  actions that emit it. An action is eligible if it:
+  - has `emits`;
+  - has no `requires_permit` (gated actions never fire through T11);
+  - is not a discharging action: not any descriptor's `for_action`, and
+    its emitted event is not any descriptor's `discharged_by`.
+- For each event with WAITING dependents and each eligible emitter not
+  yet occurred on the path, T11 adds an edge in which:
+  - every WAITING obligation triggered by the event becomes PENDING;
+  - the activation step is recorded (part 1's `World.activation_steps`);
+  - the action is added to `occurred_actions`;
+  - the step does not advance.
+  The edge label is `fire:<event> via <action>`.
+- Suppressed while a strict obligation is PENDING with an ACTIVE holder:
+  the same condition as T3, mirroring the engine's Step 3.5 guard (AM-78),
+  which blocks no-progress actions. A T11 action discharges nothing.
+- No actor-activity or embargo check: the static builder has no
+  role→actor map, and no static rule changes actor status.
+- Embargoes are out of scope. `noCircumventionEmbargo` is also
+  `triggered_by: accessRefused`, but T11 activates obligations only, and
+  embargo state is fixed in the static builder.
+
+**Why discharging actions are excluded (approved at the investigation
+step):** without the exclusion, T11 fires `recordRefusal` (emits
+`refusalRecorded`) without discharging `refusalRecordBurden`. That
+activates `refusalReviewBurden` with no refusal ever recorded, and marks
+the discharging action occurred while its burden is still open. The
+prototype confirmed this breaks the strict burden's response property
+(21228 worlds, all verdicts false). Discharge-raised events keep firing
+through T1/P6a only. The `discharged_by` half of the exclusion extends the
+approved `for_action` rule to the other way the engine discharges through
+an action (Step 3, `event_discharged`). No current scenario hits it; a
+fixture test covers it.
+
+**Not an exact engine mirror, stated explicitly:** the engine emits from
+a gated action once its permit is held (Step 6 precedes Step 7c). T11
+never fires gated actions. Recorded on the "Engine/Kripke event-model
+symmetry gap" finding in `docs/CONCEPTS_INDEX.md` as still open.
+
+**AM-97's idiom is unaffected:** AM-97's `effect create` engine idiom
+("action X makes token Y available") is unaffected. T11 is the verifier
+counterpart for specifications that use `emits` / `triggered_by` instead,
+and does not change how `effect create` is handled anywhere.
+
+**Result on the scenario (horizon 10):** 4 → 2444 worlds (5924 edges). T11
+fires exactly `fire:accessRefused via refuseRequest` and
+`fire:vendorIncidentDetected via detectIncident`. `refusalReviewBurden` is
+activated only by discharging `refusalRecordBurden` (P6a). EF is true for
+all three burdens. AF from w0 stays false for all three, because each
+waits on an event that may never fire. Part 3 replaces that verdict with
+the bounded response property for triggered obligations.
+
+**Blast radius, checked rather than assumed:** full static snapshot (world
+count, edge count, AF/EF per obligation) of all 15 parseable scenarios.
+Only `external_agent_access_scenario.el` changed. The only other `emits`
+in the repo (`referral_scenario.el`, `referralSubmitted`) triggers no
+burden, so T11 adds nothing there. Hybrid mode is untouched.
+
+**Tests:** new `tests/test_am99a_t11_event_firing.py`, 9 tests.
+- On the scenario:
+  - it no longer dead-ends;
+  - EF is true for all three burdens;
+  - the exact set of T11 edges;
+  - `refusalReviewBurden` is activated only by discharge.
+- On minimal fixtures:
+  - an ungated emitter fires (PENDING, occurred, same step, activation
+    step recorded);
+  - a gated emitter does not fire;
+  - a `for_action` emitter does not fire;
+  - an emitter of a `discharged_by` event does not fire;
+  - a strict obligation blocks T11 until it is discharged.
+
+**Undo-and-rerun checks,** each component removed on its own and the file
+restored afterwards (byte-identical):
+
+| Removed | Tests failing |
+|---|---|
+| T11 disabled | 6 (every positive test) |
+| Gated exclusion | 1 (the gated test) |
+| Discharging exclusion | 4 (the two exclusion tests and two scenario tests) |
+| Strict guard | 1 (the strict test) |
+
+**Verification:** full suite — 572 passed, 1 xfailed (563 after part 1,
+plus 9).
+
+**Standard reference(s):** Annex C (Kripke semantics, informative),
+§C.2(b) reachability relation; §7.8.7 (token lifecycle, activation);
+event raising per ODP Part 2 §8.4 (EmitsDecl, AM-22).
+
+**Files changed:** `toolchain/el_kripke.py` (`_build_event_firing_index()`,
+Rule T11 in `build_kripke_model()`, docstring);
+`tests/test_am99a_t11_event_firing.py` (new);
+`docs/KRIPKE_TRANSITION_RULES.md` (T11 row, last-updated note);
+`docs/CONCEPTS_INDEX.md` (partial-resolution note on the symmetry-gap
+finding); `scenarios/README.md` (scenario row); this file (new entry).
