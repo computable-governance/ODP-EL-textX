@@ -100,7 +100,7 @@ def test_activate_triggered_tokens_activates_matching_and_skips_others(spec):
     )
 
     tokens, log_lines = _activate_triggered_tokens(
-        spec, [pending, unrelated], "encounterConcluded"
+        spec, [pending, unrelated], "encounterConcluded", tick=0
     )
 
     by_name = {t.token_name: t for t in tokens}
@@ -120,7 +120,7 @@ def test_activate_triggered_tokens_unmatched_event_is_untouched_noop(spec):
         deadline="48 hours from clinical decision", for_action="initiateReferral",
     )
 
-    tokens, log_lines = _activate_triggered_tokens(spec, [pending], "noSuchEvent")
+    tokens, log_lines = _activate_triggered_tokens(spec, [pending], "noSuchEvent", tick=0)
 
     assert tokens[0].state == "pending"
     assert log_lines == []

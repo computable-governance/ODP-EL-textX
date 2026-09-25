@@ -24,7 +24,7 @@ Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, §7.8, §7.10
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 
@@ -55,6 +55,11 @@ class TokenInstance:
                                      # strict finding's convergence addendum (2026-08-20)
     deadline: Optional[str] = None
     for_action: Optional[str] = None  # informational — see AM-01
+    activated_at_tick: Optional[int] = None  # AM-100: tick at which a pending token became
+                                     # active (event trigger or `activate` effect); None
+                                     # means active since grant. Deadlines count from here
+                                     # -- see _activation_tick(). granted_at_tick is kept
+                                     # unchanged as grant provenance.
 
 
 @dataclass(frozen=True)
@@ -153,7 +158,22 @@ def _transition(tok: TokenInstance, new_state: str) -> TokenInstance:
         granted_at_tick=tok.granted_at_tick,
         deadline=tok.deadline,
         for_action=tok.for_action,
+        activated_at_tick=tok.activated_at_tick,
     )
+
+
+def _activate(tok: TokenInstance, tick: int) -> TokenInstance:
+    """AM-100: pending -> active, stamping activated_at_tick so the
+    token's deadline counts from now rather than from its grant. The
+    live-engine counterpart of the static Kripke builder's
+    World.activation_steps (AM-99a part 1)."""
+    return replace(_transition(tok, "active"), activated_at_tick=tick)
+
+
+def _activation_tick(tok: TokenInstance) -> int:
+    """AM-100: the tick a token's deadline counts from — its activation
+    tick if it was activated after grant, otherwise its grant tick."""
+    return tok.granted_at_tick if tok.activated_at_tick is None else tok.activated_at_tick
 
 
 def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
@@ -170,6 +190,7 @@ def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
         granted_at_tick=tok.granted_at_tick,
         deadline=tok.deadline,
         for_action=tok.for_action,
+        activated_at_tick=tok.activated_at_tick,
     )
 
 
@@ -209,17 +230,25 @@ def _find_spec_tokens_for_event(spec, event_name: str, attr: str) -> set:
     return result
 
 
-def _activate_triggered_tokens(spec, tokens: list, event_name: str) -> tuple[list, list[str]]:
+def _activate_triggered_tokens(spec, tokens: list, event_name: str,
+                               tick: int) -> tuple[list, list[str]]:
     """
     Transition to 'active' every token whose triggered_by matches event_name.
     Returns (updated_tokens, effect_log_lines). Shared by advance() Step 7c
     (action-driven) and Runtime.fire_event() (direct-call, e.g. FHIR-driven).
+
+    AM-100: activated tokens are stamped with `tick` (activated_at_tick), so
+    check_live_violations() counts their deadline from activation, not grant.
+    A token already 'active' is left as it is, so a repeated event does not
+    restart its deadline.
     """
     triggered = _find_spec_tokens_for_event(spec, event_name, "triggered_by")
     if not triggered:
         return tokens, []
     new_tokens = [
-        _transition(t, "active") if t.token_name in triggered else t
+        _activate(t, tick)
+        if t.token_name in triggered and t.state != "active"
+        else t
         for t in tokens
     ]
     log_lines = [f"event '{event_name}' triggered activation of '{name}'" for name in triggered]
@@ -697,8 +726,13 @@ def advance(
                 effects_log.append(f"pended '{tok_ref.name}'")
 
             elif op == "activate":
+                # AM-100: stamp activation, as for event-triggered activation
+                # (_activate_triggered_tokens()); an already-active token keeps
+                # its deadline clock.
                 tokens = [
-                    _transition(t, "active") if t.token_name == tok_ref.name else t
+                    _activate(t, tick)
+                    if t.token_name == tok_ref.name and t.state != "active"
+                    else t
                     for t in tokens
                 ]
                 effects_log.append(f"activated '{tok_ref.name}'")
@@ -740,6 +774,7 @@ def advance(
                                     granted_at_tick=t.granted_at_tick,
                                     deadline=t.deadline,
                                     for_action=t.for_action,
+                                    activated_at_tick=t.activated_at_tick,
                                 ))
                             effects_log.append(
                                 f"transferred '{tok_ref.name}' from '{t.holder}'"
@@ -763,6 +798,7 @@ def advance(
                             granted_at_tick=t.granted_at_tick,
                             deadline=t.deadline,
                             for_action=t.for_action,
+                            activated_at_tick=t.activated_at_tick,
                         ))
                         effects_log.append(f"cloned '{tok_ref.name}' to '{actor_name}'")
                         break
@@ -770,7 +806,7 @@ def advance(
     # 7c — AM-22: event-triggered token activation
     if grammar_action and grammar_action.emits:
         tokens, triggered_log = _activate_triggered_tokens(
-            spec, tokens, grammar_action.emits.name
+            spec, tokens, grammar_action.emits.name, tick
         )
         effects_log.extend(triggered_log)
 
@@ -1996,7 +2032,7 @@ def fire_event(
         reason = _strict_block_reason(blocking, "before the event can be fired")
         return _blocked(state, source, f"fire_event:{event_name}", reason, tick)
 
-    tokens, effects_log = _activate_triggered_tokens(spec, list(state.tokens), event_name)
+    tokens, effects_log = _activate_triggered_tokens(spec, list(state.tokens), event_name, tick)
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
     record = TransitionRecord(
@@ -2146,7 +2182,7 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
         else:
             deadline_steps = _parse_deadline_steps(raw_deadline, default=5)
 
-        elapsed = tick - tok.granted_at_tick
+        elapsed = tick - _activation_tick(tok)  # AM-100: from activation, not grant
         if elapsed >= deadline_steps:
             tokens[i] = _transition(tok, "violated")
             violated_names.append(tok.token_name)
