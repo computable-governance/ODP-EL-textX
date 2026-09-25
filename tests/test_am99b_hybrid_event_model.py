@@ -27,6 +27,12 @@ Part 3: gated actions fire their events, in both builders.
     actions fire here, not through T11 — engine Step 7c after Step 6);
   - T6: a gated discharge runs P6a on the burden's discharged_by event
     and fires its action's emitted event.
+
+Part 4: the hybrid horizon is relative to the anchored world.
+  - worlds are expanded up to step state.tick + horizon; before, a
+    runtime at tick >= horizon expanded only w0;
+  - KripkeModel.horizon stays relative, and check_response() counts its
+    horizon step from initial.step.
 """
 import contextlib
 import io
@@ -133,7 +139,9 @@ def test_triggered_burden_violated_no_earlier_than_activation_plus_deadline(toe_
     rt.advance("recordRefusal", "ProviderAPIGateway")
     activated = next(t.activated_at_tick for t in rt.current_state().tokens
                      if t.token_name == "refusalReviewBurden")
-    km = _quiet(build_kripke_from_runtime, rt, horizon=30)
+    # horizon counts from the runtime's tick (9) since AM-99b part 4, so
+    # 10 steps reach step 19, past activation (8) + deadline (8).
+    km = _quiet(build_kripke_from_runtime, rt, horizon=10)
     deadline = km.obligation_descriptors["refusalReviewBurden"].deadline_steps
     violation_steps = {
         w.step for (src, w), label in km.labels.items()
@@ -432,3 +440,39 @@ def test_gated_event_burdens_reachable(gated_spec, builder):
     km = _gated_models(gated_spec)[builder]
     for oid in ("followUpBurden", "reportBurden", "archiveBurden"):
         assert km.check_permission(oid).satisfied is True, oid
+
+
+# ── Part 4: relative hybrid horizon ──────────────────────────────────────────
+
+def _shape(km):
+    """World count, edge count and the multiset of edge labels."""
+    labels = sorted(km.labels.values())
+    return len(km.worlds), sum(len(v) for v in km.edges.values()), labels
+
+
+def test_horizon_is_relative_to_runtime_tick(toe_spec):
+    """Only clock ticks separate the two runtimes and nothing is PENDING
+    yet, so the models differ only by a step offset."""
+    fresh = _toe_runtime(toe_spec)
+    later = _toe_runtime(toe_spec)
+    later.advance_clock(12)
+    km0 = _quiet(build_kripke_from_runtime, fresh, horizon=10)
+    km12 = _quiet(build_kripke_from_runtime, later, horizon=10)
+    assert km12.initial.step == 12
+    assert km12.horizon == km0.horizon == 10
+    assert _shape(km12) == _shape(km0)
+    assert max(w.step for w in km12.worlds) == 22
+
+
+def test_response_verdicts_past_absolute_horizon_match_static(toe_spec):
+    """A refusal at tick 12 (past the old absolute bound of 10) still
+    gets real verdicts, not 'not resolved within horizon'."""
+    rt = _toe_runtime(toe_spec)
+    rt.advance_clock(12)
+    assert rt.advance("refuseRequest", "ProviderAPIGateway").outcome == "ok"
+    static = _quiet(build_kripke_model, toe_spec, horizon=10)
+    hybrid = _quiet(build_kripke_from_runtime, rt, horizon=10)
+    for oid in ("refusalRecordBurden", "refusalReviewBurden", "incidentNotificationBurden"):
+        h, s_ = hybrid.check_response(oid), static.check_obligation(oid)
+        assert h.status is None, oid
+        assert h.satisfied == s_.satisfied, oid

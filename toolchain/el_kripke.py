@@ -651,7 +651,10 @@ class KripkeModel:
 
     We also carry:
       obligation_descriptors — metadata indexed by obligation_id
-      horizon                — maximum step depth used during construction
+      horizon                — maximum step depth used during construction,
+                               counted from initial.step (0 in the static
+                               builder; the runtime's tick in hybrid mode,
+                               AM-99b)
       labels                 — transition labels (world, world) → action description
     """
     initial: World
@@ -853,8 +856,9 @@ class KripkeModel:
         prop = f"discharged:{obligation_id}"
 
         pending = [w for w in self.worlds if self.satisfies(w, pending_prop)]
+        horizon_step = self.initial.step + self.horizon  # AM-99b: hybrid w0.step = tick
         in_horizon = sorted(
-            (w for w in pending if w.step < self.horizon),
+            (w for w in pending if w.step < horizon_step),
             key=lambda w: (w.step, repr(w)),
         )
 
@@ -3232,8 +3236,15 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     granted_at_tick), so Rule T2 counts its deadline from activation,
     matching the engine's check_live_violations().
     Actors from WorldState→ACTIVE. BFS expansion uses the same T1/T2/T3 rules.
+    `horizon` is relative: worlds are expanded up to step
+    state.tick + horizon (AM-99b); KripkeModel.horizon keeps the relative
+    value, counted from initial.step.
     """
     state, spec, ledger = runtime.current_state(), runtime._spec, runtime._ledger
+    # AM-99b: horizon counts from the anchored world, not from tick 0.
+    # w0.step is the runtime's tick, so an absolute bound left a runtime
+    # at tick >= horizon with only w0 expanded.
+    horizon_step = state.tick + horizon
     group_index = _build_group_index(spec)
     satisfaction_conditions = _build_satisfaction_conditions(spec)
     delegation_index = _build_delegation_transfer_index(spec)  # AM-81
@@ -3520,7 +3531,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     )
                     if wd not in worlds:
                         worlds.add(wd)
-                        if wd.step < horizon:
+                        if wd.step < horizon_step:
                             queue.append(wd)
                     edges.setdefault(w, set()).add(wd)
                     labels[(w, wd)] = f"discharge:{oid} by {effective_holder}"
@@ -3540,7 +3551,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         worlds.add(wv)
                     edges.setdefault(w, set()).add(wv)
                     labels[(w, wv)] = f"violate:{oid}"
-        if w.step < horizon and any(
+        if w.step < horizon_step and any(
             obligs.get(o) == ObligationState.PENDING
             and descriptors[o].discharge_mode == "eventual"
             for o in descriptors
@@ -3612,7 +3623,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
 
             if w_prime not in worlds:
                 worlds.add(w_prime)
-                if w_prime.step < horizon:
+                if w_prime.step < horizon_step:
                     queue.append(w_prime)
 
             edges.setdefault(w, set()).add(w_prime)
@@ -3674,7 +3685,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
 
             if w_prime not in worlds:
                 worlds.add(w_prime)
-                if w_prime.step < horizon:
+                if w_prime.step < horizon_step:
                     queue.append(w_prime)
 
             edges.setdefault(w, set()).add(w_prime)
@@ -3711,7 +3722,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     )
                     if w_fired not in worlds:
                         worlds.add(w_fired)
-                        if w_fired.step < horizon:
+                        if w_fired.step < horizon_step:
                             queue.append(w_fired)
                     edges.setdefault(w, set()).add(w_fired)
                     labels[(w, w_fired)] = f"fire:{event} via {action_name}"
@@ -3751,7 +3762,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     )
                     if w_revoked not in worlds:
                         worlds.add(w_revoked)
-                        if w_revoked.step < horizon:
+                        if w_revoked.step < horizon_step:
                             queue.append(w_revoked)
                     edges.setdefault(w, set()).add(w_revoked)
                     labels[(w, w_revoked)] = f"revoke:{auth.name}"
@@ -3777,7 +3788,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     )
                     if w_reinstated not in worlds:
                         worlds.add(w_reinstated)
-                        if w_reinstated.step < horizon:
+                        if w_reinstated.step < horizon_step:
                             queue.append(w_reinstated)
                     edges.setdefault(w, set()).add(w_reinstated)
                     labels[(w, w_reinstated)] = f"reinstate:{auth.name}"
@@ -3815,7 +3826,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     )
                     if w_revoked_deleg not in worlds:
                         worlds.add(w_revoked_deleg)
-                        if w_revoked_deleg.step < horizon:
+                        if w_revoked_deleg.step < horizon_step:
                             queue.append(w_revoked_deleg)
                     edges.setdefault(w, set()).add(w_revoked_deleg)
                     labels[(w, w_revoked_deleg)] = f"revoke_delegation:{deleg_name}"
@@ -3835,7 +3846,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     )
                     if w_reinstated_deleg not in worlds:
                         worlds.add(w_reinstated_deleg)
-                        if w_reinstated_deleg.step < horizon:
+                        if w_reinstated_deleg.step < horizon_step:
                             queue.append(w_reinstated_deleg)
                     edges.setdefault(w, set()).add(w_reinstated_deleg)
                     labels[(w, w_reinstated_deleg)] = f"reinstate_delegation:{deleg_name}"
@@ -3875,7 +3886,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     )
                     if w_transferred not in worlds:
                         worlds.add(w_transferred)
-                        if w_transferred.step < horizon:
+                        if w_transferred.step < horizon_step:
                             queue.append(w_transferred)
                     edges.setdefault(w, set()).add(w_transferred)
                     labels[(w, w_transferred)] = (
