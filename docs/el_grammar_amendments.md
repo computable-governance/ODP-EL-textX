@@ -7655,3 +7655,128 @@ Rule T11 in `build_kripke_model()`, docstring);
 `docs/KRIPKE_TRANSITION_RULES.md` (T11 row, last-updated note);
 `docs/CONCEPTS_INDEX.md` (partial-resolution note on the symmetry-gap
 finding); `scenarios/README.md` (scenario row); this file (new entry).
+
+---
+
+## AM-99a (2026-09-25) — part 3 of 3: bounded response property for triggered obligations (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-25). Type: toolchain change (Layer 4
+verdict semantics, static builder only). No grammar or validator change.
+Completes AM-99a.
+
+**Problem:** `check_obligation()` reports AF(discharged) from w0. For an
+obligation with `triggered_by`, that asks whether it is discharged on
+every path, including paths where its trigger never fires. On those paths
+the obligation was never in force, so an AF failure there is not a
+compliance failure. After part 2, all three burdens in
+`external_agent_access_scenario.el` failed AF from w0 for exactly that
+reason, including the strict `refusalRecordBurden`, which is discharged
+immediately whenever it is actually triggered.
+
+**What changed:**
+- **Verdict:** for an obligation with `triggered_by`, in a model whose
+  `response_semantics` is set, `check_obligation()` delegates to the new
+  `check_response()`. That reports the **bounded response property
+  ("within horizon")**: AG(pending:O → AF discharged:O), evaluated from
+  every world before the horizon step in which O is PENDING.
+- **Operator label:** `modal_operator = RESPONSE_OPERATOR`
+  (`"AG(pending→AF)"`).
+- **Counterexample:** the shortest path from w0 to the earliest failing
+  PENDING world (new `_path_to()`), followed by `_find_AF_counterexample()`
+  from there.
+- **Two outcomes are never reported as satisfied.** Both set the new
+  `ObligationVerdict.status` field with `satisfied=False`:
+  - `"not triggered within horizon"`: O is PENDING in no reachable world;
+  - `"not resolved within horizon"`: O is PENDING only in horizon-step
+    worlds.
+  `ObligationVerdict.__post_init__` raises `ValueError` if either status is
+  combined with `satisfied=True`, so the rule holds for any future caller,
+  not only this one. `render()` shows the status and "NOT satisfied".
+- **Horizon-step worlds are excluded from the antecedent** (approved at
+  the investigation step). Only tick enqueues a new world at
+  `step == horizon`, so a horizon-step world created by any other rule is
+  an artificial dead end. Logged as its own open finding in
+  `docs/CONCEPTS_INDEX.md`, "Kripke builders expand horizon-step worlds
+  only when a tick produces them". That finding includes a scratch check
+  of the possible link to the 31-vs-30 consent discrepancy: expanding
+  every horizon-step world leaves consent at 30, so this fix in this form
+  does not explain it.
+- **Unchanged:** obligations without `triggered_by` keep AF from w0.
+  `check_permission()` (EF from w0) is unchanged.
+
+**`response_semantics` is TEMPORARY (stated explicitly, as required at
+approval):** new `KripkeModel.response_semantics: bool = False`, set
+`True` only by `build_kripke_model()` (both of its return sites).
+`build_kripke_from_runtime()` leaves it `False`, so hybrid verdicts,
+including `el_api.py`'s `/tokens/{name}/status` compelled/detectable
+fields, are unchanged. **AM-99b must align hybrid mode with these
+semantics and remove the flag**, re-checking `referralInitiationBurden`
+under response semantics: it has `triggered_by: encounterConcluded`, and
+its hybrid AF is pinned `True` in `tests/test_referral_kripke.py:30`.
+
+**Blast radius, checked rather than assumed:** full static snapshot of all
+15 parseable scenarios, including operator and status per obligation.
+World and edge counts are unchanged everywhere (part 3 changes no
+transitions). Verdict changes:
+- `external_agent_access_scenario.el` — the intended ones, below.
+- `referral_scenario.el`, static only — `referralInitiationBurden` stays
+  `satisfied=False` but is now reported as "not triggered within horizon"
+  under the response operator, instead of a plain AF failure. Its trigger
+  `encounterConcluded` is fired only from FHIR (`fire_event()`), never by
+  a DSL action or discharge. No test pins its static verdict; its pinned
+  hybrid verdict is untouched.
+No other obligation's verdict, operator or status changed.
+
+**Result on the scenario (horizon 10):**
+- `refusalRecordBurden` (strict) — bounded response property **holds**.
+- `refusalReviewBurden` and `incidentNotificationBurden` (eventual) —
+  bounded response property **fails**, EF **true**: detectable, not
+  compelled.
+
+This matches the maintainer's hand-run expectation (tokens starting
+active), now reached from the real WAITING initial state. Reaching it
+needed parts 1 and 2 as well as this part.
+
+**Tests:** new `tests/test_am99a_bounded_response.py`, 12 tests.
+- The three scenario verdicts, and that the counterexample starts at w0.
+- Scoping:
+  - an untriggered obligation keeps AF (consent `seekConsentObligation`);
+  - the static builder sets the flag;
+  - the hybrid referral model has the flag off and still reports AF for
+    `referralInitiationBurden`.
+- "not triggered within horizon" on static referral and on a minimal
+  fixture, including `render()` text.
+- "not resolved within horizon" on a hand-built model where O is PENDING
+  only at the horizon step.
+- The `ValueError` guard for both statuses.
+
+**Undo-and-rerun checks,** each component removed on its own and the file
+restored afterwards (byte-identical):
+
+| Removed | Tests failing |
+|---|---|
+| Flag not set by the static builder | 6 |
+| Horizon-step exclusion | 2 (strict `refusalRecordBurden`, not-resolved) |
+| Not-triggered reported as vacuously satisfied | 2 (both not-triggered tests) |
+| Never-satisfied guard | 2 (both guard tests) |
+
+**Verification:** full suite — 584 passed, 1 xfailed (572 after part 2,
+plus 12). AM-99a overall: 559 → 584 (+4 part 1, +9 part 2, +12 part 3).
+
+**Standard reference(s):** Annex C (Kripke semantics, informative) —
+§C.2's reading of obligation as "behaviour obliged to occur", applied from
+the point the obligation is in force (§7.8.7 token lifecycle: a triggered
+token is not in force while it waits on its event). The response pattern
+AG(p → AF q) is standard CTL, and its bounded form is a consequence of
+the finite horizon H of the constructed model (§C.2(b)).
+
+**Files changed:** `toolchain/el_kripke.py` (`RESPONSE_OPERATOR` and
+status constants; `KripkeModel.response_semantics`; `check_obligation()`
+delegation; new `check_response()` and `_path_to()`;
+`ObligationVerdict.status`, `__post_init__` guard, `render()` branch;
+flag set at both `build_kripke_model()` return sites);
+`tests/test_am99a_bounded_response.py` (new);
+`docs/KRIPKE_TRANSITION_RULES.md` (note under "Related, not a transition
+rule itself", last-updated note); `docs/CONCEPTS_INDEX.md` (new open
+finding on horizon-step enqueueing); `scenarios/README.md` (scenario
+row); this file (new entry).

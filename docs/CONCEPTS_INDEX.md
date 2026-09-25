@@ -5831,3 +5831,37 @@ Planned as its own amendment, with an investigation step first: resetting
 `granted_at_tick` on activation may move engine-level pins in the referral
 and FHIR event tests (e.g. `tests/test_referral_event_triggers.py`,
 `tests/test_fhir_event_handler.py`).
+
+## Kripke builders expand horizon-step worlds only when a tick produces them — OPEN FINDING (2026-09-25)
+
+**OPEN FINDING** — found during AM-99a (prototyping the bounded response
+property). In `build_kripke_model()`, Rule T3 (tick) enqueues every new
+world, including one at `step == horizon`. Every other rule (T1, C1, T5,
+T6, T11) enqueues a new world only if `w_prime.step < horizon`. A
+horizon-step world reached by tick is therefore expanded: T3 itself
+cannot fire there, but T1, T2, T5, T6 and T11 can. A horizon-step world
+created by any other rule, for example an instantaneous discharge or
+T11 edge taken *from* a horizon-step world, is a leaf. `_AF` treats a
+leaf as a path that ends without the property, so a strict obligation
+that becomes PENDING there looks like a dead-end violation. The hybrid
+builder has the same pattern (`w_prime.step < horizon` guards alongside
+an unconditional tick enqueue).
+
+**Current handling (AM-99a part 3):** the bounded response property
+checks only PENDING worlds with `step < horizon`. An obligation PENDING
+only in horizon-step worlds is reported as "not resolved within horizon",
+never as satisfied. Plain AF-from-w0 verdicts are unchanged and still
+exposed to the asymmetry.
+
+**Possible link to the 31-vs-30 world discrepancy (CLAUDE.md §13.2),
+checked in scratch and not confirmed:** changing every
+`w_prime.step < horizon` guard in the static builder to `<=` leaves
+`consent_scenario.el` at 30 worlds / 30 edges. It changes
+`referral_scenario.el` (280 → 288 worlds) and
+`external_agent_access_scenario.el` (2444 → 2484). So this fix, in this
+form, does not account for the missing 31st world. A different
+horizon-boundary convention might still, so the link isn't ruled out.
+
+**Not fixed:** making the enqueue rule uniform would move static world
+counts in existing scenarios (at least the two above) and needs its own
+decision about which convention is intended.

@@ -614,6 +614,13 @@ def _build_embargo_holder_index(model: Any) -> Dict[str, Tuple[Optional[str], Op
     }
 
 
+# AM-99a part 3 — bounded response property: operator label and the two
+# statuses that are never reported as satisfied.
+RESPONSE_OPERATOR            = "AG(pending→AF)"
+NOT_TRIGGERED_WITHIN_HORIZON = "not triggered within horizon"
+NOT_RESOLVED_WITHIN_HORIZON  = "not resolved within horizon"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # §C.2  —  The Kripke model
 # ══════════════════════════════════════════════════════════════════════════════
@@ -656,6 +663,13 @@ class KripkeModel:
     # built from Community/Federation Objective.satisfaction clauses (AM-27).
     # operator is 'all_discharged' or 'any_discharged'.
     # Used by _build_propositions to emit objective_satisfied:<community>.
+    response_semantics: bool = False
+    # AM-99a part 3 — TEMPORARY flag. True only for models built by
+    # build_kripke_model() (static): check_obligation() then reports the
+    # bounded response property for triggered obligations (see there).
+    # False for build_kripke_from_runtime() (hybrid), whose verdicts are
+    # unchanged. AM-99b must align hybrid mode and remove this flag,
+    # re-checking referralInitiationBurden under response semantics.
 
     # ── Satisfaction relation ──────────────────────────────────────────────────
 
@@ -780,15 +794,24 @@ class KripkeModel:
           An obligation O is satisfied iff for ALL paths from the initial world,
           obligation_id is eventually DISCHARGED.
 
+        AM-99a part 3: for an obligation with triggered_by, in a model with
+        response_semantics set (static builder only — temporary, see the
+        field), AF from w0 is the wrong question: the trigger may never
+        fire. The verdict is instead the bounded response property
+        (see check_response()).
+
         Returns an ObligationVerdict with full explanation.
         """
+        desc = self.obligation_descriptors.get(obligation_id)
+        if self.response_semantics and desc is not None and desc.triggered_by:
+            return self.check_response(obligation_id)
+
         prop = f"discharged:{obligation_id}"
         satisfied = self.AF(self.initial, prop)
         counterexample = None if satisfied else self._find_AF_counterexample(
             self.initial, prop
         )
 
-        desc = self.obligation_descriptors.get(obligation_id)
         return ObligationVerdict(
             obligation_id=obligation_id,
             obligation_text=desc.obligation_text if desc else obligation_id,
@@ -799,6 +822,85 @@ class KripkeModel:
             holder=desc.holder if desc else "unknown",
             chain=desc.chain if desc else [],
         )
+
+    def check_response(self, obligation_id: str) -> "ObligationVerdict":
+        """
+        AM-99a part 3 — bounded response property ("within horizon"):
+          AG(pending:O → AF discharged:O), evaluated from every world
+          before the horizon step in which O is PENDING.
+
+        Worlds at step == horizon are excluded from the antecedent: only
+        tick enqueues them for expansion, so a world any other rule
+        creates there is an artificial dead end (see the horizon-enqueue
+        asymmetry open finding in docs/CONCEPTS_INDEX.md).
+
+        Two outcomes are never reported as satisfied:
+          - "not triggered within horizon": O is PENDING in no reachable
+            world (it stays WAITING, or is superseded first);
+          - "not resolved within horizon": O becomes PENDING only in
+            horizon-step worlds, so no in-horizon world can check it.
+        """
+        desc = self.obligation_descriptors.get(obligation_id)
+        pending_prop = f"pending:{obligation_id}"
+        prop = f"discharged:{obligation_id}"
+
+        pending = [w for w in self.worlds if self.satisfies(w, pending_prop)]
+        in_horizon = sorted(
+            (w for w in pending if w.step < self.horizon),
+            key=lambda w: (w.step, repr(w)),
+        )
+
+        status: Optional[str] = None
+        counterexample = None
+        if not pending:
+            satisfied, status = False, NOT_TRIGGERED_WITHIN_HORIZON
+        elif not in_horizon:
+            satisfied, status = False, NOT_RESOLVED_WITHIN_HORIZON
+        else:
+            failing = next(
+                (w for w in in_horizon if not self.AF(w, prop)), None
+            )
+            satisfied = failing is None
+            if failing is not None:
+                counterexample = (
+                    (self._path_to(failing) or [])
+                    + (self._find_AF_counterexample(failing, prop) or [])
+                )
+
+        return ObligationVerdict(
+            obligation_id=obligation_id,
+            obligation_text=desc.obligation_text if desc else obligation_id,
+            modal_operator=RESPONSE_OPERATOR,
+            satisfied=satisfied,
+            worlds_checked=len(self.worlds),
+            counterexample_path=counterexample,
+            holder=desc.holder if desc else "unknown",
+            chain=desc.chain if desc else [],
+            status=status,
+        )
+
+    def _path_to(self, target: World) -> Optional[List[Tuple[World, str]]]:
+        """Shortest (BFS) path from the initial world to target, as
+        (world, label) pairs, excluding target itself. None if unreachable."""
+        parent: Dict[World, Tuple[World, str]] = {}
+        queue: deque[World] = deque([self.initial])
+        visited: Set[World] = {self.initial}
+        while queue:
+            w = queue.popleft()
+            if w == target:
+                path: List[Tuple[World, str]] = []
+                while w in parent:
+                    prev, label = parent[w]
+                    path.append((prev, label))
+                    w = prev
+                path.reverse()
+                return path
+            for s in self.successors(w):
+                if s not in visited:
+                    visited.add(s)
+                    parent[s] = (w, self.labels.get((w, s), "→"))
+                    queue.append(s)
+        return None
 
     def check_permission(self, obligation_id: str) -> "ObligationVerdict":
         """
@@ -2179,6 +2281,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             horizon=horizon,
             group_index=group_index,
             satisfaction_conditions=satisfaction_conditions,
+            response_semantics=True,  # AM-99a part 3 — temporary; AM-99b removes
         )
 
     # Collect all actors appearing in any chain, plus every Permit holder
@@ -2576,6 +2679,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         horizon=horizon,
         group_index=group_index,
         satisfaction_conditions=satisfaction_conditions,
+        response_semantics=True,  # AM-99a part 3 — temporary; AM-99b removes
     )
 
 
@@ -2656,8 +2760,13 @@ class ObligationVerdict:
     ----------
     obligation_id      : burden name from DSL
     obligation_text    : natural-language obligation text
-    modal_operator     : "AF" (obligation) or "EF" (permission)
+    modal_operator     : "AF" (obligation), "EF" (permission), or
+                         RESPONSE_OPERATOR (bounded response property,
+                         triggered obligations in static models, AM-99a)
     satisfied          : True iff the modal property holds from the initial world
+                         (for RESPONSE_OPERATOR: from every in-horizon PENDING world)
+    status             : None, or NOT_TRIGGERED_WITHIN_HORIZON /
+                         NOT_RESOLVED_WITHIN_HORIZON — never with satisfied=True
     worlds_checked     : total worlds in the model (gives a sense of model size)
     counterexample_path: for AF, the path that never discharges (if not satisfied)
     witness_path       : for EF, the shortest path that discharges (if satisfied)
@@ -2673,6 +2782,14 @@ class ObligationVerdict:
     chain: List[str]
     counterexample_path: Optional[List[Tuple[World, str]]] = None
     witness_path: Optional[List[Tuple[World, str]]] = None
+    status: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.status is not None and self.satisfied:
+            raise ValueError(
+                f"'{self.status}' must never be reported as satisfied "
+                f"({self.obligation_id})"
+            )
 
     def render(self) -> str:
         verdict_sym = "✓" if self.satisfied else "✗"
@@ -2690,7 +2807,30 @@ class ObligationVerdict:
             lines.append(f"  Chain      : {' → '.join(self.chain)}")
         lines.append(f"  Worlds     : {self.worlds_checked} explored")
 
-        if self.modal_operator == "AF":
+        if self.modal_operator == RESPONSE_OPERATOR:
+            if self.status is not None:
+                lines.append(
+                    f"  Verdict    : {self.status} — the bounded response "
+                    "property cannot be established (NOT satisfied)."
+                )
+            elif self.satisfied:
+                lines.append(
+                    "  Verdict    : Whenever the obligation becomes pending "
+                    "within the horizon, it WILL be discharged on every path "
+                    "(bounded response property satisfied)."
+                )
+            else:
+                lines.append(
+                    "  Verdict    : Once pending, the obligation CANNOT be "
+                    "guaranteed to discharge — at least one path avoids it "
+                    "(bounded response property violated)."
+                )
+                if self.counterexample_path:
+                    lines.append("  Counterexample path:")
+                    for world, label in self.counterexample_path:
+                        lines.append(f"    {world}  [{label}]")
+
+        elif self.modal_operator == "AF":
             if self.satisfied:
                 lines.append(
                     "  Verdict    : Obligation WILL be discharged on every "

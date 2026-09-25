@@ -39,13 +39,25 @@ track rather than continuing the T-series).
 - **`ObligationState.SUPERSEDED`** — not produced by its own rule; a side
   effect of T1 (discharge) when a sibling in an `any_discharged` group
   gets discharged first (AM-57/58).
+- **Bounded response verdict (AM-99a part 3)** — not a transition rule
+  but a change to how `check_obligation()` reads the model: for an
+  obligation with `triggered_by`, in a model built by `build_kripke_model()`
+  (`KripkeModel.response_semantics`, a temporary flag AM-99b must remove),
+  the verdict is the bounded response property ("within horizon"),
+  AG(pending → AF discharged) from every `PENDING` world with
+  `step < horizon`. "not triggered within horizon" / "not resolved within
+  horizon" are never reported as satisfied. See the open finding on
+  horizon-step enqueueing in `docs/CONCEPTS_INDEX.md` for why horizon-step
+  worlds are excluded.
 - **`ObligationState.WAITING`** — the pre-claim state a pool member sits
   in before becoming `CLAIMABLE`; not itself a transition target of any
   rule above, structural/initial only.
 
 ---
 
-*Last updated: 2026-09-25, alongside AM-99a part 2 (T11 added — static
+*Last updated: 2026-09-25, alongside AM-99a part 3 (bounded response
+verdict noted under "Related, not a transition rule itself"). Previously
+updated the same day, alongside AM-99a part 2 (T11 added — static
 builder only, hybrid is AM-99b; T10 is taken by AM-84). Previously updated
 the same day, alongside AM-99a part 1 (T2 in the static
 builder now counts a deadline from the step the obligation became
