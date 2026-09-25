@@ -7902,9 +7902,9 @@ Judgement calls made in AM-99a and AM-100, one line each:
 - **7b `activate` sets `activated_at_tick` (AM-100):** a deadline counts from when the obligation becomes live, whatever the route; Kripke does not model 7b, so no layer mismatch.
 - **`tick` is a required parameter of `_activate_triggered_tokens()` (AM-100):** a default would silently stamp the wrong tick for any caller that forgot it.
 - **Claimable tokens no longer activated by events (AM-100 part 2):** mirrors P6a/T11 (only WAITING activates) and keeps claim as the only route out of `claimable`; no scenario combines the two.
-- **T11 excludes gated actions and discharging actions (AM-99a part 2):** discharging actions because firing one without its discharge activated dependents with no refusal recorded, breaking the strict burden's property; the gated exclusion has no recorded rationale in AM-99a and is a known divergence (the engine emits once the permit is held; symmetry-gap finding).
+- **T11 excludes gated actions and discharging actions (AM-99a part 2):** discharging actions because firing one without its discharge activated dependents with no refusal recorded, breaking the strict burden's property. **Gated exclusion resolved by AM-99b part 3:** gated actions fire their events through T5 (exercise) and T6 (gated discharge, which also runs P6a), in both builders, matching the engine's Step 7c after its Step 6 permit check; T11's exclusion is now by design.
 - **T11 shares T3's strict guard (AM-99a part 2):** mirrors the engine's Step 3.5 guard (AM-78), which blocks no-progress actions while a strict obligation is actionable.
-- **`KripkeModel.response_semantics` flag is temporary (AM-99a part 3):** keeps hybrid verdicts (and `el_api.py`'s compelled/detectable fields) unchanged until AM-99b aligns hybrid mode and removes it.
+- **`KripkeModel.response_semantics` flag is temporary (AM-99a part 3):** keeps hybrid verdicts (and `el_api.py`'s compelled/detectable fields) unchanged until AM-99b aligns hybrid mode and removes it. **Removed by AM-99b part 5**; no hybrid verdict changed.
 - **Bounded response property excludes horizon-step worlds (AM-99a part 3):** only tick expands a horizon-step world, so any other horizon-step world is an artificial dead end; open finding "Kripke builders expand horizon-step worlds only when a tick produces them".
 
 **Standard reference(s):** §7.8.7 (token lifecycle): a triggered token's
@@ -7926,3 +7926,200 @@ calls; one new test); `tests/test_am99a_deadline_from_activation.py`
 (docstring correction); `docs/KRIPKE_TRANSITION_RULES.md` (T2 row,
 last-updated note); `docs/CONCEPTS_INDEX.md` (finding resolved;
 symmetry-gap finding updated); this file (new entry).
+
+---
+
+## AM-99b (2026-09-25) — hybrid mode mirrors the engine's event model; T5/T6 fire action events; `response_semantics` flag removed (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-25), in six parts (commits `86f5c23`,
+`01d4270`, `e462791`, `736f5c2`, `ee12a71` and this docs commit),
+preceded by a scenario fix (`8733915`). Type: toolchain change (Layer 4,
+Kripke verifier). No grammar or validator change. Extends AM-99a's T11
+and bounded response verdict to hybrid mode (`build_kripke_from_runtime()`).
+Principle: in hybrid mode, the model mirrors the live engine's own event
+handling (Step 7c, AM-100) rather than reusing the static rules
+unchanged — the same layer-fidelity approach T9 took. Prerequisite
+AM-100 confirmed on origin/main before starting.
+
+### Preceding scenario fix — `noCircumventionEmbargo` blocks only retry-by-other-route (`8733915`)
+
+`external_agent_access_scenario.el` put `inhibited_by_embargo
+noCircumventionEmbargo` on `submitServiceRequest` and
+`readPatientDemographics`, so a single refusal would have blocked every
+legitimate referral permanently; time-bounded quarantine is already
+`RefusalQuarantinePolicy`'s job. Removed from both; the embargo's
+`for_action` became `"retryByOtherRoute"` (AM-97 literal match), and a
+new action `retryByOtherRoute` on `externalRequesterRole` carries the
+`inhibited_by_embargo`. The scenario validates; static model unchanged
+at 2444 worlds / 5924 edges, same three response verdicts. After a
+refusal the engine blocks `retryByOtherRoute` and allows submit and
+read, and the verifier's inhibition index names only
+`retryByOtherRoute`.
+
+### Part 1 — hybrid w0 seeding and T2 from activation (`86f5c23`)
+
+- An engine `pending` burden with `triggered_by` maps to `WAITING`.
+  **A `pending` burden without `triggered_by` stays `PENDING`**
+  (masked while delegated, §7.8.7 — ereferral's three masked burdens);
+  mapping it to `WAITING` would strand it.
+- Every burden `PENDING` at w0 has its engine activation tick
+  (`_activation_tick()`: `activated_at_tick`, else `granted_at_tick`)
+  seeded into `w0.activation_steps`, in the same absolute-tick unit as
+  hybrid `w.step`.
+- **T2 defect:** hybrid T2 compared `w.step >= deadline_steps`, with
+  `w.step` the absolute runtime tick — counting from neither grant nor
+  activation. It now counts `w.step - activated_at`, matching static T2
+  and `check_live_violations()`. Probe before the fix: a burden
+  activated at tick 8 with an 8-step deadline had violate edges from
+  step 9; the engine violates at 16.
+- **Separate defect, also fixed:** every hybrid successor world dropped
+  `activation_steps` (none of the ten hybrid `_make_world` calls passed
+  it), so even a correctly seeded w0 would have lost its seeds after one
+  transition. All ten now thread it through.
+- The fallback descriptor path (tokens with no Commitment root) now
+  reads `triggered_by`/`discharged_by` from the spec token instead of
+  hard-coding `None`.
+
+### Part 2 — hybrid T11, P6a and event-activated embargoes (`01d4270`)
+
+- Hybrid T11: same eligibility as static T11
+  (`_build_event_firing_index()`), over the live-sourced descriptors;
+  taken only if the event activates something in the world. It keeps
+  the strict guard (`strict_burden_blocks()`), matching the engine's
+  Step 3.5; no step advance.
+- `_fire_event()`, the hybrid counterpart of `_activate_triggered_tokens()`:
+  `WAITING` obligations become `PENDING` (activation step recorded), and
+  every Permit/Embargo named by the engine's own
+  `_find_spec_tokens_for_event()` whose per-world state is `pending`
+  becomes `active`. This is how `noCircumventionEmbargo` is activated on
+  `accessRefused`.
+- Hybrid T1 now runs P6a on the burden's `discharged_by` event.
+- **Pre-existing defect, fixed:** the hybrid T5/T6 Embargo guards read
+  only the w0 state (`embargo_holder_index`), never the per-world
+  `embargo_states`, so an embargo activated inside the model never
+  blocked anything. It was masked because T7 (the only rule that changed
+  embargo state before) also supersedes the permit, so `_permit_active()`
+  blocked the exercise anyway. The guards now use `_embargo_active()`,
+  two-tier like `_permit_active()`.
+- **The verifier checks the embargo's state; the engine enforces the
+  blocking.** The verifier does not model `retryByOtherRoute` (no permit,
+  no burden, so no rule produces an edge for it), so it cannot show the
+  action blocked. What it verifies is that `noCircumventionEmbargo` is
+  active in every world reachable after a refusal; the engine test shows
+  the embargo blocks the retry and nothing else. Both halves are tested
+  together.
+- **The every-world embargo property holds because these terms specify
+  no lift for `noCircumventionEmbargo`** (no Authorization names it as
+  its `on_revocation` embargo, so no T8 lifts it). It is a property of
+  this scenario's terms, not a general guarantee.
+- **Hybrid P6b is still missing** (open finding "Hybrid T1 has no P6b").
+
+### Part 3 — T5 and T6 fire action events, both builders (`e462791`)
+
+- T5 (exercise) fires the event its `for_action` emits, on the same
+  edge: `WAITING` obligations become `PENDING` (hybrid: also `pending`
+  Permits/Embargoes). This is how gated actions fire their events, as
+  the engine does in Step 7c after its Step 6 permit check; T11 keeps
+  excluding them. An event that is some obligation's `discharged_by` is
+  not fired by T5 (as T11), since T1/T6 fire those with the discharge.
+- T6 (gated discharge) runs P6a on the obligation's `discharged_by`
+  event and fires the gated action's own emitted event.
+- New helpers `_build_action_emits_index()` and `_activate_waiting()`
+  (shared by both builders); `_fire_event()` takes a list of events.
+- No scenario has a gated or permit action with `emits`, so no world
+  count moved; tests use an inline fixture.
+- **Asymmetry found, not fixed:** neither builder's T5 has a strict-mode
+  guard, while the engine's Step 3.5 refuses exercise actions while a
+  strict burden is actionable — logged as an open finding and planned
+  as the next amendment (it moves the referral scenario's pinned counts).
+
+### Part 4 — hybrid horizon counts from the runtime's tick (`736f5c2`)
+
+The hybrid horizon was absolute: w0.step is the runtime's tick and every
+endpoint passes `horizon=10`, so a runtime at tick ≥ 10 expanded only w0
+(8 worlds on the terms-of-engagement runtime, against 1374 at tick 0).
+Worlds now expand up to `state.tick + horizon`; `KripkeModel.horizon`
+stays relative in both builders, and `check_response()` counts its
+horizon step from `initial.step`. Measured before landing: no pinned
+test changed. The horizon-step enqueue asymmetry (open finding) is
+unchanged.
+
+### Part 5 — `response_semantics` flag removed (`ee12a71`)
+
+`check_obligation()` now reports the bounded response property for any
+obligation with `triggered_by`, in models from both builders.
+**No hybrid verdict changed** (all 16 obligations across the four
+scenario builders rechecked against the pre-AM-99b values). The only
+triggered obligation in any builder, `referralInitiationBurden`, stays
+satisfied: the referral builder grants it `active` at tick 0, so it is
+`PENDING` at w0. Only its operator changes, from `AF` to
+`AG(pending→AF)` (pre-approved). `test_static_model_sets_response_semantics`
+was deleted (it asserted the removed field; approved).
+
+### Deferred, logged as open findings
+
+- **CLAIMABLE:** hybrid mode still maps `claimable` to `PENDING`; a
+  hybrid C1 mirroring the engine's live `claim()` is its own amendment
+  ("Hybrid mode has no C1").
+- **Pending tokens without a trigger stay `PENDING`** (Part 1) —
+  deliberate, recorded with the C1 finding.
+- **Hybrid P6b** ("Hybrid T1 has no P6b").
+- **T5 strict guard** — next amendment ("Rule T5 has no strict-mode
+  guard").
+- **Engine Step 5 ignores `inhibited_by_embargo`** — the engine side is
+  to change ("Engine Step 5 ignores `inhibited_by_embargo`").
+
+### Blast radius
+
+No pinned verdict or world count moved (checked, not assumed): the four
+scenario builders keep 998 / 323 / 3992 / 44 hybrid worlds (all at tick
+0, no `WAITING` obligation or pending Permit/Embargo at w0); the static
+scenarios keep consent 30, referral 280, terms-of-engagement 2444.
+
+### Tests
+
+`tests/test_am99b_hybrid_event_model.py` (new), 23 tests:
+- Part 1 (5): no-event runtime matches the static w0; masked `pending`
+  stays `PENDING`; activation tick seeded from the engine; seed falls
+  back to grant tick; a burden activated at tick N is violated no
+  earlier than N + deadline.
+- Part 2 (8): after-refusal w0 mirrors the engine; response verdicts
+  match static; `noCircumventionEmbargo` active in every reachable
+  world; engine blocks only `retryByOtherRoute`; hybrid T11 fires the
+  refusal; T11 suppressed while a strict burden is actionable; hybrid
+  P6a; an event-activated embargo blocks exercise per world (inline
+  fixture).
+- Part 3 (8, both builders): triggered burdens start `WAITING`; T5
+  fires a gated action's event; T6 fires emits and runs P6a; the
+  triggered burdens are reachable.
+- Part 4 (2): model shape invariant under a pure clock shift; response
+  verdicts past the old absolute horizon match static.
+
+`tests/test_am99a_bounded_response.py`: the pinned hybrid test became
+`test_hybrid_model_uses_response_semantics` (operator label only);
+`test_static_model_sets_response_semantics` deleted.
+
+**Undo-and-rerun checks:** reverting each part's code fails 4 (part 1),
+4 (part 2), 6 (part 3) and 2 (part 4) of that part's tests; the rest
+are guards or properties that hold either way (e.g. the every-world
+embargo property, the engine-only test).
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 593 → 598 → 606
+→ 614 → 616 → 615 passed, 1 xfailed.
+
+**Standard reference(s):** §7.8.7 (token lifecycle: a triggered token is
+in force from activation; masked `pending` tokens); §6.4.6 (Embargo;
+Action-level inhibition); Annex C (Kripke semantics, informative), §C.2.
+
+**Files changed:** `toolchain/el_kripke.py` (`build_kripke_from_runtime()`
+w0 mapping, seeding, T1 P6a, T2, T5/T6 guards and event firing, T11,
+relative horizon; static T5/T6 event firing; `_build_action_emits_index()`,
+`_activate_waiting()`; `check_obligation()`/`check_response()`;
+`response_semantics` removed; docstrings);
+`scenarios/terms_of_engagement/external_agent_access_scenario.el`;
+`tests/test_am99b_hybrid_event_model.py` (new);
+`tests/test_am99a_bounded_response.py`; `docs/KRIPKE_TRANSITION_RULES.md`
+(T1, T2, T5, T6, T11 rows; related notes; last-updated note);
+`docs/CONCEPTS_INDEX.md` (symmetry-gap, hybrid-`WAITING` and
+horizon-enqueue findings updated; four new open findings); this file
+(AM-100's "Decisions to revisit" updated; new entry).

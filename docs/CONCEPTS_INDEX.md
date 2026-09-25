@@ -1698,6 +1698,26 @@ Still open: the hybrid builder (AM-99b, which should seed
 `activation_steps` from `activated_at_tick`, else `granted_at_tick`);
 T11's gated-action exclusion; and no shared abstraction.
 
+*Update 2026-09-25 (AM-99b), hybrid builder and gated actions closed:*
+- **Hybrid builder (closed).** `build_kripke_from_runtime()` now maps an
+  engine `pending` token with `triggered_by` to `WAITING`, seeds
+  `activation_steps` from `activated_at_tick` (else `granted_at_tick`),
+  counts T2 from activation, runs P6a in T1, and has its own T11. Events
+  also activate `pending` Permits/Embargoes per world, as Step 7c does.
+- **Gated actions (closed).** T5 and T6 fire the performed action's
+  emitted event in both builders (T6 also runs P6a), matching Step 7c
+  after the Step 6 permit check. T11 still excludes gated actions, now
+  by design.
+
+Still open: no shared abstraction (the hybrid builder reuses the
+engine's `_find_spec_tokens_for_event()` for Permit/Embargo lookup, but
+obligations still go through descriptors); hybrid P6b and C1 (findings
+at the end of this file); events fired from outside the DSL
+(`Runtime.fire_event()`) are anchored correctly in hybrid w0 but are not
+a transition in either builder; the static builder tracks no per-world
+Embargo/Permit state; and the T5 strict-guard asymmetry (end of this
+file).
+
 ## Engine/Kripke unification — what a shared design would and wouldn't merge
 
 Following up on the symmetry gap above: the operational/modal split itself
@@ -1740,6 +1760,16 @@ the hybrid mode never produces `WAITING`, a pending→active transition via
 `Runtime.fire_event()` would be invisible to that proof mode's output —
 worth a targeted recon before relying on `Runtime.fire_event()` as any kind
 of bridge between the two layers, which it currently is not.
+
+*Answered 2026-09-25 (AM-99b investigation, then fixed):* before AM-99b
+it never did — the hybrid builder mapped every burden that was not
+discharged or violated to `PENDING`, including engine `pending` and
+`claimable` tokens. Since AM-99b a `pending` token with `triggered_by`
+maps to `WAITING`, so a runtime anchored after `Runtime.fire_event()`
+shows the activated obligation `PENDING` and the rest still `WAITING`.
+`fire_event()` itself is still not a transition in either builder.
+`claimable` still maps to `PENDING` (see "Hybrid mode has no C1" at the
+end of this file).
 
 Not scheduled — this is a forward-looking design note, useful the next
 time either layer is touched, not urgent work.
@@ -5899,3 +5929,93 @@ horizon-boundary convention might still, so the link isn't ruled out.
 **Not fixed:** making the enqueue rule uniform would move static world
 counts in existing scenarios (at least the two above) and needs its own
 decision about which convention is intended.
+
+*Update 2026-09-25 (AM-99b):* a separate, hybrid-only horizon problem
+was fixed: the hybrid horizon was absolute (w0.step is the runtime's
+tick, and every endpoint passes `horizon=10`), so a runtime at tick ≥ 10
+expanded only w0. It now counts from the runtime's tick, and
+`check_response()` counts its horizon step from `initial.step`. The
+enqueue asymmetry itself is unchanged in both builders, and the hybrid
+T11 added by AM-99b follows the same `step < horizon` enqueue guard as
+the other non-tick rules.
+
+## Rule T5 has no strict-mode guard; the engine's Step 3.5 refuses the same actions — OPEN FINDING (2026-09-25)
+
+**OPEN FINDING** — found during AM-99b part 3. Neither builder's T5
+(Exercise) is suppressed while a `discharge_mode: strict` obligation is
+`PENDING` with an `ACTIVE` holder. The engine's Step 3.5 (AM-78) refuses
+any action that discharges nothing while a strict burden is actionable,
+and exercising a permit discharges nothing. T3, T4, T7–T11 already share
+this guard; T5 does not.
+
+**Consequence:** the verifier can explore exercise paths the engine
+would refuse, so an EF witness that runs through such a path may be
+unreachable in practice. Since AM-99b part 3 this matters more, because
+T5 now fires the exercised action's event: an exercise edge taken while
+a strict burden is actionable can activate obligations in a state the
+engine never reaches.
+
+**Planned as the next amendment after AM-99b.** Adding the guard to both
+builders moves pinned world counts: `referral_scenario.el` has a strict
+burden (`referralInitiationBurden`) alongside permit exercises. The fix
+should report every count and verdict that moves before it lands.
+
+## Engine Step 5 ignores `inhibited_by_embargo`; the verifier's guards rely on it — OPEN FINDING (2026-09-25)
+
+**OPEN FINDING** — found during the AM-99b investigation. The engine's
+embargo sweep (`advance()` Step 5) blocks an action only when an active
+embargo's own `for_action` names it (or the embargo has none). It never
+reads the Action-level `inhibited_by_embargo` requirement. The verifier's
+T5/T6 Embargo guards read only that requirement
+(`_build_embargo_inhibition_index()`), never the embargo's `for_action`.
+The two layers can therefore block different actions for the same
+embargo.
+
+**Instance:** before commit `8733915`, `external_agent_access_scenario.el`
+declared `noCircumventionEmbargo` with `for_action:
+"retry_refused_request_by_other_route"` and put
+`inhibited_by_embargo noCircumventionEmbargo` on `submitServiceRequest`
+and `readPatientDemographics`. After a refusal, the engine allowed both
+and blocked only the retry name; the verifier's hybrid guard (as of
+AM-99b) would have blocked both. The scenario now names
+`retryByOtherRoute` in both places, so the layers agree there. The
+general gap remains.
+
+**Decision (2026-09-25):** the verifier keeps its `inhibited_by_embargo`
+semantics (§6.4.6: the Action declares what inhibits it). The engine is
+the side to change. Not scheduled.
+
+## Hybrid mode has no C1: `claimable` tokens map to `PENDING` — OPEN FINDING (2026-09-25)
+
+**OPEN FINDING, deferred to its own amendment** (decided 2026-09-25,
+during AM-99b). `build_kripke_from_runtime()` maps an engine `claimable`
+burden to `PENDING`, so the claim step is invisible to hybrid mode. A
+faithful fix would map it to `CLAIMABLE` and add a hybrid C1 with
+`LAPSED` siblings. It must mirror the engine's live `claim()`, which
+needs no spec Evaluation (DN_005 §3 Option C), unlike static C1, which
+requires an accept Evaluation.
+
+**Expected impact:** likely flips the hybrid AF verdicts of
+`erequesting_claiming`'s two claim burdens (both `True` today, because
+each is treated as already live); measure before landing.
+
+**Related mapping note (deliberate, not a defect):** an engine `pending`
+burden without `triggered_by` (masked while delegated, §7.8.7 — e.g.
+ereferral's `acknowledgementBurden`, `examinationBurden`,
+`aiExaminationBurden`) stays `PENDING` in hybrid mode. Mapping it to
+`WAITING` would strand it, since no event releases it. The engine never
+sweeps such a token for violation, while hybrid T2 can violate it; that
+difference predates AM-99b and is unchanged.
+
+## Hybrid T1 has no P6b (`any_discharged` sibling supersession) — OPEN FINDING (2026-09-25)
+
+**OPEN FINDING** — recorded during AM-99b part 2. The static builder's
+T1 marks the remaining `PENDING`/`WAITING` siblings of an
+`any_discharged` group `SUPERSEDED` when one member discharges (P6b),
+and the engine does the same for `active` siblings (Step 7a-cont,
+AM-57). The hybrid builder's T1 does not, so after one member of such a
+group discharges, hybrid mode can still discharge or violate its
+siblings. AM-99b added P6a to hybrid T1 but not P6b. Neither builder's
+T6 has P6b; that is safe today, because no gated burden is an
+`any_discharged` member (checked across every scenario, 2026-09-25).
+Not scheduled.
