@@ -21,6 +21,12 @@ Part 2: events inside the hybrid model.
     blocking itself. Both halves of the claim are tested here: the
     embargo is active in every world reachable after a refusal, and the
     engine blocks retryByOtherRoute while allowing submit and read.
+
+Part 3: gated actions fire their events, in both builders.
+  - T5: exercising a permit fires the event its action emits (gated
+    actions fire here, not through T11 — engine Step 7c after Step 6);
+  - T6: a gated discharge runs P6a on the burden's discharged_by event
+    and fires its action's emitted event.
 """
 import contextlib
 import io
@@ -273,3 +279,156 @@ def test_event_activated_embargo_blocks_exercise_per_world():
                  if km.labels[(km.initial, w)] == "fire:lockdown via declareLockdown"]
     assert locked.embargo_dict()["lockEmbargo"] == "active"
     assert not any(l.startswith("exercise:") for l in labels_from(locked))
+
+
+# ── Part 3: gated actions fire their events (T5/T6), both builders ──────────
+
+_GATED_EMITS_PROBE = """
+enterprise specification GatedEmitsProbe
+
+agent Worker {
+    holds submitPermit
+    holds examinePermit
+}
+
+permit submitPermit {
+    for_action: "submitForm"
+    state: active
+}
+
+permit examinePermit {
+    for_action: "examineCase"
+    state: active
+}
+
+burden followUpBurden {
+    for_action: "followUp"
+    state: pending
+    triggered_by: formSubmitted
+    discharge_mode: eventual
+}
+
+burden examineBurden {
+    for_action: "examineCase"
+    state: active
+    discharged_by: caseClosed
+    discharge_mode: eventual
+}
+
+burden reportBurden {
+    for_action: "writeReport"
+    state: pending
+    triggered_by: caseExamined
+    discharge_mode: eventual
+}
+
+burden archiveBurden {
+    for_action: "archiveCase"
+    state: pending
+    triggered_by: caseClosed
+    discharge_mode: eventual
+}
+
+community ProbeCommunity {
+    objective: "probe events emitted by gated actions"
+    event formSubmitted
+    event caseExamined
+    event caseClosed
+
+    role workerRole {
+        action submitForm {
+            actor: workerRole
+            requires_permit submitPermit
+            emits: formSubmitted
+        }
+        action examineCase {
+            actor: workerRole
+            requires_permit examinePermit
+            emits: caseExamined
+        }
+    }
+}
+
+commitment WorkerFollowsUp {
+    by: Worker
+    obligation: "follow up a submitted form"
+    creates_burden: followUpBurden
+}
+
+commitment WorkerExamines {
+    by: Worker
+    obligation: "examine the case"
+    creates_burden: examineBurden
+}
+
+commitment WorkerReports {
+    by: Worker
+    obligation: "report on an examined case"
+    creates_burden: reportBurden
+}
+
+commitment WorkerArchives {
+    by: Worker
+    obligation: "archive a closed case"
+    creates_burden: archiveBurden
+}
+"""
+
+_GATED_GRANTS = ["submitPermit", "examinePermit", "followUpBurden",
+                 "examineBurden", "reportBurden", "archiveBurden"]
+
+
+@pytest.fixture(scope="module")
+def gated_spec():
+    result = parse_string(_GATED_EMITS_PROBE, validate=False)
+    assert result.ok, result.errors
+    return result.model
+
+
+def _gated_models(spec):
+    state = enroll(initial_state(), "Worker")
+    for token in _GATED_GRANTS:
+        state = grant_token(state, token_from_spec(spec, token, "Worker", 0))
+    return {
+        "static": _quiet(build_kripke_model, spec, horizon=5),
+        "hybrid": _quiet(build_kripke_from_runtime, Runtime(state, spec), horizon=5),
+    }
+
+
+def _successor(km, label):
+    (w,) = [s for s in km.successors(km.initial) if km.labels[(km.initial, s)] == label]
+    return w
+
+
+@pytest.mark.parametrize("builder", ["static", "hybrid"])
+def test_gated_action_events_start_waiting(gated_spec, builder):
+    km = _gated_models(gated_spec)[builder]
+    for oid in ("followUpBurden", "reportBurden", "archiveBurden"):
+        assert km.initial.get_obligation(oid) == ObligationState.WAITING, oid
+    assert not any(l.startswith("fire:") for l in km.labels.values())
+
+
+@pytest.mark.parametrize("builder", ["static", "hybrid"])
+def test_t5_exercise_fires_gated_action_event(gated_spec, builder):
+    km = _gated_models(gated_spec)[builder]
+    w = _successor(km, "exercise:submitPermit → submitForm")
+    assert w.get_obligation("followUpBurden") == ObligationState.PENDING
+    assert dict(w.activation_steps)["followUpBurden"] == km.initial.step
+    assert w.has_occurred("submitForm")
+
+
+@pytest.mark.parametrize("builder", ["static", "hybrid"])
+def test_t6_examine_fires_emits_and_runs_p6a(gated_spec, builder):
+    km = _gated_models(gated_spec)[builder]
+    w = _successor(km, "examine:examineBurden → examineCase")
+    assert w.get_obligation("examineBurden") == ObligationState.DISCHARGED
+    assert w.get_obligation("reportBurden") == ObligationState.PENDING    # emits
+    assert w.get_obligation("archiveBurden") == ObligationState.PENDING   # P6a
+    assert w.get_obligation("followUpBurden") == ObligationState.WAITING  # untouched
+
+
+@pytest.mark.parametrize("builder", ["static", "hybrid"])
+def test_gated_event_burdens_reachable(gated_spec, builder):
+    km = _gated_models(gated_spec)[builder]
+    for oid in ("followUpBurden", "reportBurden", "archiveBurden"):
+        assert km.check_permission(oid).satisfied is True, oid

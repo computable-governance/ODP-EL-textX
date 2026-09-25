@@ -82,7 +82,7 @@ import sys
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple
 
 # Relocated 2026-08-20 (see docs/CONCEPTS_INDEX.md, "discharge_mode: strict —
 # enforcement exists only in the verifier, not the live runtime" and "Live
@@ -2003,6 +2003,44 @@ def _build_event_firing_index(
     return index
 
 
+def _build_action_emits_index(model: Any) -> Dict[str, str]:
+    """
+    AM-99b: map action_name -> the event it emits, for every action with
+    `emits` in every Community/Domain/Federation — no eligibility filter,
+    unlike _build_event_firing_index. Rules T5 and T6 use it to fire the
+    event of a gated action they perform, as the engine's Step 7c does
+    after its Step 6 permit check. State-free, built once before the BFS.
+    """
+    index: Dict[str, str] = {}
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                emits = getattr(action, "emits", None)
+                event = _obj_name(getattr(emits, "event", None) or emits)
+                if event:
+                    index[action.name] = event
+    return index
+
+
+def _activate_waiting(
+    descriptors: Dict[str, ObligationDescriptor],
+    event: str,
+    new_obligs: Dict[str, ObligationState],
+    new_activation: Dict[str, int],
+    step: int,
+) -> None:
+    """AM-99b: every WAITING obligation triggered_by `event` becomes
+    PENDING, its activation step recorded (both dicts updated in place).
+    The obligation half of an event firing, shared by both builders'
+    T5/T6 and the hybrid builder's _fire_event()."""
+    for oid, d in descriptors.items():
+        if d.triggered_by == event and new_obligs.get(oid) == ObligationState.WAITING:
+            new_obligs[oid] = ObligationState.PENDING
+            new_activation[oid] = step
+
+
 def _build_claim_evaluations(model: Any) -> Dict[str, List[Any]]:
     """
     AM-61 (see DN_003): map each DeonticToken name to the
@@ -2208,8 +2246,14 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            actor A, add an edge w → w' where w' is identical to w except
            P's for_action is added to occurred_actions. Unlike T1, the
            Permit token's own state does NOT transition — a Permit is a
-           standing grant (§6.4.5), not consumed by being exercised. No
-           Embargo guard yet (landing separately).
+           standing grant (§6.4.5), not consumed by being exercised.
+           AM-99b: if the exercised action emits an event, WAITING
+           obligations triggered_by it become PENDING on the same edge —
+           gated actions fire their events here, not through T11, as the
+           engine fires Step 7c after its Step 6 permit check. An event
+           that is some burden's discharged_by is not fired (as T11).
+           Rule T6 (gated discharge) likewise runs P6a on the burden's
+           discharged_by event and fires its action's emitted event.
 
          Rule T9 — TRANSFER (§6.4.7/§7.8.7 DeonticEffect(transfer)):
            For each Burden-kind `transfer` DeonticEffect whose `from_role`
@@ -2261,6 +2305,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     claim_evaluations = _build_claim_evaluations(model)  # AM-61 — see DN_003
     event_firing_index = _build_event_firing_index(  # AM-99a — Rule T11
         model, descriptors, permit_requirement_index)
+    action_emits_index = _build_action_emits_index(model)  # AM-99b — T5/T6
+    discharge_events = {d.fires_event for d in descriptors.values() if d.fires_event}
     satisfaction_conditions = _build_satisfaction_conditions(model)
 
     # A permit/embargo-only spec (no burdens) must not hit the trivial-model
@@ -2564,8 +2610,15 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 continue
 
             new_occurred = current_occurred | {pdesc.for_action}
-            w_prime = _make_world(current_obligs, current_actors, new_occurred,
-                                  activation_steps=w.activation_steps, step=w.step)
+            # AM-99b — fire the exercised action's emitted event (see the
+            # T5 docstring above); discharge events are left to T1/T6.
+            new_obligs = dict(current_obligs)
+            new_activation = dict(w.activation_steps)
+            event = action_emits_index.get(pdesc.for_action)
+            if event and event not in discharge_events:
+                _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
+            w_prime = _make_world(new_obligs, current_actors, new_occurred,
+                                  activation_steps=new_activation, step=w.step)
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
 
             if w_prime not in worlds:
@@ -2578,12 +2631,12 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             successors_for_w.add(w_prime)
 
         # ── Rule T6: EXAMINE (Burden discharge gated on requires_permit) ───────
-        # Known limitation, matching current data exactly (verified 2026-08-18):
-        # no P6a (triggered_by cascade) or P6b (any_discharged sibling
-        # suppression) here, unlike T1. Safe today because none of the
-        # currently-gated Burdens set triggered_by/discharged_by, and no
-        # scenario in the repo uses any_discharged at all. Would need
-        # extending if a future gated Burden combines with either mechanism.
+        # AM-99b: P6a runs here as in T1 (the burden's discharged_by event),
+        # and the gated action's own emitted event fires too (engine Step
+        # 7c after Step 6). Known limitation, matching current data
+        # exactly (verified 2026-08-18): no P6b (any_discharged sibling
+        # suppression) here, unlike T1. Safe today because no gated Burden
+        # is an any_discharged group member. Would need extending if one is.
         for oid, desc in descriptors.items():
             if current_obligs.get(oid) != ObligationState.PENDING:
                 continue
@@ -2619,8 +2672,11 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.DISCHARGED
             new_occurred = current_occurred | {desc.for_action}
+            new_activation = dict(w.activation_steps)
+            for event in {desc.fires_event, action_emits_index.get(desc.for_action)} - {None}:
+                _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
             w_prime = _make_world(new_obligs, current_actors, new_occurred,
-                                  activation_steps=w.activation_steps, step=w.step)
+                                  activation_steps=new_activation, step=w.step)
             label   = f"examine:{oid} → {desc.for_action}"
 
             if w_prime not in worlds:
@@ -3339,32 +3395,34 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     # _build_event_firing_index), over the live-sourced descriptors.
     event_firing_index = _build_event_firing_index(
         spec, descriptors, permit_requirement_index)
+    action_emits_index = _build_action_emits_index(spec)  # AM-99b — T5/T6
+    discharge_events = {d.fires_event for d in descriptors.values() if d.fires_event}
     event_token_cache: Dict[str, Set[str]] = {}
 
     def _fire_event(
-        w: World, event: str,
+        w: World, events: Iterable[str],
         new_obligs: Dict[str, ObligationState], new_activation: Dict[str, int],
     ) -> Tuple[_PermitStates, _EmbargoStates]:
         """AM-99b — hybrid counterpart of the engine's
-        _activate_triggered_tokens() (Step 7c, fire_event()). Every WAITING
-        obligation triggered_by `event` becomes PENDING in new_obligs, with
-        its activation step recorded in new_activation (both updated in
-        place). Every Permit/Embargo named by the engine's own lookup
-        (_find_spec_tokens_for_event) whose per-world state is 'pending'
-        becomes 'active' — the engine activates pending tokens of every
-        kind. Returns w's permit/embargo states with those activations."""
-        for oid, d in descriptors.items():
-            if d.triggered_by == event and new_obligs.get(oid) == ObligationState.WAITING:
-                new_obligs[oid] = ObligationState.PENDING
-                new_activation[oid] = w.step
-        if event not in event_token_cache:
-            event_token_cache[event] = _find_spec_tokens_for_event(spec, event, "triggered_by")
+        _activate_triggered_tokens() (Step 7c, fire_event()), for each of
+        `events`. Every WAITING obligation triggered_by an event becomes
+        PENDING in new_obligs, with its activation step recorded in
+        new_activation (both updated in place). Every Permit/Embargo named
+        by the engine's own lookup (_find_spec_tokens_for_event) whose
+        per-world state is 'pending' becomes 'active' — the engine
+        activates pending tokens of every kind. Returns w's permit/embargo
+        states with those activations."""
         permits, embargoes = w.permit_dict(), w.embargo_dict()
-        for name in event_token_cache[event]:
-            if permits.get(name) == "pending":
-                permits[name] = "active"
-            if embargoes.get(name) == "pending":
-                embargoes[name] = "active"
+        for event in events:
+            _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
+            if event not in event_token_cache:
+                event_token_cache[event] = _find_spec_tokens_for_event(
+                    spec, event, "triggered_by")
+            for name in event_token_cache[event]:
+                if permits.get(name) == "pending":
+                    permits[name] = "active"
+                if embargoes.get(name) == "pending":
+                    embargoes[name] = "active"
         return frozenset(permits.items()), frozenset(embargoes.items())
 
     def _effective_holder(w: World, oid: str, desc: ObligationDescriptor) -> str:
@@ -3451,7 +3509,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     # action's emits. No P6b here yet (hybrid gap).
                     if desc.fires_event:
                         permit_states, embargo_states = _fire_event(
-                            w, desc.fires_event, new_obligs, new_activation)
+                            w, [desc.fires_event], new_obligs, new_activation)
                     wd = _make_world(
                         new_obligs, actors, occurred,
                         permit_states=permit_states, embargo_states=embargo_states,
@@ -3534,12 +3592,20 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 continue
 
             new_occurred = occurred | {pdesc.for_action}
+            # AM-99b — fire the exercised action's emitted event, as static
+            # T5 does (discharge events are left to T1/T6).
+            new_obligs = dict(obligs)
+            new_activation = dict(w.activation_steps)
+            event = action_emits_index.get(pdesc.for_action)
+            permit_states, embargo_states = _fire_event(
+                w, [event] if event and event not in discharge_events else [],
+                new_obligs, new_activation)
             w_prime = _make_world(
-                obligs, actors, new_occurred,
-                permit_states=w.permit_states, embargo_states=w.embargo_states,
+                new_obligs, actors, new_occurred,
+                permit_states=permit_states, embargo_states=embargo_states,
                 delegation_states=w.delegation_states,
                 holder_overrides=w.holder_overrides,
-                activation_steps=w.activation_steps,
+                activation_steps=new_activation,
                 step=w.step,
             )
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
@@ -3553,9 +3619,10 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             labels[(w, w_prime)] = label
 
         # ── Rule T6: EXAMINE (Burden discharge gated on requires_permit) ────
-        # Ported from build_kripke_model()'s T6 — see that block's comment
-        # for the P6a/P6b limitation (safe today: no gated Burden uses
-        # triggered_by/discharged_by or any_discharged, confirmed 2026-08-18).
+        # Ported from build_kripke_model()'s T6 — see that block's comment:
+        # P6a and the action's emitted event fire here (AM-99b), through
+        # _fire_event(); no P6b (safe today: no gated Burden is an
+        # any_discharged group member).
         for oid, desc in descriptors.items():
             if obligs.get(oid) != ObligationState.PENDING:
                 continue
@@ -3591,12 +3658,16 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             new_obligs = dict(obligs)
             new_obligs[oid] = ObligationState.DISCHARGED
             new_occurred = occurred | {desc.for_action}
+            new_activation = dict(w.activation_steps)
+            permit_states, embargo_states = _fire_event(
+                w, {desc.fires_event, action_emits_index.get(desc.for_action)} - {None},
+                new_obligs, new_activation)
             w_prime = _make_world(
                 new_obligs, actors, new_occurred,
-                permit_states=w.permit_states, embargo_states=w.embargo_states,
+                permit_states=permit_states, embargo_states=embargo_states,
                 delegation_states=w.delegation_states,
                 holder_overrides=w.holder_overrides,
-                activation_steps=w.activation_steps,
+                activation_steps=new_activation,
                 step=w.step,
             )
             label   = f"examine:{oid} → {desc.for_action}"
@@ -3623,7 +3694,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 new_obligs = dict(obligs)
                 new_activation = dict(w.activation_steps)
                 permit_states, embargo_states = _fire_event(
-                    w, event, new_obligs, new_activation)
+                    w, [event], new_obligs, new_activation)
                 if (new_obligs == obligs and permit_states == w.permit_states
                         and embargo_states == w.embargo_states):
                     continue  # nothing waiting on this event in w
