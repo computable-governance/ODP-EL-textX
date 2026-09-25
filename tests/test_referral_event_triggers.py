@@ -260,6 +260,31 @@ def test_handle_encounter_event_finished_no_match_is_distinguished():
     assert _referral_burden_state(runtime, "referralInitiationBurden") == "pending"
 
 
+def test_handle_encounter_event_repeated_after_discharge_is_no_match():
+    """
+    AM-100 part 2: a second status=finished Encounter after
+    referralInitiationBurden was discharged matches its triggered_by but
+    activates nothing — the burden stays discharged, the effects log is
+    empty, and the handler reports "fired_no_match", not "fired".
+    """
+    runtime = _with_pending_referral_burden(_build_referral_runtime())
+    encounter = {"resourceType": "Encounter", "id": "enc-repeat", "status": "finished"}
+
+    assert handle_encounter_event(encounter, runtime).action_taken == "fired"
+    init_record = runtime.advance(
+        "initiateReferral", "GPClinician",
+        facts={"Patient must have an active episode of care and clinical indication for referral": True},
+    )
+    assert init_record.outcome == "ok"
+    assert _referral_burden_state(runtime, "referralInitiationBurden") == "discharged"
+
+    resp = handle_encounter_event(encounter, runtime)
+
+    assert resp.action_taken == "fired_no_match"
+    assert resp.transition.effects == ()
+    assert _referral_burden_state(runtime, "referralInitiationBurden") == "discharged"
+
+
 @pytest.mark.parametrize("status", ["cancelled", "entered-in-error"])
 def test_handle_encounter_event_terminal_status_raises(status):
     runtime = _build_referral_runtime()

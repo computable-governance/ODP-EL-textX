@@ -64,8 +64,11 @@ R26-R29 probe — Encounter.status: finished -> fires 'encounterConcluded'
                          matched (transition.effects non-empty).
     "fired_no_match"  — event genuinely fired via Runtime.fire_event()
                          (tick advances, a ledger entry is recorded) but no
-                         token in the current spec has triggered_by set to
-                         this event name, so transition.effects is empty.
+                         token was activated, so transition.effects is
+                         empty: either no token has triggered_by set to this
+                         event name, or none that does is still pending
+                         (AM-100 part 2 — e.g. a repeated event after the
+                         token was discharged).
                          This is the case that would otherwise be a silent
                          no-op if action_taken were not distinguished from
                          "fired".
@@ -406,7 +409,7 @@ def handle_encounter_event(
             action_taken="fired_no_match",
             message=(
                 f"Encounter '{encounter_id}' status=finished: fired event "
-                f"'{event_name}', but no token in the current spec has "
+                f"'{event_name}', but no pending token has "
                 f"triggered_by='{event_name}' — nothing was activated."
             ),
             fhir_provenance=encounter_id,

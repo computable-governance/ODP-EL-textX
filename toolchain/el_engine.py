@@ -239,19 +239,25 @@ def _activate_triggered_tokens(spec, tokens: list, event_name: str,
 
     AM-100: activated tokens are stamped with `tick` (activated_at_tick), so
     check_live_violations() counts their deadline from activation, not grant.
-    A token already 'active' is left as it is, so a repeated event does not
-    restart its deadline.
+
+    AM-100 part 2: only 'pending' tokens are activated, mirroring the static
+    Kripke builder's P6a/T11 (only WAITING obligations activate). Any other
+    state is left as it is: an 'active' token keeps its deadline clock, and
+    a repeated event no longer revives a 'discharged' or 'violated' token.
+    Only tokens actually activated are logged, so an event that matches
+    nothing pending leaves the effects log empty (fhir_event_handler reports
+    that as "fired_no_match").
     """
     triggered = _find_spec_tokens_for_event(spec, event_name, "triggered_by")
     if not triggered:
         return tokens, []
     new_tokens = [
-        _activate(t, tick)
-        if t.token_name in triggered and t.state != "active"
-        else t
+        _activate(t, tick) if t.token_name in triggered and t.state == "pending" else t
         for t in tokens
     ]
-    log_lines = [f"event '{event_name}' triggered activation of '{name}'" for name in triggered]
+    activated = {t.token_name for t in tokens
+                 if t.token_name in triggered and t.state == "pending"}
+    log_lines = [f"event '{event_name}' triggered activation of '{name}'" for name in activated]
     return new_tokens, log_lines
 
 

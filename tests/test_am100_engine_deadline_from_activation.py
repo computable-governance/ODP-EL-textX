@@ -13,6 +13,11 @@ event (Step 7c `emits`, fire_event()) or by a DeonticEffect `activate`;
 check_live_violations() counts from it when set, else from
 granted_at_tick. granted_at_tick is unchanged (grant provenance).
 
+Part 2: an event activates only 'pending' tokens, mirroring the static
+builder's P6a/T11 (only WAITING obligations activate). Before, a repeated
+event moved a matching token to 'active' whatever its state, reviving
+discharged and violated tokens.
+
 C1 claim (claimable -> active) deliberately still counts from grant: pool
 deadlines are worded from the offer ("4 hours from referral delegation"),
 and the static builder's C1 does not record activation_steps either
@@ -52,6 +57,12 @@ community ProbeCommunity
                     emits: workStarted
                 }
 
+                action finishWork {
+                    description: "Discharges fireTriggeredBurden"
+                    actor: operatorRole
+                    favoured_by_burden fireTriggeredBurden
+                }
+
                 action openFollowUp {
                     description: "Activates followUpBurden via a DeonticEffect"
                     actor: operatorRole
@@ -68,6 +79,7 @@ burden emitTriggeredBurden {
 }
 
 burden fireTriggeredBurden {
+    for_action: "finishWork"
     state: pending
     deadline: "1 hour"
     triggered_by: externallyStarted
@@ -243,3 +255,25 @@ def test_c1_claimed_burden_deadline_counts_from_grant():
 
     _clock_to(rt, _CLAIM_DEADLINE_STEPS)
     assert rt.check_live_violations().violations == ("providerAClaimBurden",)
+
+
+# ── Part 2: an event activates only pending tokens ──────────────────────────
+
+def test_repeated_event_leaves_discharged_token_discharged():
+    rt = _runtime("fireTriggeredBurden")
+    assert rt.fire_event("externallyStarted").outcome == "ok"
+    assert rt.advance("finishWork", "Operator").outcome == "ok"
+    assert _token(rt, "fireTriggeredBurden").state == "discharged"
+
+    assert rt.fire_event("externallyStarted").outcome == "ok"
+    assert _token(rt, "fireTriggeredBurden").state == "discharged"
+
+
+def test_repeated_event_leaves_violated_token_violated():
+    rt = _runtime("fireTriggeredBurden")
+    assert rt.fire_event("externallyStarted").outcome == "ok"
+    _clock_to(rt, 1 + DEADLINE_STEPS)
+    assert rt.check_live_violations().violations == ("fireTriggeredBurden",)
+
+    assert rt.fire_event("externallyStarted").outcome == "ok"
+    assert _token(rt, "fireTriggeredBurden").state == "violated"
