@@ -1225,7 +1225,9 @@ def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthor
     description=(
         "Calls Runtime.check_live_violations() to detect and transition to "
         "'violated' any active, discharge_mode: eventual Burden whose elapsed "
-        "time (current tick minus granted_at_tick) has reached or passed its "
+        "time (current tick minus the tick it became active: activated_at_tick "
+        "if an event or activate effect activated it after grant, otherwise "
+        "granted_at_tick) has reached or passed its "
         "deadline_steps. deadline_steps is resolved via the same "
         "Commitment-derived two-tier lookup build_kripke_from_runtime() uses "
         "(Commitment-derived ObligationDescriptor first, bare DeonticToken "

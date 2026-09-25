@@ -222,12 +222,14 @@ class World:
       - activation_steps  : per-world record of the step at which an
                             obligation became PENDING after w0, AM-99a.
                             Rule T2 counts an obligation's deadline from
-                            this step rather than from step 0. Deliberately
-                            NOT an engine mirror: the live engine counts an
-                            event-triggered token from grant, since
-                            _transition() preserves granted_at_tick (open
-                            finding in docs/CONCEPTS_INDEX.md, to be fixed
-                            before AM-99b).
+                            this step rather than from step 0. The live
+                            engine's counterpart is
+                            TokenInstance.activated_at_tick (AM-100), so both
+                            layers count an event-triggered obligation from
+                            activation. C1 records no step here and the
+                            engine stamps nothing on claim: both count a
+                            claimed obligation from grant, deliberately
+                            (AM-100).
                             Obligations PENDING at w0 are not recorded
                             (implicit activation step 0). Populated by
                             the static builder's P6a cascade and Rule T11

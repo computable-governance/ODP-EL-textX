@@ -1678,6 +1678,26 @@ the deadline-counting divergence above; T11 does not fire gated actions,
 which the engine does once the permit is held; and there is still no
 shared abstraction between the two sides.
 
+*Update 2026-09-25 (AM-100), two divergences closed:*
+- **Deadline counting (closed).** The engine now counts an
+  event-triggered burden's deadline from activation
+  (`TokenInstance.activated_at_tick`), matching the static builder's
+  `World.activation_steps`. The 7b DeonticEffect `activate` op stamps it
+  too; Kripke does not model 7b, so this adds no mismatch. **C1 claim
+  counts from grant in both layers, deliberately:** pool deadlines are
+  worded from the offer ("4 hours from referral delegation"), and the
+  static C1 records no activation step.
+- **Reactivation of finished tokens (closed).** An event used to move
+  every matching token to `active` whatever its state, so a repeated
+  event revived `discharged` and `violated` tokens. The engine now
+  activates only `pending` tokens, mirroring P6a/T11, which activate only
+  WAITING obligations. A `claimable` token with `triggered_by` is no
+  longer activated by its event; it must be claimed.
+
+Still open: the hybrid builder (AM-99b, which should seed
+`activation_steps` from `activated_at_tick`, else `granted_at_tick`);
+T11's gated-action exclusion; and no shared abstraction.
+
 ## Engine/Kripke unification — what a shared design would and wouldn't merge
 
 Following up on the symmetry gap above: the operational/modal split itself
@@ -5804,9 +5824,23 @@ edit (which does not touch this).
 
 **F-4: Motivating case for the domain-scope finding.** See "Permit/Embargo missing domain scope (§7.8.8.2/§7.8.8.3 gap)" above. In this scenario, `outsideScopeEmbargo` and `noCircumventionEmbargo` carry no domain scope, and `AgentAccessAuthorization.domain_scope` is an unchecked string. Prerequisite for tier-2 (federation) terms of engagement; not needed for tier 1.
 
-## Engine counts event-triggered deadlines from grant, not activation — OPEN FINDING (2026-09-25)
+## Engine counts event-triggered deadlines from grant, not activation — RESOLVED (2026-09-25)
 
-**OPEN FINDING** — found during AM-99a part 1 (static-builder deadline
+**OPEN FINDING (2026-09-25), RESOLVED same day by AM-100** (see
+`docs/el_grammar_amendments.md`). `TokenInstance` gained
+`activated_at_tick`, stamped when an event (Step 7c, `fire_event()`) or a
+DeonticEffect `activate` moves a pending token to active;
+`check_live_violations()` now counts from it, falling back to
+`granted_at_tick` for tokens active since grant. `granted_at_tick` is
+kept as grant provenance. No existing pinned verdict or violation timing
+moved: the referral scenario's only triggered burden
+(`referralInitiationBurden`) is strict and never swept, and no other test
+swept a triggered token. C1 claim deliberately still counts from grant,
+in both layers. AM-99b should seed hybrid `activation_steps` from
+`activated_at_tick`, falling back to `granted_at_tick` (both absolute
+ticks, the same unit as hybrid `w.step`). The original finding follows.
+
+Found during AM-99a part 1 (static-builder deadline
 counting). When an event activates a pending token in the live engine
 (`_activate_triggered_tokens()`, Step 7c, or `fire_event()`), the token
 goes through `_transition()` (`el_engine.py:145-155`), which copies

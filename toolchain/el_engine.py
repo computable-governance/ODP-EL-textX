@@ -1035,7 +1035,7 @@ def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
     14 * 8 = 112 — now genuinely distinguishable, and proportional to the
     real ratio (14/5 = 2.8x) the two deadlines actually encode. Confirmed
     against check_live_violations()'s only consumption of this value —
-    `elapsed = tick - tok.granted_at_tick; if elapsed >= deadline_steps` — a
+    `elapsed = tick - _activation_tick(tok); if elapsed >= deadline_steps` — a
     plain elapsed-ticks-vs-threshold comparison, so scaling the threshold
     linearly with the stated magnitude is the semantically correct fix for
     that call site, not just a plausible-looking formula.
@@ -2067,8 +2067,12 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     WorldState.tick at all. This function is that connection: tick-based
     (not wall-clock-based — the open design question the finding left
     undecided), reusing the Kripke model's own deadline_steps vocabulary
-    against the real WorldState.tick/TokenInstance.granted_at_tick instead
-    of a hypothetical one. It is deliberately an explicit call, not
+    against the real WorldState.tick instead of a hypothetical one. Elapsed
+    time counts from _activation_tick(tok) (AM-100): a token's
+    activated_at_tick when an event or `activate` effect made it live after
+    grant, otherwise its granted_at_tick. A C1-claimed token deliberately
+    keeps counting from grant (pool deadlines are worded from the offer).
+    It is deliberately an explicit call, not
     something advance() invokes automatically — the finding's other open
     question — so callers control when a deadline sweep happens (e.g. an
     explicit "check deadlines" endpoint) rather than it firing silently on

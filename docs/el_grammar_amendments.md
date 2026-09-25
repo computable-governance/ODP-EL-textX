@@ -7780,3 +7780,149 @@ flag set at both `build_kripke_model()` return sites);
 rule itself", last-updated note); `docs/CONCEPTS_INDEX.md` (new open
 finding on horizon-step enqueueing); `scenarios/README.md` (scenario
 row); this file (new entry).
+
+---
+
+## AM-100 (2026-09-25) — engine counts event-triggered deadlines from activation; events activate only pending tokens (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED (2026-09-25), in two parts. Type: toolchain fix
+(Layer 3, live engine). No grammar or validator change. The engine-side
+counterpart of **AM-99a part 1**, which made the static Kripke builder
+count deadlines from activation (`World.activation_steps`). Lands before
+AM-99b, which mirrors the engine's event handling in hybrid mode and would
+otherwise copy the old behaviour. Resolves the `docs/CONCEPTS_INDEX.md`
+finding "Engine counts event-triggered deadlines from grant, not
+activation".
+
+### Part 1 — deadlines count from activation
+
+**Problem:** activating a pending token went through `_transition()`,
+which copies `granted_at_tick` unchanged, and `check_live_violations()`
+computed `elapsed = tick - tok.granted_at_tick`. An event-triggered
+burden's deadline therefore ran from its grant (typically enrolment or
+build time), not from when its trigger fired. A burden triggered late
+enough violated on the first sweep after it became active. After AM-99a
+part 1 the engine and the static builder disagreed on this.
+
+**What changed:**
+- New `TokenInstance.activated_at_tick: Optional[int] = None`. None
+  means "active since grant"; freshly created tokens are unchanged.
+  `granted_at_tick` is kept as grant provenance, never reset.
+- New `_activate(tok, tick)` (pending → active, stamping the tick) and
+  `_activation_tick(tok)` (`activated_at_tick` if set, else
+  `granted_at_tick`).
+- `_activate_triggered_tokens()` takes a required `tick` and stamps
+  activated tokens. Both callers pass it: `advance()` Step 7c and
+  `fire_event()`.
+- The 7b DeonticEffect `activate` op stamps the tick as well.
+- `check_live_violations()` computes `elapsed = tick - _activation_tick(tok)`.
+- `_transition()`, `_reassign_holder()` and the transfer/clone handlers
+  carry the field through.
+- An already-active token is not re-stamped, so a repeated event does not
+  restart its deadline.
+- **C1 claim (claimable → active) is unchanged:** a claimed token still
+  counts from grant. See "Decisions to revisit".
+
+### Part 2 — events activate only pending tokens
+
+**Problem:** `_activate_triggered_tokens()` moved every token whose name
+matched the event to `active`, whatever its state. A repeated event
+revived `discharged` and `violated` tokens. It also logged "triggered
+activation" for every matching name, so `fhir_event_handler` reported
+`"fired"` for a repeated Encounter even when nothing was activated.
+
+**What changed:**
+- Only tokens in state `pending` are activated. This mirrors the static
+  builder's P6a and T11, which activate only WAITING obligations.
+- Only tokens actually activated are logged. An event that matches
+  nothing pending leaves the effects log empty, and
+  `handle_encounter_event()` reports `"fired_no_match"`. Its docstring
+  and `fired_no_match` message now name both causes (no matching
+  `triggered_by`, or none still pending).
+- **Behaviour change beyond discharged and violated, accepted:** a
+  `claimable` token with `triggered_by` is no longer activated directly
+  by its event; it must be claimed. No scenario combines the two
+  (`specialist_pool_scenario.el` deliberately avoids it).
+- Checked before changing: with the pending-only guard applied, the full
+  suite was unchanged, so no existing test relied on reactivation.
+
+### Blast radius
+
+No pinned verdict or violation timing moved (checked, not assumed):
+- `referral_scenario.el`'s only triggered burden,
+  `referralInitiationBurden`, is strict, so `check_live_violations()`
+  never sweeps it. The escalation test violates `referralResponseBurden`,
+  which is pre-seeded, not triggered.
+- The FHIR event-handler tests assert states and effects, not timing.
+- `test_gp_escalation_notification_chain.py` never sweeps its triggered
+  burden. The claim tests never sweep.
+- Two tests in `tests/test_referral_event_triggers.py` call
+  `_activate_triggered_tokens()` directly and gained `tick=0`; their
+  assertions are unchanged.
+
+### Tests
+
+`tests/test_am100_engine_deadline_from_activation.py` (new), 8 tests, on
+a minimal fixture where every burden has a 5-step deadline, is granted at
+tick 0, and (where triggered) is activated at tick 10.
+
+Part 1 (6 tests):
+- A burden activated by `emits`, by `fire_event()`, and by the 7b
+  `activate` op each violates at tick 15 and not at 14, keeping
+  `granted_at_tick == 0`.
+- A token granted at tick 3 counts from 3; `activated_at_tick` stays None.
+- A repeated event on a still-active token does not restart its deadline.
+- C1: a claim at tick 10 still violates at grant + 20
+  (`erequesting_claiming_scenario.el`).
+
+Part 2 (2 tests there, plus 1 in `tests/test_referral_event_triggers.py`):
+- A repeated event leaves a discharged token discharged, and a violated
+  token violated (both reached through the real action and sweep).
+- On the real referral runtime, a second `status=finished` Encounter after
+  `referralInitiationBurden` is discharged yields `"fired_no_match"` with
+  empty effects.
+
+**Undo-and-rerun checks:**
+
+| Reverted | Tests failing |
+|---|---|
+| Old `tick - tok.granted_at_tick` comparison | 4 (emits, fire_event, `activate` op, repeated event); fresh-token and C1 tests pass, as intended |
+| Part 1 guard (`state != "active"`) instead of `== "pending"` | 2 (both part-2 reactivation tests) |
+| Logging every matching name | 1 (the `fired_no_match` test) |
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 590 passed, 1
+xfailed after part 1 (584 + 6); 593 passed, 1 xfailed after part 2
+(+3).
+
+### Decisions to revisit
+
+Judgement calls made in AM-99a and AM-100, one line each:
+
+- **C1 counts from grant (AM-100):** pool deadlines are worded from the offer ("4 hours from referral delegation"), and both layers already agreed; revisit if a pool deadline is ever worded from the claim.
+- **7b `activate` sets `activated_at_tick` (AM-100):** a deadline counts from when the obligation becomes live, whatever the route; Kripke does not model 7b, so no layer mismatch.
+- **`tick` is a required parameter of `_activate_triggered_tokens()` (AM-100):** a default would silently stamp the wrong tick for any caller that forgot it.
+- **Claimable tokens no longer activated by events (AM-100 part 2):** mirrors P6a/T11 (only WAITING activates) and keeps claim as the only route out of `claimable`; no scenario combines the two.
+- **T11 excludes gated actions and discharging actions (AM-99a part 2):** discharging actions because firing one without its discharge activated dependents with no refusal recorded, breaking the strict burden's property; the gated exclusion has no recorded rationale in AM-99a and is a known divergence (the engine emits once the permit is held; symmetry-gap finding).
+- **T11 shares T3's strict guard (AM-99a part 2):** mirrors the engine's Step 3.5 guard (AM-78), which blocks no-progress actions while a strict obligation is actionable.
+- **`KripkeModel.response_semantics` flag is temporary (AM-99a part 3):** keeps hybrid verdicts (and `el_api.py`'s compelled/detectable fields) unchanged until AM-99b aligns hybrid mode and removes it.
+- **Bounded response property excludes horizon-step worlds (AM-99a part 3):** only tick expands a horizon-step world, so any other horizon-step world is an artificial dead end; open finding "Kripke builders expand horizon-step worlds only when a tick produces them".
+
+**Standard reference(s):** §7.8.7 (token lifecycle): a triggered token's
+obligation is in force from activation, not before, and a token that has
+completed its lifecycle (discharged, violated) is not re-entered by a
+later event. Annex C (Kripke semantics, informative), §C.2, for the
+matching verifier behaviour (AM-99a part 1; P6a/T11 WAITING-only
+activation).
+
+**Files changed:** `toolchain/el_engine.py` (`TokenInstance.activated_at_tick`,
+`_activate()`, `_activation_tick()`, `_activate_triggered_tokens()`,
+Step 7b `activate`, `check_live_violations()`, field carried through
+copies; docstrings); `toolchain/fhir_event_handler.py` (`fired_no_match`
+docstring and message); `toolchain/el_api.py` (`/check-violations`
+description); `toolchain/el_kripke.py` (`World.activation_steps`
+docstring only); `tests/test_am100_engine_deadline_from_activation.py`
+(new); `tests/test_referral_event_triggers.py` (`tick=0` on two direct
+calls; one new test); `tests/test_am99a_deadline_from_activation.py`
+(docstring correction); `docs/KRIPKE_TRANSITION_RULES.md` (T2 row,
+last-updated note); `docs/CONCEPTS_INDEX.md` (finding resolved;
+symmetry-gap finding updated); this file (new entry).

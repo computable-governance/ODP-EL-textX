@@ -6,8 +6,9 @@ compared w.step against deadline_steps directly, i.e. counted every
 obligation's deadline from step 0 — including obligations the P6a
 cascade only activated (WAITING -> PENDING) at some later step. An
 obligation activated at step >= its deadline got a violation edge in
-the very world it became PENDING. The live engine already counts from
-activation (check_live_violations(): tick - granted_at_tick).
+the very world it became PENDING. (The investigation assumed the live
+engine already counted from activation; it counted from grant. Fixed on
+the engine side by AM-100, TokenInstance.activated_at_tick.)
 
 Fix: World.activation_steps records the step P6a activated each
 obligation; T2 counts from there (docs/el_grammar_amendments.md, AM-99a).
