@@ -96,6 +96,7 @@ from el_engine import (
     _activation_tick,
     _build_obligation_descriptors,
     _commitment_root_for_token,
+    _find_spec_tokens_for_event,
     _parse_deadline_steps,
 )
 
@@ -2238,7 +2239,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            holder — the same condition as T3, mirroring the engine's
            Step 3.5 guard (a T11 action discharges nothing). Verifier
            counterpart of the engine's Step 7c (_activate_triggered_tokens(),
-           el_engine.py). Static builder only; hybrid is AM-99b.
+           el_engine.py). The hybrid builder has its own T11 (AM-99b),
+           which also activates pending Permits/Embargoes.
 
     Parameters
     ----------
@@ -2631,7 +2633,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             successors_for_w.add(w_prime)
 
         # ── Rule T11: EVENT FIRING (action-emitted triggers, AM-99a) ─────────
-        # Static builder only; hybrid is AM-99b. Same strict guard as T3:
+        # Hybrid counterpart in build_kripke_from_runtime() (AM-99b).
+        # Same strict guard as T3:
         # a T11 action discharges nothing, so it is a no-progress action
         # the engine's Step 3.5 blocks while a strict burden is actionable.
         strict_blocks = any(
@@ -3332,6 +3335,38 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     # lookup pattern invented here.
     authorizations = _collect(spec, "Authorization")
 
+    # AM-99b — Rule T11, same eligibility as the static builder (see
+    # _build_event_firing_index), over the live-sourced descriptors.
+    event_firing_index = _build_event_firing_index(
+        spec, descriptors, permit_requirement_index)
+    event_token_cache: Dict[str, Set[str]] = {}
+
+    def _fire_event(
+        w: World, event: str,
+        new_obligs: Dict[str, ObligationState], new_activation: Dict[str, int],
+    ) -> Tuple[_PermitStates, _EmbargoStates]:
+        """AM-99b — hybrid counterpart of the engine's
+        _activate_triggered_tokens() (Step 7c, fire_event()). Every WAITING
+        obligation triggered_by `event` becomes PENDING in new_obligs, with
+        its activation step recorded in new_activation (both updated in
+        place). Every Permit/Embargo named by the engine's own lookup
+        (_find_spec_tokens_for_event) whose per-world state is 'pending'
+        becomes 'active' — the engine activates pending tokens of every
+        kind. Returns w's permit/embargo states with those activations."""
+        for oid, d in descriptors.items():
+            if d.triggered_by == event and new_obligs.get(oid) == ObligationState.WAITING:
+                new_obligs[oid] = ObligationState.PENDING
+                new_activation[oid] = w.step
+        if event not in event_token_cache:
+            event_token_cache[event] = _find_spec_tokens_for_event(spec, event, "triggered_by")
+        permits, embargoes = w.permit_dict(), w.embargo_dict()
+        for name in event_token_cache[event]:
+            if permits.get(name) == "pending":
+                permits[name] = "active"
+            if embargoes.get(name) == "pending":
+                embargoes[name] = "active"
+        return frozenset(permits.items()), frozenset(embargoes.items())
+
     def _effective_holder(w: World, oid: str, desc: ObligationDescriptor) -> str:
         """AM-81/AM-82: resolve oid's genuine current holder, accounting
         for a revoked delegation or a Rule T9 (Transfer) holder override.
@@ -3385,6 +3420,18 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             return permit_state == "active"
         return p in permit_descriptors
 
+    def _embargo_active(w: World, e: str) -> bool:
+        """AM-99b — the Embargo analogue of _permit_active(): read the
+        per-world state (set at w0 from the live token, then changed by
+        T7/T8 or an event), falling back to the w0 state in
+        embargo_holder_index for an embargo the world does not track.
+        Before AM-99b the T5/T6 guards read only the w0 state, so an
+        embargo activated inside the model never blocked anything."""
+        embargo_state = w.embargo_dict().get(e)
+        if embargo_state is not None:
+            return embargo_state == "active"
+        return embargo_holder_index.get(e, (None, None))[0] == "active"
+
     while queue:
         w = queue.popleft()
         obligs, actors = w.obligation_dict(), w.actor_dict()
@@ -3395,12 +3442,22 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             if obligs.get(oid) == ObligationState.PENDING:
                 effective_holder = _effective_holder(w, oid, desc)  # AM-81
                 if actors.get(effective_holder) == ActorStatus.ACTIVE:
+                    new_obligs = {**obligs, oid: ObligationState.DISCHARGED}
+                    new_activation = dict(w.activation_steps)
+                    permit_states, embargo_states = w.permit_states, w.embargo_states
+                    # P6a (AM-99b) — the discharge event activates its
+                    # dependents, as the static builder's T1 does; the
+                    # engine's Step 7c does the same for the discharging
+                    # action's emits. No P6b here yet (hybrid gap).
+                    if desc.fires_event:
+                        permit_states, embargo_states = _fire_event(
+                            w, desc.fires_event, new_obligs, new_activation)
                     wd = _make_world(
-                        {**obligs, oid: ObligationState.DISCHARGED}, actors, occurred,
-                        permit_states=w.permit_states, embargo_states=w.embargo_states,
+                        new_obligs, actors, occurred,
+                        permit_states=permit_states, embargo_states=embargo_states,
                         delegation_states=w.delegation_states,
                         holder_overrides=w.holder_overrides,
-                        activation_steps=w.activation_steps,
+                        activation_steps=new_activation,
                         step=w.step,
                     )
                     if wd not in worlds:
@@ -3469,8 +3526,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
 
             blocked = False
             for embargo_name in embargo_inhibition_index.get(pdesc.for_action, []):
-                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
-                if e_state == "active" and e_holder == pdesc.holder:
+                _, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+                if _embargo_active(w, embargo_name) and e_holder == pdesc.holder:  # AM-99b
                     blocked = True
                     break
             if blocked:
@@ -3524,8 +3581,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             # embargo_inhibition_index/embargo_holder_index.
             blocked = False
             for embargo_name in embargo_inhibition_index.get(desc.for_action, []):
-                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
-                if e_state == "active" and e_holder == effective_holder:
+                _, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+                if _embargo_active(w, embargo_name) and e_holder == effective_holder:  # AM-99b
                     blocked = True
                     break
             if blocked:
@@ -3551,6 +3608,42 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
 
             edges.setdefault(w, set()).add(w_prime)
             labels[(w, w_prime)] = label
+
+        # ── Rule T11: EVENT FIRING (action-emitted triggers, AM-99b) ────────
+        # Hybrid counterpart of the static builder's T11: an eligible
+        # emitting action (ungated, non-discharging — see
+        # _build_event_firing_index) fires its event through _fire_event(),
+        # which also activates pending Permits/Embargoes, as the engine's
+        # Step 7c does. Taken only if the event activates something in w.
+        # Same strict guard as tick/T4/T7/T8/T9 (strict_burden_blocks): a
+        # T11 action discharges nothing, so the engine's Step 3.5 blocks it
+        # while a strict burden is actionable. No step advance.
+        if not strict_burden_blocks(w):
+            for event, actions in event_firing_index.items():
+                new_obligs = dict(obligs)
+                new_activation = dict(w.activation_steps)
+                permit_states, embargo_states = _fire_event(
+                    w, event, new_obligs, new_activation)
+                if (new_obligs == obligs and permit_states == w.permit_states
+                        and embargo_states == w.embargo_states):
+                    continue  # nothing waiting on this event in w
+                for action_name in actions:
+                    if action_name in occurred:
+                        continue  # already occurred on this path — as T5
+                    w_fired = _make_world(
+                        new_obligs, actors, occurred | {action_name},
+                        permit_states=permit_states, embargo_states=embargo_states,
+                        delegation_states=w.delegation_states,
+                        holder_overrides=w.holder_overrides,
+                        activation_steps=new_activation,
+                        step=w.step,
+                    )
+                    if w_fired not in worlds:
+                        worlds.add(w_fired)
+                        if w_fired.step < horizon:
+                            queue.append(w_fired)
+                    edges.setdefault(w, set()).add(w_fired)
+                    labels[(w, w_fired)] = f"fire:{event} via {action_name}"
 
         # ── Rule T7/T8: AUTHORIZATION REVOKE / REINSTATE ─────────────────────
         # DN_014 §6. Mirrors revoke_authorization()/reinstate_authorization()
