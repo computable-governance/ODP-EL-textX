@@ -93,6 +93,7 @@ from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
 # and build_kripke_from_runtime() below already relied on.
 from el_engine import (
     ObligationDescriptor,
+    _activation_tick,
     _build_obligation_descriptors,
     _commitment_root_for_token,
     _parse_deadline_steps,
@@ -230,10 +231,14 @@ class World:
                             engine stamps nothing on claim: both count a
                             claimed obligation from grant, deliberately
                             (AM-100).
-                            Obligations PENDING at w0 are not recorded
-                            (implicit activation step 0). Populated by
-                            the static builder's P6a cascade and Rule T11
-                            only; hybrid-mode worlds leave it empty.
+                            In the static builder, obligations PENDING at
+                            w0 are not recorded (implicit activation step
+                            0); it is populated by the P6a cascade and
+                            Rule T11. The hybrid builder seeds every
+                            obligation PENDING at w0 with its engine
+                            activation tick (activated_at_tick, else
+                            granted_at_tick — AM-99b), in the same
+                            absolute-tick unit as its w.step.
       - step              : discrete time step (0 = initial)
 
     Frozen so that worlds are hashable and can appear in sets/dict keys.
@@ -3159,6 +3164,14 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     Hybrid mode (ISO 15414 Annex C): KripkeModel anchored to runtime.current_state().
 
     burden/active→PENDING, /discharged or in ledger→DISCHARGED, /violated→VIOLATED.
+    AM-99b: burden/pending with triggered_by→WAITING (waiting on its event);
+    burden/pending without triggered_by (masked while delegated, §7.8.7)
+    stays PENDING, as before. burden/claimable still maps to PENDING —
+    hybrid mode has no C1 yet (deferred, see docs/CONCEPTS_INDEX.md).
+    Every burden PENDING at w0 has its activation tick seeded into
+    w0.activation_steps (_activation_tick(): activated_at_tick, else
+    granted_at_tick), so Rule T2 counts its deadline from activation,
+    matching the engine's check_live_violations().
     Actors from WorldState→ACTIVE. BFS expansion uses the same T1/T2/T3 rules.
     """
     state, spec, ledger = runtime.current_state(), runtime._spec, runtime._ledger
@@ -3168,6 +3181,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     transfer_index = _build_transfer_index(spec, state.actors)  # AM-82
     discharged_in_ledger: Set[str] = {n for r in ledger for n in r.discharged}
     init_obligs: Dict[str, ObligationState] = {}
+    init_activation: Dict[str, int] = {}  # AM-99b — seeds w0.activation_steps
     descriptors: Dict[str, ObligationDescriptor] = {}
 
     # Spec-derived structure, shared with pre-exec mode. Only covers burdens
@@ -3217,13 +3231,6 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
 
     for tok in state.tokens:
         if tok.kind == "burden":
-            obl_st = (
-                ObligationState.DISCHARGED
-                if tok.state in ("discharged", "terminated") or tok.token_name in discharged_in_ledger
-                else ObligationState.VIOLATED if tok.state == "violated"
-                else ObligationState.PENDING
-            )
-            init_obligs[tok.token_name] = obl_st
             chain = _delegation_chain_for_token(spec, tok.token_name, tok.holder)
 
             spec_desc = spec_descriptors.get(tok.token_name)
@@ -3250,9 +3257,24 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 priority_weight = _priority_weight(tok.priority)
                 revocable = False
                 sub_delegation_allowed = False
-                triggered_by = None
-                fires_event = None
+                # AM-99b: read the token's own trigger fields, as
+                # _build_obligation_descriptors() does for Commitment roots,
+                # so a directly enrolled triggered burden still maps to
+                # WAITING below.
+                triggered_by = getattr(getattr(spec_tok, "triggered_by", None), "name", None)
+                fires_event = getattr(getattr(spec_tok, "discharged_by", None), "name", None)
                 for_action = None
+
+            if tok.state in ("discharged", "terminated") or tok.token_name in discharged_in_ledger:
+                obl_st = ObligationState.DISCHARGED
+            elif tok.state == "violated":
+                obl_st = ObligationState.VIOLATED
+            elif tok.state == "pending" and triggered_by:
+                obl_st = ObligationState.WAITING  # AM-99b — waiting on its event
+            else:
+                obl_st = ObligationState.PENDING
+                init_activation[tok.token_name] = _activation_tick(tok)  # AM-99b
+            init_obligs[tok.token_name] = obl_st
 
             descriptors[tok.token_name] = ObligationDescriptor(
                 obligation_id=tok.token_name, obligation_text=tok.token_name,
@@ -3297,6 +3319,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     w0 = _make_world(
         init_obligs, init_actors, occurred_actions=frozenset(),
         permit_states=init_permit_states, embargo_states=init_embargo_states,
+        activation_steps=init_activation,
         step=state.tick,
     )
     worlds, edges, labels, queue = {w0}, {}, {}, deque([w0])
@@ -3377,6 +3400,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=w.delegation_states,
                         holder_overrides=w.holder_overrides,
+                        activation_steps=w.activation_steps,
                         step=w.step,
                     )
                     if wd not in worlds:
@@ -3385,12 +3409,16 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                             queue.append(wd)
                     edges.setdefault(w, set()).add(wd)
                     labels[(w, wd)] = f"discharge:{oid} by {effective_holder}"
-                if w.step >= desc.deadline_steps:
+                # AM-99b: deadline counted from activation, as static T2
+                # and the engine's check_live_violations() count it.
+                activated_at = dict(w.activation_steps).get(oid, 0)
+                if w.step - activated_at >= desc.deadline_steps:
                     wv = _make_world(
                         {**obligs, oid: ObligationState.VIOLATED}, actors, occurred,
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=w.delegation_states,
                         holder_overrides=w.holder_overrides,
+                        activation_steps=w.activation_steps,
                         step=w.step,
                     )
                     if wv not in worlds:
@@ -3407,6 +3435,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
                 delegation_states=w.delegation_states,
                 holder_overrides=w.holder_overrides,
+                activation_steps=w.activation_steps,
                 step=w.step + 1,
             )
             if wt not in worlds:
@@ -3453,6 +3482,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
                 delegation_states=w.delegation_states,
                 holder_overrides=w.holder_overrides,
+                activation_steps=w.activation_steps,
                 step=w.step,
             )
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
@@ -3509,6 +3539,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 permit_states=w.permit_states, embargo_states=w.embargo_states,
                 delegation_states=w.delegation_states,
                 holder_overrides=w.holder_overrides,
+                activation_steps=w.activation_steps,
                 step=w.step,
             )
             label   = f"examine:{oid} → {desc.for_action}"
@@ -3551,6 +3582,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         embargo_states=frozenset(new_embargoes.items()),
                         delegation_states=w.delegation_states,
                         holder_overrides=w.holder_overrides,
+                        activation_steps=w.activation_steps,
                         step=w.step,
                     )
                     if w_revoked not in worlds:
@@ -3576,6 +3608,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         embargo_states=frozenset(new_embargoes.items()),
                         delegation_states=w.delegation_states,
                         holder_overrides=w.holder_overrides,
+                        activation_steps=w.activation_steps,
                         step=w.step,
                     )
                     if w_reinstated not in worlds:
@@ -3613,6 +3646,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=frozenset(new_delegations.items()),
                         holder_overrides=w.holder_overrides,
+                        activation_steps=w.activation_steps,
                         step=w.step,
                     )
                     if w_revoked_deleg not in worlds:
@@ -3632,6 +3666,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=frozenset(new_delegations.items()),
                         holder_overrides=w.holder_overrides,
+                        activation_steps=w.activation_steps,
                         step=w.step,
                     )
                     if w_reinstated_deleg not in worlds:
@@ -3671,6 +3706,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=w.delegation_states,
                         holder_overrides=frozenset(new_overrides.items()),
+                        activation_steps=w.activation_steps,
                         step=w.step,
                     )
                     if w_transferred not in worlds:
