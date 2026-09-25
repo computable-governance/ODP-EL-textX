@@ -7454,3 +7454,87 @@ intended surface syntax.
 alternative order, plus comment); `tests/test_am98_duration_plural_units.py`
 (new); `scenarios/terms_of_engagement/external_agent_access_scenario.el`
 (`RefusalQuarantinePolicy.initial_value`); this file (new entry).
+
+---
+
+## AM-99a (2026-09-25) — part 1 of 3: static builder counts deadlines from activation (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-25). Type: toolchain fix (Layer 4,
+static builder only). No grammar or validator change. Fixes a
+**pre-existing** issue in `build_kripke_model()`'s deadline counting for
+P6a-activated obligations. It is independent of T11 (AM-99a part 2), and
+is landed first so its effect can be checked on its own.
+
+**Problem:** Rule T2 checked `w.step < desc.deadline_steps`, which counts
+every obligation's deadline from step 0, including obligations the P6a
+cascade only moves from WAITING to PENDING at a later step. An obligation
+activated at a step at or past its deadline got a VIOLATED edge in the
+same world it became PENDING, so AF could never hold for it however
+promptly its holder acted. Found while prototyping AM-99a: once T11 lets
+`refusalRecordBurden` (strict; default 5-step deadline) be triggered at
+step ≥ 5, its bounded response property is false for this reason alone.
+
+**What changed:**
+- New `World.activation_steps` field (frozenset of `(obligation_id,
+  step)`, default empty), also accepted by `_make_world()`.
+- P6a records `w.step` for every obligation it activates.
+- T2 now checks `w.step - activated_at < desc.deadline_steps`, where
+  `activated_at` is the recorded step, or 0 if none is recorded.
+- Every static-builder rule (T1, C1, T2, T3, T5, T6) passes the field on
+  to the successor world.
+- Obligations PENDING at w0 are not recorded (implicit step 0), so w0 and
+  every existing model are unchanged.
+- The hybrid builder (`build_kripke_from_runtime()`) is untouched; its T2
+  still checks `w.step >= desc.deadline_steps`.
+
+**Correction to the investigation note (stated explicitly):** the AM-99a
+investigation said this fix would match the live engine's
+`tick - granted_at_tick`. That is wrong for event-triggered tokens. The
+engine activates them through `_transition()` (`el_engine.py:145-155`),
+which keeps the original `granted_at_tick`, so `check_live_violations()`
+counts an event-triggered token's deadline from **grant**, not
+activation. Part 1 therefore **deliberately does not mirror the engine**.
+After it, the verifier and the engine disagree for triggered obligations.
+Before it, they agreed only because both counted from the wrong point.
+Logged as a new open finding in `docs/CONCEPTS_INDEX.md`, "Engine counts
+event-triggered deadlines from grant, not activation", which must be
+fixed, as its own amendment, before AM-99b.
+
+**Separate open item, not fixed here:** C1-claimed obligations
+(CLAIMABLE → PENDING) still count their deadline from step 0 in the
+static builder. C1 does not record an activation step. Out of scope for
+part 1, which is limited to P6a.
+
+**Blast radius, checked rather than assumed:** static world count, edge
+count and AF/EF verdict for every obligation in all 15 parseable
+scenarios (`ecommerce_scenario.el` does not parse — see AM-93 note) are
+identical before and after, compared as a full text snapshot. No
+existing scenario activates an obligation through P6a late enough for
+the counting point to matter. No pinned count or verdict moved.
+
+**Tests:** new `tests/test_am99a_deadline_from_activation.py`, 4 tests,
+on a minimal fixture: `firstBurden` (1-week deadline) fires `firstDone`
+on discharge, and `secondBurden` is `triggered_by: firstDone` with the
+default 5-step deadline. The tests check:
+- the default deadline is 5 steps;
+- an activation at step ≥ 5 has no violation edge in its activation world;
+- across every world, a violation edge exists exactly when
+  `step - activated_at >= 5`;
+- w0 records no activation steps.
+
+**Undo-and-rerun check:** with only T2's old comparison restored (the
+field still present, so failures reflect the bug and not a missing
+attribute), the two behavioural tests fail. With the fix, all four pass.
+
+**Verification:** full suite (`.venv/bin/python3.13 -m pytest`) — 563
+passed, 1 xfailed, against the 559 passed / 1 xfailed baseline at
+`8407e5d`. The +4 are exactly the new tests.
+
+**Standard reference(s):** Annex C (Kripke semantics, informative) —
+§C.2's deadline-expiry reading of obligation violation. §7.8.7 (token
+lifecycle): a token's obligation is in force from activation, not before.
+
+**Files changed:** `toolchain/el_kripke.py`; `tests/test_am99a_deadline_from_activation.py`
+(new); `docs/KRIPKE_TRANSITION_RULES.md` (T2 row, last-updated note);
+`docs/CONCEPTS_INDEX.md` (new open finding, plus a forward pointer on the
+"Engine/Kripke event-model symmetry gap" finding); this file (new entry).

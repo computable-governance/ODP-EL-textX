@@ -17,7 +17,7 @@ track rather than continuing the T-series).
 | Rule | Name | What it does | Status |
 |---|---|---|---|
 | **T1** | Discharge | For each `PENDING` obligation held by an `ACTIVE` actor, add an edge to `DISCHARGED`. | Implemented, both builders |
-| **T2** | Deadline Expiry (Violate) | If `w.step >= deadline_steps` and still `PENDING`, add an edge to `VIOLATED`. | Implemented, both builders |
+| **T2** | Deadline Expiry (Violate) | If still `PENDING` and the deadline has elapsed, add an edge to `VIOLATED`. **Static builder:** elapsed is `w.step - activated_at`, where `activated_at` is the step the obligation became `PENDING` (`World.activation_steps`, recorded by P6a; 0 for an obligation `PENDING` at w0). **Hybrid builder:** unchanged, `w.step >= deadline_steps` (`el_kripke.py:3143`). Deliberately not an engine mirror: the live engine counts an event-triggered token's deadline from grant, not activation (`_transition()` preserves `granted_at_tick`) — see the open finding "Engine counts event-triggered deadlines from grant, not activation" in `docs/CONCEPTS_INDEX.md`. C1-claimed obligations (`CLAIMABLE` → `PENDING`) still count from step 0 in the static builder — separate open item. | Implemented, both builders; static builder counts from activation — AM-99a part 1 (2026-09-25) |
 | **T3** | Tick | Add an edge advancing `step` by 1, obligations unchanged — suppressed if any `discharge_mode: strict` obligation is `PENDING` and actionable (held by an `ACTIVE` actor). This is the rule AM-49/AM-76/AM-78 mirror into the live engine's own guard. | Implemented, both builders |
 | **T4** | Delegation Revoke | For a revocable, `transfers_burden` Delegation currently `"active"`: flip that delegation's own per-world state to `"revoked"` (`World.delegation_states`, scoped per delegation instance — not a global `ActorStatus` flip, which would incorrectly affect every other obligation the delegate separately holds; see the 2026-09-12 investigation finding in `docs/CONCEPTS_INDEX.md`). A resolved `_effective_holder()` is threaded through T1's discharge check/label, `strict_burden_blocks()`, and T6's holder/permit-ownership check, so the burden is judged/attributed against the delegator once revoked. **Distinct mechanism from T7/T8** — this is about Burden/delegation revocation, not Permit/Authorization revocation. Mirrors `revoke_delegation()` (`el_engine.py`). | **Implemented, hybrid mode only — AM-81 (2026-09-14)**. `transfers_token_group` Delegations are out of scope; `build_kripke_model()` (static/pre-exec) is untouched, same as T7/T8. |
 | **T10** | Delegation Reinstate | The reverse of T4: for a revocable, `transfers_burden` Delegation currently `"revoked"`, flip that delegation's per-world state back to `"active"`, restoring `_effective_holder()`'s fall-through to the original delegate everywhere T4 redirected it (T1, `strict_burden_blocks()`, T6). Closes the one-way gap T4 deliberately left open at AM-81. Mirrors `reinstate_delegation()` (`el_engine.py`). Same strict-burden guard, same instantaneous/no-step-advance shape as T4. | **Implemented, hybrid mode only — AM-84 (2026-09-14)**. Same scope as T4 (`transfers_burden` only); `build_kripke_model()` (static/pre-exec) is untouched, same as T4/T7/T8/T9. |
@@ -44,7 +44,10 @@ track rather than continuing the T-series).
 
 ---
 
-*Last updated: 2026-09-14, alongside AM-84 (T10 added — the reverse of
+*Last updated: 2026-09-25, alongside AM-99a part 1 (T2 in the static
+builder now counts a deadline from the step the obligation became
+`PENDING` — new `World.activation_steps` field, recorded by P6a — not
+from step 0; hybrid T2 unchanged). Previously updated 2026-09-14, alongside AM-84 (T10 added — the reverse of
 T4, closing the one-way gap AM-81 deliberately left open; T4's own row
 retitled "Delegation Revoke" and its "one-way only" framing dropped,
 now that T10 exists). Previously updated the same day, alongside AM-82

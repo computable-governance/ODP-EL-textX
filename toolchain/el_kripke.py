@@ -172,6 +172,7 @@ _PermitStates = FrozenSet[Tuple[str, str]]              # (permit_name, "active"
 _EmbargoStates = FrozenSet[Tuple[str, str]]             # (embargo_name, "active"|"lifted")
 _DelegationStates = FrozenSet[Tuple[str, str]]           # (delegation_name, "active"|"revoked")
 _HolderOverrides = FrozenSet[Tuple[str, str]]             # (obligation_id, current_holder_actor_name)
+_ActivationSteps = FrozenSet[Tuple[str, int]]             # (obligation_id, step it became PENDING)
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,19 @@ class World:
                             Permit/Embargo transfers are out of scope for
                             T9 (their per-world state tracks activity,
                             not holder identity).
+      - activation_steps  : per-world record of the step at which an
+                            obligation became PENDING after w0, AM-99a.
+                            Rule T2 counts an obligation's deadline from
+                            this step rather than from step 0. Deliberately
+                            NOT an engine mirror: the live engine counts an
+                            event-triggered token from grant, since
+                            _transition() preserves granted_at_tick (open
+                            finding in docs/CONCEPTS_INDEX.md, to be fixed
+                            before AM-99b).
+                            Obligations PENDING at w0 are not recorded
+                            (implicit activation step 0). Populated by
+                            the static builder's P6a cascade only;
+                            hybrid-mode worlds leave it empty.
       - step              : discrete time step (0 = initial)
 
     Frozen so that worlds are hashable and can appear in sets/dict keys.
@@ -230,6 +244,7 @@ class World:
     embargo_states: _EmbargoStates = frozenset() # frozenset of (embargo_name, "active"|"lifted")
     delegation_states: _DelegationStates = frozenset()  # frozenset of (delegation_name, "active"|"revoked")
     holder_overrides: _HolderOverrides = frozenset()  # frozenset of (obligation_id, holder_actor_name)
+    activation_steps: _ActivationSteps = frozenset()  # frozenset of (obligation_id, activation step), AM-99a
     step: int = 0
 
     # ── Convenience accessors ─────────────────────────────────────────────────
@@ -326,6 +341,7 @@ def _make_world(
     embargo_states: _EmbargoStates = frozenset(),
     delegation_states: _DelegationStates = frozenset(),
     holder_overrides: _HolderOverrides = frozenset(),
+    activation_steps: _ActivationSteps = frozenset(),
     step: int = 0,
 ) -> World:
     """Convenience constructor from plain dicts (+ frozensets of action names
@@ -347,6 +363,7 @@ def _make_world(
         embargo_states=frozenset(dict(embargo_states).items()),
         delegation_states=frozenset(dict(delegation_states).items()),
         holder_overrides=frozenset(dict(holder_overrides).items()),
+        activation_steps=frozenset(dict(activation_steps).items()),
         step=step,
     )
 
@@ -1992,9 +2009,12 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            the obligated action.
 
          Rule T2 — DEADLINE EXPIRY:
-           If w.step >= desc.deadline_steps and O is still PENDING,
-           add an edge w → w'' where O is VIOLATED. This models the
-           obligation breaching its deadline.
+           If w.step - activated_at >= desc.deadline_steps and O is
+           still PENDING, add an edge w → w'' where O is VIOLATED. This
+           models the obligation breaching its deadline. activated_at is
+           the step O became PENDING (w.activation_steps; 0 for an
+           obligation PENDING at w0) — AM-99a, previously counted from
+           step 0 even for obligations P6a activated later.
 
          Rule T3 — TICK (time passes):
            Add an edge w → w_tick where step increments by 1 and all
@@ -2179,11 +2199,15 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             # any WAITING obligation with triggered_by = that event becomes PENDING.
             # Applied before SUPERSEDED suppression so P6b can override P6a when
             # the same token is both a group sibling and a cascade target.
+            # AM-99a: each activation's step is recorded so T2 counts the
+            # activated obligation's deadline from here, not from step 0.
+            new_activation = dict(w.activation_steps)
             if desc.fires_event:
                 for other_oid, other_desc in descriptors.items():
                     if (other_desc.triggered_by == desc.fires_event
                             and new_obligs.get(other_oid) == ObligationState.WAITING):
                         new_obligs[other_oid] = ObligationState.PENDING
+                        new_activation[other_oid] = w.step
 
             # P6b — SUPERSEDED sibling suppression (any_discharged groups only).
             # When a member of an any_discharged group discharges, the remaining
@@ -2204,7 +2228,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                                              ObligationState.WAITING):
                             new_obligs[sibling_oid] = ObligationState.SUPERSEDED
 
-            w_prime = _make_world(new_obligs, current_actors, current_occurred, step=w.step)
+            w_prime = _make_world(new_obligs, current_actors, current_occurred,
+                                  activation_steps=new_activation, step=w.step)
             label   = f"discharge:{oid} by {desc.holder}"
 
             if w_prime not in worlds:
@@ -2257,7 +2282,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                     if new_obligs.get(sibling_oid) == ObligationState.CLAIMABLE:
                         new_obligs[sibling_oid] = ObligationState.LAPSED
 
-            w_prime = _make_world(new_obligs, current_actors, current_occurred, step=w.step)
+            w_prime = _make_world(new_obligs, current_actors, current_occurred,
+                                  activation_steps=w.activation_steps, step=w.step)
             label = f"claim:{oid} by {desc.holder}"
 
             if w_prime not in worlds:
@@ -2273,13 +2299,17 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         for oid, desc in descriptors.items():
             if current_obligs.get(oid) != ObligationState.PENDING:
                 continue
-            if w.step < desc.deadline_steps:
+            # AM-99a: deadline counted from the step this obligation became
+            # PENDING (0 unless activated later by P6a), not from step 0.
+            activated_at = dict(w.activation_steps).get(oid, 0)
+            if w.step - activated_at < desc.deadline_steps:
                 continue
 
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.VIOLATED
 
-            w_viol  = _make_world(new_obligs, current_actors, current_occurred, step=w.step)
+            w_viol  = _make_world(new_obligs, current_actors, current_occurred,
+                                  activation_steps=w.activation_steps, step=w.step)
             label   = f"violate:{oid} (deadline={desc.deadline_steps} steps)"
 
             if w_viol not in worlds:
@@ -2314,7 +2344,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 for oid in descriptors
             )
             if has_eventual_pending and not has_strict_pending_dischargeable:
-                w_tick = _make_world(current_obligs, current_actors, current_occurred, step=w.step + 1)
+                w_tick = _make_world(current_obligs, current_actors, current_occurred,
+                                     activation_steps=w.activation_steps, step=w.step + 1)
                 label  = "tick (time passes)"
 
                 if w_tick not in worlds:
@@ -2362,7 +2393,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 continue
 
             new_occurred = current_occurred | {pdesc.for_action}
-            w_prime = _make_world(current_obligs, current_actors, new_occurred, step=w.step)
+            w_prime = _make_world(current_obligs, current_actors, new_occurred,
+                                  activation_steps=w.activation_steps, step=w.step)
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
 
             if w_prime not in worlds:
@@ -2416,7 +2448,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.DISCHARGED
             new_occurred = current_occurred | {desc.for_action}
-            w_prime = _make_world(new_obligs, current_actors, new_occurred, step=w.step)
+            w_prime = _make_world(new_obligs, current_actors, new_occurred,
+                                  activation_steps=w.activation_steps, step=w.step)
             label   = f"examine:{oid} → {desc.for_action}"
 
             if w_prime not in worlds:

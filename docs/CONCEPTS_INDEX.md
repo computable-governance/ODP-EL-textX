@@ -1665,6 +1665,11 @@ symmetry or explains the discrepancy. Worth keeping in mind for any future
 work that touches either side: changes to one do not automatically apply to
 the other, and there is currently no shared abstraction between them.
 
+*Update 2026-09-25:* a concrete instance — deadline counting for
+event-triggered obligations — is logged as its own open finding, "Engine
+counts event-triggered deadlines from grant, not activation" (end of this
+file).
+
 ## Engine/Kripke unification — what a shared design would and wouldn't merge
 
 Following up on the symmetry gap above: the operational/modal split itself
@@ -5790,3 +5795,31 @@ edit (which does not touch this).
 **F-3: Static `can_perform()` ignores Authorization grants.** It reports `VendorReferralAgent` as missing `serviceRequestSubmitPermit`, which `AgentAccessAuthorization` grants; it reads only `holds` in object bodies. Check against AM-96's `[W-16h]` grantability logic, which may already have the lookup needed.
 
 **F-4: Motivating case for the domain-scope finding.** See "Permit/Embargo missing domain scope (§7.8.8.2/§7.8.8.3 gap)" above. In this scenario, `outsideScopeEmbargo` and `noCircumventionEmbargo` carry no domain scope, and `AgentAccessAuthorization.domain_scope` is an unchecked string. Prerequisite for tier-2 (federation) terms of engagement; not needed for tier 1.
+
+## Engine counts event-triggered deadlines from grant, not activation — OPEN FINDING (2026-09-25)
+
+**OPEN FINDING** — found during AM-99a part 1 (static-builder deadline
+counting). When an event activates a pending token in the live engine
+(`_activate_triggered_tokens()`, Step 7c, or `fire_event()`), the token
+goes through `_transition()` (`el_engine.py:145-155`), which copies
+`granted_at_tick` unchanged. `check_live_violations()` then computes
+`elapsed = tick - tok.granted_at_tick` (`el_engine.py:2149`), so an
+event-triggered burden's deadline is counted from when the token was
+granted (typically enrollment), not from when its trigger fired. A burden
+triggered late enough can be violated on the first sweep after it becomes
+active. Freshly created tokens (`effect create`, fresh grants —
+`el_engine.py:680`, `856`) are stamped with the current tick and are not
+affected.
+
+As of AM-99a part 1 the static Kripke builder counts from activation
+(`World.activation_steps`), so the two layers now **disagree** for
+triggered obligations. Before AM-99a they agreed only because both counted
+from the wrong point. Adds a concrete instance to the "Engine/Kripke
+event-model symmetry gap" finding above.
+
+**Must be fixed before AM-99b**, because AM-99b mirrors the engine's
+event handling in hybrid mode and would otherwise copy this behaviour.
+Planned as its own amendment, with an investigation step first: resetting
+`granted_at_tick` on activation may move engine-level pins in the referral
+and FHIR event tests (e.g. `tests/test_referral_event_triggers.py`,
+`tests/test_fhir_event_handler.py`).
