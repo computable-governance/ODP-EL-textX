@@ -5778,3 +5778,15 @@ finding. Flagged for a future session.
 edit (which does not touch this).
 
 ---
+
+## Terms-of-engagement scenario findings (2026-09-25)
+
+**OPEN FINDINGS**, from drafting `scenarios/terms_of_engagement/external_agent_access_scenario.el`.
+
+**F-1: No link from a domain to the community it establishes.** A domain's security policies cannot be applied to roles of a community that domain establishes: V-14 resolves `applies ... to role X` only within the same element. The scenario applies them inside the community instead, which hides policy ownership. Related to §7.5.1 (domain policies bind controlled objects). Design question; no brief yet.
+
+**F-2: Role-held burdens are invisible to the verifier.** `holds` in a role body creates no obligation descriptor. AM-86 widened descriptor sources to Commitment, `ViolationResponse.creates_burden`, Authorization and token-group Delegation, but not role-held tokens. The scenario uses Commitment + Delegation instead (provider accountable, gateway discharges). Resolving a holder for a role-held burden needs the role-membership dimension the Kripke `World` lacks (see the AM-83 role-membership gap).
+
+**F-3: Static `can_perform()` ignores Authorization grants.** It reports `VendorReferralAgent` as missing `serviceRequestSubmitPermit`, which `AgentAccessAuthorization` grants; it reads only `holds` in object bodies. Check against AM-96's `[W-16h]` grantability logic, which may already have the lookup needed.
+
+**F-4: Motivating case for the domain-scope finding.** See "Permit/Embargo missing domain scope (§7.8.8.2/§7.8.8.3 gap)" above. In this scenario, `outsideScopeEmbargo` and `noCircumventionEmbargo` carry no domain scope, and `AgentAccessAuthorization.domain_scope` is an unchecked string. Prerequisite for tier-2 (federation) terms of engagement; not needed for tier 1.
