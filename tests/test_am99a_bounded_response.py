@@ -2,18 +2,17 @@
 AM-99a (part 3) — bounded response property for triggered obligations.
 
 For an obligation with triggered_by, AF(discharged) from w0 asks the wrong
-question: the trigger may never fire. In models built by
-build_kripke_model() (response_semantics=True — a TEMPORARY flag, which
-AM-99b must remove after aligning hybrid mode), check_obligation() instead
+question: the trigger may never fire. check_obligation() instead
 reports the bounded response property ("within horizon"):
 
     AG(pending:O -> AF discharged:O), from every PENDING world before
     the horizon step.
 
 "not triggered within horizon" and "not resolved within horizon" are never
-reported as satisfied. Obligations without triggered_by, and every hybrid
-model, keep today's AF-from-w0 verdict (docs/el_grammar_amendments.md,
-AM-99a).
+reported as satisfied. Obligations without triggered_by keep the
+AF-from-w0 verdict (docs/el_grammar_amendments.md, AM-99a). AM-99a
+limited this to static models with a temporary response_semantics flag;
+AM-99b removed it, so hybrid models use the same semantics.
 """
 from pathlib import Path
 
@@ -89,18 +88,16 @@ def test_untriggered_obligation_keeps_af_from_w0():
     assert v.satisfied is True
 
 
-def test_static_model_sets_response_semantics(toe):
-    assert toe.response_semantics is True
-
-
-def test_hybrid_model_keeps_af_verdict():
-    """Temporary flag: hybrid verdicts are unchanged until AM-99b.
-    referralInitiationBurden has triggered_by but is still judged by AF
-    from the live anchored world (test_referral_kripke.py pins True)."""
+def test_hybrid_model_uses_response_semantics():
+    """AM-99b removed the temporary flag: a hybrid model judges a
+    triggered obligation by the response property too. The referral
+    builder grants referralInitiationBurden active at tick 0, so it is
+    PENDING at w0 and the verdict is unchanged: satisfied
+    (test_referral_kripke.py pins True); only the operator changes,
+    from AF to the response operator."""
     km = build_kripke_from_runtime(_SCENARIO_BUILDERS["referral"](), horizon=10)
-    assert km.response_semantics is False
     v = km.check_obligation("referralInitiationBurden")
-    assert v.modal_operator == "AF"
+    assert v.modal_operator == RESPONSE_OPERATOR
     assert v.status is None
     assert v.satisfied is True
 
@@ -172,7 +169,6 @@ def test_not_resolved_within_horizon_pending_only_at_horizon_step():
         labels={(w0, w_h): "fire:E via probe"},
         obligation_descriptors={"O": desc},
         horizon=horizon,
-        response_semantics=True,
     )
     v = km.check_obligation("O")
     assert v.modal_operator == RESPONSE_OPERATOR

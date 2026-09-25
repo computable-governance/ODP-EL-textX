@@ -674,13 +674,6 @@ class KripkeModel:
     # built from Community/Federation Objective.satisfaction clauses (AM-27).
     # operator is 'all_discharged' or 'any_discharged'.
     # Used by _build_propositions to emit objective_satisfied:<community>.
-    response_semantics: bool = False
-    # AM-99a part 3 — TEMPORARY flag. True only for models built by
-    # build_kripke_model() (static): check_obligation() then reports the
-    # bounded response property for triggered obligations (see there).
-    # False for build_kripke_from_runtime() (hybrid), whose verdicts are
-    # unchanged. AM-99b must align hybrid mode and remove this flag,
-    # re-checking referralInitiationBurden under response semantics.
 
     # ── Satisfaction relation ──────────────────────────────────────────────────
 
@@ -805,16 +798,17 @@ class KripkeModel:
           An obligation O is satisfied iff for ALL paths from the initial world,
           obligation_id is eventually DISCHARGED.
 
-        AM-99a part 3: for an obligation with triggered_by, in a model with
-        response_semantics set (static builder only — temporary, see the
-        field), AF from w0 is the wrong question: the trigger may never
-        fire. The verdict is instead the bounded response property
-        (see check_response()).
+        AM-99a part 3: for an obligation with triggered_by, AF from w0 is
+        the wrong question: the trigger may never fire. The verdict is
+        instead the bounded response property (see check_response()), in
+        models from both builders — AM-99b removed the temporary flag that
+        limited this to the static builder, once hybrid mode mirrored the
+        engine's event model.
 
         Returns an ObligationVerdict with full explanation.
         """
         desc = self.obligation_descriptors.get(obligation_id)
-        if self.response_semantics and desc is not None and desc.triggered_by:
+        if desc is not None and desc.triggered_by:
             return self.check_response(obligation_id)
 
         prop = f"discharged:{obligation_id}"
@@ -2340,7 +2334,6 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             horizon=horizon,
             group_index=group_index,
             satisfaction_conditions=satisfaction_conditions,
-            response_semantics=True,  # AM-99a part 3 — temporary; AM-99b removes
         )
 
     # Collect all actors appearing in any chain, plus every Permit holder
@@ -2749,7 +2742,6 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         horizon=horizon,
         group_index=group_index,
         satisfaction_conditions=satisfaction_conditions,
-        response_semantics=True,  # AM-99a part 3 — temporary; AM-99b removes
     )
 
 
