@@ -80,7 +80,7 @@ embargo outsideScopeEmbargo {
 // The Medicare lesson: a refusal is final. After a refusal, the agent may not
 // seek an alternative route to the same data.
 embargo noCircumventionEmbargo {
-    for_action: "retry_refused_request_by_other_route"
+    for_action: "retryByOtherRoute"
     state: pending
     triggered_by: accessRefused
     description: "Once refused, no alternative path to the same data (different endpoint, proxy, third-party service)"
@@ -241,12 +241,19 @@ contract community ExternalAgentAccess
             actor: externalRequesterRole
             resource: ProviderFHIRService
             requires_permit serviceRequestSubmitPermit
-            inhibited_by_embargo noCircumventionEmbargo
         }
         action readPatientDemographics {
             actor: externalRequesterRole
             resource: ProviderFHIRService
             requires_permit patientLookupPermit
+        }
+        // Seeking refused data by another route (different endpoint, proxy,
+        // third-party service). Blocked once a refusal activates
+        // noCircumventionEmbargo; the legitimate actions above stay open
+        // (time-bounded quarantine is RefusalQuarantinePolicy's job).
+        action retryByOtherRoute {
+            actor: externalRequesterRole
+            resource: ProviderFHIRService
             inhibited_by_embargo noCircumventionEmbargo
         }
     }
