@@ -4590,6 +4590,14 @@ and use the plain `int` value (`5`, unchanged) exactly as before for these
 burdens, since nothing about the verifier's bounded-horizon model was
 asked to change here.
 
+**Update (AM-108, 2026-09-26): the verifier side is resolved.** Both
+Kripke builders' T2 now apply only to a deadline with an elapsed-time
+magnitude (`KripkeModel.enforceable_deadlines`), and a new T2b mirrors the
+engine's DN_010 option (b) episode-conclusion violation. Descriptors still
+carry the default 5 for these burdens (unused by T2). `[W-24]` flags an
+eventual burden with neither path. The DN_010 modelling gaps this entry
+keeps open (unsuccessful conclusion, etc.) are unchanged.
+
 10 new tests (2 integration-level in
 `tests/test_check_live_violations.py`, exercising both Tier 1 and Tier 2;
 8 unit-level in `tests/test_parse_deadline_steps.py` covering
@@ -6441,7 +6449,11 @@ deadline as the static builder does. Caveat recorded in the AM-106 entry:
 referral's `aiExaminationBurden`, now violable in hybrid, has a
 no-magnitude deadline ("referral episode") that the engine never
 violates — an instance of the verifier-wide no-magnitude mismatch, still
-open. The original finding follows.
+open. **Update (AM-108, 2026-09-26):** the mismatch is resolved — T2 no
+longer violates a deadline without an elapsed-time magnitude, in either
+builder, and T2b adds the engine's episode-conclusion violation;
+`aiExaminationBurden` is now violated only when the rest of its opted-in
+episode concludes, as in the engine. The original finding follows.
 
 Found in AM-105 Phase 1. The hybrid
 builder's T1/T2 loop (`build_kripke_from_runtime()`) starts with
@@ -6536,6 +6548,18 @@ obligation still PENDING when another one is violated; AM-105 makes it
 visible because a violation response exists precisely so that work
 continues after a violation. No tracked scenario is affected today:
 `escalationNoticeBurden`'s activating violation is beyond the horizon.
+
+**Update (2026-09-26):** now seen in practice twice. AM-106: in referral
+and gp_referral advanced to tick 36, the escalation's bounded response
+was false via violate `referralResponseBurden` → violate
+`clinicalHandoverBurden` → dead end (that case disappeared with AM-108,
+since `clinicalHandoverBurden`'s violation was the fictional no-magnitude
+default). AM-108: with `escalationNoticeBurden` granted directly in the
+referral runtime, its AF is false via T2b violating `aiExaminationBurden`
+("episode concluded") → terminal world with the escalation pending → dead
+end; AF holds with violated worlds non-terminal. Pinned in
+`tests/test_am86_obligation_descriptor_roots.py`. **Scheduled as AM-109,
+next.**
 
 **Fix direction:** let violated worlds continue (enqueue them below the
 horizon) at least while any obligation is PENDING, or unconditionally;

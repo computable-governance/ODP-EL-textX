@@ -8875,6 +8875,9 @@ clock-violates it (`_has_deadline_magnitude()`). Its newly reachable
 hybrid violation is therefore an instance of the verifier-wide
 no-magnitude mismatch (see "Not done here" under Part 2), not a real
 deadline. It now matches the static builder, which already violated it.
+**Update (AM-108):** no longer — T2 skips a deadline without a
+magnitude. `aiExaminationBurden` is now violated only by T2b, when the
+rest of its opted-in episode has concluded, exactly as the engine does.
 
 ### Part 2 — the fallback descriptor (`f1e1fb7`)
 
@@ -8906,6 +8909,9 @@ episode"` has no valid tick-count" (underlying gap still OPEN). Fixing it
 (no T2 without a magnitude, in both builders) would, for example, remove
 `violate:clinicalHandoverBurden` and `violate:aiExaminationBurden` (both
 "referral episode") from the referral models; a separate amendment.
+**Update (AM-108):** done — T2 skips a deadline without a magnitude in
+both builders, and T2b adds the engine's episode-conclusion violation;
+see the AM-108 entry.
 
 ### Part 3 — tests (`4e6ba94`)
 
@@ -9104,3 +9110,184 @@ API `status` field comment and endpoint description (`el_api.py`).
 (recommended-action and execute-action candidate order; status field
 description); `tests/test_am107_horizon_honest_af.py` (new);
 `docs/CONCEPTS_INDEX.md`; this file.
+
+---
+
+## AM-108 (2026-09-26) — no-magnitude deadlines: T2 skip plus episode-conclusion violation (T2b); `[W-24]` (`toolchain/el_kripke.py`, `el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in four parts (commits `498dcda`, `dfaa10b`,
+`a5757ac` and this docs commit). Type: verifier semantics (Layer 4), validator
+warning (advisory). **No grammar or engine change; descriptors
+unchanged.** Resolves the verifier/engine "no-magnitude" mismatch
+recorded in AM-106 (its caveat and "Not done here") and in CONCEPTS_INDEX
+(the permit-gated entry's caveat; the verifier side of "`deadline:
+"referral episode"` has no valid tick-count"). Scoped in AM-107's reorder.
+
+**The mismatch.** A burden whose deadline has no elapsed-time magnitude —
+prose ("referral episode", "end of session"), a bare number, or none —
+gets `_parse_deadline_steps()`'s default of 5 in its descriptor, and both
+builders' T2 violated it at 5 steps. The engine never clock-violates one
+(`check_live_violations()` requires `_has_deadline_magnitude()`), but it
+*can* violate an eventual one through DN_010 option (b): when every other
+member of an opted-in satisfaction group (`terminating {
+on_objective_achieved: true }`) is DISCHARGED or SUPERSEDED
+(`all_discharged`), or one is (`any_discharged`). 18 of 35 burdens in the
+tracked scenarios have no magnitude. AM-107's horizon-honest AF made
+removing the fictional violations safe: a burden that can no longer be
+violated is reported "not resolved within horizon", not compelled.
+
+### Part 1 — T2 skip and T2b, both builders (`498dcda`)
+
+One part: the skip alone would also drop the violations the engine can
+produce by conclusion; T2b alone is meaningless while T2 still violates
+the same burdens at 5 steps.
+
+- **T2 skip.** `_build_enforceable_deadlines()` (top-level and
+  role-scoped burdens with a magnitude) is kept on
+  `KripkeModel.enforceable_deadlines` (`None` in a hand-built model =
+  every deadline enforceable). T2 applies only to those. A live burden
+  with no spec token has no deadline and is not enforceable, as in the
+  engine. `render_summary()` prints `deadline=none` for the others.
+- **T2b — episode conclusion.** For a PENDING, eventual obligation with
+  no enforceable deadline: if an opted-in group has concluded around it
+  (`_build_conclusion_index()`, `_episode_concluded()`, the world-state
+  mirror of `el_engine._owning_group_concluded()`: the obligation itself
+  excluded; a member absent from the world counts as unresolved), an
+  edge to VIOLATED at the same step, labelled `violate:<O> (episode
+  concluded)`. Strict burdens: never (the engine excludes them). Same
+  AM-105 activation and terminal rule as T2. The engine's and the
+  verifier's satisfaction-group builders (duplicated per AM-57) agree on
+  every tracked scenario.
+- T2b can reach four burdens: referral `clinicalHandoverBurden`,
+  `aiExaminationBurden`; ereferral `examinationBurden`,
+  `aiExaminationBurden`. In hybrid referral it produces 189 + 189 edges,
+  in ereferral 42 + 42. In the static referral model the rest of the
+  episode does not conclude within horizon 10, so there are none.
+- Three existing tests updated in this part (so it is green on its own):
+  `test_am107_…::test_counterexample_is_genuine`'s four static cases now
+  pin "not resolved within horizon" (their counterexample was an
+  unrelated no-magnitude burden violated at the default 5, then a dead
+  end); `test_am99a_deadline_from_activation`'s second burden gets
+  `deadline: "1 hour"` (it relied on the default 5); and
+  `test_am86_…::test_escalation_notice_burden_descriptor_in_hybrid_mode`
+  pins the flip below.
+
+**Before/after** (every static model, API runtime, and 147 suite-built
+hybrid models, recorded with a scratch pytest plugin; deterministic
+since AM-107):
+
+- "Eventually violated" true → false for every no-magnitude burden
+  without a conclusion path; unchanged (via T2b) for the four with one.
+- "Fails" → "not resolved within horizon" wherever the only
+  counterexample rested on a fictional violation: static referral
+  `referralResponseBurden`, `assessmentSchedulingBurden`,
+  `reviewNonResponseAndDetermineNextStepsBurden`, the same in
+  gp_referral, consent `reportingObligation`, the transfer probes, the
+  FHIR mapper's `Id402`/`Id403`/`Id702`/`Id703`, and other probes.
+- World counts shrink (hybrid referral 4768 → 3562, ereferral 316 → 268,
+  gp_referral 994 → 796; static referral 264 → 176, consent 30 → 24,
+  transfer_probe 384 → 192). Expected utilities rise where fictional
+  violation branches disappear; in referral-family models the top
+  action moves from `examine:aiExaminationBurden` to
+  `examine:referralResponseBurden` (e.g. 0.7601 → 0.8095).
+- No verdict becomes true merely because a violation disappeared and
+  AM-107 would otherwise report "not resolved": the only false → true is
+  the tick-36 escalation below, which holds honestly.
+
+**`escalationNoticeBurden` flip — terminal rule plus T2b.** Granted
+directly in the referral runtime (two tests), its AF goes true → false.
+Counterexample: the other episode members are discharged at step 0, T2b
+violates `aiExaminationBurden` ("episode concluded"), and that violated
+world is terminal with the strict escalation still PENDING — a dead end.
+The engine allows the sequence (others' discharging actions and
+`check_live_violations()` are not blocked by the strict freeze). With
+violated worlds non-terminal (throwaway check) AF holds again. So the
+false is the terminal rule's, a conservative under-report; before
+AM-108 `aiExaminationBurden` was only violated by T2's default 5 steps,
+which the strict freeze never let elapse. **AM-109 (the terminal rule)
+is next.**
+
+**Tick-36 escalation case (AM-106).** The dead-end counterexample
+(violate `referralResponseBurden` → violate `clinicalHandoverBurden` →
+dead end) disappears: `clinicalHandoverBurden`'s violation was the
+fictional default, and T2b cannot fire there (`referralResponseBurden`
+is violated, not resolved). The escalation's bounded response is now
+true in referral (8370 worlds) and gp_referral (1998).
+
+### Part 2 — `[W-24]` (`dfaa10b`)
+
+An eventual burden (top-level or role-scoped) whose deadline has no
+elapsed-time magnitude and that is in no opted-in satisfaction group
+together with another member: "Eventual burden 'X' has no enforceable
+deadline ('…') and no episode-conclusion path: it is never violated, at
+runtime or in the verifier. Give it a deadline with a time unit, or put
+it in a satisfaction group whose community opts in with
+on_objective_achieved. (§6.4.3, §7.8.7)". Uses the engine's helpers, as
+`[W-18]`/`[W-19]` do. Strict burdens are `[W-19]`'s. Fires on 7: consent
+`reportingObligation`; ereferral `acknowledgementBurden`; gp_referral
+`clinicalHandoverBurden` (only in `ReferralFederation`'s group, which does
+not opt in); the four eventual transfer-probe burdens. Existing tests:
+the `[W-16b]` probes in `test_am89_warnings_channel.py` and a
+`test_am90` probe get a `"1 hour"` deadline (neutral to what they test);
+`test_am89`'s tracked-scenario test excludes `[W-24]` alongside
+`[W-19]`/`[W-20]` (consent's `reportingObligation`, a known scenario gap).
+
+### Part 3 — tests (`a5757ac`)
+
+New `tests/test_am108_no_magnitude_deadlines.py` (19; 16 fail on the
+pre-AM-108 code — the three that pass are the engine parity check and
+the two scenarios where `[W-24]` must stay silent): prose and bare-number
+deadlines never clock-violated, in both builders, with the descriptor
+unchanged and `deadline=none` in the summary; a magnitude deadline still
+violated; T2b fires only once the group has concluded, never on the
+strict member, and matches the engine's `check_live_violations()` step
+by step; referral's two "referral episode" burdens violated only by T2b
+(hybrid) and not at all (static); gp_referral `clinicalHandoverBurden`
+never violated; `[W-24]` per tracked scenario and its message; **the
+consent scenario's recommended order and values pinned** (static model,
+horizon 10, γ 0.9): `recommend_action(w0)` — seek consent immediate 0.86
+/ expected future 0.93, report 0.44 / 0.72; Bellman Q (API formula) —
+6.4975 / 2.15.
+
+### Part 4 — docs
+
+This entry; CONCEPTS_INDEX: the no-magnitude mismatch resolved (notes on
+the "referral episode" entry and the permit-gated entry's caveat), the
+escalation flip added to the terminal-rule finding; the AM-106 entry's
+caveat and "Not done here" updated; `docs/KRIPKE_TRANSITION_RULES.md`:
+T2 row, new T2b row, last-updated note.
+
+### EDOC 2026 Q-values
+
+The EDOC 2026 paper's consent figures (+0.980 for
+`seekConsentObligation`, +0.920 for `reportingObligation`) cannot be
+reproduced at HEAD, before or after AM-108 — neither as Bellman Q-values
+(6.4975 / 2.15) nor as `recommend_action` expected future utility (0.8593
+/ 0.72 before, 0.93 / 0.72 after, horizon 10), nor at horizons 3–15 — and
+the values appear nowhere in the repository's history (`git log -S` over
+all branches). **The recommended order they illustrate (seek consent
+first) holds before and after AM-108.** AM-108 changes only
+`seekConsentObligation`'s expected future utility (0.8593 → 0.93, now
+the same at every horizon); the Bellman Q-values are unchanged. The
+figures now have a reproducible source: the consent test in Part 3.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 728 → 728 → 728
+→ 747 → 747 passed, 1 xfailed.
+
+**Standard reference(s):** §6.4.3 (Burden), §7.8.7 (token lifecycle:
+deadlines), §6.2 and §7.7 (community objective, satisfaction), §7.6
+(community lifecycle: termination); Annex C (Kripke semantics,
+informative), §C.2, §C.4.
+
+**Files changed:** `toolchain/el_kripke.py`
+(`KripkeModel.enforceable_deadlines`, `render_summary()`,
+`_build_enforceable_deadlines()`, `_build_conclusion_index()`,
+`_episode_concluded()`, T2/T2b in both builders, builder docstring);
+`toolchain/el_validator.py` (`[W-24]`, header);
+`tests/test_am108_no_magnitude_deadlines.py` (new);
+`tests/test_am107_horizon_honest_af.py`,
+`tests/test_am86_obligation_descriptor_roots.py`,
+`tests/test_am99a_deadline_from_activation.py`,
+`tests/test_am89_warnings_channel.py`,
+`tests/test_am90_multi_parent_warnings.py`; `docs/CONCEPTS_INDEX.md`;
+`docs/KRIPKE_TRANSITION_RULES.md`; this file.
