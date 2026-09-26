@@ -2022,6 +2022,58 @@ def _build_action_emits_index(model: Any) -> Dict[str, str]:
     return index
 
 
+def _build_action_destroys_index(model: Any) -> Dict[str, Set[str]]:
+    """
+    AM-101: map action_name -> the token names its `destroy` DeonticEffects
+    name — the engine's Step 3 `explicit_destroys`. First match per action
+    name wins, as the engine's _find_action() does. State-free, built once
+    before the BFS; read by _discharges_any() for Rule T5's strict guard.
+    """
+    index: Dict[str, Set[str]] = {}
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                if action.name in index:
+                    continue
+                index[action.name] = {
+                    eff.token.name
+                    for eff in getattr(action, "deontic_effects", []) or []
+                    if eff.operation == "destroy" and eff.token
+                }
+    return index
+
+
+def _discharges_any(
+    action: str,
+    actor: str,
+    pending_holders: Iterable[Tuple[str, str]],
+    for_action_of: Dict[str, Optional[str]],
+    descriptors: Dict[str, ObligationDescriptor],
+    action_emits_index: Dict[str, str],
+    action_destroys_index: Dict[str, Set[str]],
+) -> bool:
+    """
+    AM-101: True iff `actor` performing `action` would discharge at least
+    one burden — the verifier mirror of the engine's Step 3 `dischargeable`
+    list, which exempts an action from Step 3.5's strict-mode guard.
+    `pending_holders` is (oid, holder) for every PENDING obligation (the
+    engine's state == 'active'); a burden counts if its holder is `actor`
+    and the action destroys it, matches its for_action, or emits its
+    discharged_by event.
+    """
+    emitted = action_emits_index.get(action)
+    destroyed = action_destroys_index.get(action, set())
+    return any(
+        holder == actor
+        and (oid in destroyed
+             or for_action_of.get(oid) == action
+             or (emitted is not None and descriptors[oid].fires_event == emitted))
+        for oid, holder in pending_holders
+    )
+
+
 def _activate_waiting(
     descriptors: Dict[str, ObligationDescriptor],
     event: str,
@@ -2252,6 +2304,12 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            that is some burden's discharged_by is not fired (as T11).
            Rule T6 (gated discharge) likewise runs P6a on the burden's
            discharged_by event and fires its action's emitted event.
+           AM-101: suppressed while a strict obligation is PENDING with an
+           ACTIVE holder (the T3 condition), unless the exercised action
+           discharges a PENDING burden the permit holder holds (destroy
+           effect, matching for_action, or emitting its discharged_by
+           event) — the engine's Step 3.5 guard and its Step 3
+           `dischargeable` exemption.
 
          Rule T9 — TRANSFER (§6.4.7/§7.8.7 DeonticEffect(transfer)):
            For each Burden-kind `transfer` DeonticEffect whose `from_role`
@@ -2304,6 +2362,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     event_firing_index = _build_event_firing_index(  # AM-99a — Rule T11
         model, descriptors, permit_requirement_index)
     action_emits_index = _build_action_emits_index(model)  # AM-99b — T5/T6
+    action_destroys_index = _build_action_destroys_index(model)  # AM-101 — T5
+    for_action_of = {oid: d.for_action for oid, d in descriptors.items()}  # AM-101
     discharge_events = {d.fires_event for d in descriptors.values() if d.fires_event}
     satisfaction_conditions = _build_satisfaction_conditions(model)
 
@@ -2570,11 +2630,33 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 labels[(w, w_tick)] = label
                 successors_for_w.add(w_tick)
 
+        # Same condition as T3's has_strict_pending_dischargeable; shared by
+        # T5 and T11 (AM-101).
+        strict_blocks = any(
+            current_obligs.get(oid) == ObligationState.PENDING
+            and d.discharge_mode == "strict"
+            and current_actors.get(d.holder) == ActorStatus.ACTIVE
+            for oid, d in descriptors.items()
+        )
+        pending_holders = [
+            (oid, d.holder) for oid, d in descriptors.items()
+            if current_obligs.get(oid) == ObligationState.PENDING
+        ]
+
         # ── Rule T5: EXERCISE (Permit occurrence) ──────────────────────────────
         for permit_id, pdesc in permit_descriptors.items():
             if pdesc.for_action is None:
                 continue
             if current_actors.get(pdesc.holder) != ActorStatus.ACTIVE:
+                continue
+            # AM-101 strict guard, mirroring the engine's Step 3.5: while a
+            # strict burden is actionable, an exercise is refused unless its
+            # action discharges some burden the permit holder holds (the
+            # engine's Step 3 `dischargeable`); T1/T6 draw that discharge.
+            if strict_blocks and not _discharges_any(
+                pdesc.for_action, pdesc.holder, pending_holders, for_action_of,
+                descriptors, action_emits_index, action_destroys_index,
+            ):
                 continue
             if pdesc.for_action in current_occurred:
                 # Already occurred in this world — mirrors T1's implicit
@@ -2687,15 +2769,9 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
 
         # ── Rule T11: EVENT FIRING (action-emitted triggers, AM-99a) ─────────
         # Hybrid counterpart in build_kripke_from_runtime() (AM-99b).
-        # Same strict guard as T3:
+        # Same strict guard as T3 (strict_blocks, computed above T5):
         # a T11 action discharges nothing, so it is a no-progress action
         # the engine's Step 3.5 blocks while a strict burden is actionable.
-        strict_blocks = any(
-            current_obligs.get(oid) == ObligationState.PENDING
-            and d.discharge_mode == "strict"
-            and current_actors.get(d.holder) == ActorStatus.ACTIVE
-            for oid, d in descriptors.items()
-        )
         for event, actions in ([] if strict_blocks else event_firing_index.items()):
             targets = [
                 oid for oid, d in descriptors.items()
