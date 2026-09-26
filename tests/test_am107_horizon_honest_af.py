@@ -153,23 +153,32 @@ def test_bounded_response_not_resolved_when_deadline_beyond_horizon():
 
 # ── genuine counterexamples for the referral-family cases ──────────────────
 
+# AM-108: the four static cases' genuine counterexample (an unrelated
+# no-magnitude burden violated at the parser's default 5 steps, then a dead
+# end) is gone — T2 no longer enforces a deadline without a magnitude — so
+# they are now "not resolved within horizon" (deadlines 40 and 112 steps,
+# horizon 10). The hybrid cycle case is unaffected.
 _GENUINE_CASES = [
-    ("static", "scenarios/referral/referral_scenario.el", "referralResponseBurden", "✗ dead-end"),
-    ("static", "scenarios/referral/referral_scenario.el", "assessmentSchedulingBurden", "✗ dead-end"),
-    ("static", "scenarios/gp_referral/gp_referral_scenario.el", "referralResponseBurden", "✗ dead-end"),
-    ("static", "scenarios/gp_referral/gp_referral_scenario.el", "assessmentSchedulingBurden", "✗ dead-end"),
+    ("static", "scenarios/referral/referral_scenario.el", "referralResponseBurden", None),
+    ("static", "scenarios/referral/referral_scenario.el", "assessmentSchedulingBurden", None),
+    ("static", "scenarios/gp_referral/gp_referral_scenario.el", "referralResponseBurden", None),
+    ("static", "scenarios/gp_referral/gp_referral_scenario.el", "assessmentSchedulingBurden", None),
     ("hybrid", "referral", "referralResponseBurden", "↺ cycle"),
 ]
 
 
 @pytest.mark.parametrize("builder,source,oid,ending", _GENUINE_CASES)
 def test_counterexample_is_genuine(builder, source, oid, ending):
-    """Before AM-107 these five showed a path cut off at the horizon."""
+    """Before AM-107 these five showed a path cut off at the horizon.
+    ending None: not resolved within horizon (since AM-108)."""
     if builder == "static":
         km = _quiet(build_kripke_model, _quiet(parse, _ROOT / source, validate=False).model, horizon=10)
     else:
         km = _quiet(build_kripke_from_runtime, _quiet(_SCENARIO_BUILDERS[source]), horizon=10)
     verdict = km.check_obligation(oid)
+    if ending is None:
+        _assert_not_resolved(verdict)
+        return
     assert verdict.satisfied is False and verdict.status is None
     last_world, last_label = verdict.counterexample_path[-1]
     assert last_label.startswith(ending)

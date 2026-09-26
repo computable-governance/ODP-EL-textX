@@ -15,7 +15,9 @@ obligation; T2 counts from there (docs/el_grammar_amendments.md, AM-99a).
 
 Fixture: firstBurden (long deadline, so it can be discharged late)
 fires firstDone on discharge; secondBurden is triggered_by firstDone
-and has the default 5-step deadline.
+and has a 5-step deadline ("1 hour"). AM-108: it had no deadline and
+relied on the parser's default of 5, which T2 no longer enforces (no
+elapsed-time magnitude); "1 hour" gives the same 5 steps.
 """
 from el_kripke import ObligationState, build_kripke_model
 from el_parser import parse_string
@@ -37,6 +39,7 @@ burden firstBurden {
 burden secondBurden {
     for_action: "doSecond"
     state: pending
+    deadline: "1 hour"
     triggered_by: firstDone
     discharge_mode: eventual
 }

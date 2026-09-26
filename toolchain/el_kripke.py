@@ -684,6 +684,11 @@ class KripkeModel:
     # and T2's violation of any listed burden activates it; check_obligation()
     # then gives it the bounded response verdict, as for triggered_by.
     # Kept off ObligationDescriptor so descriptors stay unchanged.
+    enforceable_deadlines: Optional[FrozenSet[str]] = None
+    # AM-108: burdens whose deadline has an elapsed-time magnitude
+    # (_build_enforceable_deadlines()); only these can be violated by T2's
+    # clock. None (a hand-built model) means every obligation's deadline is
+    # enforceable, the pre-AM-108 behaviour.
 
     # ── Satisfaction relation ──────────────────────────────────────────────────
 
@@ -1665,10 +1670,14 @@ class KripkeModel:
             priority_label = {1.0: "critical", 0.75: "high",
                               0.5: "normal", 0.25: "low"}.get(
                 desc.priority_weight, f"{desc.priority_weight:.2f}")
+            # AM-108: "deadline=none" for a deadline with no elapsed-time magnitude
+            enforceable = (self.enforceable_deadlines is None
+                           or oid in self.enforceable_deadlines)
+            deadline_str = f"{desc.deadline_steps} steps" if enforceable else "none"
             lines.append(
                 f"    [{oid}]  priority={priority_label}"
                 f"  mode={desc.discharge_mode}"
-                f"  deadline={desc.deadline_steps} steps"
+                f"  deadline={deadline_str}"
                 f"  chain: {chain_str}"
             )
         return "\n".join(lines)
@@ -2283,6 +2292,83 @@ def _activate_on_violation(
     return activated
 
 
+def _build_enforceable_deadlines(model: Any) -> FrozenSet[str]:
+    """
+    AM-108: names of burdens — top-level DeonticTokens and role-scoped
+    InlineTokens — whose deadline has an elapsed-time magnitude
+    (el_engine._has_deadline_magnitude(), the test check_live_violations()
+    uses). Only these are violated by T2's clock. A prose deadline
+    ("referral episode"), a bare number, or none at all falls back to
+    _parse_deadline_steps()'s default of 5 in the descriptor, which the
+    engine never enforces; before AM-108 both builders violated such a
+    burden at 5 steps. A live burden with no spec token has no deadline and
+    is not in the set, as in the engine.
+    """
+    from el_engine import _has_deadline_magnitude
+
+    tokens = [t for t in model.elements if type(t).__name__ == "DeonticToken"]
+    for el in model.elements:
+        if type(el).__name__ in ("Community", "Domain", "Federation"):
+            for role in getattr(el, "roles", []) or []:
+                tokens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                              if type(t).__name__ == "InlineToken")
+    return frozenset(
+        t.name for t in tokens
+        if getattr(t, "kind", None) == "burden"
+        and _has_deadline_magnitude(getattr(t, "deadline", None) or None)
+    )
+
+
+def _build_conclusion_index(model: Any) -> Dict[str, List[Tuple[str, Tuple[str, ...]]]]:
+    """
+    AM-108: {burden: [(operator, other members), ...]} for every satisfaction
+    group (_build_satisfaction_conditions()) of a Community/Federation/Domain
+    that opts in with lifecycle { terminating { on_objective_achieved: true } }
+    (el_engine._concludes_on_objective_achieved()). The burden itself is
+    excluded from its group's members, as in el_engine._owning_group_concluded();
+    a group with no other member is skipped. Read by T2b.
+    """
+    from el_engine import _concludes_on_objective_achieved
+
+    concludes = {
+        el.name: _concludes_on_objective_achieved(el)
+        for el in model.elements
+        if type(el).__name__ in ("Community", "Federation", "Domain")
+    }
+    index: Dict[str, List[Tuple[str, Tuple[str, ...]]]] = {}
+    for el_name, (operator, members) in _build_satisfaction_conditions(model).items():
+        if not concludes.get(el_name):
+            continue
+        for member in members:
+            others = tuple(m for m in members if m != member)
+            if others:
+                index.setdefault(member, []).append((operator, others))
+    return index
+
+
+def _episode_concluded(
+    conclusion_index: Dict[str, List[Tuple[str, Tuple[str, ...]]]],
+    oid: str,
+    obligs: Dict[str, ObligationState],
+) -> bool:
+    """
+    AM-108: T2b's condition — the world-state mirror of
+    el_engine._owning_group_concluded(). True if some opted-in group of
+    `oid` has concluded around it: every other member DISCHARGED or
+    SUPERSEDED (all_discharged), or at least one (any_discharged). A member
+    absent from the world counts as unresolved, as a member with no live
+    token does in the engine.
+    """
+    resolved = (ObligationState.DISCHARGED, ObligationState.SUPERSEDED)
+    for operator, others in conclusion_index.get(oid, []):
+        if operator == "all_discharged":
+            if all(obligs.get(m) in resolved for m in others):
+                return True
+        elif any(obligs.get(m) in resolved for m in others):
+            return True
+    return False
+
+
 def _build_claim_evaluations(model: Any) -> Dict[str, List[Any]]:
     """
     AM-61 (see DN_003): map each DeonticToken name to the
@@ -2454,6 +2540,19 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            burden a ViolationResponse creates from O
            (violation_activation); such a violated world is enqueued,
            every other stays terminal.
+           AM-108: only for an obligation whose deadline has an
+           elapsed-time magnitude (enforceable_deadlines); the engine never
+           clock-violates any other.
+
+         Rule T2b — EPISODE CONCLUSION (AM-108):
+           If O is PENDING, eventual, has no enforceable deadline, and an
+           opted-in satisfaction group (on_objective_achieved) has
+           concluded around it — every other member DISCHARGED or
+           SUPERSEDED (all_discharged), or one (any_discharged) — add an
+           edge to the same step where O is VIOLATED, labelled
+           "violate:O (episode concluded)". Mirrors the engine's
+           check_live_violations() / _owning_group_concluded() (DN_010
+           option b). Same AM-105 activation and terminal rule as T2.
 
          Rule T3 — TICK (time passes):
            Add an edge w → w_tick where step increments by 1 and all
@@ -2556,6 +2655,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     """
     descriptors = _build_obligation_descriptors(model)
     violation_activation = _build_violation_activation_index(model, descriptors)  # AM-105
+    enforceable_deadlines = _build_enforceable_deadlines(model)  # AM-108
+    conclusion_index = _build_conclusion_index(model)  # AM-108 — T2b
     permit_descriptors = _build_permit_descriptors(model)
     embargo_inhibition_index = _build_embargo_inhibition_index(model)
     general_embargoes = _build_general_embargoes(model)  # AM-102
@@ -2789,15 +2890,25 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             labels[(w, w_prime)] = label
             successors_for_w.add(w_prime)
 
-        # ── Rule T2: DEADLINE VIOLATION ─────────────────────────────────────────
+        # ── Rule T2: DEADLINE VIOLATION, and T2b: EPISODE CONCLUSION ───────────
         for oid, desc in descriptors.items():
             if current_obligs.get(oid) != ObligationState.PENDING:
                 continue
-            # AM-99a: deadline counted from the step this obligation became
-            # PENDING (0 unless activated later by P6a), not from step 0.
-            activated_at = dict(w.activation_steps).get(oid, 0)
-            if w.step - activated_at < desc.deadline_steps:
-                continue
+            if oid in enforceable_deadlines:
+                # T2. AM-99a: deadline counted from the step this obligation
+                # became PENDING (0 unless activated later by P6a), not from 0.
+                activated_at = dict(w.activation_steps).get(oid, 0)
+                if w.step - activated_at < desc.deadline_steps:
+                    continue
+                violation_label = f"violate:{oid} (deadline={desc.deadline_steps} steps)"
+            else:
+                # T2b (AM-108): no enforceable deadline — the engine violates
+                # an eventual one only when its opted-in episode concludes
+                # around it (check_live_violations(), DN_010 option b).
+                if (desc.discharge_mode != "eventual"
+                        or not _episode_concluded(conclusion_index, oid, current_obligs)):
+                    continue
+                violation_label = f"violate:{oid} (episode concluded)"
 
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.VIOLATED
@@ -2808,7 +2919,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
 
             w_viol  = _make_world(new_obligs, current_actors, current_occurred,
                                   activation_steps=new_activation, step=w.step)
-            label   = f"violate:{oid} (deadline={desc.deadline_steps} steps)"
+            label   = violation_label
 
             if w_viol not in worlds:
                 worlds.add(w_viol)
@@ -3042,6 +3153,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         group_index=group_index,
         satisfaction_conditions=satisfaction_conditions,
         violation_activation=violation_activation,
+        enforceable_deadlines=enforceable_deadlines,
     )
 
 
@@ -3559,6 +3671,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     # holder/chain must always come from state.tokens, not from the static
     # Commitment/Delegation walk.
     spec_descriptors = _build_obligation_descriptors(spec)
+    enforceable_deadlines = _build_enforceable_deadlines(spec)  # AM-108
+    conclusion_index = _build_conclusion_index(spec)  # AM-108 — T2b
 
     # Spec-derived structure for Permit for_action resolution, shared with
     # pre-exec mode. Only covers permits whose holder can be resolved
@@ -3880,12 +3994,21 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         # static T2 and the engine's check_live_violations() count it.
         # AM-105: the violation activates the burdens its responses create;
         # such a violated world is enqueued, every other stays terminal.
+        # AM-108: T2 only for an enforceable deadline; otherwise T2b, as in
+        # the static builder.
         for oid, desc in descriptors.items():
             if obligs.get(oid) != ObligationState.PENDING:
                 continue
-            activated_at = dict(w.activation_steps).get(oid, 0)
-            if w.step - activated_at < desc.deadline_steps:
-                continue
+            if oid in enforceable_deadlines:
+                activated_at = dict(w.activation_steps).get(oid, 0)
+                if w.step - activated_at < desc.deadline_steps:
+                    continue
+                violation_label = f"violate:{oid}"
+            else:
+                if (desc.discharge_mode != "eventual"
+                        or not _episode_concluded(conclusion_index, oid, obligs)):
+                    continue
+                violation_label = f"violate:{oid} (episode concluded)"
             v_obligs = {**obligs, oid: ObligationState.VIOLATED}
             v_activation = dict(w.activation_steps)
             responded = _activate_on_violation(
@@ -3903,7 +4026,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 if responded and wv.step < horizon_step:
                     queue.append(wv)
             edges.setdefault(w, set()).add(wv)
-            labels[(w, wv)] = f"violate:{oid}"
+            labels[(w, wv)] = violation_label
         if w.step < horizon_step and any(
             obligs.get(o) == ObligationState.PENDING
             and descriptors[o].discharge_mode == "eventual"
@@ -4267,6 +4390,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         group_index=group_index,
         satisfaction_conditions=satisfaction_conditions,
         violation_activation=violation_activation,
+        enforceable_deadlines=enforceable_deadlines,
     )
 
 
