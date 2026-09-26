@@ -9412,3 +9412,160 @@ enqueue; `_activate_on_violation()` docstring; builder docstring);
 `tests/test_am99b_hybrid_event_model.py`;
 `tests/test_am109_violated_worlds_continue.py` (new);
 `docs/CONCEPTS_INDEX.md`; `docs/KRIPKE_TRANSITION_RULES.md`; this file.
+
+## AM-110 (2026-09-27) — deadline scale factor: deadlines beyond the horizon become checkable (`toolchain/el_kripke.py`, `toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED (2026-09-27), in three parts (commits `6604b23`,
+`a7e5b81` and this docs commit). Type: verifier option (Layer 4). **No
+grammar, spec, engine or descriptor-parsing change; nothing changes at
+k = 1 (the default).** Addresses the CONCEPTS_INDEX finding "Horizon
+sizing: most real deadlines exceed the default horizon" (updated, still
+open for the default-horizon question); the AM-109 case it names — the
+static terms-of-engagement `incidentNotificationBurden`, "not resolved
+within horizon" because its 72-hour deadline is 360 steps — is now
+checkable at k = 40.
+
+**Two designs weighed (Phase 1).** (a) A variant of
+`public_data_portal_scenario.el` with deadlines rewritten to fit the
+horizon. Rejected: the unit table cannot express 72 hours in 9 steps or
+fewer, so the variant would have to misstate its deadline text ("1 day",
+tying with the review; a bare number has no magnitude and is never
+violated, AM-108) — the governance artefact would say something false.
+It would also need its own copy of the test actor/grant lists
+(`test_public_data_portal_scenario.py`, imported by three other test
+modules), entries in `_EXPECTED_W22` / `_EXPECTED_W24`, a second
+external-agent variant, and keeping DN_019 and `scenarios/README.md` in
+step. (b) A scale factor applied at model build, chosen.
+
+### Part 1 — builders and API (`6604b23`)
+
+`build_kripke_model(model, horizon, deadline_scale=1)` and
+`build_kripke_from_runtime(runtime, horizon, deadline_scale=1)`: every
+**enforceable** deadline (AM-108: one with an elapsed-time magnitude)
+d becomes ceil(d / k) in the descriptor (`_scale_deadlines()`); deadlines
+without a magnitude keep the parser's default, which T2 never reads. k
+must be an integer ≥ 1 (`ValueError` otherwise).
+
+- **Stated, never derived.** `suggest_deadline_scale(spec, horizon)`
+  proposes ceil(max_enforceable / (horizon − 1)) (1 if none); no builder
+  or endpoint applies it. Deriving k automatically would let one added
+  deadline silently change every step number in replayed results.
+- **Hybrid anchoring, exact.** w0.step and the seeded activation ticks
+  are raw runtime ticks; steps after w0 are scaled. A burden PENDING at
+  w0 with e raw ticks elapsed has its activation re-anchored to
+  a' = tick − (ceil(d/k) − ceil(max(d − e, 0)/k)), so T2 becomes
+  available exactly ceil((d − e)/k) scaled steps after w0 (at w0 if
+  d ≤ e). The floor approximation considered in Phase 1
+  (tick − ⌊e/k⌋) can be one step late; e.g. d = 360, k = 50, e = 45 gives
+  8 instead of 7. Activations inside the model (P6a, T11, AM-105) are
+  already in scaled steps. At k = 1 nothing is re-anchored.
+- **k reported everywhere.** `KripkeModel.deadline_scale` and
+  `.unscaled_deadlines`; `ObligationVerdict.deadline_scale` (AF, bounded
+  response, EF), and `render()` adds a "Deadlines : scaled, k=…" line;
+  the T2 label in both builders becomes
+  `violate:<oid> (deadline=N steps at k=K; D unscaled)` (counterexamples
+  and witnesses carry it); `render_summary()` adds a "Deadline scale"
+  line and "deadline=N steps (D unscaled, k=K)". All of these are
+  unchanged at k = 1. API: `GET /obligations/{token}/status` and
+  `GET /kripke/witness` take `deadline_scale` (query, default 1; 400
+  below 1) and return it (`ObligationStatusResponse.deadline_scale`;
+  `"deadline_scale"` in the witness response). Other endpoints build at
+  k = 1 as before.
+
+**Soundness.** Scaling is exactly coarser tick granularity, because of
+two properties the builders already have: T1 has no deadline guard (an
+obligation past its deadline can still be discharged), and T2 is an
+option, not forced. A deadline therefore only fixes the earliest step at
+which the violation becomes available, and ceil(d / k) is exactly the
+first scaled step j with j·k ≥ d — never earlier than unscaled. The
+scaled model is the unscaled one with every non-tick transition confined
+to multiples of k; conversely, any unscaled sequence of events can be
+delayed onto that grid (discharge stays enabled after the deadline, a
+violation can be taken later, a tick exists whenever an eventual
+obligation is PENDING, and a strict obligation freezes the tick in both).
+So AF, EF, the bounded response and "eventually violated" coincide
+whenever the horizon covers the deadlines; k only changes how much time
+horizon 10 covers. This is an argument, not a proof; the cross-checks
+below test it.
+
+Consequences: ceil is monotone, so deadlines can merge but never swap
+order; merges change no verdict (by the argument above) but path step
+numbers lose resolution. A deadline d ≤ k becomes 1 step, never 0; a
+0-step deadline stays 0. Bellman's γ discounts per decision point, not
+per unit of time, so it is unaffected. Two limits on the suggested k:
+it fits deadlines below **horizon − 1** (a violated world at the horizon
+step is not expanded — the horizon-enqueue asymmetry), and it ignores
+**activation offsets** (a burden activated at step s needs
+s + ceil(d/k) < horizon, so a chain may need a larger k).
+
+**Cross-checks** (pinned in Part 2) — identical verdicts for every burden
+(AF / bounded response outcome, EF discharged, EF violated):
+
+| Scenario | Scaled | Against |
+|---|---|---|
+| gp_referral, static | k = 27, H = 10 (446 worlds) | k = 1, H = 250 (171,156 worlds) |
+| erequesting_claiming, static and hybrid | k = 3, H = 10 | k = 1, H = 22 |
+| public data portal, static | k = 40, H = 10 (3,348 worlds) | k = 10, H = 40 (43,596 worlds) |
+
+**Verdicts at the suggested k** (horizon 10; Phase 1, unchanged by the
+exact hybrid anchoring):
+
+| Model | Burden | k = 1 | Scaled |
+|---|---|---|---|
+| terms-of-engagement static (both), k = 40 | `incidentNotificationBurden` | not resolved; violation unreachable | **fails** — incident detected, no `notifyIncident`, ticks until `violate (deadline=9 steps at k=40; 360 unscaled)`; violation reachable |
+| terms-of-engagement hybrid (both; fresh and after refusal), k = 40 | `incidentNotificationBurden` | fails (revoke/reinstate cycle) | fails, **same cycle counterexample**; violation now reachable |
+| terms-of-engagement, all six models | `refusalRecordBurden` / `refusalReviewBurden` | holds / fails | unchanged (review deadline 8 → 1 step) |
+| referral, gp_referral static, k = 27 | `referralResponseBurden`, `assessmentSchedulingBurden` | not resolved | **fails** (silence, then violation); EF discharged stays false |
+| referral static, k = 27 | `reviewNonResponseAndDetermineNextStepsBurden` | not resolved | **fails** |
+| referral, gp_referral static and hybrid, k = 27 | `escalationNoticeBurden` (strict) | not triggered | **holds** — its trigger, `referralResponseBurden`'s violation, is now reachable |
+| referral, gp_referral hybrid, k = 27 | `referralResponseBurden`, `assessmentSchedulingBurden` | fails (cycle) | fails, same cycle counterexample; violation now reachable |
+
+Every other burden unchanged, including the no-magnitude T2b ones. The
+Bellman recommendation and w0 value are unchanged for referral and
+gp_referral hybrid at k = 27. World counts grow (static portal 2,444 →
+3,348; hybrid portal 16,516 → 22,348; referral hybrid 3,562 → 15,078).
+
+**The terms-of-engagement reading** (recording compelled; review and
+notification detectable only) is fully demonstrable at k = 40 in the
+static models. In the hybrid models it is demonstrable through
+EF violated only: the displayed counterexample is still the
+revoke/reinstate cycle that weak fairness would exclude (new OPEN
+FINDING, cross-referenced to the fairness-cycle finding).
+
+### Part 2 — tests (`a7e5b81`)
+
+New `tests/test_am110_deadline_scale.py` (32): the three cross-checks;
+the terms-of-engagement reading at k = 40 for both scenarios (recording
+holds; review and notification fail with a counterexample ending
+`violate:<oid> (deadline=N steps at k=40; D unscaled)` → `✗ violated`,
+never discharging) and the k = 1 baseline; k = 1 identical to the
+default (initial world, worlds, labels, deadlines) for every static
+scenario in `_SCENARIO_PATHS` and every hybrid runtime in
+`_SCENARIO_BUILDERS`; only enforceable deadlines scale, summary text;
+`suggest_deadline_scale()` per scenario; invalid k rejected; hybrid exact
+remainder (d = 360, k = 50, e = 45 → 7 steps) and an overdue burden
+violable at w0; hybrid label; both endpoints report k and reject k < 1.
+The gp_referral cross-check builds 171,156 worlds (about 24 s).
+
+### Part 3 — docs
+
+This entry; CONCEPTS_INDEX: the horizon-sizing finding updated
+(industrial_procedure and specialist_pool added; the horizon − 1
+boundary and chain offsets; AM-110 as the available remedy); two new OPEN
+FINDINGS — the unit table's real-time order reversal (high priority,
+scheduled next) and the hybrid counterexample remaining the
+revoke/reinstate cycle at any k. `docs/KRIPKE_TRANSITION_RULES.md`: T2
+row, last-updated note.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 751 → 751 → 783
+→ 783 passed, 1 xfailed.
+
+**Standard reference(s):** Annex C (Kripke semantics, informative),
+§C.2; §7.8.7 (token lifecycle, deadlines).
+
+**Files changed:** `toolchain/el_kripke.py` (`_check_deadline_scale()`,
+`_scale_deadlines()`, `suggest_deadline_scale()`; both builders; T2
+labels; `KripkeModel`, `ObligationVerdict`, `render_summary()`,
+`render()`); `toolchain/el_api.py` (status and witness endpoints);
+`tests/test_am110_deadline_scale.py` (new); `docs/CONCEPTS_INDEX.md`;
+`docs/KRIPKE_TRANSITION_RULES.md`; this file.

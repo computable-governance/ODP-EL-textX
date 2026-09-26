@@ -6651,6 +6651,39 @@ variant of the public data portal scenario (deadlines rescaled to fit
 the horizon), so the notification's failure is reachable and the
 "detectable, not compelled" reading can be shown.
 
+**Update (AM-110, 2026-09-27):** the candidate fix was weighed against a
+deadline scale factor and the scale factor chosen (a variant file would
+have to misstate its deadline text; see the AM-110 entry in
+`docs/el_grammar_amendments.md`). Both builders now take
+`deadline_scale=k` (default 1): every enforceable deadline d becomes
+ceil(d / k), k is reported with every verdict, and
+`suggest_deadline_scale()` proposes a k without applying it. At k = 40
+the static terms-of-engagement `incidentNotificationBurden` fails with
+the silence-until-deadline counterexample; verdicts at the scaled
+horizon match an unscaled larger horizon in three cross-checks.
+
+The table above is incomplete. Also beyond or at the horizon:
+
+| Steps | Burdens |
+|---|---|
+| 10 | specialist_pool `specialistAResponseBurden`, `specialistBResponseBurden` ("2 hours") — at the horizon, so their violation lands on the step that is never expanded |
+| 15, 30, 45 | industrial_procedure (and the three `sop_4471_generated*` files) `compressorStartOblig(ation)`, `pressureCheckObligation`, `pressureInterlockTrip(Obligation)` ("5/10/15 minutes") |
+
+Suggested k at horizon 10: terms-of-engagement 40, referral and
+gp_referral 27, industrial_procedure 5, erequesting_claiming 3,
+specialist_pool 2. Two limits on "fits": a deadline must fit below
+**horizon − 1**, since a violated world at the horizon step is not
+expanded (see "Kripke builders expand horizon-step worlds only when a
+tick produces them"); and **activation offsets add up** — a burden
+activated at step s needs s + ceil(d/k) below the horizon, so a chain of
+deadlines may need a larger k than the largest single deadline (at
+k = 27, referral's `escalationNoticeBurden` is activated at step 2 with a
+9-step deadline, past the horizon; no effect today, since it is strict).
+Still open: the **default** horizon and k for the API and UI (every
+endpoint other than status and witness builds at k = 1), and the unit
+table's order reversal (see "Deadline unit table reverses real-time
+order"), which scaling inherits.
+
 ## Institutional-act cycles as AF counterexamples, and fairness — OPEN FINDING (2026-09-26)
 
 **OPEN FINDING** — found in AM-109 Phase 1 (and seen in AM-107). In the
@@ -6701,6 +6734,11 @@ accepted. Needs "enabled" defined per world (holder ACTIVE, permits
 active, no covering embargo, no strict freeze) — the same conditions T1
 and T6 already check. Not scheduled.
 
+**Update (AM-110, 2026-09-27):** with a deadline scale factor the genuine
+deadline violation becomes reachable in these hybrid models, but the
+reported counterexample stays the cycle — see "Hybrid AF counterexample
+is the revoke/reinstate cycle at any deadline scale".
+
 ## Static builder does not model event-triggered permits — OPEN FINDING (2026-09-26)
 
 **OPEN FINDING** — found in AM-109 Phase 2 while building the true → false
@@ -6714,3 +6752,50 @@ event (AM-99b), as the engine does. In the probe
 the obligation failing on the branch where the permit should have been
 activated. No tracked scenario uses an event-triggered permit today. Not
 scheduled.
+
+## Deadline unit table reverses real-time order — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING — high priority; scheduled next, after AM-110.** Found in
+AM-110 Phase 1. `el_engine._DEADLINE_UNIT_STEPS` gives second = 2,
+minute = 3, hour = 5, day = 8, week = 12, month = 20 steps per unit, and
+`_parse_deadline_steps()` multiplies by the magnitude. The per-unit
+values are not proportional to real durations, so magnitudes reverse
+real-time order:
+
+| Deadline | Steps | Real duration |
+|---|---|---|
+| "48 hours" (referral `escalationNoticeBurden`, `referralInitiationBurden`, `reviewNonResponseAndDetermineNextStepsBurden`) | 240 | 2 days |
+| "14 days" (`assessmentSchedulingBurden`) | 112 | 14 days |
+| "5 working days" (`referralResponseBurden`) | 40 | 5 days |
+| "10 minutes" (industrial `pressureCheckObligation`) | 30 | 10 minutes |
+| "1 hour" | 5 | 60 minutes |
+
+So "48 hours" outlasts "14 days", and "10 minutes" outlasts "1 hour".
+Ratios are distorted too: "72 hours" : "1 day" is 360 : 8 (45×) against
+a real 3×. This affects the **engine's live violations**
+(`check_live_violations()` compares elapsed ticks against the same
+`deadline_steps`), not only the verifier: a 48-hour obligation is
+violated after a 14-day one. AM-110's scaling is monotone, so it
+inherits the reversal and cannot fix it. Fix direction: per-unit values
+proportional to real time (e.g. derived from one base unit), which moves
+every deadline and so every deadline-dependent test and suggested k;
+needs its own amendment with a before/after comparison.
+
+## Hybrid AF counterexample is the revoke/reinstate cycle at any deadline scale — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-110. In the hybrid terms-of-engagement
+models (fresh and after refusal) and hybrid referral/gp_referral, AM-110's
+scale factor makes the genuine deadline violation of
+`incidentNotificationBurden` (and of `referralResponseBurden`,
+`assessmentSchedulingBurden`) reachable — "eventually violated" goes
+false → true — but the counterexample reported for AF and the bounded
+response is still the revoke/reinstate cycle (T7/T8) on
+`AggregateQueryAuthorization` / `AgentAccessAuthorization` /
+`patientDataAuthorization`, at k = 1 and at the suggested k. Every one of
+those cycles keeps the discharge enabled, so weak fairness (accepted in
+AM-103) would exclude it. Consequence: the "detectable, not compelled"
+reading is fully demonstrable only in the static models; in hybrid mode
+only through EF violated. Resolves with the fairness-cycle finding —
+see "Institutional-act cycles as AF counterexamples, and fairness";
+once weakly-fair-excluded cycles are dropped, the hybrid counterexample
+should become the deadline violation. Not scheduled separately.
