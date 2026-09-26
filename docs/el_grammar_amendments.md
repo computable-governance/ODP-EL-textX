@@ -8543,3 +8543,147 @@ deadlines), §6.3.8 and §7.8.6 (violation and its response), §6.4.4 and
 `test_am91_…`, `test_am93_…`, `test_am95_…`, `test_am96_…`,
 `test_public_data_portal_scenario.py` (assertions scoped);
 `docs/CONCEPTS_INDEX.md`; this file.
+
+---
+
+## AM-104 (2026-09-26) — violation responses that act: `response_kind` read by the engine; `[W-21]`–`[W-23]`; status endpoint names its property (`toolchain/el_engine.py`, `el_validator.py`, `el_api.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in five parts (commits `f9d077b`,
+`4fac549`, `c1a8cfb`, `25a1ca5` and this docs commit). Type: engine semantics
+(Layer 3 only), validator warnings (advisory), API response fields. **No
+grammar change; no verifier change.** Resolves the CONCEPTS_INDEX finding
+"`response_kind` is read by nothing; only `creates_burden` responses ever
+fire" (2026-09-26), including its status-endpoint part.
+
+**Design context (2026-09-26, design chat):** "detectable" must mean
+"violation recorded AND answered". This amendment makes responses act;
+the violation-declaration and `discharged_by` amendments follow it.
+
+### Part 1 — engine (`f9d077b`)
+
+- **Once-only marker.** `WorldState.responded`: a frozenset of
+  (response name, violated token name, holder, granted_at_tick), one per
+  violated token instance. `with_tokens()`, `with_tick()` and `enroll()`
+  carry it; `with_responded()` sets it. `fire_violation_responses()` fires
+  a response once per violated instance whose key is absent, then adds
+  the key. A re-granted instance (new granted_at_tick) can fire again.
+  The old once-only condition ("obligates does not hold creates_burden
+  'active' or 'discharged'") only worked for responses with
+  creates_burden; it survives only as a duplicate-grant guard (not
+  granted again while obligates holds it 'active'; logged).
+  **Edge case:** two instances of the same token granted to the same
+  holder in the same tick share a key, so only the first violation of
+  the two fires. Not reachable in any tracked scenario.
+- **Firing by kind** (§7.8.6). Every kind fires, with or without
+  creates_burden. Effects and ledger lines in order: (1) grant
+  creates_burden, if set; (2) `escalate_to` ledger line, if set; (3) a
+  line naming the response_kind and the violator — first when there is
+  no grant line, so the pre-existing grant-first order is unchanged;
+  (4) terminate only: revocations. escalate, remediate and penalise do
+  nothing beyond 1–3.
+- **terminate.** Revokes every Authorization whose `to_agent` is in
+  `_violator_chain()` of the violated instance's holder (the holder,
+  objects whose `delegated_from` chain leads to it, objects it is
+  transitively `principal_of`; static declarations only), that is
+  revocable with an `on_revocation` embargo, whose permit is still
+  active, and whose `authority` is the response's `obligates`. Any other
+  Authorization in the chain gets a `not revoked '…': …` ledger line; the
+  response still counts as fired. `to_role` Authorizations are not
+  covered (open finding).
+- **Strict freeze.** `revoke_authorization()`'s token effects moved into
+  `_apply_revocation()` (no guard, no tick, no ledger). The public
+  `revoke_authorization()` keeps its strict guard and calls it;
+  terminate calls it directly, so a response revokes while a strict
+  burden is actionable: a response is an institutional act, not an
+  ordinary governed action. Step 3.5 is unchanged for `advance()`.
+  (`check_live_violations()` and `fire_violation_responses()` already
+  ran unguarded.)
+- **Engine-only.** The verifier models no response firing (confirmed in
+  Phase 1). A hybrid model built after firing reflects the new state
+  (portal scenarios after the 2.10b violation: 28 → 24 worlds, every
+  verdict unchanged). The static builder's treatment of response-created
+  burdens is wrong and is logged as an open finding.
+- Docstrings: `el_runtime.fire_violation_responses()`; the
+  `/fire-violation-responses` endpoint description.
+
+### Part 2 — tests (`4fac549`)
+
+`tests/test_am104_violation_responses.py` (7): DN_019 step 2.10b in both
+terms-of-engagement scenarios (terminate revokes both Authorizations,
+permits superseded, the agent's read blocked, second fire a no-op with
+no tick); the missed-review case in both (escalate as a ledger entry
+only, no token change, agent unaffected); terminate during a strict
+freeze (direct revoke refused, response revokes, Step 3.5 still blocks
+the agent); authority mismatch (ledger note, not revoked, still fired);
+re-firing on a re-granted instance (and "permit not active" instead of
+a second revocation). `tests/test_fire_violation_responses.py` is
+unchanged and passes.
+
+### Part 3 — validator (`c1a8cfb`)
+
+All advisory (AM-89 channel).
+
+- **`[W-21]`** — a terminate response that would revoke nothing: no
+  Authorization to the violator chain is revocable with an
+  `on_revocation` embargo and granted by `obligates`. The holder is the
+  one `el_engine._build_obligation_descriptors()` resolves; a burden with
+  no descriptor is skipped. Fires on no tracked scenario (both
+  terminate responses have two qualifying Authorizations).
+- **`[W-22]`** — an escalate response with no creates_burden: "fires as
+  a ledger entry only; nobody becomes obligated" (§7.8.6 NOTE 2). Fires
+  on 4: ereferral `examinationViolation`, `acknowledgementViolation`; both
+  terms-of-engagement `missedReviewResponse`s.
+- **`[W-23]`** — the dormant V-NEW-16 (`el_domain.ViolationResponse`'s
+  docstring): an escalate response whose `escalate_to` is missing or not
+  a party. Added as a warning because no tracked scenario fails it (all
+  six escalate responses name a party). Named `[W-23]` so it takes the
+  warning channel (`[W-` prefix); the message cites V-NEW-16.
+
+The public data portal fixture now also accepts `[W-22]`, with a
+comment (pending the violation-declaration amendment's scenario edits).
+New `tests/test_am104_validator_warnings.py` (10).
+
+### Part 4 — status endpoint (`25a1ca5`)
+
+`GET /obligations/{token_name}/status` gains `modal_operator` ("AF", or
+"AG(pending→AF)" for a burden with `triggered_by` — the bounded response
+property, AM-99a part 3), `status` (None, or "not triggered within
+horizon" / "not resolved within horizon") and `horizon`
+(`_KRIPKE_HORIZON`, 10). Additive; existing clients unaffected. New
+`tests/test_am104_obligation_status_fields.py` (3).
+
+### Part 5 — docs
+
+- CONCEPTS_INDEX: the `response_kind` finding marked **RESOLVED**; new
+  OPEN FINDINGS — the static builder places response-created burdens in
+  w0 unlinked to the violation (wrong AF verdict for referral's
+  `escalationNoticeBurden`); revocation supersedes a permit by name for
+  every holder (high priority; touches T7); `to_role` Authorizations not
+  covered by terminate. The `missedReviewResponse` oddity (escalates to
+  the contact who missed the review) recorded there.
+- DN_019: step 2.10b and work item 4 updated to AM-104 behaviour.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 676 → 676 → 683
+→ 693 → 696 passed, 1 xfailed. Phase 1 (temporary patch, reverted)
+compared every scenario before and after: only the portal runs that
+reach a violation move.
+
+**Standard reference(s):** §6.3.8 and §7.8.6 (violation; the response
+rule is an obligation on the responding object, NOTE 2); §6.6.4 and
+§7.10 (Authorization, its revocation by the authority); §6.6.8 and
+§7.10.1 (delegation, principal); §7.4 (party); Annex C (Kripke
+semantics, informative), §C.2.
+
+**Files changed:** `toolchain/el_engine.py` (`WorldState.responded`,
+`with_responded()`, `enroll()`, `_apply_revocation()`,
+`revoke_authorization()`, `_violator_chain()`,
+`_terminate_authorizations()`, `fire_violation_responses()`);
+`toolchain/el_runtime.py` (docstring); `toolchain/el_api.py`
+(fire-violation-responses description; `ObligationStatusResponse`,
+status endpoint); `toolchain/el_validator.py` (`[W-21]`–`[W-23]`;
+header); `toolchain/el_domain.py` (docstring);
+`tests/test_am104_violation_responses.py`,
+`tests/test_am104_validator_warnings.py`,
+`tests/test_am104_obligation_status_fields.py` (new);
+`tests/test_public_data_portal_scenario.py` (warning allow-list);
+`docs/CONCEPTS_INDEX.md`; `docs/design_notes/DN_019_…`; this file.

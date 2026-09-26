@@ -86,7 +86,7 @@ Steps 2.2–2.7 are the sequence already asserted in
 | 2.8 | Security contact | Reviews the refusal | execute-action `reviewRefusal` | ok; refusalReviewBurden discharged (verified) |
 | 2.9 | Operator | Detects an incident; notification clock starts | execute-action `detectIncident` | ok; incidentNotificationBurden pending → active (verified) |
 | 2.10a | Operator, contact | Notifies; contact acknowledges | `notifyIncident`, `acknowledgeIncident` | burden discharged by `notifyIncident` itself, not by incidentAcknowledged (verified; see finding below) |
-| 2.10b | Operator | Stays silent past the deadline | `advance-clock`, `check-violations`, `fire-violation-responses` | violated at the first check 360 ticks after activation ("72 hours" = 360 steps); `fire-violation-responses` is a no-op: lateNotificationResponse does not fire, and the agent keeps every token (verified) |
+| 2.10b | Operator | Stays silent past the deadline | `advance-clock`, `check-violations`, `fire-violation-responses` | violated at the first check 360 ticks after activation ("72 hours" = 360 steps); since AM-104, `fire-violation-responses` fires lateNotificationResponse (terminate): both of the agent's Authorizations are revoked, its permits superseded, and its next read is blocked (verified; before AM-104 this was a no-op) |
 
 **Verified 2026-09-26** by replaying the test fixture's `_runtime()`
 through 2.2–2.10b in the engine (`Runtime.advance`, `advance_clock`,
@@ -130,18 +130,20 @@ per burden, from the hybrid model built on the live runtime.
 | refusalReviewBurden | AF false, EF true | Detectable only |
 | incidentNotificationBurden | AF false, EF true | Detectable only |
 
-**Finding (AM-103 follow-up, 2026-09-26):** nothing in the engine reads
-`response_kind`, and `fire_violation_responses()` fires only a
-ViolationResponse that has `creates_burden`. So `lateNotificationResponse`
-(terminate) and `missedReviewResponse` (escalate) never fire, and the
-revocation the scenario describes never happens. Until this is fixed,
-step 2.10b must show "violation recorded, no response" and be labelled
-as today's behaviour. Planned: the violation-declaration amendment also
-makes responses act (`terminate` → revoke the violator's authorizations).
+**Finding (AM-103 follow-up, 2026-09-26), resolved by AM-104:** before
+AM-104 nothing in the engine read `response_kind`, and
+`fire_violation_responses()` fired only a ViolationResponse with
+`creates_burden`, so `lateNotificationResponse` (terminate) and
+`missedReviewResponse` (escalate) never fired. Now both fire:
+terminate revokes the agent's Authorizations (step 2.10b), and escalate
+fires as a ledger entry naming the security contact. `missedReviewResponse`
+still obligates nobody (`[W-22]`) and escalates to the contact who missed
+the review; both are to be fixed with the violation-declaration
+amendment's scenario edits.
 
 Step 2.10 is the branch point: 2.10a and 2.10b show that a detectable
 obligation is not prevented from failing, but its failure is recorded
-(and, once responses act, answered; today it is not). This is the
+and answered (AM-104). This is the
 optimistic side of the story, and it is honest.
 
 Endpoint for the panel: `GET /obligations/{token_name}/status` returns
@@ -193,6 +195,7 @@ Two lessons for the caption:
    lane.
 4. Violation responses: make `response_kind` act (at least `terminate`
    and `escalate`), so step 2.10b and Act 3 show a real response.
+   Done in AM-104; Act 3 still needs item 5.
 5. Act 3, steps 3.4–3.5: depend on the violation-declaration amendment
    and on the scenario declaring a violation_response for
    refusalRecordBurden.

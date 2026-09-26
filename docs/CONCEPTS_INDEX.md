@@ -6242,9 +6242,21 @@ no fix here. `[W-18]`-style static detection (a strict burden's
 discharging action covered by an embargo, or gated by a revocable
 permit) is a possible follow-on. Not scheduled.
 
-## `response_kind` is read by nothing; only `creates_burden` responses ever fire — OPEN FINDING (2026-09-26)
+## `response_kind` is read by nothing; only `creates_burden` responses ever fire — RESOLVED (2026-09-26)
 
-**OPEN FINDING** — `ViolationResponse.response_kind`
+**OPEN FINDING (2026-09-26), RESOLVED 2026-09-26 by AM-104** (see
+`docs/el_grammar_amendments.md`). `fire_violation_responses()` now fires
+every response once per violated instance (`WorldState.responded`),
+with or without `creates_burden`, and reads `response_kind`: terminate
+revokes the violator chain's Authorizations whose authority is
+`obligates`, also during a strict freeze. `lateNotificationResponse`
+and `missedReviewResponse` now fire in both terms-of-engagement
+scenarios. `[W-22]` flags escalate responses without `creates_burden`
+(ledger entry only), and V-NEW-16 exists as `[W-23]`. The status endpoint
+part is resolved too: the response carries `modal_operator`, `status`
+and `horizon`. The original finding follows.
+
+`ViolationResponse.response_kind`
 (`escalate | remediate | penalise | terminate`, grammar
 `grammar/v2/el_grammar.tx` §7.8.6 block) is parsed and stored
 (`el_domain.py`) but no code in `toolchain/` reads it: not the validator,
@@ -6327,3 +6339,62 @@ actor_name`). So:
 Until then, DN_019 captions 2.10a as "notification sent: burden
 discharged", with the acknowledgement having no deontic effect. Not
 scheduled.
+
+## Static builder: response-created burdens sit in w0, unlinked to the violation — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found in AM-104 Phase 1. AM-86's root 2 gives each
+`ViolationResponse.creates_burden` an obligation descriptor, and
+`build_kripke_model()` then places that burden in w0 as an ordinary
+PENDING obligation with no link to the violation that creates it. In
+`referral_scenario.el`, `escalationNoticeBurden` (strict) can be
+discharged from step 0: 264 of 272 worlds have it DISCHARGED while
+`referralResponseBurden` is still PENDING, and `referralResponseBurden`
+is never VIOLATED within the horizon. The static model reports
+**AF true (compelled)** for an escalation that only exists after a
+violation. **Wrong verdict.** Responses without `creates_burden` have no
+descriptor and are invisible.
+
+The hybrid builder is correct by construction: descriptors only apply to
+live tokens, so the created burden appears once the engine grants it
+(AM-104). No transition models response firing in either builder.
+
+**Fix direction:** treat a response-created burden as waiting on the
+violated burden's T2 (VIOLATED) transition — in effect triggered by the
+violation — so it is PENDING only in worlds where the violation
+happened. Next amendment; not scheduled.
+
+## Revocation supersedes a permit by name for every holder — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING — high priority.** `revoke_authorization()` (now
+`_apply_revocation()`, AM-104) supersedes every permit TokenInstance
+whose name is the Authorization's permit, whoever holds it, not only the
+instance granted to the Authorization's `to_agent`. AM-104's terminate
+response inherits this: revoking the violator's Authorization also
+revokes any other agent's access through a permit of the same name. No
+tracked scenario grants one permit name to two holders, so nothing
+shows it today; a multi-agent scenario would.
+
+**The fix touches T7 as well:** the hybrid builder's T7 (Authorization
+Revoke, `docs/KRIPKE_TRANSITION_RULES.md`) mirrors
+`revoke_authorization()`, and permit state is tracked per permit name in
+a world, so a per-holder revocation needs per-holder permit state there
+too. The `on_revocation` embargo already goes to the former holder, but
+only `holders[0]` when several hold the permit. Not scheduled.
+
+## terminate responses do not cover `to_role` Authorizations — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — AM-104's terminate revokes only Authorizations whose
+`to_agent` is in the violator chain. An Authorization granted `to_role`
+(AM-31) is never revoked by a response, even when the violator (or its
+agent) fills that role. `[W-21]` likewise counts only `to_agent`
+Authorizations. Deciding the rule needs role membership at fire time
+(revoke only the violator's grant through the role, which in turn
+depends on the per-holder revocation finding above). No tracked
+scenario uses `to_role` with a terminate response. Not scheduled.
+
+**Scenario note (AM-104):** both terms-of-engagement scenarios'
+`missedReviewResponse` escalate to the security contact who missed the
+review (`escalate_to: AgencySecurityContact` / `ProviderSecurityContact`,
+the holder of `refusalReviewBurden`). To be fixed with the scenario edits
+in the violation-declaration amendment, which should also give it a
+`creates_burden` (it currently raises `[W-22]`).
