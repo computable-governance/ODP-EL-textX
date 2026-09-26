@@ -341,6 +341,22 @@ class World:
         obl = ", ".join(f"{k}={v.name}" for k, v in sorted(self.obligation_states))
         return f"World(step={self.step}, [{obl}])"
 
+    def sort_key(self) -> Tuple:
+        """AM-107: a total order over worlds that does not depend on hash
+        order (PYTHONHASHSEED), for deterministic tie-breaking. Covers every
+        field; __repr__ shows only step and obligation states."""
+        return (
+            self.step,
+            tuple(sorted((k, v.name) for k, v in self.obligation_states)),
+            tuple(sorted((k, v.name) for k, v in self.actor_states)),
+            tuple(sorted(self.occurred_actions)),
+            tuple(sorted(self.permit_states)),
+            tuple(sorted(self.embargo_states)),
+            tuple(sorted(self.delegation_states)),
+            tuple(sorted(self.holder_overrides)),
+            tuple(sorted(self.activation_steps)),
+        )
+
 
 def _make_world(
     obligation_states: Dict[str, ObligationState],
@@ -691,6 +707,16 @@ class KripkeModel:
         """Direct successors of world under R."""
         return self.edges.get(world, set())
 
+    def ordered_successors(self, world: World) -> List[World]:
+        """AM-107: successors sorted by edge label, then World.sort_key().
+        Anything that picks one successor among equals (ranking ties,
+        shortest paths, counterexamples) iterates this, not the set, so the
+        choice does not depend on hash order and replays identically."""
+        return sorted(
+            self.successors(world),
+            key=lambda s: (self.labels.get((world, s), ""), s.sort_key()),
+        )
+
     def reachable(self, world: World) -> Set[World]:
         """
         All worlds reachable from world under R* (reflexive-transitive closure).
@@ -928,7 +954,7 @@ class KripkeModel:
         horizon_step = self.initial.step + self.horizon  # AM-99b: hybrid w0.step = tick
         in_horizon = sorted(
             (w for w in pending if w.step < horizon_step),
-            key=lambda w: (w.step, repr(w)),
+            key=lambda w: w.sort_key(),  # AM-107: repr() is not a total order
         )
 
         status: Optional[str] = None
@@ -984,7 +1010,7 @@ class KripkeModel:
                     w = prev
                 path.reverse()
                 return path
-            for s in self.successors(w):
+            for s in self.ordered_successors(w):  # AM-107: deterministic
                 if s not in visited:
                     visited.add(s)
                     parent[s] = (w, self.labels.get((w, s), "→"))
@@ -1168,6 +1194,8 @@ class KripkeModel:
         requirement from §C.4.
         """
         pairs = [(w, self.utility(w)) for w in self.reachable(world)]
+        # AM-107: ties in world order (World.sort_key()), not hash order.
+        pairs.sort(key=lambda x: x[0].sort_key())
         pairs.sort(key=lambda x: x[1], reverse=descending)
         return pairs
 
@@ -1216,7 +1244,7 @@ class KripkeModel:
         Returns an empty list if world has no outgoing transitions (terminal).
         """
         recommendations = []
-        for successor in self.successors(world):
+        for successor in self.ordered_successors(world):  # AM-107
             label = self.labels.get((world, successor), "→")
             recommendations.append(ActionRecommendation(
                 rank=0,  # set after sorting
@@ -1228,6 +1256,8 @@ class KripkeModel:
 
         # Primary sort: expected future utility (descending)
         # Secondary sort: immediate utility (descending) — tiebreaker
+        # AM-107: remaining ties keep ordered_successors() order (label,
+        # then World.sort_key()) — the sort is stable — not hash order.
         recommendations.sort(
             key=lambda r: (r.expected_future_utility, r.immediate_utility),
             reverse=True,
@@ -1406,7 +1436,7 @@ class KripkeModel:
         current = world
 
         for _ in range(max_steps):
-            succs = self.successors(current)
+            succs = self.ordered_successors(current)  # AM-107: max() keeps the first of equals
             if not succs:
                 break
             best = max(
@@ -1576,11 +1606,7 @@ class KripkeModel:
                 path.append((w, "✗ dead-end — obligation not discharged"))
                 return path
             on_path.add(w)
-            nxt = next(
-                (x for x in sorted(succs, key=lambda x: (self.labels.get((w, x), ""), repr(x)))
-                 if fails(x)),
-                None,
-            )
+            nxt = next((x for x in self.ordered_successors(w) if fails(x)), None)
             if nxt is None:        # cannot happen when fails(w); defensive
                 path.append((w, "✗ dead-end — obligation not discharged"))
                 return path
@@ -1613,7 +1639,7 @@ class KripkeModel:
                 path.reverse()
                 path.append((w, "✓ discharged"))
                 return path
-            for s in self.successors(w):
+            for s in self.ordered_successors(w):  # AM-107: deterministic
                 if s not in visited:
                     visited.add(s)
                     parent[s] = (w, self.labels.get((w, s), "→"))

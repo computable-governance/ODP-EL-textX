@@ -996,7 +996,7 @@ def get_recommended_action(
     V = km.bellman_values(gamma=gamma)
 
     candidates = []
-    for succ in km.successors(km.initial):
+    for succ in km.ordered_successors(km.initial):  # AM-107
         label = km.labels.get((km.initial, succ), "→")
         imm = km.utility(succ)
         v_s = V.get(succ, 0.0)
@@ -1014,7 +1014,8 @@ def get_recommended_action(
             gamma=gamma,
         )
 
-    candidates.sort(key=lambda x: x[1], reverse=True)
+    # AM-107: ties by label, not by the successor set's hash order.
+    candidates.sort(key=lambda x: (-x[1], x[0]))
     recommended_label, q_val, imm_reward, v_star_succ = candidates[0]
 
     alternatives = [
@@ -1073,14 +1074,14 @@ def execute_action(
 
     V = km.bellman_values(gamma=0.9)
     candidates = []
-    for succ in km.successors(km.initial):
+    for succ in km.ordered_successors(km.initial):  # AM-107
         label = km.labels.get((km.initial, succ), "→")
         imm = km.utility(succ)
         v_s = V.get(succ, 0.0)
         candidates.append((label, imm + 0.9 * v_s, imm, v_s))
 
     if candidates:
-        candidates.sort(key=lambda x: x[1], reverse=True)
+        candidates.sort(key=lambda x: (-x[1], x[0]))  # AM-107: ties by label
         new_rec = candidates[0][0]
         new_q = candidates[0][1]
     else:
