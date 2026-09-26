@@ -18,6 +18,20 @@ config discovery because of a pre-existing INI syntax bug in `setup.cfg`
 (stale packaging scaffolding — see the "Known issue" note in `CLAUDE.md`).
 Any CI configuration must use `-c pytest.ini` until that is resolved.
 
+### Slow tests
+
+Tests marked `@pytest.mark.slow` (tens of seconds each) are excluded by
+default: `pytest.ini` sets `addopts = -m "not slow"`. Run only them with
+
+    /opt/homebrew/bin/python3.11 -m pytest -c pytest.ini -m slow
+
+or everything, slow tests included, with `-m "slow or not slow"`. A `-m`
+on the command line replaces the default. Currently one:
+`test_am110_deadline_scale.py::test_cross_check_gp_referral_static_wide`
+(a 133,674-world cross-check of the deadline scale factor; its
+9,279-world counterpart runs by default). Run the slow tests before
+changing `el_kripke.py`'s deadline handling.
+
 ## Why a DSL needs layered testing
 
 This is not an ordinary application — it is a small compiler (textX

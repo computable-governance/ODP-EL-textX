@@ -113,9 +113,21 @@ def test_cross_check_erequesting_claiming_hybrid():
 
 
 def test_cross_check_gp_referral_static():
-    """k = 2240 at horizon 10 (197 worlds) against k = 56 at horizon 400
-    (133,674 worlds) — the largest deadline, "14 days" = 20160 steps, is 9
-    and 360 scaled steps. Before AM-111: k = 27 at 10 against k = 1 at 250."""
+    """k = 2240 at horizon 10 (197 worlds) against k = 224 at horizon 100
+    (9,279 worlds): "14 days" = 20160 steps is 9 and 90 scaled steps."""
+    spec = _spec(_SCENARIO_PATHS["gp_referral"])
+    scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=2240)
+    wide = _quiet(build_kripke_model, spec, horizon=100, deadline_scale=224)
+    assert _verdicts(scaled) == _verdicts(wide)
+    assert _verdicts(scaled)["referralResponseBurden"] == (False, False, False, True)
+
+
+@pytest.mark.slow
+def test_cross_check_gp_referral_static_wide():
+    """Slow (about 20 s; run with -m slow). k = 2240 at horizon 10 (197
+    worlds) against k = 56 at horizon 400 (133,674 worlds) — "14 days" =
+    20160 steps is 9 and 360 scaled steps. Before AM-111: k = 27 at 10
+    against k = 1 at 250 (171,156 worlds), in the default suite."""
     spec = _spec(_SCENARIO_PATHS["gp_referral"])
     scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=2240)
     wide = _quiet(build_kripke_model, spec, horizon=400, deadline_scale=56)
