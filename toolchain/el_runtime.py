@@ -289,7 +289,8 @@ class Runtime:
     def fire_violation_responses(self) -> TransitionRecord:
         """Fire each declared ViolationResponse whose on_violation_of Burden is
         currently VIOLATED; append the event to the ledger. Idempotent per
-        violation — see el_engine.fire_violation_responses()'s docstring for
+        violated instance (AM-104: WorldState.responded) — see
+        el_engine.fire_violation_responses()'s docstring for
         the exact predicate. Deliberately separate from
         check_live_violations() (kept a pure detector); mirrors its
         direct-call pattern and conditional tick-advance (no-op stays free)."""

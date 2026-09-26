@@ -80,12 +80,22 @@ class WorldState:
     tokens: Tuple[TokenInstance, ...]
     actors: Tuple[ActorState, ...]
     tick: int = 0
+    # AM-104: one (response name, violated token name, holder, granted_at_tick)
+    # entry per ViolationResponse fired, keyed per violated token instance —
+    # fire_violation_responses()'s once-only marker. See that function.
+    responded: FrozenSet[Tuple[str, str, str, int]] = frozenset()
 
     def with_tokens(self, tokens) -> "WorldState":
-        return WorldState(tokens=tuple(tokens), actors=self.actors, tick=self.tick)
+        return WorldState(tokens=tuple(tokens), actors=self.actors, tick=self.tick,
+                          responded=self.responded)
 
     def with_tick(self, tick: int) -> "WorldState":
-        return WorldState(tokens=self.tokens, actors=self.actors, tick=tick)
+        return WorldState(tokens=self.tokens, actors=self.actors, tick=tick,
+                          responded=self.responded)
+
+    def with_responded(self, responded) -> "WorldState":
+        return WorldState(tokens=self.tokens, actors=self.actors, tick=self.tick,
+                          responded=frozenset(responded))
 
 
 @dataclass(frozen=True)
@@ -910,7 +920,8 @@ def enroll(state: WorldState, actor_name: str, role_name: Optional[str] = None,
     new_actors = list(state.actors) + [
         ActorState(actor_name=actor_name, role_name=role_name, community_tag=community_tag)
     ]
-    return WorldState(tokens=state.tokens, actors=tuple(new_actors), tick=state.tick)
+    return WorldState(tokens=state.tokens, actors=tuple(new_actors), tick=state.tick,
+                      responded=state.responded)
 
 
 def join_role(state: WorldState, spec: Any, actor_name: str, role_name: str,
@@ -1559,10 +1570,8 @@ def revoke_authorization(
     if auth is None:
         raise KeyError(f"Authorization '{authorization_name}' not found in spec")
 
-    permit_name = auth.permit.name
     # on_revocation_embargo is a plain ID: absent → "" per textX default, not None
-    embargo_name = getattr(auth, "on_revocation_embargo", "")
-    if not embargo_name:
+    if not getattr(auth, "on_revocation_embargo", ""):
         raise KeyError(f"Authorization '{authorization_name}' has no on_revocation embargo")
 
     tick = state.tick
@@ -1572,18 +1581,49 @@ def revoke_authorization(
         reason = _strict_block_reason(blocking, "before the authorization can be revoked")
         return _blocked(state, auth.authority.name, f"revoke:{authorization_name}", reason, tick)
 
-    effects_log: list[str] = []
+    tokens, effects_log = _apply_revocation(state.tokens, spec, auth, tick)
+
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=auth.authority.name,
+        action_name=f"revoke:{authorization_name}",
+        outcome="ok",
+        discharged=(),
+        effects=tuple(effects_log),
+        violations=(),
+    )
+    return new_state, record
+
+
+def _apply_revocation(
+    tokens_in, spec, auth, tick: int
+) -> Tuple[List[TokenInstance], List[str]]:
+    """
+    AM-104: the token effects of revoking Authorization `auth` — steps 1
+    and 2 of revoke_authorization() — with no strict-mode guard and no
+    tick or ledger handling. Returns (tokens, effects_log).
+
+    revoke_authorization() applies its strict guard first, then calls
+    this. A terminate ViolationResponse calls it directly from
+    fire_violation_responses(): a response is an institutional act, not
+    an ordinary governed action, so it may revoke while a strict burden
+    is actionable. Step 3.5 is unchanged for advance().
+    """
+    permit_name = auth.permit.name
+    embargo_name = auth.on_revocation_embargo
+    effects_log: List[str] = []
 
     # 1 — supersede the granted permit(s)
     holders = [
-        t.holder for t in state.tokens
+        t.holder for t in tokens_in
         if t.token_name == permit_name and t.kind == "permit"
     ]
     tokens = [
         _transition(t, "superseded")
         if t.token_name == permit_name and t.kind == "permit"
         else t
-        for t in state.tokens
+        for t in tokens_in
     ]
     effects_log.append(f"superseded permit '{permit_name}'")
 
@@ -1597,18 +1637,7 @@ def revoke_authorization(
         target = holders[0] if holders else auth.authority.name
         tokens.append(_transition(token_from_spec(spec, embargo_name, target, tick), "active"))
     effects_log.append(f"activated embargo '{embargo_name}'")
-
-    new_state = state.with_tokens(tokens).with_tick(tick + 1)
-    record = TransitionRecord(
-        tick=tick,
-        actor_name=auth.authority.name,
-        action_name=f"revoke:{authorization_name}",
-        outcome="ok",
-        discharged=(),
-        effects=tuple(effects_log),
-        violations=(),
-    )
-    return new_state, record
+    return tokens, effects_log
 
 
 def reinstate_authorization(
@@ -2281,6 +2310,68 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     return new_state, record
 
 
+def _violator_chain(spec, holder: str) -> Set[str]:
+    """
+    AM-104: the enterprise objects a terminate response treats as the
+    violator — the violated instance's holder, every object whose
+    delegated_from chain leads to it, and every object it is (transitively)
+    principal_of (§6.6.8, §7.10.1). In the terms-of-engagement scenarios
+    the operator violates and its agent holds the Authorizations. Static
+    declarations only; runtime Delegations are not followed.
+    """
+    objects = [el for el in spec.elements if type(el).__name__ == "EnterpriseObject"]
+    chain = {holder}
+    changed = True
+    while changed:
+        changed = False
+        for eo in objects:
+            if eo.name in chain:
+                for p in getattr(eo, "principal_of", []) or []:
+                    # P2 folds PrincipalOf wrappers; accept either shape.
+                    agent_name = getattr(getattr(p, "agent", p), "name", None)
+                    if agent_name and agent_name not in chain:
+                        chain.add(agent_name)
+                        changed = True
+            elif any(getattr(getattr(df, "delegator", None), "name", None) in chain
+                     for df in getattr(eo, "delegated_from", []) or []):
+                chain.add(eo.name)
+                changed = True
+    return chain
+
+
+def _terminate_authorizations(
+    tokens, spec, violators: Set[str], responder: str, tick: int, effects_log: List[str]
+) -> List[TokenInstance]:
+    """AM-104: effect 4 of fire_violation_responses() for response_kind
+    terminate. Revokes each qualifying to_agent Authorization via
+    _apply_revocation(); logs why any other one in the chain is not
+    revoked. Returns the new token list; appends to effects_log."""
+    for auth in spec.elements:
+        if type(auth).__name__ != "Authorization":
+            continue
+        to_agent = getattr(getattr(auth, "authorized_agent", None), "name", None)
+        if to_agent not in violators:
+            continue
+        if not getattr(auth, "revocable", False) or not getattr(auth, "on_revocation_embargo", ""):
+            effects_log.append(f"not revoked '{auth.name}': not revocable with an on_revocation embargo")
+            continue
+        authority = getattr(getattr(auth, "authority", None), "name", None)
+        if authority != responder:
+            effects_log.append(
+                f"not revoked '{auth.name}': authority is '{authority}', not '{responder}'"
+            )
+            continue
+        permit_name = auth.permit.name
+        if not any(t.token_name == permit_name and t.kind == "permit" and t.state == "active"
+                   for t in tokens):
+            effects_log.append(f"not revoked '{auth.name}': permit '{permit_name}' is not active")
+            continue
+        tokens, revocation_effects = _apply_revocation(tokens, spec, auth, tick)
+        effects_log.append(f"revoked '{auth.name}' (to '{to_agent}')")
+        effects_log.extend(f"  {e}" for e in revocation_effects)
+    return list(tokens)
+
+
 def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, TransitionRecord]:
     """
     Fire each declared ViolationResponse whose on_violation_of Burden is
@@ -2295,33 +2386,45 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     displayable on its own; response-firing is a distinct, deliberate beat.
     See docs/CONCEPTS_INDEX.md for the fuller rationale.
 
-    Fires VR iff:
-      (A) some token named VR.on_violation_of.name is state == 'violated'
-          anywhere in live state — NOT scoped by holder: the violated
-          Burden's holder and VR.obligates are commonly different parties
-          (e.g. referralResponseBurden/SpecialistClinician vs.
-          escalationNoticeBurden/SpecialistPractice).
-      (B) VR.obligates does NOT already hold a token named
-          VR.creates_burden.name in state 'active' OR 'discharged'. The
-          'OR discharged' is load-bearing: checking only 'active' would
-          re-fire (granting a duplicate) the moment the created burden is
-          legitimately discharged by its own for_action — 'violated' never
-          reverts, so without this the predicate would flip back to fireable
-          every poll after a real discharge.
+    AM-104: fires VR once per violated instance — for each token named
+    VR.on_violation_of.name in state 'violated' anywhere in live state (NOT
+    scoped by holder: the violated Burden's holder and VR.obligates are
+    commonly different parties, e.g. referralResponseBurden/
+    SpecialistClinician vs. escalationNoticeBurden/SpecialistPractice)
+    whose key (VR name, token name, holder, granted_at_tick) is not yet in
+    state.responded. Firing adds the key. 'violated' never reverts, so the
+    marker, not the created burden's state, is what stops a re-fire; a
+    re-granted instance of the violated Burden has a new granted_at_tick
+    and can fire again. Before AM-104 the once-only condition was "obligates
+    does not hold creates_burden 'active' or 'discharged'", which only
+    worked for responses with creates_burden; it survives only as the
+    duplicate-grant guard in effect 1.
 
-    On fire, two effects:
-      1. Grant creates_burden to obligates as a real TokenInstance via
-         token_from_spec() — the same general-purpose grant path
-         revoke_authorization()/reinstate_authorization() already reuse for
-         their own fresh-grant cases, granted_at_tick stamped.
-      2. escalate_to: an informational effects-log entry only, no token or
-         event fired. The genuine ISO/IEC 15414 X.902 §8.4 outbound
+    On fire, effects in this order (ledger lines likewise):
+      1. creates_burden, if set: grant it to obligates as a real
+         TokenInstance via token_from_spec(), granted_at_tick stamped —
+         unless obligates already holds it 'active' (logged, not granted
+         again).
+      2. escalate_to, if set: an informational effects-log entry only, no
+         token or event fired. The genuine ISO/IEC 15414 X.902 §8.4 outbound
          notification-to-a-non-participant this conceptually is does NOT
          map onto this toolchain's `emits` construct (that implements
          intra-spec token choreography — discharged_by/triggered_by — not
          §8.4 notification; see docs/CONCEPTS_INDEX.md's emits-vs-
          notification finding). Revisit only if/when a real GP-side
          consumer token exists.
+      3. A ledger line naming the response_kind (§7.8.6) and the violator.
+         It comes first when there is no grant line.
+      4. response_kind terminate: revoke, via _apply_revocation() (no
+         strict-mode guard: a response is an institutional act, not an
+         ordinary governed action), every Authorization whose to_agent is
+         in _violator_chain() of the violated instance's holder, that is
+         revocable with an on_revocation embargo, whose permit is still
+         active, and whose authority is VR.obligates. An Authorization in
+         the chain that fails any of these is not revoked; the ledger says
+         why, and the response still counts as fired. to_role
+         Authorizations are not covered.
+    escalate, remediate and penalise have no effect beyond 1–3.
 
     Tick only advances when at least one response actually fires — same
     conditional-advance pattern and poll-safety rationale as
@@ -2336,6 +2439,7 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     """
     tick = state.tick
     tokens = list(state.tokens)
+    responded = set(state.responded)
     fired: List[str] = []
     effects_log: List[str] = []
 
@@ -2344,39 +2448,56 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
             continue
 
         violated_burden_name = getattr(getattr(vr, "violated_burden", None), "name", None)
-        if not violated_burden_name:
-            continue
-        if not any(t.token_name == violated_burden_name and t.state == "violated" for t in tokens):
-            continue
-
         responding_actor = getattr(getattr(vr, "responding_actor", None), "name", None)
+        if not violated_burden_name or not responding_actor:
+            continue
+        kind = getattr(vr, "response_kind", "") or ""
         creates_burden_ref = getattr(vr, "creates_burden", None)
-        if not responding_actor or creates_burden_ref is None:
-            continue
-        creates_burden_name = creates_burden_ref.name
-
-        already_responded = any(
-            t.token_name == creates_burden_name
-            and t.holder == responding_actor
-            and t.state in ("active", "discharged")
-            for t in tokens
-        )
-        if already_responded:
-            continue
-
-        new_tok = token_from_spec(spec, creates_burden_name, responding_actor, tick)
-        tokens.append(new_tok)
-        fired.append(vr.name)
-        effects_log.append(
-            f"fired '{vr.name}': granted '{creates_burden_name}' to '{responding_actor}'"
-        )
-
         escalate_to_ref = getattr(vr, "escalate_to", None)
-        if escalate_to_ref is not None:
-            effects_log.append(f"escalated '{vr.name}' to '{escalate_to_ref.name}'")
+
+        violated = [t for t in tokens
+                    if t.token_name == violated_burden_name and t.state == "violated"]
+        for inst in violated:
+            key = (vr.name, inst.token_name, inst.holder, inst.granted_at_tick)
+            if key in responded:
+                continue
+            responded.add(key)
+            fired.append(vr.name)
+            kind_line = (f"fired '{vr.name}' ({kind}) on violation of "
+                         f"'{inst.token_name}' by '{inst.holder}'")
+
+            # 1 — creates_burden
+            if creates_burden_ref is not None:
+                cb = creates_burden_ref.name
+                if any(t.token_name == cb and t.holder == responding_actor
+                       and t.state == "active" for t in tokens):
+                    effects_log.append(
+                        f"fired '{vr.name}': '{responding_actor}' already holds "
+                        f"active '{cb}'; not granted again"
+                    )
+                else:
+                    tokens.append(token_from_spec(spec, cb, responding_actor, tick))
+                    effects_log.append(f"fired '{vr.name}': granted '{cb}' to '{responding_actor}'")
+            else:
+                effects_log.append(kind_line)
+
+            # 2 — escalate_to
+            if escalate_to_ref is not None:
+                effects_log.append(f"escalated '{vr.name}' to '{escalate_to_ref.name}'")
+
+            # 3 — response_kind line, after the grant line
+            if creates_burden_ref is not None:
+                effects_log.append(kind_line)
+
+            # 4 — terminate: revoke the violator chain's Authorizations
+            if kind == "terminate":
+                tokens = _terminate_authorizations(
+                    tokens, spec, _violator_chain(spec, inst.holder),
+                    responding_actor, tick, effects_log,
+                )
 
     new_tick = tick + 1 if fired else tick
-    new_state = state.with_tokens(tokens).with_tick(new_tick)
+    new_state = state.with_tokens(tokens).with_tick(new_tick).with_responded(responded)
     record = TransitionRecord(
         tick=tick,
         actor_name="system",
