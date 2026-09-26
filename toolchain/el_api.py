@@ -375,7 +375,7 @@ app.add_middleware(
 
 class AvailableAction(BaseModel):
     action: str
-    reason: str            # "obligated" | "permitted"
+    reason: str            # "obligated" | "obligated_blocked" | "permitted" (AM-103)
     token: str             # burden or permit name that makes this action available
     deadline: Optional[str] = None
 
@@ -620,8 +620,10 @@ class ScenarioListResponse(BaseModel):
     description=(
         "Synthesises available actions from the actor's current permits, "
         "embargoes, and active obligations. Each entry is tagged 'obligated' "
-        "(an active burden requires the action) or 'permitted' (a permit grants "
-        "it and no embargo blocks it). Reads directly from the current Layer 3 "
+        "(an active burden requires the action), 'obligated_blocked' (an active "
+        "burden requires it, but an active embargo the actor holds covers it, so "
+        "the engine's Step 5 would refuse it) or 'permitted' (a permit grants it "
+        "and no embargo blocks it). Reads directly from the current Layer 3 "
         "runtime state — no Kripke model is needed for this endpoint."
     ),
 )
@@ -662,9 +664,11 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
             continue  # token carries no action association — nothing to surface
 
         if tok.kind == "burden":
+            # AM-103: an obligation whose action an embargo covers is kept,
+            # marked blocked, so a stuck obligation stays visible.
             actions.append(AvailableAction(
                 action=tok.for_action,
-                reason="obligated",
+                reason="obligated_blocked" if _is_embargoed(tok.for_action) else "obligated",
                 token=tok.token_name,
                 deadline=tok.deadline,
             ))
