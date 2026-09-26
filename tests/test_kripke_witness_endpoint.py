@@ -215,9 +215,13 @@ def test_witness_endpoint_matches_manually_traced_referral_path(api):
     assert w1["edge_from_previous"] == "examine:aiExaminationBurden → conductAIExamination"
     assert w1["occurred_actions"] == ["conductAIExamination"]
     assert w1["obligations"]["aiExaminationBurden"] == "DISCHARGED"
-    # every other Burden is untouched by this single fused T6 transition
+    # every other Burden is untouched by this single fused T6 transition.
+    # AM-105: escalationNoticeBurden, which referralNoResponseViolation
+    # creates, is not yet granted; the hybrid model carries it WAITING on
+    # referralResponseBurden's violation.
+    assert w1["obligations"]["escalationNoticeBurden"] == "WAITING"
     for oid, state in w1["obligations"].items():
-        if oid != "aiExaminationBurden":
+        if oid not in ("aiExaminationBurden", "escalationNoticeBurden"):
             assert state == "PENDING"
     assert all(state == "ACTIVE" for state in w1["actors"].values())
 

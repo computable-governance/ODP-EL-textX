@@ -3546,6 +3546,25 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             embargo_holder_index[tok.token_name] = (tok.state, tok.holder)
             init_embargo_states[tok.token_name] = tok.state
 
+    # AM-105: a burden a ViolationResponse creates, not yet granted (the
+    # response has not fired), is seeded from its spec descriptor when a
+    # burden it waits on is live: WAITING, activated by hybrid T2 below; or
+    # PENDING at w0 if that burden is already violated (detected, response
+    # not yet fired — the model treats firing as taken, as T2 does). Once
+    # granted it is an ordinary live token, handled above, and not indexed.
+    violation_activation: Dict[str, Tuple[str, ...]] = {}
+    for created, sources in _build_violation_activation_index(spec, spec_descriptors).items():
+        live_sources = [src for src in sources if src in init_obligs]
+        if created in descriptors or not live_sources:
+            continue
+        if any(init_obligs[src] == ObligationState.VIOLATED for src in live_sources):
+            init_obligs[created] = ObligationState.PENDING
+            init_activation[created] = state.tick
+        else:
+            init_obligs[created] = ObligationState.WAITING
+        descriptors[created] = spec_descriptors[created]
+        violation_activation[created] = sources
+
     init_actors: Dict[str, ActorStatus] = {a.actor_name: ActorStatus.ACTIVE for a in state.actors}
     enrolled_actors = sorted(a.actor_name for a in state.actors)  # AM-102 — T11/T9 performers
     for desc in descriptors.values():
@@ -3729,16 +3748,25 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 # and the engine's check_live_violations() count it.
                 activated_at = dict(w.activation_steps).get(oid, 0)
                 if w.step - activated_at >= desc.deadline_steps:
+                    # AM-105: activate the burdens this violation's responses
+                    # create; such a violated world is enqueued, others stay
+                    # terminal (as static T2).
+                    v_obligs = {**obligs, oid: ObligationState.VIOLATED}
+                    v_activation = dict(w.activation_steps)
+                    responded = _activate_on_violation(
+                        violation_activation, oid, v_obligs, v_activation, w.step)
                     wv = _make_world(
-                        {**obligs, oid: ObligationState.VIOLATED}, actors, occurred,
+                        v_obligs, actors, occurred,
                         permit_states=w.permit_states, embargo_states=w.embargo_states,
                         delegation_states=w.delegation_states,
                         holder_overrides=w.holder_overrides,
-                        activation_steps=w.activation_steps,
+                        activation_steps=v_activation,
                         step=w.step,
                     )
                     if wv not in worlds:
                         worlds.add(wv)
+                        if responded and wv.step < horizon_step:
+                            queue.append(wv)
                     edges.setdefault(w, set()).add(wv)
                     labels[(w, wv)] = f"violate:{oid}"
         if w.step < horizon_step and any(
@@ -4103,6 +4131,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         labels=labels, obligation_descriptors=descriptors, horizon=horizon,
         group_index=group_index,
         satisfaction_conditions=satisfaction_conditions,
+        violation_activation=violation_activation,
     )
 
 
