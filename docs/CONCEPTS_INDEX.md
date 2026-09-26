@@ -6284,3 +6284,46 @@ show up as a bare `compelled: false`. Neither the response nor the
 endpoint description gives the horizon (`_KRIPKE_HORIZON = 10`).
 Fix: add `modal_operator`, `status` and `horizon` to the response.
 Not scheduled.
+
+## `discharged_by` never fires for an event emitted by someone other than the holder — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found while verifying DN_019 step 2.10a
+(`docs/design_notes/DN_019_incident_simulator_storyboard.md`). Both
+terms-of-engagement scenarios declare `incidentNotificationBurden`
+(holder: the operator/vendor) with `for_action: "notifyIncident"` and
+`discharged_by: incidentAcknowledged`, and say it is "discharged only by
+the designated contact's acknowledgement". The event is emitted by
+`acknowledgeIncident`, whose actor is the contact (`incidentContactRole`),
+not the holder.
+
+**Engine:** Step 3 (discharge key, `el_engine.py`) collects dischargeable
+burdens only among those the acting actor holds (`tok.holder ==
+actor_name`). So:
+
+- `acknowledgeIncident` by the contact leaves the burden active: the
+  `discharged_by` match is never reached for a non-holder.
+- `notifyIncident` by the holder discharges it at once, via the
+  `for_action` match. The notification counts on its own, which is what
+  the scenario rules out.
+
+**Verifier:** agrees with the engine. The hybrid model's EF witness is
+"discharge:incidentNotificationBurden by AgentOperator". So the verdicts
+(`AF false, EF true`) hold, but for the wrong discharge.
+
+**Fix options (not decided):**
+1. **`discharged_by` works whoever causes the event.** An emitted event
+   discharges every active burden whose `discharged_by` names it,
+   regardless of the emitting actor. Where a burden declares both,
+   `discharged_by` takes precedence over `for_action`: the `for_action`
+   action no longer discharges on its own. Engine Step 3 and both Kripke
+   builders' discharge rules change together; existing scenarios that
+   rely on holder-only `discharged_by` need checking.
+2. **Remodel as an interaction.** Keep holder-only discharge, and model
+   notify-then-acknowledge explicitly (e.g. `notifyIncident` creates an
+   acknowledgement burden on the contact, and the operator's burden
+   discharges on an event it itself observes), so each discharge is by
+   the holder. Scenario change only, no semantics change.
+
+Until then, DN_019 captions 2.10a as "notification sent: burden
+discharged", with the acknowledgement having no deontic effect. Not
+scheduled.
