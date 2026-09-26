@@ -1259,6 +1259,8 @@ class ViolationResponse(_ELParentable):
     The violation response is itself a burden on the responding actor.
     V-NEW-15: violated_burden must be a burden token (not permit/embargo).
     V-NEW-16: if response_kind is escalate, escalate_to must be a party.
+    (AM-104: implemented as warning [W-23], not an error.)
+    AM-104: el_engine.fire_violation_responses() reads response_kind.
     """
     name:             str            = ""
     violated_burden:  Optional[object] = None   # → DeonticToken (burden)

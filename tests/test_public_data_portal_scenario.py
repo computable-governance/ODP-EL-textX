@@ -48,8 +48,10 @@ def spec():
     assert result.ok, result.errors
     # AM-103: [W-19]/[W-20] on refusalRecordBurden (no measurable deadline,
     # no ViolationResponse) are known deployment gaps, pending the
-    # violation-declaration amendment; any other warning is unexpected.
-    others = [w for w in result.warnings if not w.startswith(("[W-19]", "[W-20]"))]
+    # violation-declaration amendment; so is AM-104's [W-22] on
+    # missedReviewResponse (escalate, no creates_burden), pending that
+    # amendment's scenario edits. Any other warning is unexpected.
+    others = [w for w in result.warnings if not w.startswith(("[W-19]", "[W-20]", "[W-22]"))]
     assert not others, others
     return result.model
 

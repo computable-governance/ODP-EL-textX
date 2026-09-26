@@ -92,6 +92,16 @@ Rules implemented
   W-20  A discharge_mode: strict Burden that no ViolationResponse
         names in on_violation_of. Advisory; not needed if the
         enforcement point discharges it atomically.        AM-103, §6.3.8, §7.8.6
+  W-21  A terminate ViolationResponse whose violator chain holds
+        no revocable Authorization (with an on_revocation
+        embargo) granted by its obligates — it would fire and
+        revoke nothing. Advisory.                 AM-104, §6.3.8, §7.8.6, §6.6.4
+  W-22  An escalate ViolationResponse with no creates_burden —
+        fires as a ledger entry only; nobody becomes obligated.
+        Advisory.                                AM-104, §6.3.8, §7.8.6 NOTE 2
+  W-23  An escalate ViolationResponse whose escalate_to is
+        missing or not a party. The dormant V-NEW-16, as a
+        warning. Advisory.                            AM-104, §6.3.8, §7.4
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -257,6 +267,15 @@ def validate_spec(model) -> List[str]:
 
     # W-20 — strict burden no ViolationResponse names (AM-103, §6.3.8, §7.8.6)
     errors.extend(_validate_strict_burden_violation_response(model))
+
+    # W-21 — terminate response with nothing to revoke (AM-104, §6.3.8, §7.8.6, §6.6.4)
+    errors.extend(_validate_terminate_response_target(model))
+
+    # W-22 — escalate response that obligates nobody (AM-104, §6.3.8, §7.8.6 NOTE 2)
+    errors.extend(_validate_escalate_response_burden(model))
+
+    # W-23 — escalate_to must be a party; the dormant V-NEW-16 (AM-104, §6.3.8, §7.4)
+    errors.extend(_validate_escalate_to_party(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1356,6 +1375,92 @@ def _validate_strict_burden_violation_response(model) -> List[str]:
             f"(on_violation_of). If its holder never discharges it, nothing "
             f"responds. Not needed if the enforcement point discharges the burden "
             f"atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        )
+    return warnings
+
+
+def _validate_terminate_response_target(model) -> List[str]:
+    """W-21 (AM-104): a response_kind terminate ViolationResponse that
+    would fire and revoke nothing. On fire, the engine revokes each
+    Authorization whose to_agent is in the violator chain
+    (el_engine._violator_chain() of the violated burden's holder), that is
+    revocable with an on_revocation embargo, and whose authority is the
+    response's obligates. Warns when no declared Authorization meets all
+    of these. The holder is the one el_engine._build_obligation_descriptors()
+    resolves (root construct, then the delegation walk); a burden with no
+    descriptor has no static holder and is skipped. to_role Authorizations
+    are not revoked by terminate, so they do not count. Advisory."""
+    from el_engine import _build_obligation_descriptors, _violator_chain
+
+    descriptors = _build_obligation_descriptors(model)
+    authorizations = _collect(model, "Authorization")
+    warnings: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        if getattr(vr, "response_kind", None) != "terminate":
+            continue
+        burden = _obj_name(getattr(vr, "violated_burden", None))
+        desc = descriptors.get(burden)
+        if desc is None:
+            continue
+        responder = _obj_name(getattr(vr, "responding_actor", None))
+        chain = _violator_chain(model, desc.holder)
+        revocable = [
+            a for a in authorizations
+            if _obj_name(getattr(a, "authorized_agent", None)) in chain
+            and getattr(a, "revocable", False)
+            and getattr(a, "on_revocation_embargo", "")
+            and _obj_name(getattr(a, "authority", None)) == responder
+        ]
+        if revocable:
+            continue
+        warnings.append(
+            f"[W-21] Terminate response '{vr.name}' has nothing to revoke: no "
+            f"revocable Authorization with an on_revocation embargo, granted by "
+            f"'{responder}', is held by '{desc.holder}' or its agents "
+            f"({', '.join(sorted(chain))}). It would fire and do nothing. "
+            f"(§6.3.8, §7.8.6, §6.6.4)"
+        )
+    return warnings
+
+
+def _validate_escalate_response_burden(model) -> List[str]:
+    """W-22 (AM-104): a response_kind escalate ViolationResponse with no
+    creates_burden. It fires as a ledger entry only; nobody becomes
+    obligated to act on the escalation, although §7.8.6 NOTE 2 makes the
+    response rule an obligation on the object it applies to. Advisory."""
+    warnings: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        if getattr(vr, "response_kind", None) != "escalate":
+            continue
+        if getattr(vr, "creates_burden", None) is not None:
+            continue
+        warnings.append(
+            f"[W-22] Escalate response '{vr.name}' has no creates_burden: it "
+            f"fires as a ledger entry only; nobody becomes obligated. "
+            f"(§6.3.8, §7.8.6 NOTE 2)"
+        )
+    return warnings
+
+
+def _validate_escalate_to_party(model) -> List[str]:
+    """W-23 (AM-104): the dormant V-NEW-16 from el_domain.ViolationResponse's
+    docstring, as a warning — a response_kind escalate ViolationResponse
+    must name a party in escalate_to. Missing escalate_to also warns.
+    Advisory."""
+    warnings: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        if getattr(vr, "response_kind", None) != "escalate":
+            continue
+        target = getattr(vr, "escalate_to", None)
+        if target is None:
+            problem = "names no escalate_to"
+        elif getattr(target, "kind", None) != "party":
+            problem = f"escalates to '{target.name}' ({getattr(target, 'kind', None)}), not a party"
+        else:
+            continue
+        warnings.append(
+            f"[W-23] Escalate response '{vr.name}' {problem}. Escalation goes "
+            f"to a party. (V-NEW-16; §6.3.8, §7.4)"
         )
     return warnings
 
