@@ -2120,6 +2120,17 @@ now has a real descriptor in both `build_kripke_model()` and
 `build_kripke_from_runtime()`, confirmed reachable via AF/EF and eligible
 for Bellman-planned paths.
 
+**Correction (AM-105, 2026-09-26):** "confirmed reachable via AF" was a
+wrong verdict. The static builder put the burden in w0 as an ordinary
+PENDING strict obligation, unlinked to the violation, so AF held
+trivially. Since AM-105 it starts WAITING and `referralResponseBurden`'s
+violation activates it (both builders); its verdict is the bounded
+response property, "not triggered within horizon" (horizon 10 against a
+40-step deadline), EF false. It is still in the model and still eligible
+for Bellman-planned paths. See "Static builder: response-created burdens
+sit in w0, unlinked to the violation — RESOLVED". The text above is left
+as it was.
+
 **Important — this does NOT close the separate "Live violation
 triggering" finding below (2026-08-20), which remains open as logged
 there:** that finding is about a *different* gap — whatever remains
@@ -6340,9 +6351,19 @@ Until then, DN_019 captions 2.10a as "notification sent: burden
 discharged", with the acknowledgement having no deontic effect. Not
 scheduled.
 
-## Static builder: response-created burdens sit in w0, unlinked to the violation — OPEN FINDING (2026-09-26)
+## Static builder: response-created burdens sit in w0, unlinked to the violation — RESOLVED (2026-09-26)
 
-**OPEN FINDING** — found in AM-104 Phase 1. AM-86's root 2 gives each
+**OPEN FINDING (2026-09-26), RESOLVED 2026-09-26 by AM-105** (see
+`docs/el_grammar_amendments.md`). A burden that a ViolationResponse
+creates (and nothing else roots) now starts WAITING in both builders
+(`KripkeModel.violation_activation`), and the violated burden's T2 edge
+activates it; its verdict is the bounded response property. Referral's
+`escalationNoticeBurden`: AF true → "not triggered within horizon"
+(horizon 10 against `referralResponseBurden`'s 40-step deadline), EF
+false, in both builders. The hybrid builder now also seeds a created
+burden that is not yet granted. The original finding follows.
+
+Found in AM-104 Phase 1. AM-86's root 2 gives each
 `ViolationResponse.creates_burden` an obligation descriptor, and
 `build_kripke_model()` then places that burden in w0 as an ordinary
 PENDING obligation with no link to the violation that creates it. In
@@ -6398,3 +6419,74 @@ review (`escalate_to: AgencySecurityContact` / `ProviderSecurityContact`,
 the holder of `refusalReviewBurden`). To be fixed with the scenario edits
 in the violation-declaration amendment, which should also give it a
 `creates_burden` (it currently raises `[W-22]`).
+
+## Hybrid mode never violates a permit-gated burden — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING — high priority.** Found in AM-105 Phase 1. The hybrid
+builder's T1/T2 loop (`build_kripke_from_runtime()`) starts with
+`if desc.for_action in permit_requirement_index: continue` ("gated — T6
+handles this obligation's discharge, not T1"). The `continue` skips T2 as
+well, and T6 only discharges. So a burden whose discharging action
+requires a permit is never VIOLATED in a hybrid model, whatever its
+deadline. The static builder's T2 is a separate loop over every
+obligation and is not affected.
+
+Affected live burdens (API builders, tick 0, horizon 10). "Ungated"
+is a scratch experiment with T2 moved outside the gate, not committed:
+
+| Scenario | Burden | Deadline (steps) | Hybrid today | Violation reachable today / ungated |
+|---|---|---|---|---|
+| referral | `referralResponseBurden` | 40 | AF false, EF true | no / no (deadline beyond horizon) |
+| referral | `assessmentSchedulingBurden` | 112 | AF false, EF true | no / no |
+| referral | `aiExaminationBurden` | 5 | AF false, EF true | **no / yes** (model 3976 → 4768 worlds) |
+| gp_referral | `referralResponseBurden` | 40 | AF false, EF true | no / no |
+| gp_referral | `assessmentSchedulingBurden` | 112 | AF false, EF false | no / no |
+
+All five use `AF` (none is `triggered_by`). **None is reported as
+compelled because violation is unreachable:** all five are AF false
+today, and AF/EF are unchanged in the experiment. What the gap hides is
+the violation itself: "eventually violated" is false in hybrid where it
+is true (referral's `aiExaminationBurden`), and a ViolationResponse on a
+gated burden can never fire in the model — AM-105's
+`escalationNoticeBurden` is waiting on `referralResponseBurden`, which is
+gated, so in hybrid mode it can never be activated even when the deadline
+is within the horizon.
+
+Phase 1 counted six burdens; the sixth, ereferral's
+`aiExaminationBurden`, is not gated in the hybrid model: its live token
+has no spec descriptor, and the hybrid fallback sets the descriptor's
+`for_action` to `None` (not the token's own `for_action`), so the gate
+never matches. That fallback is a smaller gap of its own: with
+`for_action` `None`, neither the permit gate nor T1's embargo check can
+apply to that burden.
+
+**Fix direction:** apply T2 to every PENDING obligation, gated or not
+(as static does), keeping the gate for T1 only. Moves hybrid world
+counts (referral 3976 → 4768 in the experiment). Separate amendment; not
+scheduled.
+
+## A burden created by several ViolationResponses: one model instance, several engine grants — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — AM-105 edge case, not in any tracked scenario. When
+several responses create the same burden, `violation_activation` lists
+every violated burden and the first violation activates it. The model
+has one instance of the burden. The engine can grant more than one:
+AM-104's duplicate-grant guard only skips a grant while the responder
+holds the burden `active`, so if the first grant was discharged, a
+second violation grants a new instance. The model cannot show that
+second instance. Options when it matters: a validator warning for a
+burden created by more than one response, or per-instance obligations
+in the model. Not scheduled.
+
+## A response-created burden that is also `triggered_by` an event is not linked to its violation — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — AM-105 edge case, not in any tracked scenario. In the
+engine, `fire_violation_responses()` grants such a burden in its spec
+state (`pending`), and it then still waits on its event: it needs the
+violation *and* the event. The model's single WAITING state cannot
+separate "not yet created" from "created, waiting on its event", so
+AM-105 does not link it (`_build_violation_activation_index()`): it keeps
+its ordinary `triggered_by` treatment, and the event alone can activate
+it in the model even if the violation never happens. Over-approximates
+reachability. Fix needs a distinct "not yet created" state or a
+two-condition activation. Not scheduled.

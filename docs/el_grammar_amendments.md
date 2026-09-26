@@ -5854,6 +5854,17 @@ a pure additive change to the existing Commitment path. Full suite: 390
 passed, 1 xfailed — the 7 new tests accounting for the difference from the
 383/1 baseline, zero regressions.
 
+**Correction (AM-105, 2026-09-26):** "reachable via both
+`check_obligation()`/AF" above was a wrong verdict, and the test pinned
+it. The static builder placed `escalationNoticeBurden` in w0 as an
+ordinary PENDING strict obligation, unlinked to the violation that
+creates it, so AF held trivially. Since AM-105 it starts WAITING and is
+activated by `referralResponseBurden`'s violation; its verdict is the
+bounded response property, "not triggered within horizon" (horizon 10
+against a 40-step deadline), with EF false. It is still in the model and
+still appears in a recommended successor's `obligation_states`. The text
+above is left as it was.
+
 **Files changed:** `toolchain/el_engine.py` (`_build_obligation_descriptors()`
 refactor); `toolchain/el_kripke.py` (stale comment correction, no logic
 change); new `tests/test_am86_obligation_descriptor_roots.py`; this file
@@ -8687,3 +8698,138 @@ header); `toolchain/el_domain.py` (docstring);
 `tests/test_am104_obligation_status_fields.py` (new);
 `tests/test_public_data_portal_scenario.py` (warning allow-list);
 `docs/CONCEPTS_INDEX.md`; `docs/design_notes/DN_019_…`; this file.
+
+---
+
+## AM-105 (2026-09-26) — burdens a ViolationResponse creates wait on the violation, in both Kripke builders (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in four parts (commits `aab285c`, `63c878e`,
+`045c02f` and this docs commit). Type: verifier semantics (Layer 4). **No
+grammar, engine or descriptor change.** Resolves the CONCEPTS_INDEX
+finding "Static builder: response-created burdens sit in w0, unlinked to
+the violation" (2026-09-26, from AM-104). Corrects a wrong verdict:
+`escalationNoticeBurden` (referral, gp_referral) was reported AF true
+(compelled) by the static model although it exists only after
+`referralResponseBurden` is violated.
+
+**Design (decided 2026-09-26):** reuse the `triggered_by` mechanism. A
+created burden starts WAITING and the violated burden's T2 edge activates
+it, so its verdict is the bounded response property from activation, as
+for any triggered burden (AM-99a).
+
+### Part 1 — static builder (`aab285c`)
+
+- **`KripkeModel.violation_activation`**: `{created_burden:
+  (violated_burden, ...)}` from `_build_violation_activation_index()`.
+  A separate index, not an `ObligationDescriptor` field, so descriptors
+  and their three snapshot tests are unchanged. A burden is linked only
+  if a ViolationResponse creates it, it has a descriptor, it has **no
+  `triggered_by`** of its own, and it has **no other root** (no
+  Commitment, no Authorization `auth_burden`, not in any object's or
+  role's `holds`) — a burden with another root exists independently of
+  the violation and keeps its ordinary initial state. Several responses
+  creating one burden list every violated burden.
+- **Initial world:** a linked burden starts WAITING.
+- **T2:** the edge violating O also makes every linked burden waiting
+  on O PENDING, activation step = that step (`_activate_on_violation()`),
+  so its deadline counts from there.
+- **Violated worlds stay terminal, except** when their T2 edge activated
+  a created burden: that world is enqueued (below the horizon, like any
+  other). Left terminal, the created burden could never discharge — a
+  dead end makes AF false — so the model would report "never
+  dischargeable", wrong the other way. Every other violated world stays
+  terminal, including one reached after a created burden is activated:
+  a later unrelated violation still ends the path, so the created
+  burden's bounded response fails on that path (pinned by
+  `test_static_other_violations_stay_terminal`).
+- **`check_obligation()`** gives a linked burden the bounded response
+  verdict (`AG(pending→AF)`), as for `triggered_by`.
+- **Why one T2 edge, not a separate "fire" transition.** In the engine,
+  `check_live_violations()` and `fire_violation_responses()` are separate
+  system calls; the created burden does not exist between them, so no
+  ordinary action can affect it. A separate fire edge would only add
+  paths where the operator never calls `fire_violation_responses()`,
+  making AF fail on a property of how the runtime is operated, not of
+  the governance rules. Treating the response as taken is the weak-
+  fairness assumption already accepted in AM-103 (an enabled
+  institutional act is eventually taken). **One-tick approximation:** the
+  engine's firing advances the tick by 1 and grants the burden at the
+  firing tick, so the model's activation step can be up to that much
+  earlier than the engine's `granted_at_tick`.
+- **`test_am86_…::test_escalation_notice_burden_reachable_via_af_ef_and_bellman`**
+  pinned the wrong verdict (AF true, EF true); updated in this part (so
+  the part is green on its own) to the corrected verdict, with a comment.
+  Its name is kept; its Bellman assertion (the burden is present in a
+  recommended successor's `obligation_states`) still holds.
+
+### Part 2 — hybrid parity (`63c878e`)
+
+Before AM-105 a created burden not yet granted was absent from the
+hybrid model (descriptors come only from live tokens), so a violation in
+a future world never produced it — incomplete rather than wrong. Now,
+when a burden it waits on is live, the builder seeds it from its spec
+descriptor: WAITING, activated by hybrid T2 (same enqueue rule as
+static); or PENDING at w0, activated at the runtime's tick, if that
+burden is already violated (detected, response not yet fired — firing
+treated as taken, as in T2). Once the response has fired, the created
+burden is an ordinary live token: not seeded, not indexed.
+`tests/test_kripke_witness_endpoint.py`'s referral witness now also
+shows `escalationNoticeBurden: WAITING`; updated.
+
+### Part 3 — tests (`045c02f`)
+
+New `tests/test_am105_violation_activation.py` (10): the pinned verdict
+for `escalationNoticeBurden` in both referral scenarios, static and
+hybrid (the same: bounded response, "not triggered within horizon", EF
+false, WAITING at w0); a granted created burden is not indexed in
+hybrid; a short-deadline probe — T2 activates the created burden on the
+violating edge and the world continues, bounded response true in both
+builders; hybrid seeds PENDING when already violated; an unrelated
+violation stays terminal (dead-end counterexample); the index links only
+response-only, untriggered burdens and lists every violated burden for a
+burden two responses create.
+
+### Part 4 — docs
+
+AM-104's static-builder finding marked **RESOLVED**; correction notes
+(not rewrites) on AM-86's "Empirical verification" and on the
+CONCEPTS_INDEX entry "`escalationNoticeBurden` has no ObligationDescriptor
+… RESOLVED (2026-09-15)"; new OPEN FINDINGS: hybrid never violates
+permit-gated burdens (high priority); a burden created by several
+responses; a created burden that is also `triggered_by`.
+
+### Results
+
+| Model | Worlds | Edges | Verdict change |
+|---|---|---|---|
+| static referral | 272 → 264 | 604 → 584 | `escalationNoticeBurden`: AF true, EF true → bounded response false, "not triggered within horizon", EF false |
+| static gp_referral | 61 → 57 | 105 → 97 | same |
+| hybrid referral, gp_referral | unchanged | unchanged | `escalationNoticeBurden` now present, WAITING: same verdict as static |
+| every other scenario, both builders | unchanged | unchanged | none |
+
+**"Not triggered within horizon" here reflects horizon 10 against
+`referralResponseBurden`'s 40-step deadline** ("5 working days"): the
+violation that creates the escalation is out of reach, so nothing can
+be said about the escalation within the horizon. It is not a claim that
+the escalation is never needed or never discharged. In hybrid mode it is
+also unreachable for another reason: `referralResponseBurden` is
+permit-gated, and hybrid T2 never violates a gated burden (open finding).
+The worlds removed from the static models are the branches the strict
+escalation used to force at w0 (T3 suppressed until it was discharged).
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 696 → 696 → 696
+→ 706 → 706 passed, 1 xfailed.
+
+**Standard reference(s):** §6.3.8 and §7.8.6 NOTE 2 (violation; the
+response rule is an obligation on the responding object); §7.8.7 (token
+lifecycle: activation, deadlines); Annex C (Kripke semantics,
+informative), §C.2.
+
+**Files changed:** `toolchain/el_kripke.py` (`KripkeModel.violation_activation`,
+`_build_violation_activation_index()`, `_activate_on_violation()`,
+`check_obligation()`, `build_kripke_model()` initial world and T2,
+`build_kripke_from_runtime()` seeding and T2);
+`tests/test_am86_obligation_descriptor_roots.py` (pinned verdict
+corrected); `tests/test_kripke_witness_endpoint.py`;
+`tests/test_am105_violation_activation.py` (new); `docs/CONCEPTS_INDEX.md`;
+this file.
