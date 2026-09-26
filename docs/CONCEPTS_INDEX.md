@@ -6241,3 +6241,46 @@ permit as its analogue of a revoked one: the static builder has no T7.)
 no fix here. `[W-18]`-style static detection (a strict burden's
 discharging action covered by an embargo, or gated by a revocable
 permit) is a possible follow-on. Not scheduled.
+
+## `response_kind` is read by nothing; only `creates_burden` responses ever fire — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — `ViolationResponse.response_kind`
+(`escalate | remediate | penalise | terminate`, grammar
+`grammar/v2/el_grammar.tx` §7.8.6 block) is parsed and stored
+(`el_domain.py`) but no code in `toolchain/` reads it: not the validator,
+the engine, or the verifier. (The `el_domain.py` docstring mentions a
+V-NEW-16 escalate/party check; no such check exists in `el_validator.py`.)
+
+`fire_violation_responses()` (`el_engine.py`) skips any response without
+`creates_burden` (`if not responding_actor or creates_burden_ref is None:
+continue`). The `escalate_to` effects-log line comes after that skip, so
+a response with `escalate_to` but no `creates_burden` doesn't even log
+its escalation.
+
+**Instances:** both terms-of-engagement scenarios
+(`public_data_portal_scenario.el`, `external_agent_access_scenario.el`)
+declare `lateNotificationResponse` (`terminate`) and `missedReviewResponse`
+(`escalate`, `escalate_to: AgencySecurityContact`), neither with
+`creates_burden`. Neither ever fires: once `incidentNotificationBurden`
+or `refusalReviewBurden` is violated, nothing happens. The agent keeps
+its authorizations.
+
+**Planned fix:** the violation-declaration amendment (see "Strict mode,
+model vs deployment") also makes responses act on their kind:
+`terminate` revokes the violator's authorizations; `escalate` fires
+whether or not a burden is created. Until then, a `terminate` or
+`escalate` response without `creates_burden` is inert. A warning for
+that case is a possible stopgap. Not scheduled.
+
+**Related — `/obligations/{token}/status` hides which property
+`compelled` is.** The endpoint (`el_api.py`) maps `compelled` to
+`check_obligation().satisfied`. For a burden with `triggered_by`,
+`check_obligation()` returns the bounded response verdict
+(`AG(pending→AF)`, within horizon, AM-99a part 3), not AF from w0.
+`ObligationStatusResponse` drops the verdict's `modal_operator` and
+`status`, so a client can't tell AF from bounded response, and
+"not triggered within horizon" / "not resolved within horizon" both
+show up as a bare `compelled: false`. Neither the response nor the
+endpoint description gives the horizon (`_KRIPKE_HORIZON = 10`).
+Fix: add `modal_operator`, `status` and `horizon` to the response.
+Not scheduled.
