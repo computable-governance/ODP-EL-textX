@@ -23,6 +23,9 @@ check_live_violations() — see docs/CONCEPTS_INDEX.md's "referral episode"
 finding (2026-08-29) and tests/test_check_live_violations.py's
 test_no_magnitude_deadline_never_violates_* tests for the integration-level
 coverage of that fix.
+
+AM-111: one step is one minute (el_engine._STEP_SECONDS); every unit
+converts through it, so the values below are durations in minutes.
 """
 from el_engine import _has_deadline_magnitude, _parse_deadline_steps
 
@@ -41,50 +44,78 @@ def test_five_day_and_fourteen_day_deadlines_now_differ():
     assert fourteen_day > five_day
 
 
-def test_magnitude_scales_linearly_with_the_per_unit_step_value():
-    """5 * 8 = 40, 14 * 8 = 112 — proportional to the real 14/5 = 2.8x ratio
-    the two deadlines actually encode, not just "different"."""
-    assert _parse_deadline_steps("5 working days from referral receipt") == 40
-    assert _parse_deadline_steps("14 days from referral receipt") == 112
+def test_magnitude_scales_linearly_with_the_unit_duration():
+    """AM-111: one step is one minute. 14 days = 20160 minutes; 5 working
+    days = 7 calendar days (the 7/5 working-day approximation) = 10080."""
+    assert _parse_deadline_steps("5 working days from referral receipt") == 10080
+    assert _parse_deadline_steps("14 days from referral receipt") == 20160
 
 
 # ── Other real scenario deadline strings, magnitude present ─────────────────
 
 def test_magnitude_parsed_for_hour_deadlines():
-    assert _parse_deadline_steps("48 hours from clinical decision") == 240
-    assert _parse_deadline_steps("2 hours from consult request") == 10
-    assert _parse_deadline_steps("4 hours from referral delegation") == 20
+    assert _parse_deadline_steps("48 hours from clinical decision") == 2880
+    assert _parse_deadline_steps("2 hours from consult request") == 120
+    assert _parse_deadline_steps("4 hours from referral delegation") == 240
 
 
 def test_magnitude_parsed_for_minute_deadlines():
-    assert _parse_deadline_steps("10 minutes") == 30
-    assert _parse_deadline_steps("15 minutes") == 45
-    assert _parse_deadline_steps("5 minutes") == 15
+    assert _parse_deadline_steps("10 minutes") == 10
+    assert _parse_deadline_steps("15 minutes") == 15
+    assert _parse_deadline_steps("5 minutes") == 5
 
 
-# ── magnitude == 1 must reproduce the original flat bucket exactly ─────────
-# (existing tests in test_check_live_violations.py / test_check_violations_
-# endpoint.py hardcode deadline_steps == 5 for "1 hour" — this fix must not
-# disturb that.)
+# ── AM-111: every unit converts through one step duration ──────────────────
 
-def test_magnitude_one_matches_original_flat_bucket_value():
-    assert _parse_deadline_steps("1 hour") == 5
-    assert _parse_deadline_steps("1 day") == 8
-    assert _parse_deadline_steps("1 week") == 12
+def test_every_unit_converts_through_one_step_duration():
+    assert _parse_deadline_steps("1 minute") == 1
+    assert _parse_deadline_steps("1 hour") == 60
+    assert _parse_deadline_steps("1 day") == 1440
+    assert _parse_deadline_steps("1 week") == 10080
+    assert _parse_deadline_steps("1 month") == 43200      # 30 days
+    assert _parse_deadline_steps("1 year") == 525600      # 365 days
+    assert _parse_deadline_steps("0 minutes") == 0
 
 
-# ── No digit alongside the unit word: falls back to the original flat
-# per-unit bucket, unchanged from before this fix ───────────────────────────
+def test_seconds_round_up_to_whole_steps():
+    """A deadline is never shorter than stated."""
+    assert _parse_deadline_steps("1 second") == 1
+    assert _parse_deadline_steps("30 seconds") == 1
+    assert _parse_deadline_steps("90 seconds") == 2
 
-def test_word_form_magnitude_falls_back_to_flat_bucket():
+
+def test_qualified_units_are_documented_approximations():
+    """Working/business days: 5 per 7-day week; business hours: 40 per
+    168-hour week. Start weekday and public holidays are ignored."""
+    assert _parse_deadline_steps("5 working days") == 7 * 1440
+    assert _parse_deadline_steps("5 business days") == 7 * 1440
+    assert _parse_deadline_steps("1 working day") == 2016          # 1.4 days
+    assert _parse_deadline_steps("40 business hours") == 168 * 60
+    assert _parse_deadline_steps("5 days") == 5 * 1440             # unqualified
+
+
+def test_real_time_order_is_preserved():
+    """Before AM-111 "48 hours" (240) outlasted "14 days" (112), and
+    "5 minutes" (15) outlasted "2 hours" (10) and "1 day" (8)."""
+    ordered = ["30 seconds", "5 minutes", "10 minutes", "15 minutes",
+               "2 hours", "4 hours", "1 day", "48 hours", "72 hours",
+               "5 working days", "14 days", "1 month", "1 year"]
+    steps = [_parse_deadline_steps(d) for d in ordered]
+    assert steps == sorted(steps)
+    assert len(set(steps)) == len(steps)
+
+
+# ── No digit alongside the unit word: one unit's duration ──────────────────
+
+def test_word_form_magnitude_falls_back_to_one_unit():
     """"thirty days" has no digit for the parser to find — this parser does
-    not spell out word-form numbers — so it must fall back to the original
-    unit-only bucket (8), not silently default to something else."""
-    assert _parse_deadline_steps("thirty days from cancellation") == 8
+    not spell out word-form numbers — so it falls back to one unit (a day),
+    not silently to something else. Never clock-violated (no magnitude)."""
+    assert _parse_deadline_steps("thirty days from cancellation") == 1440
 
 
-def test_bare_unit_only_deadline_falls_back_to_flat_bucket():
-    assert _parse_deadline_steps("referral response window: day") == 8
+def test_bare_unit_only_deadline_falls_back_to_one_unit():
+    assert _parse_deadline_steps("referral response window: day") == 1440
 
 
 # ── No unit keyword at all: default, unaffected by this fix ────────────────
@@ -112,8 +143,8 @@ def test_distant_unrelated_number_does_not_pair_with_a_later_unit():
         "referral 12345 must be actioned promptly within the current day"
     )
     # "day" is present with no adjacent digit within the window -> falls
-    # back to the flat per-unit bucket, not 12345 * 8.
-    assert steps == 8
+    # back to one unit, not 12345 days.
+    assert steps == 1440
 
 
 # ── _has_deadline_magnitude() — the 2026-08-29 sibling function ────────────
@@ -124,6 +155,7 @@ def test_has_magnitude_true_for_every_magnitude_bearing_deadline():
     assert _has_deadline_magnitude("48 hours from clinical decision") is True
     assert _has_deadline_magnitude("1 hour") is True
     assert _has_deadline_magnitude("10 minutes") is True
+    assert _has_deadline_magnitude("1 year") is True   # AM-111: new unit
 
 
 def test_has_magnitude_false_for_the_reported_referral_episode_case():
@@ -145,10 +177,9 @@ def test_has_magnitude_false_for_every_no_digit_deadline_found_across_scenarios(
 
 def test_has_magnitude_false_for_word_form_magnitude():
     """"thirty days" has a unit word but no digit -- _parse_deadline_steps()
-    still falls back to its flat per-unit bucket for this case (unchanged
-    behaviour, see test_word_form_magnitude_falls_back_to_flat_bucket
-    above), but _has_deadline_magnitude() must say False: a flat bucket is
-    exactly the kind of guessed value check_live_violations() should not
+    still falls back to one unit's duration for this case (see
+    test_word_form_magnitude_falls_back_to_one_unit above), but
+    _has_deadline_magnitude() must say False: a one-unit fallback is exactly the kind of guessed value check_live_violations() should not
     tick-violate on for a burden whose real deadline it cannot compute."""
     assert _has_deadline_magnitude("thirty days from cancellation") is False
 

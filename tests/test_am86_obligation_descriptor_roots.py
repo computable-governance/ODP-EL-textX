@@ -229,12 +229,14 @@ def test_authorization_without_creates_burden_on_authority_yields_no_descriptor(
 # _build_obligation_descriptors() vs. this amendment's refactored version,
 # run over dataclasses.asdict() for every shared key, on both scenario
 # files below. All were byte-identical; pinning them here as a persisted
-# regression check, not just a one-off diff.
+# regression check, not just a one-off diff. AM-111 changed only the
+# deadline_steps of deadlines with a magnitude (one step per minute);
+# no-magnitude deadlines keep the parser's default of 5.
 _EXPECTED_REFERRAL_COMMITMENT_DESCRIPTORS = {
     "referralInitiationBurden": {
         "obligation_id": "referralInitiationBurden",
         "obligation_text": "Initiate specialist referral and provide clinical handover for the patient",
-        "deadline_steps": 240,
+        "deadline_steps": 2880,  # AM-111: 48 hours, one step per minute (240 before)
         "holder": "GPPractice",
         "chain": ["GPPractice"],
         "revocable": False,
@@ -248,7 +250,7 @@ _EXPECTED_REFERRAL_COMMITMENT_DESCRIPTORS = {
     "referralResponseBurden": {
         "obligation_id": "referralResponseBurden",
         "obligation_text": "Respond to the specialist referral within the agreed timeframe and schedule assessment",
-        "deadline_steps": 40,
+        "deadline_steps": 10080,  # AM-111: 5 working days = 7 days (40 before)
         "holder": "GPPractice",
         "chain": ["GPPractice"],
         "revocable": False,
@@ -276,7 +278,7 @@ _EXPECTED_REFERRAL_COMMITMENT_DESCRIPTORS = {
     "assessmentSchedulingBurden": {
         "obligation_id": "assessmentSchedulingBurden",
         "obligation_text": "Schedule specialist assessment appointment for the patient",
-        "deadline_steps": 112,
+        "deadline_steps": 20160,  # AM-111: 14 days (112 before)
         "holder": "SpecialistPractice",
         "chain": ["SpecialistPractice"],
         "revocable": False,
@@ -304,7 +306,7 @@ _EXPECTED_REFERRAL_COMMITMENT_DESCRIPTORS = {
     "reviewNonResponseAndDetermineNextStepsBurden": {
         "obligation_id": "reviewNonResponseAndDetermineNextStepsBurden",
         "obligation_text": "Review referral non-response escalations and determine appropriate next steps",
-        "deadline_steps": 240,
+        "deadline_steps": 2880,  # AM-111: 48 hours, one step per minute (240 before)
         "holder": "GPPractice",
         "chain": ["GPPractice"],
         "revocable": False,

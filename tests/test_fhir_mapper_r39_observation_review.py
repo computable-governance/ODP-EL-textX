@@ -166,11 +166,12 @@ def test_r39_bundle_output_parses_and_validates():
 
 def test_deadline_elapsed_actually_fires_violation_and_creates_escalation_burden():
     """The real proof, not just plausible-looking text: build a live
-    Runtime, advance the clock past the 7-day deadline (56 ticks —
-    _DEADLINE_UNIT_STEPS["day"] == 8), call check_live_violations() (must
+    Runtime, advance the clock to the 7-day deadline (derived from
+    _parse_deadline_steps(); 10080 ticks since AM-111), call check_live_violations() (must
     transition Id960Obligation to 'violated'), then
     fire_violation_responses() (must grant Id960EscalationNoticeObligation
     to RiversidePhysio, and log the escalation to ElimbahMedicalCentre)."""
+    from el_engine import _parse_deadline_steps
     from el_parser import parse_string
     from el_runtime import Runtime
 
@@ -182,7 +183,7 @@ def test_deadline_elapsed_actually_fires_violation_and_creates_escalation_burden
     assert tokens_before["Id960Obligation"].state == "active"
     assert tokens_before["Id960Obligation"].holder == "RiversidePhysio"
 
-    rt._state = rt._state.with_tick(56)
+    rt._state = rt._state.with_tick(_parse_deadline_steps("7 days"))
     violation_record = rt.check_live_violations()
 
     assert violation_record.outcome == "violation"

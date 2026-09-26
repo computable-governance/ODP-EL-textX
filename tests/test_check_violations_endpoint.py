@@ -23,6 +23,7 @@ import importlib
 
 import pytest
 
+from el_engine import _parse_deadline_steps
 from el_parser import parse_string
 from el_runtime import Runtime
 
@@ -72,12 +73,15 @@ def api():
     return el_api
 
 
+_DEADLINE = _parse_deadline_steps("1 hour")  # the probe's deadline, in steps (AM-111: 60)
+
+
 def _token(runtime, name):
     return next(t for t in runtime.current_state().tokens if t.token_name == name)
 
 
 def test_check_violations_reports_nothing_before_deadline(api):
-    api._runtime._state = api._runtime._state.with_tick(4)  # elapsed 4 < deadline_steps 5
+    api._runtime._state = api._runtime._state.with_tick(_DEADLINE - 1)  # elapsed < deadline_steps
 
     resp = api.check_violations_endpoint()
 
@@ -85,24 +89,24 @@ def test_check_violations_reports_nothing_before_deadline(api):
     assert resp.violations == []
     assert _token(api._runtime, "eventualBurden").state == "active"
     # No-op poll must not consume a tick (see el_engine.check_live_violations()).
-    assert api._runtime.current_state().tick == 4
+    assert api._runtime.current_state().tick == _DEADLINE - 1
 
 
 def test_check_violations_transitions_eventual_burden_past_deadline(api):
-    api._runtime._state = api._runtime._state.with_tick(5)  # elapsed 5 >= deadline_steps 5
+    api._runtime._state = api._runtime._state.with_tick(_DEADLINE)  # elapsed == deadline_steps
 
     resp = api.check_violations_endpoint()
 
     assert resp.outcome == "violation"
     assert resp.violations == ["eventualBurden"]
     assert resp.effects and "eventualBurden" in resp.effects[0]
-    assert resp.tick == 5
+    assert resp.tick == _DEADLINE
     assert _token(api._runtime, "eventualBurden").state == "violated"
-    assert api._runtime.current_state().tick == 6  # a real transition — tick advances
+    assert api._runtime.current_state().tick == _DEADLINE + 1  # a real transition — tick advances
 
 
 def test_check_violations_never_reports_strict_burden(api):
-    api._runtime._state = api._runtime._state.with_tick(1000)  # wildly past any deadline
+    api._runtime._state = api._runtime._state.with_tick(1000 * _DEADLINE)  # wildly past any deadline
 
     resp = api.check_violations_endpoint()
 
@@ -113,10 +117,15 @@ def test_check_violations_never_reports_strict_burden(api):
 def test_check_violations_report_shape_matches_revoke_endpoint(api):
     """Same fields as RevokeAuthorizationResponse/ReinstateAuthorizationResponse
     (minus the authorization-specific ones) — updated_world/objective score/
-    reachability re-queried the same way, per the endpoint's own docstring."""
-    api._runtime._state = api._runtime._state.with_tick(5)
+    reachability re-queried the same way, per the endpoint's own docstring.
+    AM-111: also asserts the violation happened — before, this test kept
+    passing when a unit-table change moved the deadline past its tick."""
+    api._runtime._state = api._runtime._state.with_tick(_DEADLINE)
 
     resp = api.check_violations_endpoint()
+
+    assert resp.outcome == "violation"
+    assert resp.violations == ["eventualBurden"]
 
     assert isinstance(resp.updated_world, dict)
     assert "step" in resp.updated_world

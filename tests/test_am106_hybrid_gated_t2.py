@@ -44,9 +44,9 @@ party Clinic {
 party Practice
 party GP
 
-burden answerBurden { for_action: "answer" state: active deadline: "1 hour" discharge_mode: eventual }
+burden answerBurden { for_action: "answer" state: active deadline: "5 minutes" discharge_mode: eventual }
 permit answerPermit { for_action: "answer" state: active }
-burden noticeBurden { for_action: "notify" state: active deadline: "1 hour" discharge_mode: strict }
+burden noticeBurden { for_action: "notify" state: active deadline: "5 minutes" discharge_mode: strict }
 
 commitment ClinicAnswers { by: Clinic obligation: "answer" creates_burden: answerBurden }
 

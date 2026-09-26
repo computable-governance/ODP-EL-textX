@@ -23,11 +23,14 @@ deadlines are worded from the offer ("4 hours from referral delegation"),
 and the static builder's C1 does not record activation_steps either
 (docs/el_grammar_amendments.md, AM-100).
 
-Fixture: every burden has deadline "1 hour" (5 steps, eventual). Tokens
-are granted at tick 0; triggered ones are activated at tick 10, so they
-must violate at tick 15 and not at 14.
+Fixture: every burden has deadline "1 hour" (eventual; DEADLINE_STEPS,
+derived from _parse_deadline_steps() — 60 since AM-111). Tokens are
+granted at tick 0; triggered ones are activated at tick 10, so they must
+violate at tick 10 + DEADLINE_STEPS and not one tick earlier.
 """
-from el_engine import TokenInstance, enroll, grant_token, initial_state, token_from_spec
+from el_engine import (
+    TokenInstance, _parse_deadline_steps, enroll, grant_token, initial_state, token_from_spec,
+)
 from el_parser import parse, parse_string
 from el_runtime import Runtime
 
@@ -100,7 +103,7 @@ burden freshBurden {
 """
 
 ACTIVATION_TICK = 10
-DEADLINE_STEPS = 5
+DEADLINE_STEPS = _parse_deadline_steps("1 hour")
 
 
 def _runtime(*token_names) -> Runtime:
@@ -216,7 +219,7 @@ def test_repeated_event_does_not_restart_deadline():
 # ── C1 claim: deliberately still counts from grant ──────────────────────────
 
 _CLAIMING_SCENARIO = "scenarios/erequesting_claiming/erequesting_claiming_scenario.el"
-_CLAIM_DEADLINE_STEPS = 20  # "4 hours from referral delegation", Commitment-derived
+_CLAIM_DEADLINE_STEPS = _parse_deadline_steps("4 hours from referral delegation")
 
 
 def _claiming_runtime():
@@ -240,7 +243,8 @@ def _claiming_runtime():
 
 def test_c1_claimed_burden_deadline_counts_from_grant():
     """The pool deadline is worded from the offer, so a claim at tick 10
-    does not restart it: the claimed burden violates at grant (0) + 20."""
+    does not restart it: the claimed burden violates at grant (0) + its
+    deadline."""
     rt = _claiming_runtime()
     _clock_to(rt, ACTIVATION_TICK)
 

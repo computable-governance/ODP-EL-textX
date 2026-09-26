@@ -39,6 +39,10 @@ empirical snapshot taken from the pre-fix code
 confirming this is a pure bug fix with zero behavioural change to any
 existing scenario, same convention as
 tests/test_am86_obligation_descriptor_roots.py.
+
+AM-111: the snapshot's deadline_steps values were regenerated when one step
+became one minute (13 descriptors, all with a deadline magnitude); every
+other field was checked unchanged before the snapshot was rewritten.
 """
 import dataclasses
 import itertools

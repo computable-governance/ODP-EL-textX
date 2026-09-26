@@ -88,8 +88,8 @@ party Clinic
 party Practice
 party GP
 
-burden answerBurden { for_action: "answer" state: active deadline: "1 hour" discharge_mode: eventual }
-burden noticeBurden { for_action: "notify" state: active deadline: "1 hour" discharge_mode: strict }
+burden answerBurden { for_action: "answer" state: active deadline: "5 minutes" discharge_mode: eventual }
+burden noticeBurden { for_action: "notify" state: active deadline: "5 minutes" discharge_mode: strict }
 
 commitment ClinicAnswers { by: Clinic obligation: "answer" creates_burden: answerBurden }
 
@@ -105,7 +105,7 @@ violation_response lateAnswer {
 
 # The same, plus an unrelated obligation whose violation activates nothing.
 _PROBE_OTHER = _PROBE + """
-burden otherBurden { for_action: "other" state: active deadline: "1 hour" discharge_mode: eventual }
+burden otherBurden { for_action: "other" state: active deadline: "5 minutes" discharge_mode: eventual }
 commitment ClinicOther { by: Clinic obligation: "other" creates_burden: otherBurden }
 """
 
@@ -201,17 +201,17 @@ enterprise specification ViolationActivationLinkProbe
 party Clinic
 party Practice
 
-burden sourceA { for_action: "a" state: active deadline: "1 hour" discharge_mode: eventual }
-burden sourceB { for_action: "b" state: active deadline: "1 hour" discharge_mode: eventual }
-burden sharedBurden { for_action: "shared" state: active deadline: "1 hour" discharge_mode: eventual }
+burden sourceA { for_action: "a" state: active deadline: "5 minutes" discharge_mode: eventual }
+burden sourceB { for_action: "b" state: active deadline: "5 minutes" discharge_mode: eventual }
+burden sharedBurden { for_action: "shared" state: active deadline: "5 minutes" discharge_mode: eventual }
 burden triggeredBurden {
     for_action: "triggered"
     state: pending
-    deadline: "1 hour"
+    deadline: "5 minutes"
     triggered_by: someEvent
     discharge_mode: eventual
 }
-burden committedBurden { for_action: "committed" state: active deadline: "1 hour" discharge_mode: eventual }
+burden committedBurden { for_action: "committed" state: active deadline: "5 minutes" discharge_mode: eventual }
 
 commitment CA { by: Clinic obligation: "a" creates_burden: sourceA }
 commitment CB { by: Clinic obligation: "b" creates_burden: sourceB }

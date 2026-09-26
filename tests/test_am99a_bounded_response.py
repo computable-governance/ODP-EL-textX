@@ -41,15 +41,23 @@ _CONSENT = _REPO / "scenarios" / "consent" / "consent_scenario.el"
 _REFERRAL = _REPO / "scenarios" / "referral" / "referral_scenario.el"
 
 
-def _km_from_file(path, horizon=10):
+def _km_from_file(path, horizon=10, deadline_scale=1):
     result = parse(path, validate=False)
     assert result.ok, result.errors
-    return build_kripke_model(result.model, horizon=horizon)
+    return build_kripke_model(result.model, horizon=horizon, deadline_scale=deadline_scale)
 
 
 @pytest.fixture(scope="module")
 def toe():
     return _km_from_file(_TOE)
+
+
+@pytest.fixture(scope="module")
+def toe_scaled():
+    """AM-111: "1 day" is 1440 steps (one step per minute), beyond horizon
+    10, so the review's deadline is reached only with AM-110's scale factor.
+    k = 480 is the scenario's configured k (review 3 steps, notification 9)."""
+    return _km_from_file(_TOE, deadline_scale=480)
 
 
 # ── The motivating scenario ──────────────────────────────────────────────────
@@ -62,14 +70,21 @@ def test_refusal_record_response_property_holds(toe):
     assert v.satisfied is True
 
 
-def test_eventual_response_property_fails_but_reachable(toe):
+def test_eventual_response_property_fails_but_reachable(toe_scaled):
     """Eventual: detectable (EF) but not compelled once pending."""
-    v = toe.check_obligation("refusalReviewBurden")
+    v = toe_scaled.check_obligation("refusalReviewBurden")
     assert v.modal_operator == RESPONSE_OPERATOR
     assert v.status is None
     assert v.satisfied is False
     assert v.counterexample_path
-    assert toe.check_permission("refusalReviewBurden").satisfied is True
+    assert toe_scaled.check_permission("refusalReviewBurden").satisfied is True
+
+
+def test_eventual_review_not_resolved_unscaled(toe):
+    """AM-111: at k = 1 the review's 1-day deadline (1440 steps) lies
+    beyond horizon 10."""
+    v = toe.check_obligation("refusalReviewBurden")
+    assert (v.satisfied, v.status) == (False, NOT_RESOLVED_WITHIN_HORIZON)
 
 
 def test_incident_notification_not_resolved_within_horizon(toe):
@@ -77,7 +92,8 @@ def test_incident_notification_not_resolved_within_horizon(toe):
     counterexample ended at another obligation's violation, then a dead
     end (the terminal-violated-world rule). With violated worlds
     continuing, no path fails within the horizon: its own genuine failure,
-    silence until the 72-hour deadline (360 steps), lies beyond horizon 10.
+    silence until the 72-hour deadline (4320 steps since AM-111; 360
+    before), lies beyond horizon 10.
     Detectable (EF) as before. See CONCEPTS_INDEX, horizon sizing."""
     v = toe.check_obligation("incidentNotificationBurden")
     assert v.modal_operator == RESPONSE_OPERATOR
@@ -86,9 +102,9 @@ def test_incident_notification_not_resolved_within_horizon(toe):
     assert toe.check_permission("incidentNotificationBurden").satisfied is True
 
 
-def test_counterexample_starts_at_initial_world(toe):
-    v = toe.check_obligation("refusalReviewBurden")
-    assert v.counterexample_path[0][0] == toe.initial
+def test_counterexample_starts_at_initial_world(toe_scaled):
+    v = toe_scaled.check_obligation("refusalReviewBurden")
+    assert v.counterexample_path[0][0] == toe_scaled.initial
 
 
 # ── Scoping: untriggered obligations and hybrid models unchanged ─────────────

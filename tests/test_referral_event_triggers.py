@@ -31,6 +31,7 @@ from el_engine import (
     TokenInstance,
     _activate_triggered_tokens,
     _build_group_index,
+    _parse_deadline_steps,
     advance,
     enroll,
     grant_token,
@@ -402,10 +403,12 @@ def test_escalation_path_grants_review_burden_to_gp_practice():
     elapsed-vs-deadline detection — not a hand-rolled _transition() shortcut
     like tests/test_fire_violation_responses.py's own probe explicitly
     documents using for its precondition. referralResponseBurden's deadline
-    ("5 working days from referral receipt") resolves to 40 steps (see
-    docs/CONCEPTS_INDEX.md's deadline-magnitude finding); advance_clock(41)
-    crosses it while staying well under assessmentSchedulingBurden's
-    112-step ("14 days") deadline, so only referralResponseBurden violates.
+    ("5 working days from referral receipt") resolves to 10080 steps since
+    AM-111 (7 calendar days at one step per minute; see
+    docs/CONCEPTS_INDEX.md's deadline-magnitude finding); advancing the
+    clock one tick past it, derived from _parse_deadline_steps(), stays well
+    under assessmentSchedulingBurden's "14 days" (20160), so only
+    referralResponseBurden violates.
 
     referralInitiationBurden (discharge_mode: strict) must be discharged
     first — AM-49 blocks advance_clock() while any active, actionable
@@ -432,7 +435,9 @@ def test_escalation_path_grants_review_burden_to_gp_practice():
     )
     assert init_record.outcome == "ok"
 
-    clock_record = runtime.advance_clock(41)
+    response_deadline = _parse_deadline_steps("5 working days from referral receipt")
+    assert response_deadline < _parse_deadline_steps("14 days from referral receipt")
+    clock_record = runtime.advance_clock(response_deadline + 1)
     assert clock_record.outcome == "ok"
 
     violation_record = runtime.check_live_violations()

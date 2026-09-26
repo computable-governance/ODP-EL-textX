@@ -81,7 +81,7 @@ def test_no_magnitude_deadline_never_clock_violated(builder, deadline):
 
 @pytest.mark.parametrize("builder", ["static", "hybrid"])
 def test_magnitude_deadline_still_violated(builder):
-    _, models = _prose_models("1 hour")
+    _, models = _prose_models("5 minutes")
     km = models[builder]
     assert "proseBurden" in km.enforceable_deadlines
     assert km.EF(km.initial, "violated:proseBurden") is True

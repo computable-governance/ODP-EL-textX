@@ -59,7 +59,7 @@
       "chain": [
         "DiagnosticProviderA"
       ],
-      "deadline_steps": 20,
+      "deadline_steps": 240,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "claimReferralA",
@@ -75,7 +75,7 @@
       "chain": [
         "DiagnosticProviderB"
       ],
-      "deadline_steps": 20,
+      "deadline_steps": 240,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "claimReferralB",
@@ -113,7 +113,7 @@
       "chain": [
         "SpecialistParty"
       ],
-      "deadline_steps": 112,
+      "deadline_steps": 20160,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "scheduleAssessment",
@@ -145,7 +145,7 @@
       "chain": [
         "SpecialistParty"
       ],
-      "deadline_steps": 240,
+      "deadline_steps": 2880,
       "discharge_mode": "strict",
       "fires_event": null,
       "for_action": "notify_gp_of_non_response",
@@ -161,7 +161,7 @@
       "chain": [
         "GPPracticeParty"
       ],
-      "deadline_steps": 240,
+      "deadline_steps": 2880,
       "discharge_mode": "strict",
       "fires_event": null,
       "for_action": "initiateReferral",
@@ -178,7 +178,7 @@
         "GPPracticeParty",
         "SpecialistClinician"
       ],
-      "deadline_steps": 40,
+      "deadline_steps": 10080,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "acknowledgeReferral",
@@ -295,7 +295,7 @@
       "chain": [
         "SpecialistPractice"
       ],
-      "deadline_steps": 112,
+      "deadline_steps": 20160,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "scheduleAssessment",
@@ -327,7 +327,7 @@
       "chain": [
         "SpecialistPractice"
       ],
-      "deadline_steps": 240,
+      "deadline_steps": 2880,
       "discharge_mode": "strict",
       "fires_event": null,
       "for_action": "notify_gp_of_non_response",
@@ -343,7 +343,7 @@
       "chain": [
         "GPPractice"
       ],
-      "deadline_steps": 240,
+      "deadline_steps": 2880,
       "discharge_mode": "strict",
       "fires_event": null,
       "for_action": "initiateReferral",
@@ -359,7 +359,7 @@
       "chain": [
         "GPPractice"
       ],
-      "deadline_steps": 40,
+      "deadline_steps": 10080,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "acknowledgeReferral",
@@ -375,7 +375,7 @@
       "chain": [
         "GPPractice"
       ],
-      "deadline_steps": 240,
+      "deadline_steps": 2880,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "reviewNonResponseAndDetermineNextSteps",
@@ -393,7 +393,7 @@
       "chain": [
         "SpecialistOnCallA"
       ],
-      "deadline_steps": 10,
+      "deadline_steps": 120,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "acceptConsultA",
@@ -409,7 +409,7 @@
       "chain": [
         "SpecialistOnCallB"
       ],
-      "deadline_steps": 10,
+      "deadline_steps": 120,
       "discharge_mode": "eventual",
       "fires_event": null,
       "for_action": "acceptConsultB",

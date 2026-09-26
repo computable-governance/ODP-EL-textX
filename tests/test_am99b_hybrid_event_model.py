@@ -41,7 +41,7 @@ from pathlib import Path
 import pytest
 
 from el_api import _SCENARIO_BUILDERS
-from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_engine import _parse_deadline_steps, enroll, grant_token, initial_state, token_from_spec
 from el_kripke import (
     NOT_RESOLVED_WITHIN_HORIZON,
     ObligationState,
@@ -144,10 +144,13 @@ def test_triggered_burden_violated_no_earlier_than_activation_plus_deadline(toe_
     rt.advance("recordRefusal", "ProviderAPIGateway")
     activated = next(t.activated_at_tick for t in rt.current_state().tokens
                      if t.token_name == "refusalReviewBurden")
-    # horizon counts from the runtime's tick (9) since AM-99b part 4, so
-    # 10 steps reach step 19, past activation (8) + deadline (8).
+    deadline = _parse_deadline_steps("1 day")  # AM-111: 1440 steps
+    # horizon counts from the runtime's tick since AM-99b part 4: bring the
+    # runtime to 4 ticks before activation (8) + deadline, so the deadline
+    # falls inside the 10-step horizon.
+    rt.advance_clock(activated + deadline - 4 - rt.current_state().tick)
     km = _quiet(build_kripke_from_runtime, rt, horizon=10)
-    deadline = km.obligation_descriptors["refusalReviewBurden"].deadline_steps
+    assert km.obligation_descriptors["refusalReviewBurden"].deadline_steps == deadline
     violation_steps = {
         w.step for (src, w), label in km.labels.items()
         if label == "violate:refusalReviewBurden"
@@ -175,17 +178,25 @@ def test_after_refusal_w0_mirrors_engine(toe_spec):
 
 
 def test_after_refusal_response_verdicts_match_static(toe_spec):
+    # AM-111: the review's "1 day" is 1440 steps, beyond horizon 10, so the
+    # record/review comparison runs at the scenario's configured k (480;
+    # review 3 steps). At k = 1 static says "not resolved" for the review
+    # and hybrid fails via the same cycle as the notification below.
+    static_k = _quiet(build_kripke_model, toe_spec, horizon=10, deadline_scale=480)
+    hybrid_k = _quiet(build_kripke_from_runtime, _after_refusal(toe_spec), horizon=10,
+                      deadline_scale=480)
+    for oid in ("refusalRecordBurden", "refusalReviewBurden"):
+        h, s_ = hybrid_k.check_response(oid), static_k.check_obligation(oid)
+        assert (h.satisfied, h.status) == (s_.satisfied, s_.status), oid
+    assert hybrid_k.check_response("refusalRecordBurden").satisfied is True
+
     static = _quiet(build_kripke_model, toe_spec, horizon=10)
     hybrid = _quiet(build_kripke_from_runtime, _after_refusal(toe_spec), horizon=10)
-    for oid in ("refusalRecordBurden", "refusalReviewBurden"):
-        h, s_ = hybrid.check_response(oid), static.check_obligation(oid)
-        assert (h.satisfied, h.status) == (s_.satisfied, s_.status), oid
-    assert hybrid.check_response("refusalRecordBurden").satisfied is True
 
     # AM-109: incidentNotificationBurden no longer matches, pinned here.
     # Static: "not resolved within horizon" — its only counterexample used
     # to end at another obligation's violation (the terminal rule), and its
-    # own deadline (360 steps) is beyond the horizon. Hybrid: fails, via a
+    # own deadline (4320 steps since AM-111) is beyond the horizon. Hybrid: fails, via a
     # revoke/reinstate cycle on AgentAccessAuthorization (T7/T8, which only
     # the hybrid builder has) that defers the notification forever. Before
     # AM-109 both said "fails", for different reasons. notifyIncident needs

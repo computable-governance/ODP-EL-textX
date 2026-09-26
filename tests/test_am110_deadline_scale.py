@@ -6,13 +6,15 @@ with deadline_scale=k; one step then stands for k unscaled steps. k is
 stated per build (default 1) and reported on the model, every verdict,
 the T2 label and the summary.
 
-  - Soundness cross-checks: a scaled model at horizon 10 gives the same
-    verdicts as an unscaled model with a horizon large enough to reach the
-    same deadlines (erequesting_claiming static and hybrid, gp_referral
-    static, public data portal static).
-  - The terms-of-engagement reading at k = 40, static: recording is
-    compelled; review and notification fail with a deadline-violation
-    counterexample.
+  - Soundness cross-checks: a model at scale k and horizon 10 gives the
+    same verdicts as one at scale k/m and horizon 10m, which reaches the
+    same deadlines in m times as many steps (erequesting_claiming static and
+    hybrid, gp_referral static, public data portal static). Before AM-111
+    (one step per minute) the finer model could be unscaled; with deadlines
+    now 240 to 20160 steps, k/m replaces k = 1.
+  - The terms-of-engagement reading at k = 480 (its configured k since
+    AM-111; 40 before), static: recording is compelled; review and
+    notification fail with a deadline-violation counterexample.
   - k = 1 leaves every model unchanged; only enforceable deadlines scale;
     hybrid mode re-anchors a seeded activation to the exact remainder
     ceil((d - e) / k).
@@ -93,59 +95,61 @@ def _verdicts(km):
 # ── Soundness cross-checks: scaled at H = 10 ≡ unscaled at a larger horizon ──
 
 def test_cross_check_erequesting_claiming_static():
+    """"4 hours" = 240 steps: 9 at k = 27, 27 at k = 9."""
     spec = _spec(_SCENARIO_PATHS["erequesting_claiming"])
-    scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=3)
-    wide = _quiet(build_kripke_model, spec, horizon=22)
+    scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=27)
+    wide = _quiet(build_kripke_model, spec, horizon=30, deadline_scale=9)
     assert _verdicts(scaled) == _verdicts(wide)
     assert _verdicts(scaled)["providerAClaimBurden"] == (False, True, False, True)
 
 
 def test_cross_check_erequesting_claiming_hybrid():
     build = _SCENARIO_BUILDERS["erequesting_claiming"]
-    scaled = _quiet(build_kripke_from_runtime, _quiet(build), horizon=10, deadline_scale=3)
-    wide = _quiet(build_kripke_from_runtime, _quiet(build), horizon=22)
+    scaled = _quiet(build_kripke_from_runtime, _quiet(build), horizon=10, deadline_scale=27)
+    wide = _quiet(build_kripke_from_runtime, _quiet(build), horizon=30, deadline_scale=9)
     assert _verdicts(scaled) == _verdicts(wide)
     for oid in ("providerAClaimBurden", "providerBClaimBurden"):
         assert _verdicts(scaled)[oid] == (False, True, False, True), oid
 
 
 def test_cross_check_gp_referral_static():
-    """k = 27 at horizon 10 (446 worlds) against k = 1 at horizon 250
-    (171,156 worlds) — the largest deadline, 240 steps, fits in both."""
+    """k = 2240 at horizon 10 (197 worlds) against k = 56 at horizon 400
+    (133,674 worlds) — the largest deadline, "14 days" = 20160 steps, is 9
+    and 360 scaled steps. Before AM-111: k = 27 at 10 against k = 1 at 250."""
     spec = _spec(_SCENARIO_PATHS["gp_referral"])
-    scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=27)
-    wide = _quiet(build_kripke_model, spec, horizon=250)
+    scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=2240)
+    wide = _quiet(build_kripke_model, spec, horizon=400, deadline_scale=56)
     assert _verdicts(scaled) == _verdicts(wide)
     assert _verdicts(scaled)["referralResponseBurden"] == (False, False, False, True)
 
 
 def test_cross_check_public_data_portal_static():
-    """k = 40 at horizon 10 against k = 10 at horizon 40: the 360-step
+    """k = 480 at horizon 10 against k = 120 at horizon 40: the 4320-step
     notification deadline is 9 and 36 steps respectively."""
     spec = _spec(_PORTAL)
-    scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=40)
-    finer = _quiet(build_kripke_model, spec, horizon=40, deadline_scale=10)
+    scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=480)
+    finer = _quiet(build_kripke_model, spec, horizon=40, deadline_scale=120)
     assert _verdicts(scaled) == _verdicts(finer)
 
 
-# ── The terms-of-engagement reading at k = 40 (static) ───────────────────────
+# ── The terms-of-engagement reading at k = 480 (static) ──────────────────────
 
 @pytest.mark.parametrize("path", [_PORTAL, _AGENT_ACCESS], ids=lambda p: p.stem)
-def test_terms_of_engagement_reading_at_k40(path):
+def test_terms_of_engagement_reading_at_k480(path):
     spec = _spec(path)
-    assert suggest_deadline_scale(spec, 10) == 40
-    km = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=40)
+    assert suggest_deadline_scale(spec, 10) == 480
+    km = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=480)
 
     record = km.check_obligation("refusalRecordBurden")
     assert (record.satisfied, record.status) == (True, None)
 
-    for oid, scaled, unscaled in (("refusalReviewBurden", 1, 8),
-                                  ("incidentNotificationBurden", 9, 360)):
+    for oid, scaled, unscaled in (("refusalReviewBurden", 3, 1440),
+                                  ("incidentNotificationBurden", 9, 4320)):
         v = km.check_obligation(oid)
-        assert (v.satisfied, v.status, v.deadline_scale) == (False, None, 40), oid
+        assert (v.satisfied, v.status, v.deadline_scale) == (False, None, 480), oid
         labels = [label for _, label in v.counterexample_path]
         assert labels[-2] == (f"violate:{oid} (deadline={scaled} steps "
-                              f"at k=40; {unscaled} unscaled)"), oid
+                              f"at k=480; {unscaled} unscaled)"), oid
         assert labels[-1].startswith("✗ violated"), oid
         assert f"discharge:{oid}" not in " ".join(labels), oid
         assert km.EF(km.initial, f"discharged:{oid}"), oid  # detectable
@@ -187,26 +191,26 @@ def test_k1_hybrid_unchanged(name):
 # ── What scales, and how k is chosen ─────────────────────────────────────────
 
 def test_only_enforceable_deadlines_scale():
-    km = _quiet(build_kripke_model, _spec(_PORTAL), horizon=10, deadline_scale=40)
+    km = _quiet(build_kripke_model, _spec(_PORTAL), horizon=10, deadline_scale=480)
     steps = {o: d.deadline_steps for o, d in km.obligation_descriptors.items()}
     assert steps == {"refusalRecordBurden": 5,        # no magnitude: untouched
-                     "refusalReviewBurden": 1,        # ceil(8 / 40)
-                     "incidentNotificationBurden": 9}  # ceil(360 / 40)
-    assert km.unscaled_deadlines == {"refusalReviewBurden": 8,
-                                     "incidentNotificationBurden": 360}
+                     "refusalReviewBurden": 3,        # ceil(1440 / 480)
+                     "incidentNotificationBurden": 9}  # ceil(4320 / 480)
+    assert km.unscaled_deadlines == {"refusalReviewBurden": 1440,
+                                     "incidentNotificationBurden": 4320}
     summary = km.render_summary()
-    assert "Deadline scale : k=40" in summary
-    assert "deadline=9 steps (360 unscaled, k=40)" in summary
+    assert "Deadline scale : k=480" in summary
+    assert "deadline=9 steps (4320 unscaled, k=480)" in summary
     assert "mode=strict  deadline=none" in summary
 
 
 @pytest.mark.parametrize("rel, k", [
-    ("scenarios/terms_of_engagement/public_data_portal_scenario.el", 40),
-    ("scenarios/referral/referral_scenario.el", 27),
-    ("scenarios/gp_referral/gp_referral_scenario.el", 27),
-    ("scenarios/erequesting_claiming/erequesting_claiming_scenario.el", 3),
-    ("scenarios/industrial_procedure/industrial_procedure_scenario.el", 5),
-    ("scenarios/specialist_pool/specialist_pool_scenario.el", 2),
+    ("scenarios/terms_of_engagement/public_data_portal_scenario.el", 480),
+    ("scenarios/referral/referral_scenario.el", 2240),
+    ("scenarios/gp_referral/gp_referral_scenario.el", 2240),
+    ("scenarios/erequesting_claiming/erequesting_claiming_scenario.el", 27),
+    ("scenarios/industrial_procedure/industrial_procedure_scenario.el", 2),
+    ("scenarios/specialist_pool/specialist_pool_scenario.el", 14),
     ("scenarios/consent/consent_scenario.el", 1),
 ])
 def test_suggest_deadline_scale(rel, k):
@@ -241,35 +245,35 @@ def _notified_runtime(elapsed: int) -> Runtime:
 
 
 def test_hybrid_exact_remainder():
-    """d = 360, k = 50, e = 45: ceil(315 / 50) = 7 scaled steps remain.
-    The floor approximation (ceil(360/50) - floor(45/50) = 8) would be one
-    step late."""
-    rt = _notified_runtime(45)
+    """d = 4320, k = 500, e = 450: ceil(3870 / 500) = 8 scaled steps remain.
+    The floor approximation (ceil(4320/500) - floor(450/500) = 9) would be
+    one step late."""
+    rt = _notified_runtime(450)
     state = rt.current_state()
     tok = next(t for t in state.tokens if t.token_name == "incidentNotificationBurden")
     e = state.tick - tok.activated_at_tick
-    assert e == 45
-    km = _quiet(build_kripke_from_runtime, rt, horizon=10, deadline_scale=50)
-    assert km.obligation_descriptors["incidentNotificationBurden"].deadline_steps == 8
-    assert _first_violation_step(km, "incidentNotificationBurden") == state.tick + 7
+    assert e == 450
+    km = _quiet(build_kripke_from_runtime, rt, horizon=10, deadline_scale=500)
+    assert km.obligation_descriptors["incidentNotificationBurden"].deadline_steps == 9
+    assert _first_violation_step(km, "incidentNotificationBurden") == state.tick + 8
 
 
 def test_hybrid_overdue_violable_at_w0():
     """e >= d: the violation is available at w0, scaled or not."""
-    rt = _notified_runtime(400)
+    rt = _notified_runtime(4400)  # past the 4320-step deadline
     tick = rt.current_state().tick
-    for k in (1, 40):
+    for k in (1, 480):
         km = _quiet(build_kripke_from_runtime, rt, horizon=10, deadline_scale=k)
         assert _first_violation_step(km, "incidentNotificationBurden") == tick, k
 
 
 def test_hybrid_label_names_both_deadlines():
     rt = _notified_runtime(1)
-    km = _quiet(build_kripke_from_runtime, rt, horizon=10, deadline_scale=40)
+    km = _quiet(build_kripke_from_runtime, rt, horizon=10, deadline_scale=480)
     labels = {label for label in km.labels.values()
               if label.startswith("violate:incidentNotificationBurden")}
     assert labels == {"violate:incidentNotificationBurden "
-                      "(deadline=9 steps at k=40; 360 unscaled)"}
+                      "(deadline=9 steps at k=480; 4320 unscaled)"}
     unscaled = _quiet(build_kripke_from_runtime, rt, horizon=10)
     assert _first_violation_step(unscaled, "incidentNotificationBurden") is None
 
@@ -288,15 +292,15 @@ def referral_api(monkeypatch):
 def test_status_and_witness_endpoints_report_k(referral_api):
     status = el_api.get_obligation_status("referralResponseBurden")
     assert status.deadline_scale == 1
-    scaled = el_api.get_obligation_status("referralResponseBurden", deadline_scale=27)
-    assert scaled.deadline_scale == 27
+    scaled = el_api.get_obligation_status("referralResponseBurden", deadline_scale=2240)
+    assert scaled.deadline_scale == 2240
 
     witness = el_api.get_witness_path("violated:referralResponseBurden")
     assert (witness["deadline_scale"], witness["witness_path"]) == (1, [])
-    witness = el_api.get_witness_path("violated:referralResponseBurden", deadline_scale=27)
-    assert witness["deadline_scale"] == 27
+    witness = el_api.get_witness_path("violated:referralResponseBurden", deadline_scale=2240)
+    assert witness["deadline_scale"] == 2240
     assert witness["witness_path"][-1]["edge_from_previous"].startswith(
-        "violate:referralResponseBurden (deadline=2 steps at k=27; 40 unscaled)")
+        "violate:referralResponseBurden (deadline=5 steps at k=2240; 10080 unscaled)")
 
 
 def test_endpoints_reject_scale_below_one(referral_api):

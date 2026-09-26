@@ -49,7 +49,7 @@ party Holder {
     holds longBurden
 }
 
-burden shortBurden { for_action: "doShort" state: active deadline: "1 hour" discharge_mode: eventual }
+burden shortBurden { for_action: "doShort" state: active deadline: "5 minutes" discharge_mode: eventual }
 burden longBurden { for_action: "doLong" state: active deadline: "1 week" discharge_mode: eventual }
 commitment CS { by: Holder obligation: "short" creates_burden: shortBurden }
 commitment CL { by: Holder obligation: "long" creates_burden: longBurden }
@@ -97,7 +97,7 @@ party Holder {
 
 burden qBurden { for_action: "doQ" state: active deadline: "0 minutes" discharged_by: qDone discharge_mode: strict }
 permit unlockPermit { for_action: "doO" state: pending triggered_by: qDone }
-burden oBurden { for_action: "doO" state: pending deadline: "1 hour" triggered_by: start discharge_mode: strict }
+burden oBurden { for_action: "doO" state: pending deadline: "5 minutes" triggered_by: start discharge_mode: strict }
 
 commitment CQ { by: Holder obligation: "q" creates_burden: qBurden }
 commitment CO { by: Holder obligation: "o" creates_burden: oBurden }

@@ -17,15 +17,16 @@ written, but never produced by any code path until now (same finding).
 
 Minimal inline spec via parse_string(), same throwaway-probe pattern as
 tests/test_t6_examine_embargo_guard.py / test_v17_burden_embargo_conflict.py.
-"deadline: "1 hour"" parses to 5 steps via _parse_deadline_steps — chosen
-for a small, exact elapsed-vs-deadline boundary to assert on. Both burdens
+"deadline: "1 hour"" parses to _DEADLINE steps via _parse_deadline_steps
+(60 since AM-111: one step is one minute); the boundary ticks below are
+derived from it, not hard-coded. Both burdens
 are wired through a real Commitment (`by: Holder`), matching Tier 1 of the
 two-tier deadline lookup — the same Commitment-derived path
 referralResponseBurden/assessmentSchedulingBurden use in the real
 scenarios (see docs/CONCEPTS_INDEX.md's double-grant/pre-seed finding for
 why that path matters, not just the bare-string fallback).
 """
-from el_engine import _transition, check_live_violations
+from el_engine import _parse_deadline_steps, _transition, check_live_violations
 from el_parser import parse_string
 from el_runtime import Runtime
 
@@ -98,6 +99,9 @@ def _build_probe_runtime() -> Runtime:
     return Runtime.build_from_spec(result.model)
 
 
+_DEADLINE = _parse_deadline_steps("1 hour")  # the probe's deadline, in steps
+
+
 def _token(state, name):
     return next(t for t in state.tokens if t.token_name == name)
 
@@ -107,8 +111,8 @@ def test_eventual_burden_stays_active_before_deadline_elapsed():
     state = rt.current_state()
     assert _token(state, "eventualBurden").granted_at_tick == 0
 
-    # deadline_steps == 5 ("1 hour"); elapsed == 4 < 5 — not yet violated.
-    almost_due = state.with_tick(4)
+    # elapsed == _DEADLINE - 1 < _DEADLINE — not yet violated.
+    almost_due = state.with_tick(_DEADLINE - 1)
     new_state, record = check_live_violations(almost_due, rt._spec)
 
     assert record.outcome == "ok"
@@ -117,15 +121,15 @@ def test_eventual_burden_stays_active_before_deadline_elapsed():
     # No-op poll must not consume a tick — see el_engine.check_live_violations()'s
     # docstring: this is a deliberate exception to the "every mutation advances
     # tick unconditionally" convention, specifically to keep repeated polling safe.
-    assert new_state.tick == 4
+    assert new_state.tick == _DEADLINE - 1
 
 
 def test_eventual_burden_transitions_to_violated_once_elapsed_reaches_deadline():
     rt = _build_probe_runtime()
     state = rt.current_state()
 
-    # elapsed == 5 == deadline_steps — boundary is inclusive ("elapsed >= deadline").
-    exactly_due = state.with_tick(5)
+    # elapsed == deadline_steps — boundary is inclusive ("elapsed >= deadline").
+    exactly_due = state.with_tick(_DEADLINE)
     new_state, record = check_live_violations(exactly_due, rt._spec)
 
     assert record.outcome == "violation"
@@ -134,7 +138,7 @@ def test_eventual_burden_transitions_to_violated_once_elapsed_reaches_deadline()
     assert _token(new_state, "eventualBurden").state == "violated"
     # Non-mutating on the input WorldState (frozen dataclass, copy-on-write).
     assert _token(state, "eventualBurden").state == "active"
-    assert new_state.tick == 6  # a real transition happened — tick DOES advance
+    assert new_state.tick == _DEADLINE + 1  # a real transition happened — tick DOES advance
 
 
 def test_strict_burden_never_touched_regardless_of_elapsed_time():
@@ -142,7 +146,7 @@ def test_strict_burden_never_touched_regardless_of_elapsed_time():
     state = rt.current_state()
 
     # Wildly past any plausible deadline — must still be skipped entirely.
-    way_past_due = state.with_tick(1000)
+    way_past_due = state.with_tick(1000 * _DEADLINE)
     new_state, record = check_live_violations(way_past_due, rt._spec)
 
     assert "strictBurden" not in record.violations
@@ -155,9 +159,9 @@ def test_strict_burden_never_touched_regardless_of_elapsed_time():
 
 def test_tick_advances_when_a_violation_is_found():
     rt = _build_probe_runtime()
-    state = rt.current_state().with_tick(5)
+    state = rt.current_state().with_tick(_DEADLINE)
     new_state, _record = check_live_violations(state, rt._spec)
-    assert new_state.tick == 6
+    assert new_state.tick == _DEADLINE + 1
 
 
 def test_tick_does_not_advance_on_no_op():
@@ -166,10 +170,10 @@ def test_tick_does_not_advance_on_no_op():
     docstring. A poll that finds nothing must be free to repeat without
     consuming ticks other live Burdens' deadlines are measured against."""
     rt = _build_probe_runtime()
-    state = rt.current_state().with_tick(4)  # elapsed 4 < deadline_steps 5
+    state = rt.current_state().with_tick(_DEADLINE - 1)  # elapsed < deadline_steps
     new_state, record = check_live_violations(state, rt._spec)
     assert record.outcome == "ok"
-    assert new_state.tick == 4
+    assert new_state.tick == _DEADLINE - 1
 
 
 def test_no_magnitude_deadline_never_violates_regardless_of_elapsed_time():
@@ -212,7 +216,7 @@ def test_no_magnitude_deadline_never_violates_via_bare_token_fallback():
 
 def test_runtime_wrapper_appends_to_ledger():
     rt = _build_probe_runtime()
-    rt._state = rt._state.with_tick(5)
+    rt._state = rt._state.with_tick(_DEADLINE)
 
     record = rt.check_live_violations()
 

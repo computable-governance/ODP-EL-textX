@@ -93,15 +93,15 @@ def _probe_models(deadline, mode):
 @pytest.mark.parametrize("builder", ["static", "hybrid"])
 def test_holds(builder):
     """Strict: discharged before time can pass — holds, no horizon involved."""
-    verdict = _probe_models("1 hour", "strict")[builder].check_obligation("probeBurden")
+    verdict = _probe_models("5 minutes", "strict")[builder].check_obligation("probeBurden")
     assert verdict.satisfied is True
     assert verdict.status is None
 
 
 @pytest.mark.parametrize("builder", ["static", "hybrid"])
 def test_fails_with_genuine_counterexample(builder):
-    """Eventual, 1 hour (5 steps): a path violates it within the horizon."""
-    km = _probe_models("1 hour", "eventual")[builder]
+    """Eventual, 5 minutes (5 steps): a path violates it within the horizon."""
+    km = _probe_models("5 minutes", "eventual")[builder]
     verdict = km.check_obligation("probeBurden")
     assert verdict.satisfied is False
     assert verdict.status is None

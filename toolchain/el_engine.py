@@ -24,7 +24,9 @@ Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, §7.8, §7.10
 
 from __future__ import annotations
 
+import math
 import re
+from fractions import Fraction
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
@@ -1062,80 +1064,83 @@ class ObligationDescriptor:
     # _find_action_for_burden() when not set directly on the DeonticToken.
 
 
-_DEADLINE_UNIT_STEPS = {
-    "second": 2,   # very tight
-    "minute": 3,
-    "hour":   5,
-    "day":    8,
-    "week":   12,
-    "month":  20,
+# AM-111: one step is a fixed duration, defined once; every unit converts
+# through it. Before AM-111 each unit had its own step weight (second 2,
+# minute 3, hour 5, day 8, week 12, month 20), which reversed real-time
+# order: "48 hours" (240) outlasted "14 days" (112), and "5 minutes" (15)
+# outlasted "2 hours" (10). AM-110's deadline_scale keeps verification
+# tractable whatever the step size.
+_STEP_SECONDS = 60  # 1 step = 1 minute
+
+_DEADLINE_UNIT_SECONDS = {
+    "second": 1,
+    "minute": 60,
+    "hour":   3600,
+    "day":    86400,
+    "week":   7 * 86400,
+    "month":  30 * 86400,   # approximation: a 30-day month
+    "year":   365 * 86400,  # approximation: a 365-day year
 }
+
+# Qualified units, approximations documented in AM-111: a working (or
+# business) day is 7/5 of a calendar day (5 working days per 7-day week), a
+# business hour is 168/40 elapsed hours (40 business hours per 168-hour
+# week). Both ignore the starting weekday and public holidays: exact for
+# whole weeks, otherwise off by less than two days (less than two days' worth
+# of business hours).
+_QUALIFIED_UNIT_FACTOR = {
+    "day":  Fraction(7, 5),
+    "hour": Fraction(168, 40),
+}
+_DEADLINE_QUALIFIER_RE = re.compile(r"\b(?:working|business)\b")
 
 # Leading number attached to a unit word, e.g. "5" in "5 working days" or "48"
 # in "48 hours from clinical decision" — the digits and the unit need not be
 # adjacent (an intervening word like "working" is common in these strings),
-# so allow a short run of non-digit characters between them. Bounded at 20
-# chars so an unrelated number elsewhere in a long description (or in a
-# different unit's word) can't accidentally pair with this one.
+# so allow a short run of non-digit characters between them (captured, for
+# the qualifier). Bounded at 20 chars so an unrelated number elsewhere in a
+# long description (or in a different unit's word) can't accidentally pair
+# with this one.
 _DEADLINE_MAGNITUDE_RE = re.compile(
-    r"(\d+)\D{0,20}?(" + "|".join(_DEADLINE_UNIT_STEPS) + r")"
+    r"(\d+)(\D{0,20}?)(" + "|".join(_DEADLINE_UNIT_SECONDS) + r")"
 )
+
+
+def _duration_steps(seconds: Fraction) -> int:
+    """AM-111: a duration in seconds as whole steps, rounded up (a
+    deadline is never shorter than stated)."""
+    return math.ceil(Fraction(seconds) / _STEP_SECONDS)
 
 
 def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
     """
     Convert a natural-language deadline string to a finite step count.
 
-    The mapping is necessarily approximate because the DSL deadline is
-    expressed in domain time (seconds, days, etc.) while our step model is
-    abstract — there is no claim of a real-world-accurate step==duration
-    correspondence. The goal is to preserve the relative ordering of
-    deadlines, now including relative ordering *within* a unit, not just
-    across units.
+    AM-111: one step is _STEP_SECONDS (one minute). A leading number and a
+    recognised unit word give magnitude * the unit's duration, rounded up
+    to whole steps: "5 minutes" → 5, "48 hours" → 2880, "14 days" → 20160,
+    "1 year" → 525600. "working"/"business" between the number and "days"
+    or "hours" applies _QUALIFIED_UNIT_FACTOR: "5 working days" → 7 days =
+    10080. The real-time order of deadlines is therefore preserved, which
+    the per-unit weights before AM-111 did not do.
 
-    Bug fixed here (found live via referral-board-view.html, CC investigation
-    2026-08-29): the previous version matched only the unit word and ignored
-    any magnitude, so "5 working days from referral receipt"
-    (referralResponseBurden) and "14 days from referral receipt"
-    (assessmentSchedulingBurden) both resolved to the same flat 8 steps —
-    both burdens then went VIOLATED at the identical elapsed tick in
-    check_live_violations(), even though the 14-day deadline should take
-    materially longer to elapse than the 5-day one. Also logged as the
-    still-open "Convergence with live-violation-detection design" finding in
-    docs/CONCEPTS_INDEX.md's discharge_mode: strict entry (2026-08-20).
+    History (2026-08-29): before then only the unit word was matched and
+    any magnitude ignored, so "5 working days" and "14 days" both resolved
+    to the same flat step count and were violated at the same tick in
+    check_live_violations(). That function's only use of this value is
+    `elapsed = tick - _activation_tick(tok); if elapsed >= deadline_steps`,
+    so the step count must scale linearly with the stated duration.
 
-    Fix: when a leading number is present alongside a recognised unit word
-    (magnitude * that unit's per-unit step value — see
-    _DEADLINE_UNIT_STEPS), use it. "5 working days" → 5 * 8 = 40; "14 days" →
-    14 * 8 = 112 — now genuinely distinguishable, and proportional to the
-    real ratio (14/5 = 2.8x) the two deadlines actually encode. Confirmed
-    against check_live_violations()'s only consumption of this value —
-    `elapsed = tick - _activation_tick(tok); if elapsed >= deadline_steps` — a
-    plain elapsed-ticks-vs-threshold comparison, so scaling the threshold
-    linearly with the stated magnitude is the semantically correct fix for
-    that call site, not just a plausible-looking formula.
+    A magnitude-less deadline (no digit alongside a unit word — e.g. a
+    word-form magnitude like "thirty days", or a bare unit-only phrase)
+    falls back to one unit's duration; "referral episode", "end of
+    session", and other non-unit deadlines fall through to `default`.
+    Neither is ever clock-violated (_has_deadline_magnitude(), AM-108): the
+    value only fills the descriptor.
 
-    A magnitude-less deadline (no digit found alongside a unit word — e.g. a
-    word-form magnitude like "thirty days", which this parser does not
-    attempt to spell out, or a bare unit-only phrase) falls back to the
-    original flat per-unit bucket below, unchanged from before this fix.
-    "referral episode", "end of session", and other non-unit deadlines fall
-    through to `default`, also unchanged.
-
-    Known consequence, not a defect: the Kripke verifier (el_kripke.py)
-    reuses this same function and gates its Rule T2 (deadline violation)
-    transition on `w.step >= desc.deadline_steps` within a bounded horizon
-    (10 by default, el_api.py's _KRIPKE_HORIZON). A large multi-day
-    deadline_steps value (e.g. assessmentSchedulingBurden's new 112) now
-    exceeds that horizon, so the verifier can no longer witness a "violate:"
-    transition for it within the default horizon — it could before this fix,
-    at the flat value of 8. This does not affect any current test (no test
-    asserts EF/AF over a "violate:" proposition, checked directly) and does
-    not affect discharge reachability (Rule T1 fires independently of
-    deadline_steps at any step), but is worth knowing if a future scenario
-    needs "eventually witnessed as violated within N steps" for a
-    long-deadline eventual Burden — that would need a larger horizon, not a
-    change to this function.
+    The Kripke verifier (el_kripke.py) reuses this function; deadlines far
+    beyond its horizon are made checkable by AM-110's deadline_scale, not
+    by changing this function.
     """
     if not deadline_str:
         return default
@@ -1143,11 +1148,14 @@ def _parse_deadline_steps(deadline_str: Optional[str], default: int = 5) -> int:
     match = _DEADLINE_MAGNITUDE_RE.search(s)
     if match:
         magnitude = int(match.group(1))
-        unit = match.group(2)
-        return magnitude * _DEADLINE_UNIT_STEPS[unit]
-    for unit, steps in _DEADLINE_UNIT_STEPS.items():
+        unit = match.group(3)
+        seconds = Fraction(magnitude * _DEADLINE_UNIT_SECONDS[unit])
+        if unit in _QUALIFIED_UNIT_FACTOR and _DEADLINE_QUALIFIER_RE.search(match.group(2)):
+            seconds *= _QUALIFIED_UNIT_FACTOR[unit]
+        return _duration_steps(seconds)
+    for unit, unit_seconds in _DEADLINE_UNIT_SECONDS.items():
         if unit in s:
-            return steps
+            return _duration_steps(unit_seconds)
     return default
 
 
