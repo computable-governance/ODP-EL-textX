@@ -8964,3 +8964,143 @@ informative), §C.2.
 T2 loop, fallback descriptor); `tests/test_am106_hybrid_gated_t2.py`
 (new); `docs/CONCEPTS_INDEX.md`; `docs/KRIPKE_TRANSITION_RULES.md`; this
 file.
+
+---
+
+## AM-107 (2026-09-26) — horizon-honest AF, genuine counterexamples, deterministic ties (`toolchain/el_kripke.py`, `el_api.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in five parts (commits `0f1bdd7`, `aa87e6a`,
+`9b036cd`, `2fcdc3c` and this docs commit). Type: verifier semantics (Layer 4) and
+API output. **No grammar, engine or transition-rule change.** Opens and
+resolves the CONCEPTS_INDEX finding "AF reported true only because the
+horizon stopped time"; resolves "Recommendation ties depend on hash
+order".
+
+**Reorder (decided 2026-09-26).** AM-107 was first scoped as "the
+verifier does not violate a burden whose deadline has no elapsed-time
+magnitude". Its Phase 1 found that removing those violations would
+expose a pre-existing horizon bug (below) and report more eventual
+burdens as compelled only because time stops at the horizon. So the
+horizon fix comes first, as AM-107. The no-magnitude T2 skip, together
+with a T2b mirroring the engine's episode-conclusion violation (DN_010
+option b) and a validator warning `[W-24]`, becomes **AM-108**; the
+terminal-violated-world rule (CONCEPTS_INDEX, `7695d1f`) becomes
+**AM-109**.
+
+### The bug
+
+At the horizon step there is no tick (T3), but other edges — notably a
+discharge — remain. An eventual obligation that is never violated within
+the horizon therefore has, at the horizon, only the discharge left, and
+AF(discharged) came out **true ("compelled") only because time stopped**.
+Live on HEAD in both builders: erequesting_claiming's
+`providerAClaimBurden` (static, hybrid) and `providerBClaimBurden`
+(hybrid) — deadline "4 hours" = 20 steps, horizon 10. A one-burden probe
+with deadline "1 week" (12 steps) is AF true in both builders. No strict
+verdict depended on it.
+
+### Part 1 — three-valued AF (`0f1bdd7`)
+
+`KripkeModel._AF_bounded()` evaluates AF with the horizon explicit: a
+world satisfying the obligation's `violated:` proposition fails (it can
+never be discharged afterwards); a world at the horizon step that is
+neither discharged nor violated is where the path was cut off, and counts
+as a pass or a failure depending on the reading; such a world is not
+expanded. `_AF3()` combines the two readings:
+
+- **holds** — AF holds even with cut-off paths counted as failures;
+- **fails** — AF fails even with them counted as passes (a violation, a
+  dead end below the horizon, or a cycle): counterexample given;
+- **not resolved within horizon** — otherwise: `satisfied` False,
+  `status` = `NOT_RESOLVED_WITHIN_HORIZON`, no counterexample.
+
+`check_obligation()`'s AF path and `check_response()` (per pending world;
+any genuine failure fails the property, else any unresolved world leaves
+it unresolved) both use it. Memos are shared across pending worlds. The
+API keeps `compelled` = `satisfied` (false when not resolved), with the
+AM-104 `status` field.
+
+Before/after (every static model, API runtime, and the 137 hybrid models
+the suite builds): **5 verdicts true → "not resolved within horizon"**,
+all eventual — the three erequesting_claiming ones and two probe burdens
+in `test_am102_embargo_parity.py` (`carryBurden` AF, `handleBurden`
+bounded response). **17 already-false verdicts** (all in suite probes)
+change from "fails with counterexample" to "not resolved": their only
+counterexample was a path that ticked to the horizon. **No strict verdict
+moves. World counts, edges, Bellman values and recommendations
+unchanged** — nothing else reads AF (Bellman, `recommend_action()`, the
+witness endpoint, the UI pages' "Compelled" badges, which are hardcoded
+or fixed by `discharge_mode: strict`). No existing test failed.
+
+### Part 2 — genuine counterexamples (`aa87e6a`)
+
+`_find_AF_counterexample()` follows only successors from which AF fails
+even with cut-off paths counted as passes, so the path always ends at a
+genuine failure, never at a horizon cut-off. New terminal label
+`✗ violated — obligation can no longer be discharged` alongside
+`✗ dead-end` and `↺ cycle`. Across the scenarios all 30 failing verdicts
+now end genuinely (13 violated, 10 dead end below the horizon, 7 cycle).
+The five that used to end at the horizon: static referral and gp_referral
+`referralResponseBurden`, `assessmentSchedulingBurden` — now a tick, an
+unrelated violation, dead end at step 9 (genuine under today's rules, but
+it rests on the terminal rule, AM-109, and on the no-magnitude default,
+AM-108); hybrid referral `referralResponseBurden` — a
+`revoke`/`reinstate` cycle on `patientDataAuthorization`.
+
+### Part 3 — deterministic tie-breaking (`9b036cd`)
+
+Successor sets were iterated in hash order wherever one of several equals
+was picked, so results depended on `PYTHONHASHSEED`: the top
+recommendation (among equal utilities), the Bellman policy walk, the API's
+recommended action (among equal Q-values), `rank_worlds_by_utility()`,
+and the shortest witness / `_path_to()` path among equal lengths. New
+`World.sort_key()` (a total order over every field; `__repr__` shows only
+step and obligation states) and `KripkeModel.ordered_successors()`
+(label, then `sort_key()`); every such site iterates it. The API's
+candidate sort is `(-q, label)`.
+
+Changes, every one a tie at equal value: before, the hybrid suite models
+differed between two seeds in 17 of 137, the static/API models in 3 of
+20; after, in none, with identical verdicts. 22 suite-model and 5
+static/API recommendations change to the label-first choice — e.g.
+ereferral `discharge:examinationBurden` → `discharge:acknowledgementBurden`
+(0.6864 both), erequesting_claiming A/B now always A, specialist_pool
+now always A, static referral always `discharge:clinicalHandoverBurden`.
+The API's `/recommended-action` for ereferral and erequesting_claiming
+varied with the seed at HEAD (the UI could show a different
+recommendation after an API restart); now fixed. Matters for audit
+replay.
+
+### Part 4 — tests (`2fcdc3c`)
+
+New `tests/test_am107_horizon_honest_af.py` (17; 14 fail on the
+pre-AM-107 code — the two "holds" cases are unchanged by design, and the
+hybrid cycle case was hash-order dependent before): the three
+erequesting_claiming verdicts; one probe per outcome in both builders
+(strict holds; 1 hour fails with a `✗ violated` counterexample; 1 week
+not resolved — AF true before); bounded response not resolved; genuine
+counterexamples for the five referral-family cases; the status endpoint;
+the same recommendations and witness across two processes with
+`PYTHONHASHSEED` 0 and 1.
+
+### Part 5 — docs
+
+This entry; CONCEPTS_INDEX: the horizon finding opened and resolved, the
+tie-order finding resolved, a new OPEN FINDING on horizon sizing; the
+API `status` field comment and endpoint description (`el_api.py`).
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 711 → 711 → 711
+→ 711 → 728 → 728 passed, 1 xfailed.
+
+**Standard reference(s):** Annex C (Kripke semantics, informative), §C.2
+(AF, obligation), §C.4 (utility, recommendation); §6.4.3 (Burden), §7.8.7
+(deadlines).
+
+**Files changed:** `toolchain/el_kripke.py` (`World.sort_key()`,
+`KripkeModel.ordered_successors()`, `_AF_bounded()`, `_AF3()`,
+`check_obligation()`, `check_response()`, `_find_AF_counterexample()`,
+`_path_to()`, `_find_EF_witness()`, `rank_worlds_by_utility()`,
+`recommend_action()`, the Bellman policy walk); `toolchain/el_api.py`
+(recommended-action and execute-action candidate order; status field
+description); `tests/test_am107_horizon_honest_af.py` (new);
+`docs/CONCEPTS_INDEX.md`; this file.

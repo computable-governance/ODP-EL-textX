@@ -6542,3 +6542,67 @@ horizon) at least while any obligation is PENDING, or unconditionally;
 the VIOLATED obligation itself stays VIOLATED. Moves world counts and
 possibly AF verdicts in every scenario where a violation is reachable, so
 it needs its own amendment with a before/after comparison. Not scheduled.
+
+## AF reported true only because the horizon stopped time — OPEN FINDING (2026-09-26), RESOLVED (2026-09-26)
+
+**OPEN FINDING (2026-09-26), RESOLVED 2026-09-26 by AM-107** (see
+`docs/el_grammar_amendments.md`). Found in the Phase 1 of what was first
+scoped as AM-107 (no-magnitude deadlines, now AM-108).
+
+At the horizon step there is no tick, but a discharge edge remains. An
+eventual obligation never violated within the horizon therefore had only
+the discharge left at the horizon, and AF came out true ("compelled")
+only because time stopped. Live in both builders: erequesting_claiming's
+`providerAClaimBurden` (static, hybrid) and `providerBClaimBurden`
+(hybrid) — deadline 20 steps, horizon 10. No strict verdict depended on
+it. The default 5-step violation of no-magnitude deadlines hid it for
+those burdens, which is why the planned T2 skip (AM-108) had to wait.
+
+**Resolution:** AF is three-valued in `check_obligation()` and
+`check_response()` — holds, fails with a genuine counterexample, or "not
+resolved within horizon" (`status`, `satisfied` False) — and
+counterexamples always end at a genuine failure. 5 verdicts move from
+true to "not resolved", 17 already-false ones from "fails" to "not
+resolved"; nothing strict, and nothing that Bellman or the UI reads.
+
+## Recommendation ties depend on hash order — OPEN FINDING (2026-09-26), RESOLVED (2026-09-26)
+
+**OPEN FINDING (2026-09-26), RESOLVED 2026-09-26 by AM-107.** Successor
+sets were iterated in hash order wherever one of several equals was
+picked: `recommend_action()` among equal utilities, the Bellman policy
+walk, the API's `/recommended-action` among equal Q-values,
+`rank_worlds_by_utility()`, and the shortest witness / `_path_to()` path.
+Results changed with `PYTHONHASHSEED`, so an API restart could change the
+recommended action (seen for ereferral and erequesting_claiming). Fixed
+by `World.sort_key()` and `KripkeModel.ordered_successors()` (edge label,
+then world); every change was among ties at equal value. Pinned by a test
+that runs two processes with different hash seeds. Matters for audit
+replay.
+
+## Horizon sizing: most real deadlines exceed the default horizon — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — follows from AM-107. With AF now honest about the
+horizon, a burden whose deadline lies beyond it is reported "not
+resolved within horizon" rather than compelled. The API and the UI build
+models with `_KRIPKE_HORIZON = 10`, but 13 burdens in the tracked
+scenarios have longer deadlines:
+
+| Steps | Burdens |
+|---|---|
+| 20 | erequesting_claiming `providerAClaimBurden`, `providerBClaimBurden` ("4 hours") |
+| 40 | referral, gp_referral `referralResponseBurden` ("5 working days") |
+| 112 | referral, gp_referral `assessmentSchedulingBurden` ("14 days") |
+| 240 | referral, gp_referral `escalationNoticeBurden`, `referralInitiationBurden` (strict); referral `reviewNonResponseAndDetermineNextStepsBurden` ("48 hours") |
+| 360 | both terms-of-engagement `incidentNotificationBurden` ("72 hours") |
+
+So honest AF will often say "not resolved", and bounded responses whose
+trigger lies beyond the horizon say "not triggered". That is correct but
+uninformative for these scenarios.
+
+**Options (not decided):** report the largest in-scope deadline alongside
+the horizon (the status endpoint already returns `horizon`), so a reader
+sees why; or choose a default horizon that covers the largest in-scope
+deadline, per model; or rescale `_DEADLINE_UNIT_STEPS` so real deadlines
+fit a tractable horizon. World counts grow quickly with the horizon
+(e.g. hybrid referral 3976 worlds at 10), so any larger default needs a
+cost measurement. Not scheduled.
