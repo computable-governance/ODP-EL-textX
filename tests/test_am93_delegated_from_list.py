@@ -305,9 +305,10 @@ def test_named_scenarios_single_entries_and_warnings_unchanged():
     required but never granted); AM-97 fixed the scenario content — see
     AM-97's amendment entry. consent_scenario.el is warning-free again;
     the delegated_from entries checked below are unaffected either way."""
+    # AM-103: scoped to the multi-parent [W-16*] codes delegated_from feeds.
     referral = parse("scenarios/referral/referral_scenario.el", validate=True)
     assert referral.ok, referral.errors
-    assert referral.warnings == [
+    assert _w16(referral.warnings) == [
         "[W-16g] Agent 'SpecialistClinician' has 2 declared parents across all "
         "channels: GPClinician (gpToSpecialistDelegation, delegated_from), "
         "SpecialistPractice (standing principal_of). Principals are collectively "
@@ -322,12 +323,17 @@ def test_named_scenarios_single_entries_and_warnings_unchanged():
 
     consent = parse("scenarios/consent/consent_scenario.el", validate=True)
     assert consent.ok, consent.errors
-    assert consent.warnings == []
+    assert _w16(consent.warnings) == []
     assert _entries(consent.model, "SpecialistAgent") == [("GPPracticeParty", "referral period")]
     assert _entries(consent.model, "AIDiagnosticAgent") == [("SpecialistAgent", "clinical session")]
 
     federation = parse("scenarios/consent/federation_consent_scenario.el", validate=True)
     assert federation.ok, federation.errors
-    assert len(federation.warnings) == 1
-    assert federation.warnings[0].startswith("[W-16e] Agent 'SpecialistParty' has 2 standing")
+    assert len(_w16(federation.warnings)) == 1
+    assert _w16(federation.warnings)[0].startswith("[W-16e] Agent 'SpecialistParty' has 2 standing")
     assert _entries(federation.model, "AISpecialistAgent") == [("SpecialistParty", "")]
+
+
+def _w16(warnings):
+    """The multi-parent [W-16*] warnings only (AM-103 scoping)."""
+    return [w for w in warnings if w.startswith("[W-16")]

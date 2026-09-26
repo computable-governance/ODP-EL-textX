@@ -417,7 +417,8 @@ def test_referral_scenario_produces_exactly_one_w16g_true_positive():
     here, on the named tracked file, per the maintainer's instruction."""
     result = parse("scenarios/referral/referral_scenario.el", validate=True)
     assert result.ok, result.errors
-    assert result.warnings == [
+    # AM-103: scoped to [W-16g], the code this test is about.
+    assert [w for w in result.warnings if w.startswith("[W-16g]")] == [
         "[W-16g] Agent 'SpecialistClinician' has 2 declared parents across all "
         "channels: GPClinician (gpToSpecialistDelegation, delegated_from), "
         "SpecialistPractice (standing principal_of). Principals are collectively "

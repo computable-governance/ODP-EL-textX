@@ -389,7 +389,8 @@ def test_consent_scenario_no_longer_produces_w16h():
     this scenario file."""
     result = parse("scenarios/consent/consent_scenario.el", validate=True)
     assert result.ok, result.errors
-    assert result.warnings == []
+    # AM-103: scoped to [W-16h], the code this test is about.
+    assert not any(w.startswith("[W-16h]") for w in result.warnings), result.warnings
 
 
 def test_referral_scenario_produces_no_w16h():

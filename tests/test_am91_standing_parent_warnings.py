@@ -249,21 +249,12 @@ def test_named_referral_and_consent_scenarios_unchanged():
     is warning-free again."""
     result = parse("scenarios/referral/referral_scenario.el", validate=True)
     assert result.ok, result.errors
+    # AM-103: scoped to [W-16e], the code this test is about.
     assert not any(w.startswith("[W-16e]") for w in result.warnings)
-    assert result.warnings == [
-        "[W-16g] Agent 'SpecialistClinician' has 2 declared parents across all "
-        "channels: GPClinician (gpToSpecialistDelegation, delegated_from), "
-        "SpecialistPractice (standing principal_of). Principals are collectively "
-        "responsible (§7.10.1); delegated_from is itself a self-sufficient static "
-        "declaration (§6.6.8 NOTE 3) and is counted here even with no backing "
-        "Delegation. How these authorities combine is application-defined; the "
-        "toolchain does not compose them. See "
-        "el_reasoner.all_declared_parents_of(model, 'SpecialistClinician')."
-    ]
 
     result = parse("scenarios/consent/consent_scenario.el", validate=True)
     assert result.ok, result.errors
-    assert result.warnings == [], f"unexpectedly produced: {result.warnings}"
+    assert not any(w.startswith("[W-16e]") for w in result.warnings), result.warnings
 
 
 def test_federation_consent_scenario_produces_exactly_one_w16e():
@@ -275,7 +266,8 @@ def test_federation_consent_scenario_produces_exactly_one_w16e():
     per the maintainer's instruction."""
     result = parse("scenarios/consent/federation_consent_scenario.el", validate=True)
     assert result.ok, result.errors
-    assert result.warnings == [
+    # AM-103: scoped to [W-16e], the code this test is about.
+    assert [w for w in result.warnings if w.startswith("[W-16e]")] == [
         "[W-16e] Agent 'SpecialistParty' has 2 standing principal_of parents: "
         "GPParty, SpecialistPracticeParty. For a token with no Commitment of its "
         "own, chain-based views name one of them (the first alphabetically); the "

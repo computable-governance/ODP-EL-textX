@@ -86,6 +86,12 @@ Rules implemented
         has a for_action outside that set — blocking follows the
         naming Actions, so the for_action is ignored. Advisory,
         never an error; role Action bodies only.        AM-102, §6.4.4, §6.4.6
+  W-19  A discharge_mode: strict Burden has no deadline with an
+        elapsed-time magnitude (a number with a unit, e.g. "15
+        minutes") — none at all, or prose only. Advisory.  AM-103, §6.4.3, §7.8.7
+  W-20  A discharge_mode: strict Burden that no ViolationResponse
+        names in on_violation_of. Advisory; not needed if the
+        enforcement point discharges it atomically.        AM-103, §6.3.8, §7.8.6
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -245,6 +251,12 @@ def validate_spec(model) -> List[str]:
 
     # W-18 — embargo for_action outside its naming Actions (AM-102, §6.4.4, §6.4.6)
     errors.extend(_validate_embargo_for_action_consistency(model))
+
+    # W-19 — strict burden without a measurable deadline (AM-103, §6.4.3, §7.8.7)
+    errors.extend(_validate_strict_burden_deadline(model))
+
+    # W-20 — strict burden no ViolationResponse names (AM-103, §6.3.8, §7.8.6)
+    errors.extend(_validate_strict_burden_violation_response(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1271,6 +1283,79 @@ def _validate_embargo_for_action_consistency(model) -> List[str]:
             f"'{for_action}' is not blocked by it. Name '{for_action}' in its "
             f"for_action only if it is one of them, or add inhibited_by_embargo "
             f"{tok.name} to '{for_action}'. (§6.4.4, §6.4.6)"
+        )
+    return warnings
+
+
+def _strict_burdens(model) -> List[Any]:
+    """AM-103: every discharge_mode: strict Burden — top-level DeonticTokens
+    and role-scoped InlineTokens (AM-24; P3 places them in role.holds_tokens)."""
+    tokens = list(_collect(model, "DeonticToken"))
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            tokens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                          if _cls(t) == "InlineToken")
+    return [t for t in tokens
+            if getattr(t, "kind", None) == "burden"
+            and getattr(t, "discharge_mode", None) == "strict"]
+
+
+def _validate_strict_burden_deadline(model) -> List[str]:
+    """W-19 (AM-103): a strict Burden with no deadline that carries an
+    elapsed-time magnitude. The live engine never violates a strict Burden
+    on its clock (check_live_violations() excludes them); its violation is
+    to come from an external, authorised violation declaration, which needs
+    a deadline to judge against. "A deadline" means
+    el_engine._has_deadline_magnitude() is true — the same test
+    check_live_violations() uses for a genuine deadline. A prose deadline
+    ("clinical session") or a bare number only yields
+    _parse_deadline_steps()'s default of 5, which does not count.
+    The token's own `deadline` is the only source: Commitment has no
+    deadline field. Advisory, never an error."""
+    from el_engine import _has_deadline_magnitude
+
+    warnings: List[str] = []
+    for tok in _strict_burdens(model):
+        deadline = getattr(tok, "deadline", None) or None
+        if _has_deadline_magnitude(deadline):
+            continue
+        if deadline is None:
+            problem = "has no deadline"
+        else:
+            problem = (f"has deadline '{deadline}', which carries no elapsed-time "
+                       f"magnitude (a number with a unit)")
+        warnings.append(
+            f"[W-19] Strict burden '{tok.name}' {problem}. Its violation can only "
+            f"be declared against a deadline; the verifier falls back to 5 steps "
+            f"and the engine cannot measure it. Add a deadline such as "
+            f"\"15 minutes\". (§6.4.3, §7.8.7)"
+        )
+    return warnings
+
+
+def _validate_strict_burden_violation_response(model) -> List[str]:
+    """W-20 (AM-103): a strict Burden that no ViolationResponse names in
+    on_violation_of. While it is actionable, the engine refuses every
+    non-discharging action (Step 3.5); if its holder never acts, nothing
+    responds. Fires on every such Burden, including ones whose
+    enforcement point discharges them atomically (executing-compelled),
+    which the validator cannot distinguish; the message names that
+    exception. Advisory, never an error."""
+    named = {
+        getattr(getattr(vr, "violated_burden", None), "name", None)
+        for vr in _collect(model, "ViolationResponse")
+    }
+    warnings: List[str] = []
+    for tok in _strict_burdens(model):
+        if tok.name in named:
+            continue
+        warnings.append(
+            f"[W-20] Strict burden '{tok.name}' is named by no ViolationResponse "
+            f"(on_violation_of). If its holder never discharges it, nothing "
+            f"responds. Not needed if the enforcement point discharges the burden "
+            f"atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
         )
     return warnings
 
