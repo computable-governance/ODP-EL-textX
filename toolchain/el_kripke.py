@@ -662,6 +662,12 @@ class KripkeModel:
     # built from Community/Federation Objective.satisfaction clauses (AM-27).
     # operator is 'all_discharged' or 'any_discharged'.
     # Used by _build_propositions to emit objective_satisfied:<community>.
+    violation_activation: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
+    # AM-105: {created_burden: (violated_burden, ...)} from
+    # _build_violation_activation_index(). A created burden starts WAITING
+    # and T2's violation of any listed burden activates it; check_obligation()
+    # then gives it the bounded response verdict, as for triggered_by.
+    # Kept off ObligationDescriptor so descriptors stay unchanged.
 
     # ── Satisfaction relation ──────────────────────────────────────────────────
 
@@ -791,12 +797,15 @@ class KripkeModel:
         instead the bounded response property (see check_response()), in
         models from both builders — AM-99b removed the temporary flag that
         limited this to the static builder, once hybrid mode mirrored the
-        engine's event model.
+        engine's event model. AM-105: the same for a burden that a
+        ViolationResponse creates (self.violation_activation) — it exists
+        only after the violation.
 
         Returns an ObligationVerdict with full explanation.
         """
         desc = self.obligation_descriptors.get(obligation_id)
-        if desc is not None and desc.triggered_by:
+        if desc is not None and (desc.triggered_by
+                                 or obligation_id in self.violation_activation):
             return self.check_response(obligation_id)
 
         prop = f"discharged:{obligation_id}"
@@ -2079,6 +2088,76 @@ def _activate_waiting(
             new_activation[oid] = step
 
 
+def _build_violation_activation_index(
+    model: Any, descriptors: Dict[str, ObligationDescriptor]
+) -> Dict[str, Tuple[str, ...]]:
+    """
+    AM-105: {created_burden: (violated_burden, ...)} for each burden that a
+    ViolationResponse creates (creates_burden, §6.3.8, §7.8.6 NOTE 2) and
+    that exists only through that response. Such a burden starts WAITING
+    and becomes PENDING on the T2 edge that violates any listed burden
+    (_activate_on_violation()), mirroring the engine, where
+    fire_violation_responses() grants it only after the violation.
+
+    Linked only when the created burden has a descriptor, has no
+    triggered_by of its own (the engine would grant it and it would then
+    still wait on its event; one WAITING state cannot model both — open
+    finding), and has no other root: not created by a Commitment or an
+    Authorization's auth_burden, and not in any object's or role's holds.
+    A burden with another root exists independently of the violation and
+    keeps its ordinary initial state. Several responses creating the same
+    burden list every violated burden; the first violation activates it
+    (the engine could grant a second instance — open finding).
+    """
+    other_roots: Set[str] = set()
+    for el in model.elements:
+        kind = type(el).__name__
+        if kind == "Commitment":
+            other_roots.add(_obj_name(getattr(el, "burden", None)))
+        elif kind == "Authorization":
+            other_roots.add(_obj_name(getattr(el, "auth_burden", None)))
+        elif kind == "EnterpriseObject":
+            other_roots.update(_obj_name(t) for t in getattr(el, "holds_tokens", []) or [])
+        elif kind in ("Community", "Domain", "Federation"):
+            for role in getattr(el, "roles", []) or []:
+                other_roots.update(_obj_name(t) for t in getattr(role, "holds_tokens", []) or [])
+
+    index: Dict[str, Set[str]] = {}
+    for vr in model.elements:
+        if type(vr).__name__ != "ViolationResponse":
+            continue
+        created = _obj_name(getattr(vr, "creates_burden", None))
+        violated = _obj_name(getattr(vr, "violated_burden", None))
+        desc = descriptors.get(created)
+        if not created or not violated or desc is None:
+            continue
+        if desc.triggered_by or created in other_roots:
+            continue
+        index.setdefault(created, set()).add(violated)
+    return {created: tuple(sorted(v)) for created, v in index.items()}
+
+
+def _activate_on_violation(
+    violation_activation: Dict[str, Tuple[str, ...]],
+    violated: str,
+    new_obligs: Dict[str, ObligationState],
+    new_activation: Dict[str, int],
+    step: int,
+) -> bool:
+    """AM-105: on the T2 edge violating `violated`, every WAITING burden a
+    response creates from it becomes PENDING, its activation step
+    recorded (both dicts updated in place). Returns True if any did — the
+    caller then enqueues the violated world instead of leaving it
+    terminal. Shared by both builders' T2."""
+    activated = False
+    for created, sources in violation_activation.items():
+        if violated in sources and new_obligs.get(created) == ObligationState.WAITING:
+            new_obligs[created] = ObligationState.PENDING
+            new_activation[created] = step
+            activated = True
+    return activated
+
+
 def _build_claim_evaluations(model: Any) -> Dict[str, List[Any]]:
     """
     AM-61 (see DN_003): map each DeonticToken name to the
@@ -2246,6 +2325,10 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            the step O became PENDING (w.activation_steps; 0 for an
            obligation PENDING at w0) — AM-99a, previously counted from
            step 0 even for obligations P6a activated later.
+           AM-105: the same edge activates (WAITING → PENDING) every
+           burden a ViolationResponse creates from O
+           (violation_activation); such a violated world is enqueued,
+           every other stays terminal.
 
          Rule T3 — TICK (time passes):
            Add an edge w → w_tick where step increments by 1 and all
@@ -2347,6 +2430,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     KripkeModel with all worlds, edges, propositions, and descriptors populated.
     """
     descriptors = _build_obligation_descriptors(model)
+    violation_activation = _build_violation_activation_index(model, descriptors)  # AM-105
     permit_descriptors = _build_permit_descriptors(model)
     embargo_inhibition_index = _build_embargo_inhibition_index(model)
     general_embargoes = _build_general_embargoes(model)  # AM-102
@@ -2402,7 +2486,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         all_actors.add(pdesc.holder)
 
     # Build initial world: obligations with triggered_by start WAITING (trigger
-    # not yet fired); obligations that are any_discharged-group members with an
+    # not yet fired), as do burdens a ViolationResponse creates (AM-105,
+    # violation_activation — waiting on the violation); obligations that are any_discharged-group members with an
     # associated structured Evaluation (accept/reject) start CLAIMABLE
     # (AM-61 — see DN_003); all others start PENDING.
     # All actors start ACTIVE.
@@ -2425,7 +2510,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     def _initial_obligation_state(oid: str, desc: Any) -> "ObligationState":
         if oid in claimable_group_members:
             return ObligationState.CLAIMABLE
-        if desc.triggered_by:
+        if desc.triggered_by or oid in violation_activation:  # AM-105
             return ObligationState.WAITING
         return ObligationState.PENDING
 
@@ -2591,14 +2676,23 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
 
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.VIOLATED
+            # AM-105: the violation activates the burdens its responses create.
+            new_activation = dict(w.activation_steps)
+            responded = _activate_on_violation(
+                violation_activation, oid, new_obligs, new_activation, w.step)
 
             w_viol  = _make_world(new_obligs, current_actors, current_occurred,
-                                  activation_steps=w.activation_steps, step=w.step)
+                                  activation_steps=new_activation, step=w.step)
             label   = f"violate:{oid} (deadline={desc.deadline_steps} steps)"
 
             if w_viol not in worlds:
                 worlds.add(w_viol)
-                # Violated worlds are terminal — do not enqueue further
+                # Violated worlds are terminal — do not enqueue further —
+                # except (AM-105) when this edge activated a response-created
+                # burden: left terminal, that burden could never discharge
+                # (a dead end makes AF false).
+                if responded and w_viol.step < horizon:
+                    queue.append(w_viol)
             edges.setdefault(w, set()).add(w_viol)
             labels[(w, w_viol)] = label
             successors_for_w.add(w_viol)
@@ -2822,6 +2916,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         horizon=horizon,
         group_index=group_index,
         satisfaction_conditions=satisfaction_conditions,
+        violation_activation=violation_activation,
     )
 
 

@@ -37,7 +37,13 @@ import pytest
 
 from el_api import _SCENARIO_BUILDERS
 from el_engine import _build_obligation_descriptors, grant_token, token_from_spec
-from el_kripke import build_kripke_from_runtime, build_kripke_model
+from el_kripke import (
+    NOT_TRIGGERED_WITHIN_HORIZON,
+    RESPONSE_OPERATOR,
+    ObligationState,
+    build_kripke_from_runtime,
+    build_kripke_model,
+)
 from el_parser import parse, parse_string
 
 
@@ -80,13 +86,26 @@ def test_escalation_notice_burden_reachable_via_af_ef_and_bellman():
     world, making both AF and EF trivially/silently False rather than
     erroring — the "invisible to AF/EF checks... can never appear in an
     optimal path recommendation at all" consequence the original finding
-    named. Post-fix: discharge_mode strict + single ACTIVE holder means
-    this is compelled (AF holds), and it participates in Bellman planning
-    (visible in a successor world's obligation_states)."""
+    named. Post-fix it is in the model and participates in Bellman planning
+    (visible in a successor world's obligation_states).
+
+    AM-105 corrected the verdict this test used to pin. It asserted AF true
+    (compelled): the static builder placed the burden in w0 as an ordinary
+    PENDING strict obligation, so it was discharged at once although it
+    exists only after referralResponseBurden is violated. It now starts
+    WAITING and is activated by that violation's T2 edge, so its verdict is
+    the bounded response property. referralResponseBurden's deadline is 40
+    steps and the horizon 10, so the violation, and with it the escalation,
+    is out of reach: "not triggered within horizon", not compelled, and EF
+    false. The hybrid model gives the same verdict (AM-105 part 2)."""
     km = build_kripke_model(_referral_model(), horizon=10)
 
-    assert km.check_obligation("escalationNoticeBurden").satisfied is True
-    assert km.check_permission("escalationNoticeBurden").satisfied is True
+    verdict = km.check_obligation("escalationNoticeBurden")
+    assert verdict.modal_operator == RESPONSE_OPERATOR
+    assert verdict.satisfied is False
+    assert verdict.status == NOT_TRIGGERED_WITHIN_HORIZON
+    assert km.check_permission("escalationNoticeBurden").satisfied is False
+    assert dict(km.initial.obligation_states)["escalationNoticeBurden"] == ObligationState.WAITING
 
     recs = km.recommend_action(km.initial)
     assert recs, "expected at least one recommended action from w0"
