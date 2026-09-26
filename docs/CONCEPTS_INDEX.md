@@ -6166,6 +6166,13 @@ engine would refuse. Logged, not fixed; belongs with the scope amendment.
 
 ## Strict mode, model vs deployment — OPEN FINDING (2026-09-26)
 
+**Note (AM-106, 2026-09-26):** T2 can violate a `strict` burden in both
+Kripke builders — neither excludes strict burdens — while the engine
+never clock-violates one (`check_live_violations()` skips them). It
+rarely shows, because T3 is suppressed while a strict burden is
+actionable, but a strict burden whose holder is not ACTIVE can age and
+be violated in the model. Unchanged; see the AM-106 entry.
+
 **OPEN FINDING** — recorded during AM-102; refines "`discharge_mode:
 strict` — enforcement exists only in the verifier, not the live runtime"
 (2026-08-20), whose premise AM-49/AM-76/AM-78 have since partly changed:
@@ -6420,9 +6427,23 @@ the holder of `refusalReviewBurden`). To be fixed with the scenario edits
 in the violation-declaration amendment, which should also give it a
 `creates_burden` (it currently raises `[W-22]`).
 
-## Hybrid mode never violates a permit-gated burden — OPEN FINDING (2026-09-26)
+## Hybrid mode never violates a permit-gated burden — RESOLVED (2026-09-26)
 
-**OPEN FINDING — high priority.** Found in AM-105 Phase 1. The hybrid
+**OPEN FINDING (2026-09-26, high priority), RESOLVED 2026-09-26 by
+AM-106** (see `docs/el_grammar_amendments.md`). Hybrid T2 is now its own
+loop over every PENDING obligation, as in static; the permit gate
+applies to T1 only. Across all 132 hybrid models the suite builds, only
+"eventually violated" moves (false → true for gated burdens); no AF, EF
+or bounded response verdict. **The fallback gap below is resolved too:**
+the fallback descriptor takes the live token's `for_action` (ereferral's
+`aiExaminationBurden` is now gated, discharged by T6) and parses the
+deadline as the static builder does. Caveat recorded in the AM-106 entry:
+referral's `aiExaminationBurden`, now violable in hybrid, has a
+no-magnitude deadline ("referral episode") that the engine never
+violates — an instance of the verifier-wide no-magnitude mismatch, still
+open. The original finding follows.
+
+Found in AM-105 Phase 1. The hybrid
 builder's T1/T2 loop (`build_kripke_from_runtime()`) starts with
 `if desc.for_action in permit_requirement_index: continue` ("gated — T6
 handles this obligation's discharge, not T1"). The `continue` skips T2 as

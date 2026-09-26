@@ -8833,3 +8833,134 @@ informative), §C.2.
 corrected); `tests/test_kripke_witness_endpoint.py`;
 `tests/test_am105_violation_activation.py` (new); `docs/CONCEPTS_INDEX.md`;
 this file.
+
+---
+
+## AM-106 (2026-09-26) — hybrid T2 applies to permit-gated burdens; the hybrid fallback descriptor uses the token's `for_action` and static deadline parsing (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in four parts (commits `a8ad4a7`, `f1e1fb7`,
+`4e6ba94` and this docs commit). Type: verifier semantics (Layer 4, hybrid
+builder only). **No grammar, engine or static-builder change.** Resolves
+the CONCEPTS_INDEX findings "Hybrid mode never violates a permit-gated
+burden" (high priority, from AM-105) and the smaller fallback gap logged
+in it.
+
+### Part 1 — hybrid T2 as its own loop (`a8ad4a7`)
+
+Hybrid T2 sat inside the T1 loop, after `if desc.for_action in
+permit_requirement_index: continue`, so a burden whose discharging action
+requires a permit was never VIOLATED in a hybrid model, and a
+ViolationResponse on it could never fire there (AM-105's
+`escalationNoticeBurden` waits on the gated `referralResponseBurden`).
+T2 is now its own loop over every PENDING obligation, mirroring static T2
+exactly: same deadline test counted from activation, same AM-105
+activation and enqueue rule, no holder-status check (as static). The
+permit gate stays on T1 only. The hybrid label stays `violate:<oid>`.
+
+Before/after, every hybrid model the suite builds (132 models in 122
+tests, recorded by a scratch pytest plugin): 60 move, all through the
+same change — **"eventually violated" (`EF violated:<oid>`) false → true
+for a gated burden** (referral's `aiExaminationBurden`, 3976 → 4768
+worlds, and its variants, e.g. 2832 → 3552, 4104 → 5040; probe burdens
+`noteBurden`, `examineBurden`, `gatedBurden`). **No AF, EF or bounded
+response verdict moves** — including the five gated burdens listed in
+the finding, all AF false before and after. gp_referral, erequesting,
+and the terms-of-engagement runtimes do not move (deadlines beyond the
+horizon, or nothing gated).
+
+**Caveat on the main visible effect:** referral's `aiExaminationBurden`
+has `deadline: "referral episode"` — no elapsed-time magnitude — so its
+5 steps are `_parse_deadline_steps()`'s default, and the engine never
+clock-violates it (`_has_deadline_magnitude()`). Its newly reachable
+hybrid violation is therefore an instance of the verifier-wide
+no-magnitude mismatch (see "Not done here" under Part 2), not a real
+deadline. It now matches the static builder, which already violated it.
+
+### Part 2 — the fallback descriptor (`f1e1fb7`)
+
+A live burden with no spec descriptor (no Commitment, response or
+Authorization root) gets a fallback descriptor. It now takes:
+
+- **`for_action` from the live token** (was `None`, so neither T1's
+  permit gate nor its embargo check could apply — AM-101 had worked
+  around this for the strict guard only). ereferral's
+  `aiExaminationBurden` becomes gated: T6 discharges it (`examine:… →
+  conductAIExamination`, needing the agent's active
+  `patientRecordAccessPermit`) instead of T1, and T6's embargo guard
+  applies. Moves the two ereferral models: 315 → 316 worlds, 631 → 628
+  edges; no verdict change.
+- **the deadline parsed as `_build_obligation_descriptors()` parses it**
+  (`_parse_deadline_steps()`), instead of `int(dl)` first. A bare number
+  "10" gave 10 steps here but 5 in static. Moves nothing in the suite (no
+  descriptor-less live token has a bare-number deadline); pinned by
+  `test_fallback_deadline_parsed_as_static`.
+
+**Not done here — bare numbers still violate, as in static.** Parsing "as
+static" means the default of 5 steps for a deadline with no elapsed-time
+magnitude, so the verifier still violates such a burden, while the
+engine never does (`_has_deadline_magnitude()`, 2026-08-29 mitigation;
+`[W-19]`'s message says the same). That mismatch is verifier-wide
+(static, and hybrid for every burden with a spec descriptor), not
+specific to the fallback; see CONCEPTS_INDEX "`deadline: "referral
+episode"` has no valid tick-count" (underlying gap still OPEN). Fixing it
+(no T2 without a magnitude, in both builders) would, for example, remove
+`violate:clinicalHandoverBurden` and `violate:aiExaminationBurden` (both
+"referral episode") from the referral models; a separate amendment.
+
+### Part 3 — tests (`4e6ba94`)
+
+New `tests/test_am106_hybrid_gated_t2.py` (5; all fail on the pre-AM-106
+code): a short-deadline probe where a gated burden is violated in hybrid
+and its response-created burden activates on that edge (bounded response
+true), hybrid matching static on the same probe; referral's
+`aiExaminationBurden` violable in hybrid with AF/EF unchanged; the
+fallback's `for_action` (ereferral: `examine` edge, no T1 `discharge`);
+the fallback's deadline parsing.
+
+### Part 4 — docs
+
+CONCEPTS_INDEX: the permit-gated finding and its fallback gap marked
+**RESOLVED**; a note on "Strict mode, model vs deployment".
+`docs/KRIPKE_TRANSITION_RULES.md`: T2 row (AM-105 and AM-106) and the
+last-updated note — AM-105 had not updated it.
+
+### First case of the terminal rule under-reporting in practice
+
+With `referralResponseBurden` now violable in hybrid, a runtime near its
+deadline activates `escalationNoticeBurden` within the horizon: referral
+or gp_referral with `referralInitiationBurden` discharged and the clock
+advanced to tick 36 (15336 and 2916 worlds). The escalation is PENDING
+in 1800 / 342 worlds, EF true (before AM-106: "not triggered within
+horizon", EF false). Its **bounded response is false**, counterexample
+`violate:referralResponseBurden` → `violate:clinicalHandoverBurden` →
+dead end: the unrelated violation ends the path while the escalation is
+pending. With violated worlds left non-terminal (throwaway check) it is
+**true** in both scenarios (17982 / 2997 worlds). So this false comes
+only from the terminal rule — the first place it under-reports in
+practice. See CONCEPTS_INDEX "\"Violated worlds are terminal\" conflicts
+with violation responses" (`7695d1f`). **The terminal-rule amendment
+follows immediately.** (`clinicalHandoverBurden`'s deadline, "referral
+episode", has no magnitude — the engine would never violate it; see the
+bare-number note in Part 2.)
+
+### Strict burdens: model vs engine
+
+Neither builder's T2 excludes `discharge_mode: strict` burdens, while
+the engine never clock-violates one (`check_live_violations()` skips
+them, AM-103). In the model this rarely shows, because T3 (tick) is
+suppressed while a strict burden is actionable, but a strict burden
+whose holder is not ACTIVE can age and be violated in the model. See
+CONCEPTS_INDEX "Strict mode, model vs deployment". Unchanged here.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 706 → 706 → 706
+→ 711 → 711 passed, 1 xfailed.
+
+**Standard reference(s):** §6.4.3 (Burden), §6.4.6 (conditional action:
+permit requirement), §7.8.7 (token lifecycle: deadlines); §6.3.8 and
+§7.8.6 (violation and its response); Annex C (Kripke semantics,
+informative), §C.2.
+
+**Files changed:** `toolchain/el_kripke.py` (`build_kripke_from_runtime()`:
+T2 loop, fallback descriptor); `tests/test_am106_hybrid_gated_t2.py`
+(new); `docs/CONCEPTS_INDEX.md`; `docs/KRIPKE_TRANSITION_RULES.md`; this
+file.
