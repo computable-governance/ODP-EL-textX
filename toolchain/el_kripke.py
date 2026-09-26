@@ -3714,6 +3714,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         for oid, desc in descriptors.items():
             if desc.for_action and desc.for_action in permit_requirement_index:
                 continue  # gated — T6 handles this obligation's discharge, not T1
+                          # (T2 is its own loop below, gated or not — AM-106)
             if obligs.get(oid) == ObligationState.PENDING:
                 effective_holder = _effective_holder(w, oid, desc)  # AM-81
                 # AM-102: the engine's Step 5 refuses the discharging action
@@ -3744,31 +3745,37 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                             queue.append(wd)
                     edges.setdefault(w, set()).add(wd)
                     labels[(w, wd)] = f"discharge:{oid} by {effective_holder}"
-                # AM-99b: deadline counted from activation, as static T2
-                # and the engine's check_live_violations() count it.
-                activated_at = dict(w.activation_steps).get(oid, 0)
-                if w.step - activated_at >= desc.deadline_steps:
-                    # AM-105: activate the burdens this violation's responses
-                    # create; such a violated world is enqueued, others stay
-                    # terminal (as static T2).
-                    v_obligs = {**obligs, oid: ObligationState.VIOLATED}
-                    v_activation = dict(w.activation_steps)
-                    responded = _activate_on_violation(
-                        violation_activation, oid, v_obligs, v_activation, w.step)
-                    wv = _make_world(
-                        v_obligs, actors, occurred,
-                        permit_states=w.permit_states, embargo_states=w.embargo_states,
-                        delegation_states=w.delegation_states,
-                        holder_overrides=w.holder_overrides,
-                        activation_steps=v_activation,
-                        step=w.step,
-                    )
-                    if wv not in worlds:
-                        worlds.add(wv)
-                        if responded and wv.step < horizon_step:
-                            queue.append(wv)
-                    edges.setdefault(w, set()).add(wv)
-                    labels[(w, wv)] = f"violate:{oid}"
+        # T2: Deadline violation — its own loop, mirroring static T2 (AM-106).
+        # Every PENDING obligation, gated or not: before AM-106 this sat
+        # inside the T1 loop, after the permit gate, so a gated burden was
+        # never violated. Deadline counted from activation (AM-99b), as
+        # static T2 and the engine's check_live_violations() count it.
+        # AM-105: the violation activates the burdens its responses create;
+        # such a violated world is enqueued, every other stays terminal.
+        for oid, desc in descriptors.items():
+            if obligs.get(oid) != ObligationState.PENDING:
+                continue
+            activated_at = dict(w.activation_steps).get(oid, 0)
+            if w.step - activated_at < desc.deadline_steps:
+                continue
+            v_obligs = {**obligs, oid: ObligationState.VIOLATED}
+            v_activation = dict(w.activation_steps)
+            responded = _activate_on_violation(
+                violation_activation, oid, v_obligs, v_activation, w.step)
+            wv = _make_world(
+                v_obligs, actors, occurred,
+                permit_states=w.permit_states, embargo_states=w.embargo_states,
+                delegation_states=w.delegation_states,
+                holder_overrides=w.holder_overrides,
+                activation_steps=v_activation,
+                step=w.step,
+            )
+            if wv not in worlds:
+                worlds.add(wv)
+                if responded and wv.step < horizon_step:
+                    queue.append(wv)
+            edges.setdefault(w, set()).add(wv)
+            labels[(w, wv)] = f"violate:{oid}"
         if w.step < horizon_step and any(
             obligs.get(o) == ObligationState.PENDING
             and descriptors[o].discharge_mode == "eventual"
