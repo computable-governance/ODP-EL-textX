@@ -1544,35 +1544,48 @@ class KripkeModel:
         """
         Find a path from start that NEVER satisfies prop (AF counterexample).
         Returns list of (world, label) pairs tracing the path, or None.
-        Uses DFS, following edges that do not lead to satisfaction.
-        """
-        path: List[Tuple[World, str]] = []
-        on_stack: Set[World] = set()
 
-        def dfs(w: World) -> bool:
-            if self.satisfies(w, prop):
-                return False   # this branch satisfies φ — not a counterexample
-            if w in on_stack:
+        AM-107: the path ends at a genuine failure — the obligation
+        VIOLATED, a dead end below the horizon, or a cycle avoiding prop —
+        never at a path merely cut off at the horizon. It follows only
+        successors from which AF fails even with horizon-cut paths counted
+        as passes (_AF_bounded(..., horizon_passes=True)), so it never needs
+        to backtrack. Callers ask for a counterexample only when that
+        reading fails (_AF3() returned (False, None)).
+        """
+        failed = "violated:" + prop.split(":", 1)[1] if ":" in prop else ""
+        genuine: Dict[World, bool] = {}   # optimistic-AF memo, shared
+
+        def fails(w: World) -> bool:
+            return not self._AF_bounded(w, prop, failed, True, genuine)
+
+        if not fails(start):
+            return None
+        path: List[Tuple[World, str]] = []
+        on_path: Set[World] = set()
+        w = start
+        while True:
+            if failed and self.satisfies(w, failed):
+                path.append((w, "✗ violated — obligation can no longer be discharged"))
+                return path
+            if w in on_path:
                 path.append((w, "↺ cycle — obligation never discharged"))
-                return True    # lasso: we found an infinite path avoiding φ
+                return path
             succs = self.successors(w)
             if not succs:
                 path.append((w, "✗ dead-end — obligation not discharged"))
-                return True    # maximal path ends without satisfying φ
-            on_stack.add(w)
-            for s in succs:
-                label = self.labels.get((w, s), "→")
-                if not self._AF(s, prop, set(), set()):
-                    # s is on a bad path — follow it
-                    path.append((w, label))
-                    if dfs(s):
-                        on_stack.discard(w)
-                        return True
-            on_stack.discard(w)
-            return False
-
-        dfs(start)
-        return path if path else None
+                return path
+            on_path.add(w)
+            nxt = next(
+                (x for x in sorted(succs, key=lambda x: (self.labels.get((w, x), ""), repr(x)))
+                 if fails(x)),
+                None,
+            )
+            if nxt is None:        # cannot happen when fails(w); defensive
+                path.append((w, "✗ dead-end — obligation not discharged"))
+                return path
+            path.append((w, self.labels.get((w, nxt), "→")))
+            w = nxt
 
     def _find_EF_witness(
         self,
