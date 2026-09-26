@@ -6490,3 +6490,34 @@ its ordinary `triggered_by` treatment, and the event alone can activate
 it in the model even if the violation never happens. Over-approximates
 reachability. Fix needs a distinct "not yet created" state or a
 two-condition activation. Not scheduled.
+
+## "Violated worlds are terminal" conflicts with violation responses — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found in AM-105 (see its entry in
+`docs/el_grammar_amendments.md`, Part 1, "Violated worlds stay terminal,
+except…"). Both builders' T2 leaves a violated world terminal unless its
+own edge activated a response-created burden. So once a response has
+activated a burden (it is PENDING), any later violation of an
+*unrelated* obligation on that path ends the path with the created burden
+still PENDING. The dead end makes AF false there, so the created burden's
+bounded response is reported false even though, in the engine, a
+violation elsewhere does not stop anyone from discharging it.
+
+**Direction of the error: conservative.** The verdict is under-reported
+(false where it may hold), never over-reported. Pinned as current
+behaviour by
+`tests/test_am105_violation_activation.py::test_static_other_violations_stay_terminal`
+(probe: `answerBurden` violated → `noticeBurden` PENDING → `otherBurden`
+violated → dead-end counterexample; EF still true).
+
+The terminal rule predates AM-105 and has the same effect on any
+obligation still PENDING when another one is violated; AM-105 makes it
+visible because a violation response exists precisely so that work
+continues after a violation. No tracked scenario is affected today:
+`escalationNoticeBurden`'s activating violation is beyond the horizon.
+
+**Fix direction:** let violated worlds continue (enqueue them below the
+horizon) at least while any obligation is PENDING, or unconditionally;
+the VIOLATED obligation itself stays VIOLATED. Moves world counts and
+possibly AF verdicts in every scenario where a violation is reachable, so
+it needs its own amendment with a before/after comparison. Not scheduled.
