@@ -784,6 +784,73 @@ class KripkeModel:
             for w in self.reachable(world)
         )
 
+    # ── Horizon-honest AF (AM-107) ────────────────────────────────────────────
+
+    def _AF_bounded(
+        self, start: World, prop: str, failed_prop: str, horizon_passes: bool,
+        memo: Optional[Dict[World, bool]] = None,
+    ) -> bool:
+        """
+        AM-107: AF prop from start over the bounded model, with the horizon
+        made explicit. A world satisfying prop succeeds; one satisfying
+        failed_prop (the obligation VIOLATED — it can never be discharged
+        afterwards) fails, as do a dead end and a cycle that avoid prop. A
+        world at the horizon step (initial.step + horizon) that satisfies
+        neither is where the path was cut off: it counts as a pass when
+        horizon_passes, else as a failure. Such a world is not expanded:
+        whatever edges it has (e.g. a discharge with no tick left) would
+        otherwise make discharge look forced only because time stopped.
+        `memo` may be shared across start worlds for the same prop and
+        reading (a result is a property of the world, including a False
+        reached through a cycle: that cycle avoids prop from any root).
+        """
+        limit = self.initial.step + self.horizon
+        if memo is None:
+            memo = {}
+
+        def go(w: World, on_stack: Set[World]) -> bool:
+            if self.satisfies(w, prop):
+                return True
+            if self.satisfies(w, failed_prop):
+                return False
+            if w.step >= limit:
+                return horizon_passes
+            if w in on_stack:
+                return False
+            if w in memo:
+                return memo[w]
+            succs = self.successors(w)
+            if not succs:
+                return False
+            on_stack.add(w)
+            result = all(go(x, on_stack) for x in succs)
+            on_stack.discard(w)
+            memo[w] = result
+            return result
+
+        return go(start, set())
+
+    def _AF3(
+        self, start: World, obligation_id: str,
+        memos: Optional[Tuple[Dict[World, bool], Dict[World, bool]]] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        AM-107: three-valued AF discharged:O from start, as (satisfied,
+        status). Holds — AF holds even with horizon-cut paths counted as
+        failures: (True, None). Fails — AF fails even with them counted as
+        passes, so a genuine counterexample exists (O violated, a dead end
+        below the horizon, or a cycle): (False, None). Otherwise the answer
+        depends on what happens after the horizon: (False,
+        NOT_RESOLVED_WITHIN_HORIZON).
+        """
+        prop, failed = f"discharged:{obligation_id}", f"violated:{obligation_id}"
+        pessimistic, optimistic = memos if memos is not None else ({}, {})
+        if self._AF_bounded(start, prop, failed, False, pessimistic):
+            return True, None
+        if not self._AF_bounded(start, prop, failed, True, optimistic):
+            return False, None
+        return False, NOT_RESOLVED_WITHIN_HORIZON
+
     # ── High-level obligation / permission checks ─────────────────────────────
 
     def check_obligation(self, obligation_id: str) -> "ObligationVerdict":
@@ -801,6 +868,14 @@ class KripkeModel:
         ViolationResponse creates (self.violation_activation) — it exists
         only after the violation.
 
+        AM-107: AF is three-valued (_AF3()): holds, fails with a
+        counterexample, or "not resolved within horizon" (status set,
+        satisfied False, no counterexample) when AF holds only if paths cut
+        off at the horizon are assumed to discharge later. Before AM-107 a
+        horizon-step world was expanded like any other, so an eventual
+        obligation whose deadline lies beyond the horizon could be reported
+        AF true only because no tick was left.
+
         Returns an ObligationVerdict with full explanation.
         """
         desc = self.obligation_descriptors.get(obligation_id)
@@ -809,8 +884,8 @@ class KripkeModel:
             return self.check_response(obligation_id)
 
         prop = f"discharged:{obligation_id}"
-        satisfied = self.AF(self.initial, prop)
-        counterexample = None if satisfied else self._find_AF_counterexample(
+        satisfied, status = self._AF3(self.initial, obligation_id)  # AM-107
+        counterexample = None if (satisfied or status) else self._find_AF_counterexample(
             self.initial, prop
         )
 
@@ -823,6 +898,7 @@ class KripkeModel:
             counterexample_path=counterexample,
             holder=desc.holder if desc else "unknown",
             chain=desc.chain if desc else [],
+            status=status,
         )
 
     def check_response(self, obligation_id: str) -> "ObligationVerdict":
@@ -840,7 +916,9 @@ class KripkeModel:
           - "not triggered within horizon": O is PENDING in no reachable
             world (it stays WAITING, or is superseded first);
           - "not resolved within horizon": O becomes PENDING only in
-            horizon-step worlds, so no in-horizon world can check it.
+            horizon-step worlds, so no in-horizon world can check it; or
+            (AM-107) AF from some pending world is itself not resolved
+            within the horizon (_AF3()) and none fails outright.
         """
         desc = self.obligation_descriptors.get(obligation_id)
         pending_prop = f"pending:{obligation_id}"
@@ -860,10 +938,18 @@ class KripkeModel:
         elif not in_horizon:
             satisfied, status = False, NOT_RESOLVED_WITHIN_HORIZON
         else:
+            # AM-107: three-valued per pending world. A genuine failure from
+            # any of them fails the property; otherwise, if some pending
+            # world's answer depends on what happens after the horizon, it
+            # is not resolved within the horizon.
+            memos: Tuple[Dict[World, bool], Dict[World, bool]] = ({}, {})
+            verdicts = [(w, self._AF3(w, obligation_id, memos)) for w in in_horizon]
             failing = next(
-                (w for w in in_horizon if not self.AF(w, prop)), None
+                (w for w, (ok, st) in verdicts if not ok and st is None), None
             )
-            satisfied = failing is None
+            if failing is None and any(st is not None for _, (_, st) in verdicts):
+                status = NOT_RESOLVED_WITHIN_HORIZON
+            satisfied = failing is None and status is None
             if failing is not None:
                 counterexample = (
                     (self._path_to(failing) or [])
