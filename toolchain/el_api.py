@@ -517,6 +517,9 @@ class ObligationStatusResponse(BaseModel):
     # by default the active scenario's configured k, AM-111); path steps
     # after the anchored world are scaled, k unscaled steps each.
     deadline_scale: int = 1
+    # AM-112: "hybrid" (anchored to the current runtime state) or "spec"
+    # (static model of the active scenario's .el file, from its initial state).
+    mode: str = "hybrid"
     worlds_checked: int
     counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
     witness_path: Optional[List[PathStep]] = None          # present iff detectable
@@ -884,34 +887,56 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         "model with every enforceable deadline d scaled to ceil(d / k), so "
         "deadlines beyond the horizon become checkable; it defaults to the "
         "active scenario's configured k (AM-111) and the response reports "
-        "the k used. Only applies "
+        "the k used. 'mode' (AM-112): 'hybrid' (default) anchors the model "
+        "to the current runtime state; 'spec' builds the static model of the "
+        "active scenario's .el file (build_kripke_model), independent of "
+        "the runtime, and the token is looked up among the spec's declared "
+        "DeonticTokens instead of the runtime's; the response reports the "
+        "mode used. 400 for an unknown mode. Only applies "
         "to burden-kind tokens (obligations); 400 for permit/embargo tokens, "
         "404 for an unknown token name."
     ),
 )
 def get_obligation_status(
-    token_name: str, deadline_scale: Optional[int] = None,
+    token_name: str, deadline_scale: Optional[int] = None, mode: str = "hybrid",
 ) -> ObligationStatusResponse:
+    if mode not in ("hybrid", "spec"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown mode '{mode}'. Must be 'hybrid' or 'spec'.",
+        )
     deadline_scale = _resolve_deadline_scale(deadline_scale)
-    tokens = _runtime.current_state().tokens
-    matching = [t for t in tokens if t.token_name == token_name]
-    if not matching:
+    if mode == "hybrid":
+        kinds = {t.token_name: t.kind for t in _runtime.current_state().tokens}
+        where = "the current runtime state"
+    else:
+        result = parse(_SCENARIO_PATHS[_active_scenario], validate=False)
+        if not result.ok:
+            raise RuntimeError(f"{_active_scenario} parse failed: {result.errors}")
+        spec = result.model
+        kinds = {el.name: el.kind for el in spec.elements
+                 if type(el).__name__ == "DeonticToken"}
+        where = f"the '{_active_scenario}' spec"
+    if token_name not in kinds:
         raise HTTPException(
             status_code=404,
-            detail=f"Token '{token_name}' is not present in the current runtime state.",
+            detail=f"Token '{token_name}' is not present in {where}.",
         )
-    tok = matching[0]
-    if tok.kind != "burden":
+    if kinds[token_name] != "burden":
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Token '{token_name}' is a {tok.kind}, not a burden — "
+                f"Token '{token_name}' is a {kinds[token_name]}, not a burden — "
                 "compelled/detectable status only applies to obligations."
             ),
         )
 
-    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON,
-                                   deadline_scale=deadline_scale)
+    if mode == "hybrid":
+        km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON,
+                                       deadline_scale=deadline_scale)
+    else:
+        km = build_kripke_model(spec, horizon=_KRIPKE_HORIZON,
+                                deadline_scale=deadline_scale)
     af_verdict = km.check_obligation(token_name)
     ef_verdict = km.check_permission(token_name)
 
@@ -926,6 +951,7 @@ def get_obligation_status(
         status=af_verdict.status,
         horizon=_KRIPKE_HORIZON,
         deadline_scale=af_verdict.deadline_scale,
+        mode=mode,
         worlds_checked=af_verdict.worlds_checked,
         counterexample_path=_serialize_path(af_verdict.counterexample_path) if not af_verdict.satisfied else None,
         witness_path=_serialize_path(ef_verdict.witness_path) if ef_verdict.satisfied else None,
