@@ -8262,3 +8262,165 @@ T11 shares the hoisted `strict_blocks`; docstrings);
 `docs/KRIPKE_TRANSITION_RULES.md` (T5 row, last-updated note);
 `docs/CONCEPTS_INDEX.md` (finding resolved and corrected); this file
 (AM-99b's deferred list updated; new entry).
+
+---
+
+## AM-102 (2026-09-26) — one embargo blocking rule for the engine and the verifier; embargo guards on T1, T9, T11; `[W-18]` (`toolchain/el_engine.py`, `el_api.py`, `el_kripke.py`, `el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in six parts (commits `2c35c93`,
+`98a6bc4`, `996ea32`, `4d62585`, `17506fd` and this docs commit). Type:
+toolchain change across Layers 2–4 plus one advisory validator warning.
+No grammar change. Resolves the CONCEPTS_INDEX finding "Engine Step 5
+ignores `inhibited_by_embargo`; the verifier's guards rely on it". The
+earlier decision held: the verifier keeps §6.4.6 (the Action declares
+what inhibits it); the engine changed.
+
+**Problem.** The engine's Step 5 blocked an action when an active embargo
+held by the actor had that action as its `for_action`, or had none. It
+never read `inhibited_by_embargo`. The verifier's T5/T6 guards read only
+`inhibited_by_embargo` and never `for_action`, and T1, T9 and T11 had no
+embargo guard. On an inline fixture the layers disagreed for every
+class: (b) `for_action` set, named by no Action — engine blocks, builders
+draw the edge; (c) named by an Action other than its `for_action` — each
+layer blocks the other's action; (d) general — engine blocks everything,
+builders nothing.
+
+### The rule (`el_engine._embargo_coverage()`)
+
+An action A by actor X is blocked iff X holds an `active` embargo E that
+covers A:
+1. if any role Action declares `inhibited_by_embargo E`, E covers exactly
+   those Actions — `for_action` does not affect blocking;
+2. else, if E has a `for_action`, E covers that action (fallback — keeps
+   the 16 class (b) embargoes in the tracked scenarios working);
+3. else E is general and covers every action of X (the pre-AM-102 engine
+   behaviour; covering nothing would silently weaken a prohibition).
+
+The holder must be the actor performing the action, in both layers.
+ConditionalAction `inhibited_by` is not read by either layer (open
+finding). Top-level embargo tokens only, as `token_from_spec()`.
+
+### Part 1 — engine and API (`2c35c93`)
+
+`_embargo_coverage()` and `_embargo_covers()` in `el_engine.py`. Step 5
+reads them (it runs for every action, discharging ones included, and for
+action names with no declared Action). `el_api.get_available_actions()`,
+which had copied Step 5's old rule, reads them too.
+
+### Part 2 — verifier index, T5/T6 (`98a6bc4`)
+
+`_build_embargo_inhibition_index()` is now built from
+`_embargo_coverage()` (named Actions, else `for_action`);
+`_build_general_embargoes()` lists rule 3. Each builder has one
+`embargo_blocks` closure (static: declared state, `holds` holder; hybrid:
+per-world state, w0 token holder) used by T5 and T6. The index's dead
+ConditionalAction loop was removed.
+
+### Part 3 — T1, T11, T9 (`996ea32`)
+
+Mirrors the engine's performer for each rule:
+- **T1** (both builders): the performer is the burden's (effective)
+  holder; suppressed if it holds an embargo covering the `for_action`.
+- **T11** (both builders) and **T9** (hybrid): the engine lets any
+  enrolled actor perform an ungated action (Step 2 checks only
+  enrolment; a transfer's `from_role` resolves the source holder, not
+  the performer), and Step 5 refuses only an embargoed one. So the edge
+  is suppressed only when every performer holds a covering embargo —
+  static: every `ACTIVE` actor; hybrid: every enrolled actor.
+
+### Part 4 — `[W-18]` (`4d62585`)
+
+Advisory, via the AM-89 warnings channel: an embargo named by ≥1 Action
+whose `for_action` is outside that set (the `for_action` is ignored under
+rule 1). Built from `el_engine._embargo_naming_actions()`, extracted from
+`_embargo_coverage()` so the warning and the rule share one map. The
+validator imports it lazily, as its other rules import `el_reasoner`;
+`el_engine` imports no toolchain module at load time (its only one,
+`el_parser`, is in the `__main__` block), so there is no cycle. Fires on
+no tracked scenario.
+
+### Inventory (10 scenario files declare embargoes)
+
+| Scenario | Embargo | `for_action` | Named by | Runtime holder | Class |
+|---|---|---|---|---|---|
+| terms of engagement, public data portal | `noCircumventionEmbargo` | `retryByOtherRoute` | `retryByOtherRoute` | agent (test grant) | a |
+| public data portal | `outsideScopeEmbargo` | `accessNonPublicFile` | `accessNonPublicFile` | agent | a |
+| terms of engagement | `outsideScopeEmbargo` | `access_unlisted_resource` (undeclared) | — | agent | b |
+| referral, gp_referral | `patientRecordAccessEmbargo` | `access_patient_clinical_records` | — | permit holder, via revocation | b |
+| fhir generated | `ConsentAiDiagnostic001SubProv2Embargo` | `disclose` (undeclared) | — | permit holder, via revocation | b |
+| industrial + 3 SOP variants | 2–4 each | undeclared actions | — | none granted | b |
+| ecommerce (does not parse) | `auditorCustomerEmargo` | none | — | none | d |
+
+No class (c) in any tracked scenario (the historical instance was
+`external_agent_access_scenario.el` before `8733915`). No scenario uses
+ConditionalAction `inhibited_by` or the token-level
+`inhibited_by_embargo` string. No embargo is given a holder with `holds`.
+
+### Blast radius
+
+Measured before landing, against the pre-AM-102 code: **engine outcomes
+identical** for every enrolled actor × action on 14 runtime states (the
+four `el_api` builders; both terms-of-engagement runtimes fresh, after a
+refusal, after recording it and after a revocation; referral and
+gp_referral after a revocation), including available-actions. **Kripke
+counts and verdicts identical** for every static, hybrid and spec-only
+model, and for six hybrid models built after revocation or recording;
+Part 3 moved nothing either (the only T1 overlap,
+`automatedPressureTripEmbargo`, is held by nobody). The
+terms-of-engagement reading is unchanged. No existing test failed at any
+part.
+
+### Tests
+
+`tests/test_am102_embargo_parity.py` (new), 19 tests: the coverage rule
+on the fixture; engine outcome per case (8: classes b, c, d, exercises
+and discharges); both builders' w0 exercise/discharge edges equal the
+engine-accepted set (2); available-actions; `[W-18]` flags exactly the
+class (c) embargoes and no tracked scenario (2); T11 kept while one
+actor is not embargoed, suppressed when every performer is, with the
+engine (3); T9 likewise (2).
+
+**Undo-and-rerun checks:** against the pre-AM-102 toolchain, 11 of 19
+fail (the 8 that pass are cases the old engine already blocked, the
+"kept" controls and the scenario-wide `[W-18]` silence); against Part 2
+without Part 3, the T1/T11/T9 tests fail (4).
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 640 → 640 → 640
+→ 640 → 659 → 659 passed, 1 xfailed.
+
+### Decisions to revisit
+
+- **Rule 3 (general embargoes block every action)** — kept from the
+  engine for fail-closed behaviour. Only ecommerce, which does not parse,
+  has one.
+- **T11/T9 performer set** differs by builder: static has no enrolment,
+  so it uses every `ACTIVE` actor (chain members and permit holders);
+  hybrid uses enrolled actors, as the engine does.
+- **T1 checks `for_action` only.** The engine also discharges through a
+  destroy effect or an emitted `discharged_by` event, under that
+  action's own name; T1 does not model which action discharged, so an
+  embargo covering such an action is not seen by T1.
+- **available-actions lists "obligated" entries without an embargo
+  check** (pre-existing; only "permitted" entries are filtered).
+
+Logged as open findings in CONCEPTS_INDEX (2026-09-26): V-17 compares
+`for_action` strings, not coverage; embargo holder resolution (static
+`holds` only, one hybrid holder per name, T7-created embargoes without a
+holder); `grant_token()` does not check enrolment; Step 3.5 as a
+denial-of-service vector; strict mode, model vs deployment.
+
+**Standard reference(s):** §6.4.4 (Embargo), §6.4.6 (conditional action:
+the Action declares what inhibits it), §7.8.7 (token lifecycle); Annex C
+(Kripke semantics, informative), §C.2.
+
+**Files changed:** `toolchain/el_engine.py` (`_embargo_naming_actions()`,
+`_embargo_coverage()`, `_embargo_covers()`; Step 5); `toolchain/el_api.py`
+(available-actions); `toolchain/el_kripke.py`
+(`_build_embargo_inhibition_index()` rebuilt, `_build_general_embargoes()`;
+`embargo_blocks` in both builders; T1, T5, T6, T9, T11 guards;
+docstrings); `toolchain/el_validator.py` (`[W-18]`);
+`tests/test_am102_embargo_parity.py` (new);
+`docs/KRIPKE_TRANSITION_RULES.md` (T1, T5, T6, T9, T11 rows;
+last-updated note); `docs/CONCEPTS_INDEX.md` (finding resolved;
+ConditionalAction finding updated; OPEN FINDING marker on the V-NEW-10
+paragraph; five new open findings); this file (new entry).

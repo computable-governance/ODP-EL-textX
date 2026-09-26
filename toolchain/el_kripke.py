@@ -2235,7 +2235,9 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            For each PENDING obligation O held by an ACTIVE actor A,
            add an edge w → w' where w' is identical to w except
            obligation O is DISCHARGED. This models the actor performing
-           the obligated action.
+           the obligated action. AM-102: suppressed if an active embargo
+           held by A covers O's for_action (el_engine._embargo_coverage(),
+           the engine's Step 5 rule).
 
          Rule T2 — DEADLINE EXPIRY:
            If w.step - activated_at >= desc.deadline_steps and O is
@@ -2297,7 +2299,9 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            discharges a PENDING burden the permit holder holds (destroy
            effect, matching for_action, or emitting its discharged_by
            event) — the engine's Step 3.5 guard and its Step 3
-           `dischargeable` exemption.
+           `dischargeable` exemption. Embargo guard: an active embargo
+           held by the permit holder that covers the action, per
+           el_engine._embargo_coverage() (AM-102).
 
          Rule T9 — TRANSFER (§6.4.7/§7.8.7 DeonticEffect(transfer)):
            For each Burden-kind `transfer` DeonticEffect whose `from_role`
@@ -2325,7 +2329,10 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            the action is added to occurred_actions. No step advance.
            Suppressed while a strict obligation is PENDING with an ACTIVE
            holder — the same condition as T3, mirroring the engine's
-           Step 3.5 guard (a T11 action discharges nothing). Verifier
+           Step 3.5 guard (a T11 action discharges nothing). AM-102:
+           suppressed when every ACTIVE actor holds an active embargo
+           covering the action (any actor may perform an ungated action
+           in the engine; Step 5 refuses only the embargoed one). Verifier
            counterpart of the engine's Step 7c (_activate_triggered_tokens(),
            el_engine.py). The hybrid builder has its own T11 (AM-99b),
            which also activates pending Permits/Embargoes.

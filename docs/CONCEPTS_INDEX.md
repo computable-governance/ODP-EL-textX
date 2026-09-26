@@ -4009,7 +4009,7 @@ grepped every scenario file for a `Delegation` declaring
 in the repo until this change deliberately created one. The gap was real
 and general, just never previously exercised.
 
-V-NEW-10 (documented, previously unregistered — mutual exclusion of
+**OPEN FINDING** — V-NEW-10 (documented, previously unregistered — mutual exclusion of
 `transfers_burden`/`transfers_token_group`) is now registered in
 `el_validator.py`. `gp_referral_scenario.el`'s own `gpToSpecialistDelegation`
 still declares both fields (same conflation, out of scope for this fix) —
@@ -5600,6 +5600,15 @@ consistent: role Action bodies only.
 
 **Status:** OPEN. No code change.
 
+**Update (2026-09-26, AM-102):** the verifier's loop (formerly
+`el_kripke.py:503`, in `_build_embargo_inhibition_index()`) was removed;
+that index is now built from `el_engine._embargo_coverage()`, which
+likewise does not read ConditionalAction. The other two loops remain:
+`el_engine._find_action_for_burden()` and
+`el_kripke._find_element_and_action_for_burden()`.
+AM-102 kept ConditionalAction out of the embargo rule in both layers,
+pending this decision.
+
 ---
 
 ## AM-95 — `[W-16g]`: declared-parent union across all channels
@@ -5974,9 +5983,21 @@ builders moves pinned world counts: `referral_scenario.el` has a strict
 burden (`referralInitiationBurden`) alongside permit exercises. The fix
 should report every count and verdict that moves before it lands.
 
-## Engine Step 5 ignores `inhibited_by_embargo`; the verifier's guards rely on it — OPEN FINDING (2026-09-25)
+## Engine Step 5 ignores `inhibited_by_embargo`; the verifier's guards rely on it — RESOLVED (2026-09-26)
 
-**OPEN FINDING** — found during the AM-99b investigation. The engine's
+**OPEN FINDING (2026-09-25), RESOLVED 2026-09-26 by AM-102** (see
+`docs/el_grammar_amendments.md`). One rule now decides what an embargo
+blocks, in both layers: `el_engine._embargo_coverage()` — the Actions that
+name the embargo via `inhibited_by_embargo`; else its `for_action`; else
+every action of its holder. The engine's Step 5, `el_api`'s
+available-actions and both Kripke builders' guards read it, and the
+verifier now guards T1, T11 and T9 as well as T5/T6. The decision below
+held: the Action declares what inhibits it; the engine changed, and
+`for_action` survives as the fallback, with `[W-18]` flagging a
+`for_action` outside the naming Actions. No scenario's engine outcome,
+Kripke count or verdict moved.
+
+Original finding — found during the AM-99b investigation. The engine's
 embargo sweep (`advance()` Step 5) blocks an action only when an active
 embargo's own `for_action` names it (or the embargo has none). It never
 reads the Action-level `inhibited_by_embargo` requirement. The verifier's
@@ -6033,3 +6054,110 @@ siblings. AM-99b added P6a to hybrid T1 but not P6b. Neither builder's
 T6 has P6b; that is safe today, because no gated burden is an
 `any_discharged` member (checked across every scenario, 2026-09-25).
 Not scheduled.
+
+## `grant_token()` does not check enrolment — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found during AM-101. `el_engine.grant_token()` adds a
+token for any holder, enrolled or not. The engine's Step 3.5 counts a
+strict burden as actionable only if its holder is enrolled, while the
+verifier marks every chain member and permit holder `ACTIVE`, so a strict
+burden granted to a never-enrolled holder blocks in the verifier and not
+in the engine. **No reachable divergence today:** in every curated runtime
+(the four `el_api` builders, both terms-of-engagement runtimes) every
+strict holder and delegator is enrolled, and nothing un-enrols an actor.
+See AM-101's "Decisions to revisit". Not scheduled.
+
+## V-17 compares `for_action` strings, not embargo coverage — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found during AM-102. V-17 (burden/embargo conflict,
+`el_validator.py`) flags an active burden whose `for_action` equals an
+active embargo's `for_action`. Since AM-102 an embargo's `for_action`
+decides what it blocks only when no Action names the embargo
+(`el_engine._embargo_coverage()`). An embargo named by Actions covers
+those Actions instead, so V-17 can both miss a real conflict (a burden's
+action is a naming Action) and report one that does not block (the
+`for_action` is outside the naming set, which `[W-18]` flags). No tracked
+scenario is affected: `automatedPressureTripEmbargo`
+(`sop_4471_generated_EMBARGO_CONFLICT_TEST.el`) is named by no Action, so
+its coverage is its `for_action`. Fix: compare against coverage. Kept out
+of AM-102 by decision. Not scheduled.
+
+## Embargo holders: static reads only `holds`; hybrid keeps one holder per embargo; T7-created embargoes have none — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found during AM-102. The verifier's embargo guards
+compare an embargo's holder with the performer, and the holder is
+resolved narrowly:
+
+- **Static builder:** `_extract_embargo_holder()` reads only
+  `EnterpriseObject.holds`. No tracked scenario declares an embargo holder
+  that way, so static embargo guards never fire in any scenario
+  (embargoes reach holders at runtime through grants or
+  `revoke_authorization()`).
+- **Hybrid builder:** `embargo_holder_index` has one entry per embargo
+  name, taken from the w0 tokens; an embargo granted to two actors keeps
+  only the last. The engine checks every token.
+- **T7-created embargoes:** an `on_revocation` embargo with no token at
+  w0 has no holder in the hybrid index, so after a T7 edge activates it,
+  it blocks nothing. The engine's `revoke_authorization()` creates it for
+  the permit's holder. Masked today, because T7 also supersedes that
+  permit, so the covered exercise is refused by the permit check anyway.
+
+Not scheduled.
+
+## Step 3.5 as a denial-of-service vector — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — recorded during AM-102. The engine's Step 3.5 (AM-78)
+refuses every action that discharges nothing, by **every** actor, while
+**any** enrolled holder has an actionable strict burden
+(`_strict_actionable_burdens()` is not scoped to the acting actor, its
+role or its community). One strict burden therefore freezes all
+non-discharging activity system-wide — permit exercises, event-emitting
+actions, `fire_event()`, revoke/reinstate of authorizations and
+delegations, `advance_clock()` — until it is discharged.
+
+Nothing ends the freeze except a discharge: `check_live_violations()`
+never violates a strict burden (it excludes them), `advance_clock()` is
+itself blocked (AM-49), and revoking the delegation that placed the
+burden is blocked too. The exits are the holder discharging it, an
+action that discharges some other burden (allowed, but it leaves the
+freeze in place), or an external `discharge_burden()` call, which has no
+strict guard. A holder that never acts — unresponsive, crashed or
+adversarial, in any community of the specification — can hold every other
+actor's non-discharging actions indefinitely.
+
+Intended in the terms-of-engagement scenarios ("a refusal blocks
+everything until recorded"), where the holder is the provider's own
+gateway. The open questions are scope (actor, role, community or
+system) and a release path (a deadline after which the strict burden is
+violated rather than blocking). The verifier mirrors the same global
+scope (T3/T4/T5/T7–T11 use the same predicate), so its AF verdicts rest
+on this assumption. Not scheduled.
+
+## Strict mode, model vs deployment — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — recorded during AM-102; refines "`discharge_mode:
+strict` — enforcement exists only in the verifier, not the live runtime"
+(2026-08-20), whose premise AM-49/AM-76/AM-78 have since partly changed:
+the engine now blocks `advance_clock()` and every non-discharging action
+while a strict burden is actionable.
+
+In the model, T3 suppression stops time while a strict burden is
+actionable, so every path must discharge it and AF holds by construction.
+In deployment, nothing stops time, and the engine cannot make a holder
+act. A strict burden is therefore:
+
+- **executing-compelled** only when the enforcement point itself
+  discharges it (e.g. a gateway that records a refusal as part of
+  refusing), so the discharge cannot be withheld;
+- otherwise **blocking-compelled**: the engine refuses everyone's
+  non-discharging actions until it is discharged (see the Step 3.5
+  finding above), but the holder can still fail to act. The burden is
+  then violable by inaction in the normative sense — yet the engine
+  never records the breach, since `check_live_violations()` excludes
+  strict burdens.
+
+So the verifier's AF for a strict burden is a statement about the
+modelled system. It carries into deployment only for executing-compelled
+burdens. For blocking-compelled ones, deployment guarantees that nothing
+else happens until discharge, not that discharge happens. Paper and
+reviewer-response wording should draw the distinction. Not scheduled.
