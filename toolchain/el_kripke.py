@@ -3475,6 +3475,12 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     event_firing_index = _build_event_firing_index(
         spec, descriptors, permit_requirement_index)
     action_emits_index = _build_action_emits_index(spec)  # AM-99b — T5/T6
+    action_destroys_index = _build_action_destroys_index(spec)  # AM-101 — T5
+    # AM-101: the live token's for_action, which the engine's Step 3 reads
+    # (a descriptor built without a spec descriptor has for_action None).
+    for_action_of = {
+        tok.token_name: tok.for_action for tok in state.tokens if tok.kind == "burden"
+    }
     discharge_events = {d.fires_event for d in descriptors.values() if d.fires_event}
     event_token_cache: Dict[str, Set[str]] = {}
 
@@ -3528,7 +3534,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         Reused for T7/T8 because revoke_authorization()/
         reinstate_authorization() never discharge anything, so AM-78 left
         their live guard unconditional — they stay correctly blocked
-        whenever this holds, exactly like tick.
+        whenever this holds, exactly like tick. AM-101: also gates T5,
+        together with _discharges_any() (the engine's `dischargeable`).
 
         AM-81: reads the effective holder (post-revocation delegator, if
         applicable), not the static desc.holder — a revoked delegation's
@@ -3645,10 +3652,24 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         # domain-scope limitation). Operates on the live-sourced
         # permit_descriptors/embargo_holder_index built above instead of
         # pre-exec's spec-static ones.
+        strict_blocks = strict_burden_blocks(w)  # AM-101
+        pending_holders = [
+            (o, _effective_holder(w, o, d)) for o, d in descriptors.items()
+            if obligs.get(o) == ObligationState.PENDING
+        ]
         for permit_id, pdesc in permit_descriptors.items():
             if pdesc.for_action is None:
                 continue
             if actors.get(pdesc.holder) != ActorStatus.ACTIVE:
+                continue
+            # AM-101 strict guard, as static T5: refused while a strict
+            # burden blocks unless the action discharges some burden the
+            # permit holder holds (effective holder, as strict_burden_blocks
+            # reads it) — the engine's Step 3.5 and Step 3 `dischargeable`.
+            if strict_blocks and not _discharges_any(
+                pdesc.for_action, pdesc.holder, pending_holders, for_action_of,
+                descriptors, action_emits_index, action_destroys_index,
+            ):
                 continue
             if pdesc.for_action in occurred:
                 continue
