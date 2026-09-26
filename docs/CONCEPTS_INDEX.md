@@ -6524,7 +6524,16 @@ it in the model even if the violation never happens. Over-approximates
 reachability. Fix needs a distinct "not yet created" state or a
 two-condition activation. Not scheduled.
 
-## "Violated worlds are terminal" conflicts with violation responses — OPEN FINDING (2026-09-26)
+## "Violated worlds are terminal" conflicts with violation responses — RESOLVED (2026-09-26)
+
+**OPEN FINDING (2026-09-26, `7695d1f`), RESOLVED 2026-09-26 by AM-109**
+(see `docs/el_grammar_amendments.md`). Both builders now expand every
+violated world below the horizon, as the engine continues after a
+violation; the violated obligation stays VIOLATED. AM-105's exception
+(enqueue only when the edge activated a response-created burden) is
+retired. The directly granted `escalationNoticeBurden` in referral is AF
+true again; the probe in `test_am105_violation_activation.py` now holds.
+The original finding follows.
 
 **OPEN FINDING** — found in AM-105 (see its entry in
 `docs/el_grammar_amendments.md`, Part 1, "Violated worlds stay terminal,
@@ -6630,3 +6639,78 @@ deadline, per model; or rescale `_DEADLINE_UNIT_STEPS` so real deadlines
 fit a tractable horizon. World counts grow quickly with the horizon
 (e.g. hybrid referral 3976 worlds at 10), so any larger default needs a
 cost measurement. Not scheduled.
+
+**Update (AM-109, 2026-09-26):** in the static terms-of-engagement models
+(both scenarios), `incidentNotificationBurden`'s bounded response is now
+"not resolved within horizon" rather than "fails". Its only counterexample
+ended at another obligation's violation, then a dead end (the terminal
+rule). Its genuine failure — silence until the 72-hour deadline, 360
+steps — lies beyond horizon 10, so the verifier currently cannot show
+that notification is not compelled. **Candidate fix:** a scaled-deadline
+variant of the public data portal scenario (deadlines rescaled to fit
+the horizon), so the notification's failure is reachable and the
+"detectable, not compelled" reading can be shown.
+
+## Institutional-act cycles as AF counterexamples, and fairness — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found in AM-109 Phase 1 (and seen in AM-107). In the
+hybrid builder, T7/T8 (revoke/reinstate an Authorization; T4/T10 for
+Delegations) can alternate forever. A path that does nothing but
+revoke and reinstate defers every obligation indefinitely, so AF, and
+the AF inside a bounded response, fails with a `↺ cycle` counterexample
+that never touches the obligation's own action. The static builder has
+no T7/T8, so the same obligation can be "not resolved" there and "fails"
+in hybrid (pinned in `test_am99b_hybrid_event_model.py`,
+`test_after_refusal_response_verdicts_match_static`).
+
+AM-103 accepted **weak fairness**: an action continuously enabled is
+eventually taken. That settles only one of two cases:
+
+- **Discharge stays enabled throughout the cycle** — weak fairness
+  excludes the cycle: the discharging action is enabled at every step of
+  it, so a fair path must eventually take it. The counterexample is not a
+  genuine failure under the accepted assumption.
+- **The cycle disables the discharge** — e.g. it revokes the permit the
+  discharging action requires, so the action is enabled only every other
+  step. Only **strong fairness** (infinitely often enabled → eventually
+  taken) would exclude it, and strong fairness has not been accepted.
+
+Known cycles, classified from the code (permit requirements from
+`_build_permit_requirement_index()`; each cycle is one
+`reinstate`/`revoke` pair; no Delegation cycles found):
+
+| Model | Burden | Discharging action needs | Cycle revokes | Case |
+|---|---|---|---|---|
+| hybrid referral | `aiExaminationBurden` | `patientRecordAccessPermitByAuthorization` | `patientDataAuthorization` → that permit | **disables** — strong fairness only |
+| hybrid referral, gp_referral | `referralResponseBurden` | `patientRecordAccessPermitByRole` | `patientDataAuthorization` (the *ByAuthorization* permit) | stays enabled — weak fairness excludes |
+| hybrid referral, gp_referral | `assessmentSchedulingBurden` | `patientRecordAccessPermitByRole` | same | stays enabled — weak fairness excludes |
+| hybrid referral, gp_referral | `clinicalHandoverBurden` | none | same | stays enabled — weak fairness excludes |
+| hybrid external agent access (after refusal) | `incidentNotificationBurden`, `refusalReviewBurden` | none | `AgentAccessAuthorization` | stays enabled — weak fairness excludes |
+| hybrid public data portal (after refusal) | `incidentNotificationBurden`, `refusalReviewBurden` | none | `AggregateQueryAuthorization` | stays enabled — weak fairness excludes |
+
+(`patientDataAuthorization`'s `on_revocation` embargo,
+`patientRecordAccessEmbargo`, covers only `access_patient_clinical_records`
+and so blocks none of the discharging actions above. AM-107's guess that
+`referralResponseBurden`'s cycle might disable its discharge does not
+hold: its permit is role-granted, not the one revoked.)
+
+**Fix direction:** exclude from AF counterexamples any cycle along which
+the obligation's discharge stays enabled (weak fairness, already
+accepted); keep cycles that disable it, unless strong fairness is
+accepted. Needs "enabled" defined per world (holder ACTIVE, permits
+active, no covering embargo, no strict freeze) — the same conditions T1
+and T6 already check. Not scheduled.
+
+## Static builder does not model event-triggered permits — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found in AM-109 Phase 2 while building the true → false
+bounded-response probe. The static builder (`build_kripke_model()`) keeps
+no per-world permit state, so a permit declared `state: pending` with
+`triggered_by: <event>` never becomes active there, and an obligation
+whose discharging action requires it can never be discharged. The hybrid
+builder tracks permit state per world and activates such a permit on the
+event (AM-99b), as the engine does. In the probe
+(`tests/test_am109_violated_worlds_continue.py`), the static model reports
+the obligation failing on the branch where the permit should have been
+activated. No tracked scenario uses an event-triggered permit today. Not
+scheduled.

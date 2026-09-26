@@ -8742,6 +8742,9 @@ for any triggered burden (AM-99a).
   a later unrelated violation still ends the path, so the created
   burden's bounded response fails on that path (pinned by
   `test_static_other_violations_stay_terminal`).
+  **Retired by AM-109 (2026-09-26):** every violated world now continues,
+  so this exception no longer exists; the test is now
+  `test_static_other_violations_continue` and the bounded response holds.
 - **`check_obligation()`** gives a linked burden the bounded response
   verdict (`AG(pending→AF)`), as for `triggered_by`.
 - **Why one T2 edge, not a separate "fire" transition.** In the engine,
@@ -9291,3 +9294,121 @@ informative), §C.2, §C.4.
 `tests/test_am89_warnings_channel.py`,
 `tests/test_am90_multi_parent_warnings.py`; `docs/CONCEPTS_INDEX.md`;
 `docs/KRIPKE_TRANSITION_RULES.md`; this file.
+
+---
+
+## AM-109 (2026-09-26) — violated worlds are no longer terminal (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in three parts (commits `9a645f1`, `12cf928`
+and this docs commit). Type: verifier semantics (Layer 4). **No grammar,
+engine, descriptor or API change.** Resolves the CONCEPTS_INDEX finding
+"'Violated worlds are terminal' conflicts with violation responses"
+(`7695d1f`, updated by AM-108); retires AM-105's exception.
+
+**The rule it removes.** Both builders' T2/T2b left a violated world
+terminal — a dead end — unless (AM-105) the edge activated a
+response-created burden. A dead end makes AF fail, so every other
+obligation still PENDING on that path was reported as failing. The
+engine continues after a violation (the clock, other actors' actions,
+revocations all go on), so this was a model/engine divergence.
+Seen in practice: AM-106's tick-36 escalation case, and AM-108's flip of
+the directly granted `escalationNoticeBurden` in referral (T2b violates
+`aiExaminationBurden` → terminal world with the escalation pending).
+
+### Part 1 — builders (`9a645f1`)
+
+Every violated world below the horizon is enqueued, in both builders,
+unconditionally — as any other world is, including one where every
+obligation is discharged; the alternative ("only while something is
+PENDING or WAITING") would be a special case with no engine counterpart.
+The violated obligation stays VIOLATED (T1 and T2 act only on PENDING).
+`_activate_on_violation()` still activates response-created burdens; its
+result no longer decides anything. Docstrings and comments updated.
+
+**Which verdicts can move** (from the code): VIOLATED never reverts, so
+everything reachable from a violated world keeps that violation, and a
+continued violated world only replaces what was a dead end (a failure).
+So AF moves only from **fails** (to holds, "not resolved", or still
+fails); holds and "not resolved" cannot change. EF and "eventually
+violated" can only go false → true. A **bounded response can go true →
+false**: an obligation PENDING only after another obligation's violation
+has pending worlds the terminal rule cut off (pinned by a probe, Part 2).
+Bellman values and expected utilities can move either way.
+
+Four existing tests updated in this part, each with a comment:
+`test_am105_…::test_static_other_violations_stay_terminal` → renamed
+`test_static_other_violations_continue` (the bounded response now holds);
+`test_am86_…::test_escalation_notice_burden_descriptor_in_hybrid_mode`
+(AF true again); `test_am99a_bounded_response` — its parametrized
+"fails but reachable" test split: `refusalReviewBurden` still fails,
+`incidentNotificationBurden` is now "not resolved within horizon";
+`test_am99b_…::test_after_refusal_response_verdicts_match_static` pins
+the static/hybrid difference below explicitly.
+
+**Before/after** (every static model, API runtime and 157 suite-built
+hybrid models; scratch pytest plugin): no model grows more than 2× (the
+terms-of-engagement hybrid models 16340 → 16516 worlds; most growth is in
+edges); suite 61.3 s → 65.5 s (+7%). Verdicts:
+
+| Model | Burden | Change |
+|---|---|---|
+| hybrid referral, escalation granted directly (2 tests) | `escalationNoticeBurden` | AF false → **true** |
+| hybrid ereferral (3 models) | `acknowledgementBurden` | fails → not resolved (its counterexample was a violation dead end) |
+| static terms-of-engagement (both) | `incidentNotificationBurden` | bounded response fails → not resolved (deadline 360 steps) |
+
+No EF or "eventually violated" change; no true → false in any tracked
+model. No top recommended action changes; 15 suite models and both
+terms-of-engagement runtimes lose a little expected future utility
+(−0.002 to −0.009: the continued violated worlds are low-utility). The
+API's `/recommended-action` and its Q-values are unchanged in all four
+API runtimes. The tick-36 escalation case (already true since AM-108) and
+the consent pin (horizon 10, γ 0.9) do not move.
+
+**Static/hybrid difference exposed.** After the refusal in the external
+agent access scenario, static says `incidentNotificationBurden` is "not
+resolved within horizon"; hybrid says it fails, via a revoke/reinstate
+cycle on `AgentAccessAuthorization` (T7/T8, hybrid only). Before AM-109
+both said "fails", for different reasons. `notifyIncident` needs no
+permit, so under the weak fairness accepted in AM-103 the cycle should
+not count — logged as a new OPEN FINDING, "Institutional-act cycles as AF
+counterexamples, and fairness", with every known cycle classified.
+
+### Part 2 — tests (`12cf928`)
+
+New `tests/test_am109_violated_worlds_continue.py` (4; all fail on the
+pre-AM-109 code): a violated world with something still PENDING has
+successors and the violation persists in both builders; **a bounded
+response moving true → false** (hybrid probe: a strict burden with a
+0-step deadline is discharged or violated at step 0, its discharge
+activates the permit a later-triggered strict obligation needs; on the
+violated branch that obligation is now PENDING with no way to discharge
+and no tick — a genuine dead end below the horizon); the granted
+escalation back to AF true; ereferral `acknowledgementBurden` now not
+resolved. The probe uses the hybrid builder: the static builder keeps no
+permit state, so an event-triggered permit never activates there (new
+OPEN FINDING).
+
+### Part 3 — docs
+
+This entry; CONCEPTS_INDEX: `7695d1f` RESOLVED; two new OPEN FINDINGS
+(institutional-act cycles and fairness; static builder without
+event-triggered permits); the horizon-sizing finding gains the static
+terms-of-engagement case and a candidate fix (a scaled-deadline variant
+of the portal scenario). AM-105's entry: its exception marked retired.
+`docs/KRIPKE_TRANSITION_RULES.md`: T2 and T2b rows, last-updated note.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 747 → 747 → 751
+→ 751 passed, 1 xfailed.
+
+**Standard reference(s):** §6.3.8 and §7.8.6 (violation and its
+response), §7.8.7 (token lifecycle); Annex C (Kripke semantics,
+informative), §C.2, §C.4.
+
+**Files changed:** `toolchain/el_kripke.py` (both builders' T2/T2b
+enqueue; `_activate_on_violation()` docstring; builder docstring);
+`tests/test_am105_violation_activation.py`,
+`tests/test_am86_obligation_descriptor_roots.py`,
+`tests/test_am99a_bounded_response.py`,
+`tests/test_am99b_hybrid_event_model.py`;
+`tests/test_am109_violated_worlds_continue.py` (new);
+`docs/CONCEPTS_INDEX.md`; `docs/KRIPKE_TRANSITION_RULES.md`; this file.
