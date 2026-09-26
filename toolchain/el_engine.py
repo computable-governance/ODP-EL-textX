@@ -14,7 +14,8 @@ Seven-step execution pipeline (CLAUDE.md §7.1):
                        c) burden.discharged_by event == action's emits event (AM-22)
   4. Preconditions   — grammar precondition strings checked against facts dict;
                        absent key → blocked  (fail-safe, not fail-open — see §7.3)
-  5. Embargo sweep   — active embargo on actor targeting this action → blocked
+  5. Embargo sweep   — active embargo held by the actor that covers this
+                       action → blocked (coverage: _embargo_coverage(), AM-102)
   6. Permit check    — DeonticRequirement(requires_permit) must be held by actor
   7. Effect application — DeonticEffect operations + burden discharge transitions
 
@@ -135,6 +136,59 @@ def _find_action(spec, action_name):
                 if action.name == action_name:
                     return action, role
     return None, None
+
+
+def _embargo_coverage(spec) -> Dict[str, Optional[FrozenSet[str]]]:
+    """AM-102: embargo name -> the actions it covers, or None for every action.
+
+    One rule, shared by the engine's Step 5, el_api's available-actions and
+    the Kripke verifier's embargo guards (§6.4.6: the Action declares what
+    inhibits it):
+      1. if any role Action declares `inhibited_by_embargo E`, E covers
+         exactly those Actions — its for_action does not affect blocking
+         (the validator's [W-18] flags a for_action outside that set);
+      2. else, if E has a for_action, E covers that action (fallback);
+      3. else E is general and covers every action of its holder.
+    ConditionalAction.inhibited_by is not read (see the CONCEPTS_INDEX
+    finding on ConditionalAction). Top-level embargo DeonticTokens only,
+    the same lookup token_from_spec() uses.
+    """
+    named: Dict[str, Set[str]] = {}
+    for el in getattr(spec, "elements", []):
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                for req in getattr(action, "deontic_requirements", []):
+                    if req.kind == "inhibited_by_embargo" and req.token:
+                        named.setdefault(req.token.name, set()).add(action.name)
+    coverage: Dict[str, Optional[FrozenSet[str]]] = {}
+    for el in getattr(spec, "elements", []):
+        if type(el).__name__ != "DeonticToken" or el.kind != "embargo":
+            continue
+        if el.name in named:
+            coverage[el.name] = frozenset(named[el.name])
+        elif getattr(el, "for_action", None):
+            coverage[el.name] = frozenset({el.for_action})
+        else:
+            coverage[el.name] = None
+    return coverage
+
+
+def _embargo_covers(
+    coverage: Dict[str, Optional[FrozenSet[str]]],
+    embargo_name: str,
+    for_action: Optional[str],
+    action_name: str,
+) -> bool:
+    """AM-102: True iff the embargo covers action_name under _embargo_coverage().
+    An embargo not declared in the spec falls back to its own for_action
+    (None = every action), the pre-AM-102 rule."""
+    if embargo_name in coverage:
+        covered = coverage[embargo_name]
+    else:
+        covered = frozenset({for_action}) if for_action else None
+    return covered is None or action_name in covered
 
 
 def _actor_holds_permit(state: WorldState, actor_name: str, token_name: str) -> bool:
@@ -561,13 +615,16 @@ def advance(
                                 f"precondition not satisfied: '{precond}'", tick)
 
     # ── Step 5: Embargo sweep ─────────────────────────────────────────────────
+    # AM-102: an active embargo held by the actor blocks the actions it
+    # covers — the Actions that name it via inhibited_by_embargo, else its
+    # for_action, else every action (_embargo_coverage()). Applies to
+    # discharging actions too.
+    coverage = _embargo_coverage(spec)
     for tok in state.tokens:
         if (tok.holder == actor_name
                 and tok.kind == "embargo"
                 and tok.state == "active"):
-            # A general embargo (for_action=None) blocks all actions.
-            # An action-specific embargo blocks only that action.
-            if tok.for_action is None or tok.for_action == action_name:
+            if _embargo_covers(coverage, tok.token_name, tok.for_action, action_name):
                 return _blocked(state, actor_name, action_name,
                                 f"active embargo '{tok.token_name}' blocks action", tick)
 

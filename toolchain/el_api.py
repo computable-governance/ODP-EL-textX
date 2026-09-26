@@ -33,6 +33,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from el_engine import enroll, grant_token, initial_state, token_from_spec, TransitionRecord
+from el_engine import _embargo_coverage, _embargo_covers  # AM-102
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -635,16 +636,20 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
             detail=f"Actor '{actor_name}' is not enrolled in the current runtime.",
         )
 
-    # Collect the actor's active embargoes.
-    # for_action=None means the embargo blocks all actions; a named for_action
-    # blocks only that specific action (mirrors el_engine.py step 5 logic).
-    active_embargoes: set[Optional[str]] = set()
-    for tok in state.tokens:
-        if tok.holder == actor_name and tok.kind == "embargo" and tok.state == "active":
-            active_embargoes.add(tok.for_action)
+    # Collect the actor's active embargoes. Coverage follows el_engine.py's
+    # Step 5 rule (AM-102, _embargo_coverage()): the Actions naming the
+    # embargo via inhibited_by_embargo, else its for_action, else every action.
+    active_embargoes = [
+        tok for tok in state.tokens
+        if tok.holder == actor_name and tok.kind == "embargo" and tok.state == "active"
+    ]
+    coverage = _embargo_coverage(_runtime._spec)
 
     def _is_embargoed(action_name: str) -> bool:
-        return None in active_embargoes or action_name in active_embargoes
+        return any(
+            _embargo_covers(coverage, t.token_name, t.for_action, action_name)
+            for t in active_embargoes
+        )
 
     actions: List[AvailableAction] = []
 
