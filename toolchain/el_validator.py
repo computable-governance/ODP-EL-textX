@@ -107,6 +107,10 @@ Rules implemented
         (on_objective_achieved) with another member — never
         violated at runtime or in the verifier. Advisory.
                                                   AM-108, §6.4.3, §7.8.7
+  W-25  A Burden whose deadline contains a number but no
+        recognised time unit (e.g. "2 hrs", "10", "by
+        2026-05-20") — the number is ignored, so the deadline is
+        never measured. Advisory.                 AM-111, §6.4.3, §7.8.7
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -284,6 +288,9 @@ def validate_spec(model) -> List[str]:
 
     # W-24 — eventual burden that can never be violated (AM-108, §6.4.3, §7.8.7)
     errors.extend(_validate_unviolatable_eventual_burden(model))
+
+    # W-25 — deadline with a number but no recognised time unit (AM-111, §6.4.3, §7.8.7)
+    errors.extend(_validate_deadline_without_unit(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1523,6 +1530,46 @@ def _validate_unviolatable_eventual_burden(model) -> List[str]:
             f"at runtime or in the verifier. Give it a deadline with a time "
             f"unit, or put it in a satisfaction group whose community opts in "
             f"with on_objective_achieved. (§6.4.3, §7.8.7)"
+        )
+    return warnings
+
+
+def _validate_deadline_without_unit(model) -> List[str]:
+    """W-25 (AM-111): a Burden (top-level or role-scoped, eventual or
+    strict) whose deadline contains a digit but no elapsed-time magnitude
+    (el_engine._has_deadline_magnitude(): a number followed within 20
+    characters by second/minute/hour/day/week/month/year). The author
+    evidently meant a measurable deadline, but the unit is unrecognised
+    ("2 hrs"), missing ("10"), or the number is a date ("by 2026-05-20"):
+    the parser ignores the number, so neither the engine nor the verifier
+    measures the deadline. Before AM-111 "1 year" was such a case. Fires
+    alongside [W-24]/[W-19] where those apply; this one names the cause.
+    Advisory."""
+    from el_engine import _DEADLINE_UNIT_SECONDS, _has_deadline_magnitude
+
+    tokens = list(_collect(model, "DeonticToken"))
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            tokens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                          if _cls(t) == "InlineToken")
+
+    units = ", ".join(_DEADLINE_UNIT_SECONDS)
+    warnings: List[str] = []
+    for tok in tokens:
+        if getattr(tok, "kind", None) != "burden":
+            continue
+        deadline = getattr(tok, "deadline", None) or None
+        if not deadline or not any(c.isdigit() for c in deadline):
+            continue
+        if _has_deadline_magnitude(deadline):
+            continue
+        warnings.append(
+            f"[W-25] Burden '{tok.name}' has deadline '{deadline}': it contains "
+            f"a number but no recognised time unit ({units}), so the number is "
+            f"ignored and the deadline is never measured, at runtime or in the "
+            f"verifier. Write the unit out, e.g. \"2 hours\". (§6.4.3, §7.8.7)"
         )
     return warnings
 
