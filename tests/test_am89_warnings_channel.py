@@ -50,8 +50,11 @@ _TOOLCHAIN = _REPO_ROOT / "toolchain"
 _WARNING_ONLY_PROBE = """
 enterprise specification W16bProbe
 
+// AM-108: a deadline with a unit, so [W-24] (no enforceable deadline)
+// does not fire on this [W-16b] probe.
 burden singleBurden {
     state: active
+    deadline: "1 hour"
 }
 
 community TestCommunity {
@@ -63,8 +66,11 @@ community TestCommunity {
 _WARNING_AND_ERROR_PROBE = """
 enterprise specification W16bAndErrorProbe
 
+// AM-108: a deadline with a unit, so [W-24] (no enforceable deadline)
+// does not fire on this [W-16b] probe.
 burden singleBurden {
     state: active
+    deadline: "1 hour"
 }
 
 community TestCommunity {
@@ -166,8 +172,10 @@ def test_tracked_reference_scenarios_have_no_warnings():
 
 
 def _without_strict_gaps(warnings):
-    """All warnings except AM-103's [W-19]/[W-20]."""
-    return [w for w in warnings if not w.startswith(("[W-19]", "[W-20]"))]
+    """All warnings except AM-103's [W-19]/[W-20] and AM-108's [W-24]
+    (consent_scenario.el's reportingObligation, deadline "end of session":
+    a known gap in the scenario, never violated — same treatment)."""
+    return [w for w in warnings if not w.startswith(("[W-19]", "[W-20]", "[W-24]"))]
 
 
 # ── Test 6: el_reasoner.py's CLI prints warnings to stderr, exit status ok ─

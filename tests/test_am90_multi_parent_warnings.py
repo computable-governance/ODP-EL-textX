@@ -173,7 +173,8 @@ party RootParty
 agent AgentA
 agent AgentB
 
-burden sharedToken { state: active }
+// AM-108: a deadline with a unit, so [W-24] does not fire on this probe.
+burden sharedToken { state: active deadline: "1 hour" }
 
 commitment c1 { by: RootParty obligation: "Handle it" creates_burden: sharedToken }
 

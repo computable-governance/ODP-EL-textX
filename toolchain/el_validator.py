@@ -102,6 +102,11 @@ Rules implemented
   W-23  An escalate ViolationResponse whose escalate_to is
         missing or not a party. The dormant V-NEW-16, as a
         warning. Advisory.                            AM-104, §6.3.8, §7.4
+  W-24  An eventual Burden whose deadline has no elapsed-time
+        magnitude and that is in no opted-in satisfaction group
+        (on_objective_achieved) with another member — never
+        violated at runtime or in the verifier. Advisory.
+                                                  AM-108, §6.4.3, §7.8.7
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -276,6 +281,9 @@ def validate_spec(model) -> List[str]:
 
     # W-23 — escalate_to must be a party; the dormant V-NEW-16 (AM-104, §6.3.8, §7.4)
     errors.extend(_validate_escalate_to_party(model))
+
+    # W-24 — eventual burden that can never be violated (AM-108, §6.4.3, §7.8.7)
+    errors.extend(_validate_unviolatable_eventual_burden(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1461,6 +1469,60 @@ def _validate_escalate_to_party(model) -> List[str]:
         warnings.append(
             f"[W-23] Escalate response '{vr.name}' {problem}. Escalation goes "
             f"to a party. (V-NEW-16; §6.3.8, §7.4)"
+        )
+    return warnings
+
+
+def _validate_unviolatable_eventual_burden(model) -> List[str]:
+    """W-24 (AM-108): an eventual Burden (top-level or role-scoped) whose
+    deadline has no elapsed-time magnitude (el_engine._has_deadline_magnitude():
+    prose, a bare number, or none) and that has no episode-conclusion path:
+    it is not in the satisfaction group of any Community/Federation/Domain
+    that opts in with lifecycle { terminating { on_objective_achieved: true } },
+    together with at least one other member. The engine then never violates
+    it (check_live_violations(): no clock without a magnitude, no conclusion
+    without such a group), and since AM-108 neither does the verifier (T2
+    skips it, T2b needs the group). Strict burdens are [W-19]'s. Advisory."""
+    from el_engine import (
+        _build_satisfaction_conditions,
+        _concludes_on_objective_achieved,
+        _has_deadline_magnitude,
+    )
+
+    concludes = {
+        el.name: _concludes_on_objective_achieved(el)
+        for el in model.elements
+        if _cls(el) in ("Community", "Federation", "Domain")
+    }
+    concludable: Set[str] = set()
+    for el_name, (_op, members) in _build_satisfaction_conditions(model).items():
+        if concludes.get(el_name) and len(members) > 1:
+            concludable.update(members)
+
+    tokens = list(_collect(model, "DeonticToken"))
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            tokens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                          if _cls(t) == "InlineToken")
+
+    warnings: List[str] = []
+    for tok in tokens:
+        if getattr(tok, "kind", None) != "burden":
+            continue
+        if (getattr(tok, "discharge_mode", None) or "eventual") != "eventual":
+            continue
+        deadline = getattr(tok, "deadline", None) or None
+        if _has_deadline_magnitude(deadline) or tok.name in concludable:
+            continue
+        shown = f"'{deadline}'" if deadline else "none"
+        warnings.append(
+            f"[W-24] Eventual burden '{tok.name}' has no enforceable deadline "
+            f"({shown}) and no episode-conclusion path: it is never violated, "
+            f"at runtime or in the verifier. Give it a deadline with a time "
+            f"unit, or put it in a satisfaction group whose community opts in "
+            f"with on_objective_achieved. (§6.4.3, §7.8.7)"
         )
     return warnings
 
