@@ -138,6 +138,21 @@ def _find_action(spec, action_name):
     return None, None
 
 
+def _embargo_naming_actions(spec) -> Dict[str, Set[str]]:
+    """AM-102: embargo name -> the role Actions that declare
+    `inhibited_by_embargo` on it (§6.4.6). Rule 1 of _embargo_coverage();
+    also read by the validator's [W-18]. Role Action bodies only."""
+    named: Dict[str, Set[str]] = {}
+    for el in getattr(spec, "elements", []):
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                for req in getattr(action, "deontic_requirements", []):
+                    if req.kind == "inhibited_by_embargo" and req.token:
+                        named.setdefault(req.token.name, set()).add(action.name)
+    return named
+
 def _embargo_coverage(spec) -> Dict[str, Optional[FrozenSet[str]]]:
     """AM-102: embargo name -> the actions it covers, or None for every action.
 
@@ -153,15 +168,7 @@ def _embargo_coverage(spec) -> Dict[str, Optional[FrozenSet[str]]]:
     finding on ConditionalAction). Top-level embargo DeonticTokens only,
     the same lookup token_from_spec() uses.
     """
-    named: Dict[str, Set[str]] = {}
-    for el in getattr(spec, "elements", []):
-        if type(el).__name__ not in ("Community", "Domain", "Federation"):
-            continue
-        for role in getattr(el, "roles", []):
-            for action in getattr(role, "actions", []):
-                for req in getattr(action, "deontic_requirements", []):
-                    if req.kind == "inhibited_by_embargo" and req.token:
-                        named.setdefault(req.token.name, set()).add(action.name)
+    named = _embargo_naming_actions(spec)
     coverage: Dict[str, Optional[FrozenSet[str]]] = {}
     for el in getattr(spec, "elements", []):
         if type(el).__name__ != "DeonticToken" or el.kind != "embargo":

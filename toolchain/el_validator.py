@@ -82,6 +82,10 @@ Rules implemented
         requirement can never be satisfied. Advisory, never an
         error; role Action bodies only (ConditionalAction is not
         read by anything).                         AM-96, §6.4.6, §7.10.1
+  W-18  An Embargo named by >=1 Action via inhibited_by_embargo
+        has a for_action outside that set — blocking follows the
+        naming Actions, so the for_action is ignored. Advisory,
+        never an error; role Action bodies only.        AM-102, §6.4.4, §6.4.6
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -238,6 +242,9 @@ def validate_spec(model) -> List[str]:
 
     # W-16h — ungrantable permit requirement (AM-96, §6.4.6, §7.10.1)
     errors.extend(_validate_ungrantable_permit_requirement(model))
+
+    # W-18 — embargo for_action outside its naming Actions (AM-102, §6.4.4, §6.4.6)
+    errors.extend(_validate_embargo_for_action_consistency(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1234,6 +1241,38 @@ def _validate_obligation_chain(
             )
 
     return errors
+
+
+def _validate_embargo_for_action_consistency(model) -> List[str]:
+    """W-18 (AM-102): an Embargo that one or more role Actions name via
+    `inhibited_by_embargo`, and whose for_action is outside that set.
+    Under the shared blocking rule (el_engine._embargo_coverage()) the
+    naming Actions decide what the embargo blocks, in the engine and the
+    verifier alike, so the for_action is ignored — the reader of the
+    spec would expect it to be blocked, and it is not. Advisory, never an
+    error. Built from el_engine._embargo_naming_actions(), the map the
+    blocking rule itself reads, so the two cannot diverge. Role Action
+    bodies only (ConditionalAction is not read by anything)."""
+    from el_engine import _embargo_naming_actions
+
+    named = _embargo_naming_actions(model)
+    warnings: List[str] = []
+    for tok in _collect(model, "DeonticToken"):
+        if getattr(tok, "kind", None) != "embargo":
+            continue
+        for_action = getattr(tok, "for_action", None)
+        actions = named.get(tok.name)
+        if not for_action or not actions or for_action in actions:
+            continue
+        warnings.append(
+            f"[W-18] Embargo '{tok.name}' has for_action '{for_action}', but "
+            f"the Actions that declare inhibited_by_embargo {tok.name} are "
+            f"{sorted(actions)}. The embargo blocks those Actions only; "
+            f"'{for_action}' is not blocked by it. Name '{for_action}' in its "
+            f"for_action only if it is one of them, or add inhibited_by_embargo "
+            f"{tok.name} to '{for_action}'. (§6.4.4, §6.4.6)"
+        )
+    return warnings
 
 
 def _validate_burden_embargo_conflict(model) -> List[str]:
