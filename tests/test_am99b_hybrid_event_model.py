@@ -42,7 +42,12 @@ import pytest
 
 from el_api import _SCENARIO_BUILDERS
 from el_engine import enroll, grant_token, initial_state, token_from_spec
-from el_kripke import ObligationState, build_kripke_from_runtime, build_kripke_model
+from el_kripke import (
+    NOT_RESOLVED_WITHIN_HORIZON,
+    ObligationState,
+    build_kripke_from_runtime,
+    build_kripke_model,
+)
 from el_parser import parse, parse_string
 from el_runtime import Runtime
 
@@ -172,10 +177,29 @@ def test_after_refusal_w0_mirrors_engine(toe_spec):
 def test_after_refusal_response_verdicts_match_static(toe_spec):
     static = _quiet(build_kripke_model, toe_spec, horizon=10)
     hybrid = _quiet(build_kripke_from_runtime, _after_refusal(toe_spec), horizon=10)
-    for oid in ("refusalRecordBurden", "refusalReviewBurden", "incidentNotificationBurden"):
+    for oid in ("refusalRecordBurden", "refusalReviewBurden"):
         h, s_ = hybrid.check_response(oid), static.check_obligation(oid)
         assert (h.satisfied, h.status) == (s_.satisfied, s_.status), oid
     assert hybrid.check_response("refusalRecordBurden").satisfied is True
+
+    # AM-109: incidentNotificationBurden no longer matches, pinned here.
+    # Static: "not resolved within horizon" — its only counterexample used
+    # to end at another obligation's violation (the terminal rule), and its
+    # own deadline (360 steps) is beyond the horizon. Hybrid: fails, via a
+    # revoke/reinstate cycle on AgentAccessAuthorization (T7/T8, which only
+    # the hybrid builder has) that defers the notification forever. Before
+    # AM-109 both said "fails", for different reasons. notifyIncident needs
+    # no permit, so the discharge stays enabled through the cycle: weak
+    # fairness (accepted in AM-103) would exclude it — see CONCEPTS_INDEX,
+    # "Institutional-act cycles as AF counterexamples".
+    s_ = static.check_obligation("incidentNotificationBurden")
+    assert (s_.satisfied, s_.status) == (False, NOT_RESOLVED_WITHIN_HORIZON)
+    h = hybrid.check_response("incidentNotificationBurden")
+    assert (h.satisfied, h.status) == (False, None)
+    labels = [label for _, label in h.counterexample_path]
+    assert labels[-1].startswith("↺ cycle")
+    assert any(label.startswith("revoke:AgentAccessAuthorization") for label in labels)
+    assert any(label.startswith("reinstate:AgentAccessAuthorization") for label in labels)
 
 
 def test_no_circumvention_embargo_active_in_every_reachable_world(toe_spec):

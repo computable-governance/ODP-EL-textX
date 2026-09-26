@@ -147,20 +147,14 @@ def test_escalation_notice_burden_descriptor_in_hybrid_mode():
     assert desc.holder == "SpecialistPractice"
     assert desc.for_action == "notify_gp_of_non_response"
     assert desc.discharge_mode == "strict"
-    # AM-108 (pinned as current behaviour): AF is false. Counterexample:
-    # the other episode members discharge at step 0, T2b violates
-    # aiExaminationBurden ("episode concluded"), and that violated world is
-    # terminal with the strict escalation still PENDING — a dead end. The
-    # engine allows the sequence; the dead end is the terminal-violated-
-    # world rule, and with violated worlds non-terminal AF holds. Expected
-    # to flip back to True with AM-109. Before AM-108, aiExaminationBurden
-    # was only violated by T2's default 5 steps, which the strict freeze
-    # never let elapse.
+    # AM-109: AF holds again. Under AM-108 it was false: the other episode
+    # members discharged at step 0, T2b violated aiExaminationBurden
+    # ("episode concluded"), and that violated world was terminal with the
+    # strict escalation still PENDING — a dead end made by the terminal-
+    # violated-world rule, not by anything the engine does. AM-109 lets a
+    # violated world continue, so the escalation is discharged there too.
     verdict = km.check_obligation("escalationNoticeBurden")
-    assert verdict.satisfied is False and verdict.status is None
-    labels = [label for _, label in verdict.counterexample_path]
-    assert "violate:aiExaminationBurden (episode concluded)" in labels
-    assert labels[-1].startswith("✗ dead-end")
+    assert verdict.satisfied is True and verdict.status is None
 
 
 # ── Authorization.auth_burden — proactive, zero live usage ─────────────────

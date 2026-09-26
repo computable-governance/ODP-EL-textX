@@ -2280,9 +2280,10 @@ def _activate_on_violation(
 ) -> bool:
     """AM-105: on the T2 edge violating `violated`, every WAITING burden a
     response creates from it becomes PENDING, its activation step
-    recorded (both dicts updated in place). Returns True if any did — the
-    caller then enqueues the violated world instead of leaving it
-    terminal. Shared by both builders' T2."""
+    recorded (both dicts updated in place). Returns True if any did.
+    Shared by both builders' T2/T2b. (Until AM-109 the caller used the
+    result to enqueue an otherwise terminal violated world; every violated
+    world now continues.)"""
     activated = False
     for created, sources in violation_activation.items():
         if violated in sources and new_obligs.get(created) == ObligationState.WAITING:
@@ -2538,8 +2539,10 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            step 0 even for obligations P6a activated later.
            AM-105: the same edge activates (WAITING → PENDING) every
            burden a ViolationResponse creates from O
-           (violation_activation); such a violated world is enqueued,
-           every other stays terminal.
+           (violation_activation). AM-109: the violated world continues
+           (it is expanded below the horizon like any other); O stays
+           VIOLATED. Before AM-109 it was terminal unless it activated a
+           response-created burden.
            AM-108: only for an obligation whose deadline has an
            elapsed-time magnitude (enforceable_deadlines); the engine never
            clock-violates any other.
@@ -2552,7 +2555,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            edge to the same step where O is VIOLATED, labelled
            "violate:O (episode concluded)". Mirrors the engine's
            check_live_violations() / _owning_group_concluded() (DN_010
-           option b). Same AM-105 activation and terminal rule as T2.
+           option b). Same AM-105 activation as T2; the violated world
+           continues (AM-109).
 
          Rule T3 — TICK (time passes):
            Add an edge w → w_tick where step increments by 1 and all
@@ -2914,7 +2918,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             new_obligs[oid] = ObligationState.VIOLATED
             # AM-105: the violation activates the burdens its responses create.
             new_activation = dict(w.activation_steps)
-            responded = _activate_on_violation(
+            _activate_on_violation(
                 violation_activation, oid, new_obligs, new_activation, w.step)
 
             w_viol  = _make_world(new_obligs, current_actors, current_occurred,
@@ -2923,11 +2927,12 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
 
             if w_viol not in worlds:
                 worlds.add(w_viol)
-                # Violated worlds are terminal — do not enqueue further —
-                # except (AM-105) when this edge activated a response-created
-                # burden: left terminal, that burden could never discharge
-                # (a dead end makes AF false).
-                if responded and w_viol.step < horizon:
+                # AM-109: a violated world continues, as in the engine (a
+                # violation stops nothing else). Before AM-109 it was
+                # terminal — a dead end that made every other still-PENDING
+                # obligation's AF fail — unless (AM-105) the edge activated
+                # a response-created burden.
+                if w_viol.step < horizon:
                     queue.append(w_viol)
             edges.setdefault(w, set()).add(w_viol)
             labels[(w, w_viol)] = label
@@ -3992,8 +3997,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         # inside the T1 loop, after the permit gate, so a gated burden was
         # never violated. Deadline counted from activation (AM-99b), as
         # static T2 and the engine's check_live_violations() count it.
-        # AM-105: the violation activates the burdens its responses create;
-        # such a violated world is enqueued, every other stays terminal.
+        # AM-105: the violation activates the burdens its responses create.
+        # AM-109: the violated world continues, as in static T2.
         # AM-108: T2 only for an enforceable deadline; otherwise T2b, as in
         # the static builder.
         for oid, desc in descriptors.items():
@@ -4011,7 +4016,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 violation_label = f"violate:{oid} (episode concluded)"
             v_obligs = {**obligs, oid: ObligationState.VIOLATED}
             v_activation = dict(w.activation_steps)
-            responded = _activate_on_violation(
+            _activate_on_violation(
                 violation_activation, oid, v_obligs, v_activation, w.step)
             wv = _make_world(
                 v_obligs, actors, occurred,
@@ -4023,7 +4028,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             )
             if wv not in worlds:
                 worlds.add(wv)
-                if responded and wv.step < horizon_step:
+                if wv.step < horizon_step:  # AM-109: not terminal
                     queue.append(wv)
             edges.setdefault(w, set()).add(wv)
             labels[(w, wv)] = violation_label

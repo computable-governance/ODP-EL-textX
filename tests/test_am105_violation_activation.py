@@ -142,23 +142,22 @@ def test_static_t2_activates_and_continues():
     assert km.check_permission("noticeBurden").satisfied is True
 
 
-def test_static_other_violations_stay_terminal():
-    """A violation that activates nothing stays terminal, even with a
-    response-created burden PENDING: that path is a dead end, so the
-    bounded response fails there (violation ends the path, pre-AM-105
-    semantics kept). EF still holds."""
+def test_static_other_violations_continue():
+    """AM-109 (renamed from test_static_other_violations_stay_terminal): a
+    violation that activates nothing no longer ends the path. Before
+    AM-109 it did, so with noticeBurden PENDING the otherBurden violation
+    was a dead end and noticeBurden's bounded response failed there — the
+    terminal rule under-reporting (CONCEPTS_INDEX, 7695d1f). Now the
+    violated world continues below the horizon and noticeBurden (strict)
+    is discharged on every path: the bounded response holds."""
     km = _quiet(build_kripke_model, _probe(_PROBE_OTHER), horizon=10)
     other_edges = _violation_edges(km, "otherBurden")
     assert other_edges
-    assert all(not km.successors(s) for _, s in other_edges)
+    assert any(km.successors(s) for _, s in other_edges if s.step < km.horizon)
 
     verdict = km.check_obligation("noticeBurden")
-    assert verdict.satisfied is False
+    assert verdict.satisfied is True
     assert verdict.status is None
-    final_world, final_label = verdict.counterexample_path[-1]
-    assert dict(final_world.obligation_states)["otherBurden"] == ObligationState.VIOLATED
-    assert dict(final_world.obligation_states)["noticeBurden"] == ObligationState.PENDING
-    assert "dead-end" in final_label
     assert km.check_permission("noticeBurden").satisfied is True
 
 

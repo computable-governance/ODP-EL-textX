@@ -62,15 +62,28 @@ def test_refusal_record_response_property_holds(toe):
     assert v.satisfied is True
 
 
-@pytest.mark.parametrize("oid", ["refusalReviewBurden", "incidentNotificationBurden"])
-def test_eventual_response_property_fails_but_reachable(toe, oid):
+def test_eventual_response_property_fails_but_reachable(toe):
     """Eventual: detectable (EF) but not compelled once pending."""
-    v = toe.check_obligation(oid)
+    v = toe.check_obligation("refusalReviewBurden")
     assert v.modal_operator == RESPONSE_OPERATOR
     assert v.status is None
     assert v.satisfied is False
     assert v.counterexample_path
-    assert toe.check_permission(oid).satisfied is True
+    assert toe.check_permission("refusalReviewBurden").satisfied is True
+
+
+def test_incident_notification_not_resolved_within_horizon(toe):
+    """AM-109: incidentNotificationBurden was 'fails' here only because its
+    counterexample ended at another obligation's violation, then a dead
+    end (the terminal-violated-world rule). With violated worlds
+    continuing, no path fails within the horizon: its own genuine failure,
+    silence until the 72-hour deadline (360 steps), lies beyond horizon 10.
+    Detectable (EF) as before. See CONCEPTS_INDEX, horizon sizing."""
+    v = toe.check_obligation("incidentNotificationBurden")
+    assert v.modal_operator == RESPONSE_OPERATOR
+    assert v.satisfied is False
+    assert v.status == NOT_RESOLVED_WITHIN_HORIZON
+    assert toe.check_permission("incidentNotificationBurden").satisfied is True
 
 
 def test_counterexample_starts_at_initial_world(toe):
