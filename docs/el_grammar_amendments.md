@@ -8032,6 +8032,7 @@ read, and the verifier's inhibition index names only
   guard, while the engine's Step 3.5 refuses exercise actions while a
   strict burden is actionable — logged as an open finding and planned
   as the next amendment (it moves the referral scenario's pinned counts).
+  **Resolved by AM-101**; no test pinned a count, so none moved.
 
 ### Part 4 — hybrid horizon counts from the runtime's tick (`736f5c2`)
 
@@ -8065,7 +8066,7 @@ was deleted (it asserted the removed field; approved).
   deliberate, recorded with the C1 finding.
 - **Hybrid P6b** ("Hybrid T1 has no P6b").
 - **T5 strict guard** — next amendment ("Rule T5 has no strict-mode
-  guard").
+  guard"). **Resolved by AM-101.**
 - **Engine Step 5 ignores `inhibited_by_embargo`** — the engine side is
   to change ("Engine Step 5 ignores `inhibited_by_embargo`").
 
@@ -8123,3 +8124,141 @@ relative horizon; static T5/T6 event firing; `_build_action_emits_index()`,
 `docs/CONCEPTS_INDEX.md` (symmetry-gap, hybrid-`WAITING` and
 horizon-enqueue findings updated; four new open findings); this file
 (AM-100's "Decisions to revisit" updated; new entry).
+
+---
+
+## AM-101 (2026-09-26) — Rule T5 strict-mode guard, both Kripke builders, mirroring the engine's Step 3.5 (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED (2026-09-26), in four parts (commits `17945c0`,
+`d536176`, `b3ed020` and this docs commit). Type: toolchain change
+(Layer 4, Kripke verifier). No grammar, validator or engine change.
+Resolves the CONCEPTS_INDEX finding "Rule T5 has no strict-mode guard;
+the engine's Step 3.5 refuses the same actions" (found during AM-99b
+part 3).
+
+**Problem.** The engine's Step 3.5 (AM-78, `el_engine.py`) refuses an
+action when its Step 3 `dischargeable` list is empty and
+`_strict_actionable_burdens()` is not: some `active`,
+`discharge_mode: strict` burden whose holder is enrolled. Exercising a
+permit discharges nothing unless its action also discharges a burden
+the actor holds. T3, T4, T7–T11 already had the equivalent guard; T5 did
+not, so the verifier explored exercise edges the engine refuses, and
+since AM-99b part 3 such an edge could also fire the action's event.
+
+### Part 1 — static builder (`17945c0`)
+
+T11's `strict_blocks` (PENDING, strict, holder `ACTIVE`: textually the
+same condition as T3's `has_strict_pending_dischargeable`) is computed
+once above T5 and shared by T5 and T11. T5 skips a permit when
+`strict_blocks` holds and `_discharges_any()` is false. New module
+helpers: `_build_action_destroys_index()` (action → tokens its `destroy`
+effects name; first match per action name, as the engine's
+`_find_action()`), and `_discharges_any()`, the verifier's copy of Step
+3's `dischargeable`: some PENDING obligation held by the permit holder
+that the action destroys, matches by `for_action`, or discharges by
+emitting its `discharged_by` event. The static `for_action` comes from
+`_build_obligation_descriptors()` (token `for_action`, else
+`_find_action_for_burden()`), the same source `token_from_spec()` uses.
+
+### Part 2 — hybrid builder (`d536176`)
+
+Same guard, using `strict_burden_blocks(w)`. Holders are read through
+`_effective_holder()` (revoked delegation, T9 override), as
+`strict_burden_blocks()` reads them. `for_action` is read from the live
+tokens, as the engine's Step 3 does: a hybrid descriptor built without a
+spec descriptor has `for_action` None.
+
+**Engine mirror, not a blanket guard.** An exercise whose action
+discharges a burden the holder holds is kept, as the engine accepts it;
+T1/T6 still draw the discharge as their own edge. No scenario has that
+overlap today: the engine-mirroring guard and a blanket guard produce
+identical models for every scenario (harness rerun after Part 2).
+
+### Blast radius (horizon 10, measured before landing)
+
+| Scenario | Builder | Worlds | Edges | Exercise edges removed |
+|---|---|---|---|---|
+| `referral_scenario.el` | static | 280 → 272 | 632 → 604 | `patientRecordAccessPermitByAuthorization` |
+| | hybrid (`referral` builder) | 3992 → 3976 | 16350 → 16286 | same |
+| `gp_referral_scenario.el` | static, spec-only (`validate=False`) | 67 → 61 | 122 → 105 | same |
+| | hybrid (`gp_referral` builder) | 998 → 994 | 3458 → 3446 | same |
+| `ereferral_model.el` | hybrid (`ereferral` builder) | 323 → 315 | 659 → 631 | `patientRecordAccessPermit` |
+| `external_agent_access_scenario.el` | static | 2444 → 2444 | 5924 → 5840 | `serviceRequestSubmitPermit`, `patientLookupPermit` |
+| | hybrid, fresh | 16340 → 16340 | 59176 → 58840 | same |
+| | hybrid, after one refusal | 9114 → 9111 | 32066 → 32059 | same |
+| `public_data_portal_scenario.el` | static | 2444 → 2444 | 5924 → 5840 | `aggregateQueryPermit`, `publishedDatasetReadPermit` |
+| | hybrid, fresh | 16340 → 16340 | 59176 → 58840 | same |
+| `fhir/generated_governance.el` | static | 4 → 3 | 4 → 2 | `ConsentAiDiagnostic001Permit` |
+
+Every other scenario is unchanged in both builders (consent stays 30;
+`erequesting_claiming` 44 hybrid). In the terms-of-engagement scenarios
+the world count holds because the same exercise worlds are still
+reached by exercising after `recordRefusal`; only the out-of-order edges
+go. **No AF, EF or bounded response verdict changed, no EF witness path
+changed, and no `WAITING` obligation lost an activation** (none of the
+removed exercise actions emits an event). The terms-of-engagement
+reading is unchanged in both scenarios and both builders: recording
+refusals compelled (`refusalRecordBurden` holds); review and
+notification detectable only (fail, EF true). No test pinned a world or
+edge count, so none moved; the CONCEPTS_INDEX finding's expectation
+that pinned counts would move was wrong.
+
+### Tests
+
+`tests/test_am101_t5_strict_guard.py` (new), 20 tests:
+- Parity, inline fixture (8): a strict burden held by one actor; four
+  permits held by another, one per `dischargeable` arm (none, matching
+  `for_action`, `destroy` effect, emitted `discharged_by` event). The
+  engine refuses only the first; each builder's w0 has exactly the
+  engine-accepted exercises; after the strict discharge the refused
+  exercise returns (control).
+- Parity, terms of engagement (1): after a refusal the engine refuses
+  both exercises with the strict reason; hybrid w0 and every static
+  world with the same obligation states have no T5 edge.
+- Invariant (11): no T5 edge leaves a strict-blocked world, static over
+  the six affected scenario files, hybrid over the five affected
+  runtimes.
+
+**Undo-and-rerun checks:** against the pre-AM-101 `el_kripke.py`, 13 of
+the 20 fail (the static ereferral invariant is vacuous: no permits in
+the static model); with `_discharges_any()` forced false (a blanket
+guard), the two inline-fixture parity tests fail.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 620 → 620 → 620
+→ 640 passed, 1 xfailed.
+
+### Decisions to revisit
+
+- **Engine "enrolled" vs verifier `ActorStatus.ACTIVE`.** No transition
+  rule produces `INACTIVE`, and the static builder has no enrollment:
+  every chain member and permit holder is `ACTIVE` in every world. The
+  engine has no un-enroll primitive, so enrollment only grows; T9's
+  to-actor is resolved from enrolled actors. The two can diverge only
+  when a strict burden's holder, or a revoked delegation's delegator, is
+  never enrolled (`grant_token()` does not check). The engine then does
+  not block and the verifier does. In every curated runtime (the four
+  `el_api` builders, both terms-of-engagement runtimes) every strict
+  holder and every delegator is enrolled, so **no reachable world
+  diverges there**. A static model corresponds to a runtime that
+  enrolls every chain member.
+- **A kept exercise does not discharge in the model.** When the permit's
+  action also discharges a burden, the engine does both in one step;
+  the verifier keeps T5 (occurrence) and T1/T6 (discharge) as separate
+  edges. Pre-existing split, not introduced here; no scenario exercises
+  it.
+- **Action-name lookup.** `_build_action_destroys_index()` takes the
+  first action of a name (as the engine); `_build_action_emits_index()`
+  (AM-99b) takes the last. They can differ only for a duplicated action
+  name; no scenario has one.
+
+**Standard reference(s):** §6.4.5 (Permit: a standing grant, not
+consumed by exercise); §7.8.7 (token lifecycle, discharge); Annex C
+(Kripke semantics, informative), §C.2.
+
+**Files changed:** `toolchain/el_kripke.py` (static and hybrid T5
+guard; `_build_action_destroys_index()`, `_discharges_any()`; static
+T11 shares the hoisted `strict_blocks`; docstrings);
+`tests/test_am101_t5_strict_guard.py` (new);
+`docs/KRIPKE_TRANSITION_RULES.md` (T5 row, last-updated note);
+`docs/CONCEPTS_INDEX.md` (finding resolved and corrected); this file
+(AM-99b's deferred list updated; new entry).

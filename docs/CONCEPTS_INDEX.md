@@ -1715,8 +1715,8 @@ obligations still go through descriptors); hybrid P6b and C1 (findings
 at the end of this file); events fired from outside the DSL
 (`Runtime.fire_event()`) are anchored correctly in hybrid w0 but are not
 a transition in either builder; the static builder tracks no per-world
-Embargo/Permit state; and the T5 strict-guard asymmetry (end of this
-file).
+Embargo/Permit state. The T5 strict-guard asymmetry is closed (AM-101,
+2026-09-26).
 
 ## Engine/Kripke unification — what a shared design would and wouldn't merge
 
@@ -5939,9 +5939,23 @@ enqueue asymmetry itself is unchanged in both builders, and the hybrid
 T11 added by AM-99b follows the same `step < horizon` enqueue guard as
 the other non-tick rules.
 
-## Rule T5 has no strict-mode guard; the engine's Step 3.5 refuses the same actions — OPEN FINDING (2026-09-25)
+## Rule T5 has no strict-mode guard; the engine's Step 3.5 refuses the same actions — RESOLVED (2026-09-26)
 
-**OPEN FINDING** — found during AM-99b part 3. Neither builder's T5
+**OPEN FINDING (2026-09-25), RESOLVED 2026-09-26 by AM-101** (see
+`docs/el_grammar_amendments.md`). Both builders' T5 now skips an
+exercise while a strict obligation is `PENDING` with an `ACTIVE` holder,
+unless the exercised action discharges a burden the permit holder holds
+(`_discharges_any()`, the verifier's copy of the engine's Step 3
+`dischargeable`), so T5 is refused exactly when Step 3.5 refuses. No AF,
+EF or bounded response verdict changed, no EF witness changed, and no
+`WAITING` obligation lost an activation; world/edge counts dropped in
+the referral, gp_referral, ereferral, terms-of-engagement and
+FHIR-generated models (table in the AM-101 entry).
+**Correction:** the last paragraph below expected pinned world counts
+to move. No test pinned a world or edge count, so none moved; the new
+tests pin parity with the engine and an invariant instead.
+
+Original finding — found during AM-99b part 3. Neither builder's T5
 (Exercise) is suppressed while a `discharge_mode: strict` obligation is
 `PENDING` with an `ACTIVE` holder. The engine's Step 3.5 (AM-78) refuses
 any action that discharges nothing while a strict burden is actionable,
