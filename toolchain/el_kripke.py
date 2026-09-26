@@ -94,6 +94,7 @@ from typing import Any, Dict, FrozenSet, Iterable, Iterator, List, Optional, Set
 from el_engine import (
     ObligationDescriptor,
     _activation_tick,
+    _embargo_coverage,
     _build_obligation_descriptors,
     _commitment_root_for_token,
     _find_spec_tokens_for_event,
@@ -491,48 +492,35 @@ def _build_permit_descriptors(model: Any) -> Dict[str, PermitDescriptor]:
 
 def _build_embargo_inhibition_index(model: Any) -> Dict[str, List[str]]:
     """
-    Map action_name -> [embargo_token_name, ...] via the 'inhibited_by_embargo'
-    linkage (§6.4.6 conditional-action semantics).
+    Map action_name -> [embargo_token_name, ...] for every embargo that
+    covers the action. AM-102: built from el_engine._embargo_coverage(), the
+    rule the engine's Step 5 uses too — the Actions naming the embargo via
+    `inhibited_by_embargo` (§6.4.6: the Action declares what inhibits it),
+    else the embargo's for_action. General embargoes (no for_action, named
+    by no Action) cover every action and are listed separately by
+    _build_general_embargoes().
 
-    This is the Action-scoped DeonticRequirement / CondActionBodyItem
-    mechanism (grammar lines ~640-679: an Action declares itself inhibited
-    by a named Embargo) — NOT the DeonticToken-level inhibited_by_embargo
-    STRING field (grammar line ~160). That field is informational-only and
-    unused: confirmed by repo-wide grep across every toolchain/*.py module
-    and every .el scenario before this was written — it is never read and
-    never set. There is no direct Permit↔Embargo linkage anywhere in the
-    grammar; the real relationship is Action → Embargo. T5's guard walks
-    from a Permit's for_action to the Action, then to the Embargo(s) that
-    inhibit that Action via this index.
-
-    Mirrors el_reasoner.can_perform()'s traversal of
-    action.deontic_requirements (kind == 'inhibited_by_embargo'), extended
-    to also cover the ConditionalAction.inhibited_by path (post-P5
-    dissolution) that can_perform does not currently walk — matching the
-    established two-tier Action/ConditionalAction pattern already used by
-    _find_action_for_burden and _find_action_for_permit's Tier-2 (deferred)
-    design for for_action resolution.
+    Before AM-102 this read only the Action-level `inhibited_by_embargo`
+    linkage, so an embargo named by no Action blocked nothing here while
+    the engine blocked its for_action. It also walked
+    `action.conditional_actions`, a Role field that is never set on an
+    Action, so that loop never ran (see the CONCEPTS_INDEX finding on
+    ConditionalAction); the ConditionalAction path stays out of both layers.
+    The DeonticToken-level `inhibited_by_embargo` STRING field is still
+    unread. State-free, built once before the BFS.
     """
     index: Dict[str, List[str]] = {}
-    for el in model.elements:
-        if _cls(el) not in ("Community", "Domain", "Federation"):
-            continue
-        for role in getattr(el, "roles", []):
-            for action in getattr(role, "actions", []):
-                names: List[str] = []
-                for req in getattr(action, "deontic_requirements", []):
-                    if getattr(req, "kind", None) == "inhibited_by_embargo":
-                        n = _obj_name(getattr(req, "token", None))
-                        if n:
-                            names.append(n)
-                for ca in getattr(action, "conditional_actions", []):
-                    for embargo_ref in getattr(ca, "inhibited_by", []):
-                        n = _obj_name(embargo_ref)
-                        if n:
-                            names.append(n)
-                if names:
-                    index.setdefault(action.name, []).extend(names)
+    for name, covered in _embargo_coverage(model).items():
+        for action_name in sorted(covered or ()):
+            index.setdefault(action_name, []).append(name)
     return index
+
+
+def _build_general_embargoes(model: Any) -> List[str]:
+    """AM-102: embargoes that cover every action of their holder (no
+    for_action, named by no Action) — el_engine._embargo_coverage()'s None
+    case. Consulted for every action alongside _build_embargo_inhibition_index()."""
+    return sorted(n for n, covered in _embargo_coverage(model).items() if covered is None)
 
 
 def _build_permit_requirement_index(model: Any) -> Dict[str, List[str]]:
@@ -2354,6 +2342,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     descriptors = _build_obligation_descriptors(model)
     permit_descriptors = _build_permit_descriptors(model)
     embargo_inhibition_index = _build_embargo_inhibition_index(model)
+    general_embargoes = _build_general_embargoes(model)  # AM-102
     permit_requirement_index = _build_permit_requirement_index(model)
     embargo_holder_index = _build_embargo_holder_index(model)
     group_index = _build_group_index(model)
@@ -2439,6 +2428,16 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     }
     init_actors = {actor: ActorStatus.ACTIVE for actor in all_actors}
     w0 = _make_world(init_obligs, init_actors, occurred_actions=frozenset(), step=0)
+
+    def embargo_blocks(actor: Optional[str], action: Optional[str]) -> bool:
+        """AM-102: True iff an active embargo held by `actor` covers
+        `action` (el_engine._embargo_coverage(), as the engine's Step 5).
+        Static builder: spec-declared state, holder from `holds` only."""
+        for embargo_name in embargo_inhibition_index.get(action, []) + general_embargoes:
+            e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+            if e_state == "active" and e_holder == actor:
+                return True
+        return False
 
     # BFS expansion
     worlds: Set[World]                       = {w0}
@@ -2679,13 +2678,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             # "Permit/Embargo missing domain scope (§7.8.8.2/§7.8.8.3 gap)"
             # in docs/CONCEPTS_INDEX.md. Correct only within a single domain;
             # do not assume it generalises to federated Permit/Embargo pairs.
-            blocked = False
-            for embargo_name in embargo_inhibition_index.get(pdesc.for_action, []):
-                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
-                if e_state == "active" and e_holder == pdesc.holder:
-                    blocked = True
-                    break
-            if blocked:
+            if embargo_blocks(pdesc.holder, pdesc.for_action):  # AM-102
                 continue
 
             new_occurred = current_occurred | {pdesc.for_action}
@@ -2739,13 +2732,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             # Embargo that is ACTIVE and held by the SAME holder as the
             # Burden — actor-scoped, same rationale/limitations as T5's
             # guard (single-domain-scoped; see that block's comment).
-            blocked = False
-            for embargo_name in embargo_inhibition_index.get(desc.for_action, []):
-                e_state, e_holder = embargo_holder_index.get(embargo_name, (None, None))
-                if e_state == "active" and e_holder == desc.holder:
-                    blocked = True
-                    break
-            if blocked:
+            if embargo_blocks(desc.holder, desc.for_action):  # AM-102
                 continue
 
             new_obligs = dict(current_obligs)
@@ -3354,6 +3341,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     # instance's holder is always reliable by construction.
     permit_structure = _extract_permit_structure(spec)
     embargo_inhibition_index = _build_embargo_inhibition_index(spec)  # state-free, reused as-is
+    general_embargoes = _build_general_embargoes(spec)  # AM-102
     permit_requirement_index = _build_permit_requirement_index(spec)  # state-free, reused as-is
 
     permit_descriptors: Dict[str, PermitDescriptor] = {}
@@ -3576,6 +3564,17 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             return embargo_state == "active"
         return embargo_holder_index.get(e, (None, None))[0] == "active"
 
+    def embargo_blocks(w: World, actor: Optional[str], action: Optional[str]) -> bool:
+        """AM-102: True iff an active embargo held by `actor` covers
+        `action` (el_engine._embargo_coverage(), as the engine's Step 5).
+        Per-world state via _embargo_active(); holder from the live token
+        at w0 (embargo_holder_index)."""
+        for embargo_name in embargo_inhibition_index.get(action, []) + general_embargoes:
+            _, e_holder = embargo_holder_index.get(embargo_name, (None, None))
+            if _embargo_active(w, embargo_name) and e_holder == actor:
+                return True
+        return False
+
     while queue:
         w = queue.popleft()
         obligs, actors = w.obligation_dict(), w.actor_dict()
@@ -3682,13 +3681,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             if not _permit_active(w, permit_id):
                 continue
 
-            blocked = False
-            for embargo_name in embargo_inhibition_index.get(pdesc.for_action, []):
-                _, e_holder = embargo_holder_index.get(embargo_name, (None, None))
-                if _embargo_active(w, embargo_name) and e_holder == pdesc.holder:  # AM-99b
-                    blocked = True
-                    break
-            if blocked:
+            if embargo_blocks(w, pdesc.holder, pdesc.for_action):  # AM-99b, AM-102
                 continue
 
             new_occurred = occurred | {pdesc.for_action}
@@ -3746,13 +3739,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             # block's comment for full rationale) -- same actor-scoped check
             # T5's guard above uses, operating on the live-sourced
             # embargo_inhibition_index/embargo_holder_index.
-            blocked = False
-            for embargo_name in embargo_inhibition_index.get(desc.for_action, []):
-                _, e_holder = embargo_holder_index.get(embargo_name, (None, None))
-                if _embargo_active(w, embargo_name) and e_holder == effective_holder:  # AM-99b
-                    blocked = True
-                    break
-            if blocked:
+            if embargo_blocks(w, effective_holder, desc.for_action):  # AM-99b, AM-102
                 continue
 
             new_obligs = dict(obligs)
