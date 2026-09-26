@@ -42,7 +42,7 @@ from el_parser import parse, parse_string
 from el_runtime import Runtime
 
 import test_am99b_hybrid_event_model as toe_tests
-import test_public_data_portal_scenario as pdp_tests
+from el_api import _build_external_agent_access_runtime, _build_public_data_portal_runtime
 
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -303,13 +303,11 @@ def _static(rel):
 
 
 def _hybrid_toe():
-    spec = _quiet(parse, toe_tests._TOE).model
-    return _quiet(build_kripke_from_runtime, toe_tests._toe_runtime(spec), horizon=10)
+    return _quiet(build_kripke_from_runtime, _quiet(_build_external_agent_access_runtime), horizon=10)
 
 
 def _hybrid_pdp():
-    spec = _quiet(parse, pdp_tests._SCENARIO).model
-    return _quiet(build_kripke_from_runtime, pdp_tests._runtime(spec), horizon=10)
+    return _quiet(build_kripke_from_runtime, _quiet(_build_public_data_portal_runtime), horizon=10)
 
 
 _STATIC_CASES = [

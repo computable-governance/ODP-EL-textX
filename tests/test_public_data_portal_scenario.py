@@ -12,29 +12,15 @@ everything until recorded, and afterwards only the workaround is blocked.
 """
 import contextlib
 import io
-from pathlib import Path
 
 import pytest
 
-from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_api import _PUBLIC_DATA_PORTAL_SCENARIO as _SCENARIO
+from el_api import _build_public_data_portal_runtime as _runtime
 from el_kripke import build_kripke_from_runtime, build_kripke_model
 from el_parser import parse
-from el_runtime import Runtime
 
-_SCENARIO = (Path(__file__).resolve().parent.parent / "scenarios" /
-             "terms_of_engagement" / "public_data_portal_scenario.el")
 
-_ACTORS = ["DataAgency", "AgencySecurityContact", "AgencyGateway",
-           "AgentOperator", "ExternalAIAgent"]
-_GRANTS = [
-    ("refusalRecordBurden", "AgencyGateway"),
-    ("refusalReviewBurden", "AgencySecurityContact"),
-    ("incidentNotificationBurden", "AgentOperator"),
-    ("publishedDatasetReadPermit", "ExternalAIAgent"),
-    ("aggregateQueryPermit", "ExternalAIAgent"),
-    ("outsideScopeEmbargo", "ExternalAIAgent"),
-    ("noCircumventionEmbargo", "ExternalAIAgent"),
-]
 _EXPECTED = {
     "refusalRecordBurden": True,
     "refusalReviewBurden": False,
@@ -54,15 +40,6 @@ def spec():
     others = [w for w in result.warnings if not w.startswith(("[W-19]", "[W-20]", "[W-22]"))]
     assert not others, others
     return result.model
-
-
-def _runtime(spec) -> Runtime:
-    state = initial_state()
-    for actor in _ACTORS:
-        state = enroll(state, actor)
-    for token, holder in _GRANTS:
-        state = grant_token(state, token_from_spec(spec, token, holder, 0))
-    return Runtime(state, spec)
 
 
 def _quiet(fn, *args, **kwargs):

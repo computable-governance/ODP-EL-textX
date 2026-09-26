@@ -26,8 +26,7 @@ from pathlib import Path
 import pytest
 
 import el_api
-from el_api import _SCENARIO_BUILDERS, _SCENARIO_PATHS
-from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_api import _SCENARIO_BUILDERS, _SCENARIO_PATHS, _build_public_data_portal_runtime
 from el_kripke import (
     NOT_RESOLVED_WITHIN_HORIZON,
     build_kripke_from_runtime,
@@ -43,19 +42,6 @@ _TOE_DIR = _REPO / "scenarios" / "terms_of_engagement"
 _PORTAL = _TOE_DIR / "public_data_portal_scenario.el"
 _AGENT_ACCESS = _TOE_DIR / "external_agent_access_scenario.el"
 
-_PORTAL_ACTORS = ["DataAgency", "AgencySecurityContact", "AgencyGateway",
-                  "AgentOperator", "ExternalAIAgent"]
-_PORTAL_GRANTS = [
-    ("refusalRecordBurden", "AgencyGateway"),
-    ("refusalReviewBurden", "AgencySecurityContact"),
-    ("incidentNotificationBurden", "AgentOperator"),
-    ("publishedDatasetReadPermit", "ExternalAIAgent"),
-    ("aggregateQueryPermit", "ExternalAIAgent"),
-    ("outsideScopeEmbargo", "ExternalAIAgent"),
-    ("noCircumventionEmbargo", "ExternalAIAgent"),
-]
-
-
 def _quiet(fn, *args, **kwargs):
     with contextlib.redirect_stdout(io.StringIO()):
         return fn(*args, **kwargs)
@@ -65,16 +51,6 @@ def _spec(path):
     result = _quiet(parse, path, validate=False)
     assert result.ok, result.errors
     return result.model
-
-
-def _portal_runtime() -> Runtime:
-    spec = _spec(_PORTAL)
-    state = initial_state()
-    for actor in _PORTAL_ACTORS:
-        state = enroll(state, actor)
-    for token, holder in _PORTAL_GRANTS:
-        state = grant_token(state, token_from_spec(spec, token, holder, 0))
-    return Runtime(state, spec)
 
 
 def _verdicts(km):
@@ -246,7 +222,7 @@ def _first_violation_step(km, oid):
 def _notified_runtime(elapsed: int) -> Runtime:
     """Portal runtime with incidentNotificationBurden PENDING for exactly
     `elapsed` raw ticks (detectIncident itself advances the tick by one)."""
-    rt = _portal_runtime()
+    rt = _build_public_data_portal_runtime()
     assert rt.advance("detectIncident", "AgentOperator").outcome == "ok"
     state = rt.current_state()
     tok = next(t for t in state.tokens if t.token_name == "incidentNotificationBurden")

@@ -26,11 +26,10 @@ from el_engine import (
     grant_token,
     token_from_spec,
 )
-from el_parser import parse, parse_string
+from el_parser import parse_string
 from el_runtime import Runtime
 
-import test_am99b_hybrid_event_model as toe_tests
-import test_public_data_portal_scenario as pdp_tests
+from el_api import _build_external_agent_access_runtime, _build_public_data_portal_runtime
 
 
 def _quiet(fn, *args, **kwargs):
@@ -42,14 +41,14 @@ def _quiet(fn, *args, **kwargs):
 #  Authorizations to the agent, their permits)
 _SCENARIOS = {
     "public_data_portal": (
-        lambda: pdp_tests._runtime(_quiet(parse, pdp_tests._SCENARIO).model),
+        lambda: _quiet(_build_public_data_portal_runtime),
         "ExternalAIAgent", "AgentOperator", "AgencySecurityContact", "AgencyGateway",
         "readPublishedDataset",
         ["DatasetReadAuthorization", "AggregateQueryAuthorization"],
         ["publishedDatasetReadPermit", "aggregateQueryPermit"],
     ),
     "external_agent_access": (
-        lambda: toe_tests._toe_runtime(_quiet(parse, toe_tests._TOE, validate=False).model),
+        lambda: _quiet(_build_external_agent_access_runtime),
         "VendorReferralAgent", "VendorOrg", "ProviderSecurityContact", "ProviderAPIGateway",
         "readPatientDemographics",
         ["AgentAccessAuthorization", "PatientLookupAuthorization"],

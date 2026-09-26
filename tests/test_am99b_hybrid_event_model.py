@@ -50,40 +50,17 @@ from el_kripke import (
 )
 from el_parser import parse, parse_string
 from el_runtime import Runtime
+from el_api import _build_external_agent_access_runtime as _toe_runtime
 
 
 _REPO = Path(__file__).resolve().parent.parent
 _TOE = _REPO / "scenarios" / "terms_of_engagement" / "external_agent_access_scenario.el"
-
-# Holders follow the scenario's Commitment/Delegation chains and on_join
-# transfers; build_from_spec() enrols none of these (no `holds` in bodies).
-_TOE_ACTORS = ["ProviderOrg", "ProviderSecurityContact", "ProviderAPIGateway",
-               "VendorOrg", "VendorReferralAgent"]
-_TOE_GRANTS = [
-    ("refusalRecordBurden", "ProviderAPIGateway"),
-    ("refusalReviewBurden", "ProviderSecurityContact"),
-    ("incidentNotificationBurden", "VendorOrg"),
-    ("serviceRequestSubmitPermit", "VendorReferralAgent"),
-    ("patientLookupPermit", "VendorReferralAgent"),
-    ("outsideScopeEmbargo", "VendorReferralAgent"),
-    ("noCircumventionEmbargo", "VendorReferralAgent"),
-]
-
 
 @pytest.fixture(scope="module")
 def toe_spec():
     result = parse(_TOE, validate=False)
     assert result.ok, result.errors
     return result.model
-
-
-def _toe_runtime(spec) -> Runtime:
-    state = initial_state()
-    for actor in _TOE_ACTORS:
-        state = enroll(state, actor)
-    for token, holder in _TOE_GRANTS:
-        state = grant_token(state, token_from_spec(spec, token, holder, 0))
-    return Runtime(state, spec)
 
 
 def _quiet(fn, *args, **kwargs):

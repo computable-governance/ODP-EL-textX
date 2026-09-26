@@ -14,10 +14,6 @@ import io
 
 import pytest
 
-from el_parser import parse
-
-import test_public_data_portal_scenario as pdp_tests
-
 
 def _quiet(fn, *args, **kwargs):
     with contextlib.redirect_stdout(io.StringIO()):
@@ -32,7 +28,7 @@ def api():
 
 
 def _portal(api):
-    rt = pdp_tests._runtime(_quiet(parse, pdp_tests._SCENARIO).model)
+    rt = _quiet(api._build_public_data_portal_runtime)
     api._runtime = rt
     return rt
 
