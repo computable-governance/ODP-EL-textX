@@ -333,11 +333,71 @@ def _build_erequesting_claiming_runtime() -> Runtime:
     return Runtime(state, spec)
 
 
+_PUBLIC_DATA_PORTAL_SCENARIO = _REPO_ROOT / "scenarios" / "terms_of_engagement" / "public_data_portal_scenario.el"
+_EXTERNAL_AGENT_ACCESS_SCENARIO = _REPO_ROOT / "scenarios" / "terms_of_engagement" / "external_agent_access_scenario.el"
+
+# Holders follow each scenario's Commitment/Delegation chains and on_join
+# transfers; build_from_spec() enrols none of these (no `holds` in bodies).
+_PUBLIC_DATA_PORTAL_ACTORS = ["DataAgency", "AgencySecurityContact", "AgencyGateway",
+                              "AgentOperator", "ExternalAIAgent"]
+_PUBLIC_DATA_PORTAL_GRANTS = [
+    ("refusalRecordBurden", "AgencyGateway"),
+    ("refusalReviewBurden", "AgencySecurityContact"),
+    ("incidentNotificationBurden", "AgentOperator"),
+    ("publishedDatasetReadPermit", "ExternalAIAgent"),
+    ("aggregateQueryPermit", "ExternalAIAgent"),
+    ("outsideScopeEmbargo", "ExternalAIAgent"),
+    ("noCircumventionEmbargo", "ExternalAIAgent"),
+]
+_EXTERNAL_AGENT_ACCESS_ACTORS = ["ProviderOrg", "ProviderSecurityContact", "ProviderAPIGateway",
+                                 "VendorOrg", "VendorReferralAgent"]
+_EXTERNAL_AGENT_ACCESS_GRANTS = [
+    ("refusalRecordBurden", "ProviderAPIGateway"),
+    ("refusalReviewBurden", "ProviderSecurityContact"),
+    ("incidentNotificationBurden", "VendorOrg"),
+    ("serviceRequestSubmitPermit", "VendorReferralAgent"),
+    ("patientLookupPermit", "VendorReferralAgent"),
+    ("outsideScopeEmbargo", "VendorReferralAgent"),
+    ("noCircumventionEmbargo", "VendorReferralAgent"),
+]
+
+
+def _terms_of_engagement_runtime(path, spec, actors, grants) -> Runtime:
+    if spec is None:
+        result = parse(path, validate=False)
+        if not result.ok:
+            raise RuntimeError(f"{path.name} parse failed: {result.errors}")
+        spec = result.model
+    state = initial_state()
+    for actor in actors:
+        state = enroll(state, actor)
+    for token, holder in grants:
+        state = grant_token(state, token_from_spec(spec, token, holder, 0))
+    return Runtime(state, spec)
+
+
+def _build_public_data_portal_runtime(spec=None) -> Runtime:
+    """AM-112: the public data portal terms-of-engagement scenario, all five
+    actors enrolled, every token granted at tick 0. `spec` lets tests reuse
+    an already-parsed model; the API parses the file."""
+    return _terms_of_engagement_runtime(_PUBLIC_DATA_PORTAL_SCENARIO, spec,
+                                        _PUBLIC_DATA_PORTAL_ACTORS, _PUBLIC_DATA_PORTAL_GRANTS)
+
+
+def _build_external_agent_access_runtime(spec=None) -> Runtime:
+    """AM-112: the external agent access terms-of-engagement scenario; as
+    _build_public_data_portal_runtime."""
+    return _terms_of_engagement_runtime(_EXTERNAL_AGENT_ACCESS_SCENARIO, spec,
+                                        _EXTERNAL_AGENT_ACCESS_ACTORS, _EXTERNAL_AGENT_ACCESS_GRANTS)
+
+
 _SCENARIO_BUILDERS = {
     "gp_referral": _build_gp_referral_runtime,
     "ereferral":   _build_ereferral_runtime,
     "referral":    _build_referral_runtime,
     "erequesting_claiming": _build_erequesting_claiming_runtime,
+    "public_data_portal": _build_public_data_portal_runtime,
+    "external_agent_access": _build_external_agent_access_runtime,
 }
 
 # AM-111: each scenario's configured deadline scale factor k (AM-110), the
@@ -353,6 +413,8 @@ _SCENARIO_DEADLINE_SCALE = {
     "ereferral":   1,             # no deadline with a magnitude
     "referral":    2240,          # "14 days" = 20160 steps → 9
     "erequesting_claiming": 27,   # "4 hours" = 240 steps → 9
+    "public_data_portal": 480,    # "72 hours" = 4320 steps → 9
+    "external_agent_access": 480, # "72 hours" = 4320 steps → 9
 }
 assert set(_SCENARIO_DEADLINE_SCALE) == set(_SCENARIO_BUILDERS)
 
@@ -365,6 +427,8 @@ _SCENARIO_PATHS = {
     "ereferral":   _EREFERRAL_SCENARIO,
     "referral":    _REFERRAL_SCENARIO,
     "erequesting_claiming": _EREQUESTING_CLAIMING_SCENARIO,
+    "public_data_portal": _PUBLIC_DATA_PORTAL_SCENARIO,
+    "external_agent_access": _EXTERNAL_AGENT_ACCESS_SCENARIO,
 }
 
 # Active scenario name and community name for objective queries
@@ -1746,6 +1810,8 @@ _COMMUNITY_FOR_SCENARIO = {
     "ereferral":   "ReferralEpisodeCommunity",
     "referral":    "ReferralEpisodeCommunity",
     "erequesting_claiming": "DiagnosticReferralPoolCommunity",
+    "public_data_portal": "ExternalAgentAccess",
+    "external_agent_access": "ExternalAgentAccess",
 }
 
 
@@ -1772,7 +1838,8 @@ def debug_tokens():
     summary="Switch the active scenario and reset the runtime",
     description=(
         "Rebuilds the singleton runtime from the named scenario's builder. "
-        "Known scenarios: gp_referral, ereferral, referral. "
+        "Known scenarios: the keys of _SCENARIO_BUILDERS, as listed by GET "
+        "/scenarios. "
         "Returns 404 for an unknown scenario name."
     ),
 )

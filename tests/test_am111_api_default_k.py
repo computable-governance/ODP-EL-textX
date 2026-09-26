@@ -37,6 +37,7 @@ def test_every_scenario_has_a_configured_k():
     assert _SCENARIO_DEADLINE_SCALE == {
         "gp_referral": 2240, "referral": 2240,
         "erequesting_claiming": 27, "ereferral": 1,
+        "public_data_portal": 480, "external_agent_access": 480,
     }
 
 
@@ -53,6 +54,8 @@ def test_configured_k_is_the_current_suggestion(name):
     ("gp_referral", "referralResponseBurden"),
     ("erequesting_claiming", "providerAClaimBurden"),
     ("ereferral", "acknowledgementBurden"),
+    ("public_data_portal", "incidentNotificationBurden"),
+    ("external_agent_access", "incidentNotificationBurden"),
 ])
 def test_status_defaults_to_configured_k(pin, name, token):
     pin(name)
