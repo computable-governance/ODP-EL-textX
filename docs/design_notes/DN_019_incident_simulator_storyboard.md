@@ -86,7 +86,7 @@ Steps 2.2–2.7 are the sequence already asserted in
 | 2.8 | Security contact | Reviews the refusal | execute-action `reviewRefusal` | ok; refusalReviewBurden discharged (verified) |
 | 2.9 | Operator | Detects an incident; notification clock starts | execute-action `detectIncident` | ok; incidentNotificationBurden pending → active (verified) |
 | 2.10a | Operator, contact | Notifies; contact acknowledges | `notifyIncident`, `acknowledgeIncident` | burden discharged by `notifyIncident` itself, not by incidentAcknowledged (verified; see finding below) |
-| 2.10b | Operator | Stays silent past the deadline | `advance-clock`, `check-violations`, `fire-violation-responses` | violated at the first check 360 ticks after activation ("72 hours" = 360 steps); since AM-104, `fire-violation-responses` fires lateNotificationResponse (terminate): both of the agent's Authorizations are revoked, its permits superseded, and its next read is blocked (verified; before AM-104 this was a no-op) |
+| 2.10b | Operator | Stays silent past the deadline | `advance-clock`, `check-violations`, `fire-violation-responses` | violated at the first check 4,320 ticks after activation ("72 hours" = 4,320 steps since AM-111, one step per minute; 360 before); since AM-104, `fire-violation-responses` fires lateNotificationResponse (terminate): both of the agent's Authorizations are revoked, its permits superseded, and its next read is blocked (verified; before AM-104 this was a no-op) |
 
 **Verified 2026-09-26** by replaying the test fixture's `_runtime()`
 through 2.2–2.10b in the engine (`Runtime.advance`, `advance_clock`,

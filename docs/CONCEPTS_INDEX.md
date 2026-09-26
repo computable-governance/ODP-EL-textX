@@ -6684,6 +6684,22 @@ endpoint other than status and witness builds at k = 1), and the unit
 table's order reversal (see "Deadline unit table reverses real-time
 order"), which scaling inherits.
 
+**Update (AM-111, 2026-09-27):** one step is now one minute, so every
+deadline above is larger (e.g. "72 hours" 4,320 steps, "14 days" 20,160;
+the tables above and the k values in the previous paragraph are
+historical). The suggested k at horizon 10 is now terms-of-engagement
+480, referral and gp_referral 2,240, erequesting_claiming 27,
+specialist_pool 14, industrial_procedure 2. The **default k is now
+configured per API scenario** (`el_api._SCENARIO_DEADLINE_SCALE`: 2,240,
+2,240, 27, and 1 for ereferral), stated in code and checked against
+`suggest_deadline_scale()` by a test; the status and witness endpoints
+use it unless `deadline_scale` is given, and report it. The public data
+portal is not an API scenario. With the new table the chain example
+above fits: at k = 2,240 referral's response is 5 steps and the
+escalation 2, so 7 < 10. Still open: every other endpoint (objective
+score, recommended action, execute, …) builds at k = 1 and does not
+report k; and the default horizon itself.
+
 ## Institutional-act cycles as AF counterexamples, and fairness — OPEN FINDING (2026-09-26)
 
 **OPEN FINDING** — found in AM-109 Phase 1 (and seen in AM-107). In the
@@ -6753,10 +6769,14 @@ the obligation failing on the branch where the permit should have been
 activated. No tracked scenario uses an event-triggered permit today. Not
 scheduled.
 
-## Deadline unit table reverses real-time order — OPEN FINDING (2026-09-27)
+## Deadline unit table reverses real-time order — OPEN FINDING (2026-09-27), RESOLVED (2026-09-27)
 
-**OPEN FINDING — high priority; scheduled next, after AM-110.** Found in
-AM-110 Phase 1. `el_engine._DEADLINE_UNIT_STEPS` gives second = 2,
+**OPEN FINDING (2026-09-27, high priority), RESOLVED 2026-09-27 by
+AM-111** (see `docs/el_grammar_amendments.md`): one step is one minute
+(`el_engine._STEP_SECONDS`) and every unit converts through it; "year"
+added; working/business days and business hours as documented
+approximations. Every scenario deadline is now in real-time order. The
+original finding follows. Found in AM-110 Phase 1. `el_engine._DEADLINE_UNIT_STEPS` gives second = 2,
 minute = 3, hour = 5, day = 8, week = 12, month = 20 steps per unit, and
 `_parse_deadline_steps()` multiplies by the magnitude. The per-unit
 values are not proportional to real durations, so magnitudes reverse
@@ -6799,3 +6819,43 @@ only through EF violated. Resolves with the fairness-cycle finding —
 see "Institutional-act cycles as AF counterexamples, and fairness";
 once weakly-fair-excluded cycles are dropped, the hybrid counterexample
 should become the deadline violation. Not scheduled separately.
+
+## The coordination UI advances the clock by a hard-coded 8 ticks — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-111 Phase 1. In the computable-governance-ui
+repository, `widgets/board/referral-board-view.html`'s "Simulate deadline
+passing (no specialist response)" button posts `{"ticks": 8}` to
+`POST /advance-clock`. 8 was the flat "day" bucket before magnitudes were
+parsed (2026-08-29); it has been wrong since the response deadline
+("5 working days from referral receipt") became 40 steps, and is 10,080
+steps since AM-111. The button therefore no longer makes the response
+deadline pass, so the following `check-violations` finds nothing.
+Candidate fixes: an API endpoint "advance to the next deadline" (the
+engine knows every live burden's activation tick and deadline_steps), or
+the UI reading `deadline_steps` for the burden it wants to lapse. Either
+way the UI should not encode step counts. Not scheduled; the fix is in
+the UI repository, possibly with a small API addition here.
+
+## The tick is both elapsed time and event counter — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-111 Phase 1. `WorldState.tick` advances by
+one on every successful action (`advance()`, including `claim()` and
+`decline()`), `discharge_burden()`, `fire_event()`, each
+revoke/reinstate of an Authorization or Delegation, and on
+`check_live_violations()` / `fire_violation_responses()` when they change
+something; by n on `advance_clock(n)`; not at all on a blocked action,
+`enroll()`, `join_role()` or `grant_token()`. Since AM-111 a step is one
+minute, so every action also costs one minute of deadline time — a
+modelling artefact: five actions inside a "5 minutes" window violate it
+with no time having passed. At one minute per step the drift is small,
+which is one reason that base was chosen.
+
+It matters most for a deadline watchdog driven by wall-clock time: it
+would map now to `tick = ceil((now − epoch) / step duration)` and call
+`advance_clock()` only when that target is ahead of the current tick,
+since actions can push the tick ahead of real time. Separating the event
+sequence number (ledger order) from the clock (elapsed time) is future
+work: actions would take no time, and only the clock — driven by
+`advance_clock()` or a watchdog — would move deadlines. That changes
+every engine test that counts ticks after actions, and the hybrid
+builder's anchoring (w0.step is the runtime's tick). Not scheduled.

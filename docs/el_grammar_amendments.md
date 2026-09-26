@@ -9415,6 +9415,14 @@ enqueue; `_activate_on_violation()` docstring; builder docstring);
 
 ## AM-110 (2026-09-27) — deadline scale factor: deadlines beyond the horizon become checkable (`toolchain/el_kripke.py`, `toolchain/el_api.py`)
 
+> **Note (AM-111, 2026-09-27):** the deadline step counts, suggested k
+> values, world counts and cross-check pairings in this entry are
+> historical: they were computed with the pre-AM-111 unit table (hour = 5,
+> day = 8 steps, …). Since AM-111 one step is one minute: "72 hours" is
+> 4,320 steps and the terms-of-engagement k is 480, referral and gp_referral
+> 2,240, erequesting_claiming 27. The mechanism and the soundness argument
+> are unchanged; the current values are in the AM-111 entry.
+
 **Status:** IMPLEMENTED (2026-09-27), in three parts (commits `6604b23`,
 `a7e5b81` and this docs commit). Type: verifier option (Layer 4). **No
 grammar, spec, engine or descriptor-parsing change; nothing changes at
@@ -9569,3 +9577,181 @@ labels; `KripkeModel`, `ObligationVerdict`, `render_summary()`,
 `render()`); `toolchain/el_api.py` (status and witness endpoints);
 `tests/test_am110_deadline_scale.py` (new); `docs/CONCEPTS_INDEX.md`;
 `docs/KRIPKE_TRANSITION_RULES.md`; this file.
+
+## AM-111 (2026-09-27) — one step = one minute: a consistent deadline unit table (`toolchain/el_engine.py`, `toolchain/el_validator.py`, `toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED (2026-09-27), in five parts (commits `cd96846`,
+`93fa248`, `65c8f94`, `3b94334` and this docs commit). Type: engine
+semantics (Layer 3) and verifier input (Layer 4), new validator warning,
+API default. **No grammar or scenario change.** Resolves the
+CONCEPTS_INDEX finding "Deadline unit table reverses real-time order"
+(high priority, found in AM-110 Phase 1).
+
+**The defect.** `_DEADLINE_UNIT_STEPS` held per-unit weights, not a time
+conversion: second 2, minute 3, hour 5, day 8, week 12, month 20 steps.
+Multiplied by the magnitude, they reversed real-time order: "48 hours"
+(240) outlasted "14 days" (112); "5 minutes" (15) outlasted "2 hours" (10)
+and "1 day" (8); "10 minutes" (30) outlasted "1 hour" (5). The engine's
+live violations (`check_live_violations()`) and both Kripke builders read
+these numbers; in referral the 48-hour escalation outlasted the
+5-working-day response it escalates.
+
+### Part 1 — the table (`cd96846`)
+
+`_STEP_SECONDS = 60` (one step is one minute) and
+`_DEADLINE_UNIT_SECONDS` (second, minute, hour, day, week, 30-day month,
+365-day year — "year" is new); `_parse_deadline_steps()` converts
+magnitude × unit duration to whole steps, rounded up (a deadline is never
+shorter than stated). Qualifiers, **documented approximations**: a
+working or business day is 7/5 of a calendar day (5 per 7-day week); a
+business hour is 168/40 elapsed hours (40 per 168-hour week). Both ignore
+the starting weekday and public holidays — exact for whole weeks,
+otherwise off by less than two days. The qualifier word must sit between
+the number and the unit. The only qualified deadline in the scenarios is
+"5 working days from referral receipt" (referral, gp_referral).
+Magnitude-less deadlines fall back to one unit's duration (never
+clock-violated, AM-108).
+
+**Why one minute** (Phase 1 compared 1 minute, 12 minutes and 1 hour;
+54, 23 and 45 failing tests): every scenario deadline is a whole number
+of minutes, so nothing rounds; minute deadlines stay distinct (12
+minutes merges 5 and 10 minutes, 1 hour merges all three); and each
+action, which advances the tick by one (see the new finding on the tick),
+costs one minute rather than 12 minutes or an hour. AM-110's k keeps
+verification tractable at any step size.
+
+**Every deadline in the scenarios** (steps before → after; real-time
+order now holds throughout):
+
+| Deadline | Before | After |
+|---|---|---|
+| 5 / 10 / 15 minutes (industrial_procedure, 4 files) | 15 / 30 / 45 | 5 / 10 / 15 |
+| 2 hours (specialist_pool) | 10 | 120 |
+| 4 hours (erequesting_claiming) | 20 | 240 |
+| 1 day (terms-of-engagement review) | 8 | 1,440 |
+| 48 hours (referral initiation, escalation, reviewNonResponse) | 240 | 2,880 |
+| 72 hours (terms-of-engagement notification) | 360 | 4,320 |
+| 5 working days (referral response) | 40 | 10,080 |
+| 14 days (assessment scheduling) | 112 | 20,160 |
+
+**Engine live violations.** In the API and terms-of-engagement runtimes
+the expiry order is unchanged — only the ticks move (referral 40 then 112
+→ 10,080 then 20,160; terms-of-engagement with everything pending 9 then
+362 → 1,441 then 4,322): the reversed pairs are never live together there
+(the escalation starts only after the response's violation, and it and
+initiation are strict). In the suite, 20 of the 33 tests that call
+`check_live_violations()` saw a different outcome; every one advanced to
+a hard-coded tick derived from the old weights. Those tests now derive
+their ticks from `_parse_deadline_steps()`.
+
+**Verifier verdicts** at k = 1 (horizon 10) move only where a deadline
+crossed the horizon: industrial `compressorStartOblig` "not resolved" →
+fails (5 steps), `pressureCheckObligation` now violable (10 steps, still
+"not resolved": the horizon step); specialist_pool's responses and the
+terms-of-engagement review (static and hybrid) no longer violable within
+the horizon (static review fails → "not resolved"). **At the new suggested
+k no verdict changes** in any static or hybrid model, against AM-110's k.
+
+**New suggested k** (horizon 10): terms-of-engagement 480 (was 40),
+referral and gp_referral 2,240 (27; now driven by "14 days", not
+"48 hours"), erequesting_claiming 27 (3), specialist_pool 14 (2),
+industrial_procedure 2 (5).
+
+**Existing tests updated** (54 failed on the new table; each updated with
+a comment): engine fixtures derive ticks from the parser
+(`test_am100` ×7, `test_check_live_violations` ×3,
+`test_check_violations_endpoint`, `test_fhir_mapper_r39` (relied on
+day = 8), `test_referral_event_triggers`, `test_am99b` activation);
+verifier probes use "5 minutes" instead of "1 hour" (`test_am105`,
+`test_am106`, `test_am107`, `test_am108`, `test_am109`,
+`test_am99a_deadline_from_activation`); the terms-of-engagement review
+checks in `test_am99a_bounded_response` and `test_am99b` run at k = 480;
+snapshots (`test_am86`, `tests/fixtures/am88a_…_snapshot.json`: 13
+deadline_steps values regenerated, every other field checked unchanged);
+`test_parse_deadline_steps` rewritten around the new table (plus year,
+seconds rounding, qualifiers, real-time order); AM-110's tests re-derived
+— its cross-checks now compare k with k/m at m times the horizon, since
+an unscaled model can no longer reach 20,160 steps. The report-shape test
+of `/check-violations` now asserts that the violation happened: it had
+kept passing after the table change moved the deadline past its tick.
+
+### Part 2 — `[W-25]` (`93fa248`)
+
+A Burden (eventual or strict, top-level or role-scoped) whose deadline
+contains a digit but no elapsed-time magnitude — no recognised unit
+within 20 characters of the number ("2 hrs", "10", "by 2026-05-20"). The
+number is ignored, so neither the engine nor the verifier measures the
+deadline. Before this amendment "1 year" was such a case. Fires alongside
+[W-24]/[W-19] where those apply; this one names the cause. Advisory.
+Fires in **no tracked scenario**; in the suite only on
+`test_am103_strict_safety_net.py`'s deliberate bare "5" probe. Tests:
+`tests/test_am111_deadline_without_unit.py` (32).
+
+### Part 3 — configured k per API scenario (`65c8f94`)
+
+`el_api._SCENARIO_DEADLINE_SCALE`, one k per `_SCENARIO_BUILDERS` entry
+(asserted at import): gp_referral 2,240, referral 2,240,
+erequesting_claiming 27, ereferral 1. Stated in code, not derived at
+runtime; a test checks each still equals
+`suggest_deadline_scale(spec, 10)`, so a deadline change that moves it
+must update it deliberately. `GET /obligations/{token}/status` and
+`GET /kripke/witness` use the active scenario's k when no
+`deadline_scale` is given and report it; the parameter still overrides
+(400 below 1). Every other endpoint builds at k = 1: they do not report
+k. **The public data portal is not an API scenario** (not in
+`_SCENARIO_BUILDERS`), so it has no configured k; its suggested k is 480.
+
+Endpoints, referral (active scenario, fresh runtime), before → after:
+
+| Request | Before (k = 1) | After (k = 2,240) |
+|---|---|---|
+| status `referralResponseBurden` | not compelled, detectable; counterexample the `patientDataAuthorization` cycle; 3,562 worlds | same verdict and counterexample; 8,325 worlds; `deadline_scale: 2240` |
+| status `assessmentSchedulingBurden` | same as above | same as above |
+| witness `violated:referralResponseBurden` (hybrid) | `[]` — unreachable within the horizon | 8 steps, ending `violate:referralResponseBurden (deadline=5 steps at k=2240; 10080 unscaled)` |
+| same, `mode=spec` | `[]` | 7 steps, same last edge |
+
+Portal (runtime pinned after refusal, record and incident detection; an
+explicit `deadline_scale` since it has no configured k): status for the
+review and the notification is "not compelled, detectable" with the
+`AggregateQueryAuthorization` cycle as counterexample at k = 1 and k = 480
+(1,218 → 1,792 worlds); witness `violated:incidentNotificationBurden` is
+`[]` at k = 1 and 11 steps ending
+`violate:incidentNotificationBurden (deadline=9 steps at k=480; 4320 unscaled)`
+at k = 480. Tests: `tests/test_am111_api_default_k.py` (11); one AM-107
+test that pins the erequesting runtime while the active scenario stays
+referral now passes `deadline_scale=1` explicitly.
+
+### Part 4 — slow tests (`3b94334`)
+
+`pytest.ini` registers a `slow` marker and excludes it by default
+(`addopts = -m "not slow"`); `pytest -c pytest.ini -m slow` runs only the
+slow tests (documented in `tests/README.md`). One: AM-110's gp_referral
+cross-check at k = 2,240 / H = 10 against k = 56 / H = 400 (133,674
+worlds, about 19 s), the counterpart of the old 171,156-world check. A
+9,279-world version (k = 224 / H = 100) runs by default. Suite time:
+default 92 s; with the slow test 114 s. (Phase 1, before this amendment:
+108 s with the old cross-check, 84 s without it.)
+
+### Part 5 — docs
+
+This entry; a historical note on the AM-110 entry; CONCEPTS_INDEX: the
+unit-table finding RESOLVED; the horizon-sizing finding updated (default
+k configured per API scenario); two new OPEN FINDINGS (the UI's
+hard-coded `ticks: 8`; the tick as both elapsed time and event counter).
+DN_019: "72 hours" = 4,320 steps.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 783 → 787 → 819
+→ 830 → 830 (1 slow test deselected) → 830 passed, 1 xfailed; the slow
+test passes.
+
+**Standard reference(s):** §6.4.3 (burden), §7.8.7 (token lifecycle,
+deadlines); Annex C (Kripke semantics, informative), §C.2.
+
+**Files changed:** `toolchain/el_engine.py` (`_STEP_SECONDS`,
+`_DEADLINE_UNIT_SECONDS`, qualifiers, `_parse_deadline_steps()`);
+`toolchain/el_validator.py` (W-25); `toolchain/el_api.py`
+(`_SCENARIO_DEADLINE_SCALE`, `_resolve_deadline_scale()`); `pytest.ini`;
+`tests/README.md`; 17 existing test files and one fixture; new
+`tests/test_am111_deadline_without_unit.py`,
+`tests/test_am111_api_default_k.py`; `docs/CONCEPTS_INDEX.md`;
+`docs/design_notes/DN_019_incident_simulator_storyboard.md`; this file.
