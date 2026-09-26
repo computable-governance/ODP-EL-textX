@@ -37,10 +37,10 @@ Actors and grants are those of `tests/test_public_data_portal_scenario.py`
 | AgentOperator | accountablePrincipalRole | incidentNotificationBurden (eventual, 72 hours, triggered by operatorIncidentDetected) |
 | DataAgency | controlling object | accountable principal for recording and review |
 
-**Prerequisite:** `el_api` does not serve this scenario today
-(`_SCENARIO_BUILDERS` has gp_referral, ereferral, referral,
-erequesting_claiming). Add a `public_data_portal` builder that mirrors
-the test fixture's `_runtime()`.
+**Prerequisite:** done in AM-112 (2026-09-27). `el_api` serves this
+scenario as `public_data_portal` (community `ExternalAgentAccess`,
+configured k = 480), built by `_build_public_data_portal_runtime()`,
+which the tests now import.
 
 ## The toggle: "Route 2 has an enforcement point"
 
@@ -189,10 +189,19 @@ Two lessons for the caption:
 ## Work items and dependencies
 
 1. `el_api`: `public_data_portal` scenario builder (small; no semantics
-   change).
+   change). Done in AM-112, with `external_agent_access` too; the status
+   endpoint also gained `mode=spec`, which gives the static reading
+   (review and notification fail with the deadline violation) that
+   hybrid mode does not yet show.
 2. Confirm or add the verifier-panel endpoint.
 3. UI repo: narrative mode, the route-2 toggle, the outside-governance
-   lane.
+   lane. Note (AM-112): `widgets/coordination/coordination-simulator.html`
+   hard-codes the referral community (`ReferralEpisodeCommunity`) and
+   the referral actors and actions, so it cannot serve these scenarios
+   yet; the simulator needs its own page or a scenario-driven actor
+   table. Also, `ExternalAgentAccess` has no satisfaction condition, so
+   objective score and reachability are uninformative (open finding in
+   CONCEPTS_INDEX).
 4. Violation responses: make `response_kind` act (at least `terminate`
    and `escalate`), so step 2.10b and Act 3 show a real response.
    Done in AM-104; Act 3 still needs item 5.

@@ -9755,3 +9755,94 @@ deadlines); Annex C (Kripke semantics, informative), §C.2.
 `tests/test_am111_deadline_without_unit.py`,
 `tests/test_am111_api_default_k.py`; `docs/CONCEPTS_INDEX.md`;
 `docs/design_notes/DN_019_incident_simulator_storyboard.md`; this file.
+
+## AM-112 (2026-09-27) — the terms-of-engagement scenarios as API scenarios; status endpoint spec mode (`toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED (2026-09-27), in four parts (commits `d5e7b5e`,
+`0abfac6`, `e80bf2a` and this docs commit). Type: API (scenario registry,
+new query parameter). **No grammar, scenario, engine or verifier change.**
+DN_019 work item 1; the horizon-sizing finding's open item for the portal.
+
+**Before.** `el_api` served four scenarios (gp_referral, ereferral,
+referral, erequesting_claiming). The two terms-of-engagement scenarios
+(`scenarios/terms_of_engagement/public_data_portal_scenario.el`,
+`external_agent_access_scenario.el`) had runtimes only in tests, in three
+copies: `test_public_data_portal_scenario.py` (`_ACTORS`, `_GRANTS`,
+`_runtime()`), `test_am110_deadline_scale.py` (`_PORTAL_ACTORS`,
+`_PORTAL_GRANTS`, `_portal_runtime()`), and
+`test_am99b_hybrid_event_model.py` (`_TOE_ACTORS`, `_TOE_GRANTS`,
+`_toe_runtime()`); `test_am101`, `test_am104_violation_responses` and
+`test_am104_obligation_status_fields` imported them from those test
+modules. The status endpoint built only the hybrid model, so its
+counterexample for the portal's review and notification was the
+revoke/reinstate cycle, never the deadline violation.
+
+### Part 1 — registration (`d5e7b5e`)
+
+`_build_public_data_portal_runtime(spec=None)` and
+`_build_external_agent_access_runtime(spec=None)`, over one helper
+`_terms_of_engagement_runtime(path, spec, actors, grants)`: every actor
+enrolled (no role), every token granted at tick 0, as the test fixtures
+did; `spec` lets a test reuse a parsed model, the API parses the file
+(`validate=False`, as every builder). Registered under
+`public_data_portal` and `external_agent_access` in all four dicts:
+`_SCENARIO_BUILDERS`, `_SCENARIO_PATHS`, `_COMMUNITY_FOR_SCENARIO`
+(`ExternalAgentAccess` for both) and `_SCENARIO_DEADLINE_SCALE` (480 for
+both: `suggest_deadline_scale(spec, 10)`, "72 hours" = 4,320 steps → 9).
+`POST /scenario/{name}`'s description no longer lists the names (it was
+stale at three); it points to `GET /scenarios`. `test_am111`'s expected k
+dict and status-default cases gain the two scenarios; tests that
+parametrize over the registry pick them up (builder constructs, k equals
+suggestion, AM-110 k = 1 static/hybrid unchanged). 830 → 840.
+
+### Part 2 — status endpoint `mode` (`0abfac6`)
+
+`GET /obligations/{token}/status` takes `mode`, like `GET /kripke/witness`:
+`hybrid` (default, as before) anchors the model to the runtime; `spec`
+builds `build_kripke_model()` over the active scenario's `.el` file, and
+the token is looked up among the spec's declared DeonticTokens rather
+than the runtime's (404 unknown, 400 not a burden, 400 unknown mode). The
+response reports `mode`.
+
+Portal at k = 480:
+
+| Burden | `mode=spec` (3,148 worlds) | `mode=hybrid`, fresh runtime (21,012 worlds) |
+|---|---|---|
+| `refusalRecordBurden` | compelled (bounded response) | compelled |
+| `refusalReviewBurden` | not compelled, detectable; counterexample ends `violate:refusalReviewBurden (deadline=3 steps at k=480; 1440 unscaled)` | not compelled, detectable; `AggregateQueryAuthorization` revoke/reinstate cycle |
+| `incidentNotificationBurden` | same, ending `violate:incidentNotificationBurden (deadline=9 steps at k=480; 4320 unscaled)` | same cycle |
+
+So the static terms-of-engagement reading is now available from the
+status endpoint; hybrid still shows the cycle (open finding "Hybrid AF
+counterexample is the revoke/reinstate cycle at any deadline scale").
+External agent access: same pattern, its cycle on
+`AgentAccessAuthorization`. 840 → 840.
+
+### Part 3 — tests (`e80bf2a`)
+
+The three fixture copies removed; `test_public_data_portal_scenario`,
+`test_am99b_hybrid_event_model` (as aliases `_SCENARIO`/`_runtime` and
+`_toe_runtime`), `test_am110_deadline_scale`, `test_am101_t5_strict_guard`,
+`test_am104_violation_responses` and `test_am104_obligation_status_fields`
+import the builders from `el_api`. New
+`tests/test_am112_status_spec_mode.py` (8): registration, the portal's
+spec-mode reading, spec mode independent of runtime state, hybrid still
+the cycle, error codes. 840 → 848.
+
+### Part 4 — docs
+
+This entry. CONCEPTS_INDEX: the horizon-sizing finding updated (both
+scenarios registered at k = 480); a new OPEN FINDING (`ExternalAgentAccess`
+has no satisfaction condition). DN_019: work item 1 done; a note under
+the UI work item that `coordination-simulator.html` hard-codes the
+referral community and actors.
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 830 → 840 → 840
+→ 848 → 848 passed, 1 deselected (slow), 1 xfailed.
+
+**Standard reference(s):** §6.4.3 (burden); Annex C (Kripke semantics,
+informative), §C.2.
+
+**Files changed:** `toolchain/el_api.py`; seven existing test files; new
+`tests/test_am112_status_spec_mode.py`; `docs/CONCEPTS_INDEX.md`;
+`docs/design_notes/DN_019_incident_simulator_storyboard.md`; this file.

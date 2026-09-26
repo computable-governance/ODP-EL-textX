@@ -6700,6 +6700,17 @@ escalation 2, so 7 < 10. Still open: every other endpoint (objective
 score, recommended action, execute, …) builds at k = 1 and does not
 report k; and the default horizon itself.
 
+**Update (AM-112, 2026-09-27):** the public data portal and the external
+agent access scenario are now API scenarios (`public_data_portal`,
+`external_agent_access`), each configured at k = 480 ("72 hours" = 4,320
+steps → 9), covered by the k-equals-suggestion test. The status endpoint
+also takes `mode=spec`: for the portal at k = 480 it gives the static
+reading (recording compelled; review and notification fail with the
+deadline violation), while the default hybrid mode still reports the
+revoke/reinstate cycle (see "Hybrid AF counterexample is the
+revoke/reinstate cycle at any deadline scale"). Still open: every other
+endpoint builds at k = 1; the default horizon itself.
+
 ## Institutional-act cycles as AF counterexamples, and fairness — OPEN FINDING (2026-09-26)
 
 **OPEN FINDING** — found in AM-109 Phase 1 (and seen in AM-107). In the
@@ -6859,3 +6870,20 @@ work: actions would take no time, and only the clock — driven by
 `advance_clock()` or a watchdog — would move deadlines. That changes
 every engine test that counts ticks after actions, and the hybrid
 builder's anchoring (w0.step is the runtime's tick). Not scheduled.
+
+## `ExternalAgentAccess` has no satisfaction condition: objective endpoints are uninformative — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-112 Phase 1. Both terms-of-engagement
+scenarios, now API scenarios (`public_data_portal`,
+`external_agent_access`), name `ExternalAgentAccess` as the active
+community, but its Objective has no `satisfaction:` condition (AM-27), so
+the model has no `objective_satisfied:ExternalAgentAccess` proposition.
+`GET /communities/ExternalAgentAccess/objective-score` returns
+`objective_score: null` and `objective-reachable` returns `false`, both
+with `has_satisfaction_condition: false`; `execute-action` reports score
+0 and not reachable after every action. Correct, but uninformative for
+DN_019's verifier panel. `recommended-action` still works (Bellman over
+the global utility). Defining what the engagement's objective is — e.g.
+`all_discharged` over a TokenGroup of the three response burdens, or
+something else — is a design decision for the maintainer, not an
+engineering fix. Not scheduled.
