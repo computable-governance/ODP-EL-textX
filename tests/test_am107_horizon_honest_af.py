@@ -192,7 +192,9 @@ def test_status_endpoint_reports_not_resolved():
     import el_api
     importlib.reload(el_api)
     el_api._runtime = _quiet(el_api._SCENARIO_BUILDERS["erequesting_claiming"])
-    resp = _quiet(el_api.get_obligation_status, "providerAClaimBurden")
+    # AM-111: explicit k = 1 — the endpoint otherwise defaults to the active
+    # scenario's configured k, at which the 240-step claim deadline fits.
+    resp = _quiet(el_api.get_obligation_status, "providerAClaimBurden", deadline_scale=1)
     assert resp.modal_operator == "AF"
     assert resp.compelled is False
     assert resp.status == NOT_RESOLVED_WITHIN_HORIZON

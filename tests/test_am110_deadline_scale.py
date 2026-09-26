@@ -290,12 +290,14 @@ def referral_api(monkeypatch):
 
 
 def test_status_and_witness_endpoints_report_k(referral_api):
-    status = el_api.get_obligation_status("referralResponseBurden")
+    """Explicit k = 1 and k = 2240. Without deadline_scale the endpoints use
+    the scenario's configured k since AM-111 (test_am111_api_default_k.py)."""
+    status = el_api.get_obligation_status("referralResponseBurden", deadline_scale=1)
     assert status.deadline_scale == 1
     scaled = el_api.get_obligation_status("referralResponseBurden", deadline_scale=2240)
     assert scaled.deadline_scale == 2240
 
-    witness = el_api.get_witness_path("violated:referralResponseBurden")
+    witness = el_api.get_witness_path("violated:referralResponseBurden", deadline_scale=1)
     assert (witness["deadline_scale"], witness["witness_path"]) == (1, [])
     witness = el_api.get_witness_path("violated:referralResponseBurden", deadline_scale=2240)
     assert witness["deadline_scale"] == 2240

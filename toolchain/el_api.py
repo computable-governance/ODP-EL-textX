@@ -57,13 +57,18 @@ _SCENARIO = _REPO_ROOT / "scenarios" / "gp_referral" / "gp_referral_scenario.el"
 _KRIPKE_HORIZON = 10
 
 
-def _require_deadline_scale(deadline_scale: int) -> None:
-    """AM-110: 400 for a deadline scale factor below 1."""
+def _resolve_deadline_scale(deadline_scale: Optional[int]) -> int:
+    """AM-110/AM-111: the k for a request — the caller's deadline_scale if
+    given (400 below 1), else the active scenario's configured k
+    (_SCENARIO_DEADLINE_SCALE)."""
+    if deadline_scale is None:
+        return _SCENARIO_DEADLINE_SCALE.get(_active_scenario, 1)
     if deadline_scale < 1:
         raise HTTPException(
             status_code=400,
             detail=f"deadline_scale must be an integer >= 1, got {deadline_scale}.",
         )
+    return deadline_scale
 
 
 def _serialize_path(path: Optional[list]) -> Optional[List[PathStep]]:
@@ -335,6 +340,22 @@ _SCENARIO_BUILDERS = {
     "erequesting_claiming": _build_erequesting_claiming_runtime,
 }
 
+# AM-111: each scenario's configured deadline scale factor k (AM-110), the
+# default for the endpoints that report k (GET /obligations/{token}/status,
+# GET /kripke/witness); their deadline_scale query parameter overrides it.
+# Stated here, never derived at runtime: the values are what
+# el_kripke.suggest_deadline_scale(spec, _KRIPKE_HORIZON) gave when one step
+# became one minute (AM-111), so every deadline fits below the horizon.
+# Update deliberately when a scenario's deadlines change. Every other
+# endpoint builds at k = 1.
+_SCENARIO_DEADLINE_SCALE = {
+    "gp_referral": 2240,          # "14 days" = 20160 steps → 9
+    "ereferral":   1,             # no deadline with a magnitude
+    "referral":    2240,          # "14 days" = 20160 steps → 9
+    "erequesting_claiming": 27,   # "4 hours" = 240 steps → 9
+}
+assert set(_SCENARIO_DEADLINE_SCALE) == set(_SCENARIO_BUILDERS)
+
 # Scenario registry — maps scenario name to its .el file path, for
 # spec-only mode (build_kripke_model over the parsed model directly,
 # no live Runtime). _SCENARIO/_EREFERRAL_SCENARIO/_REFERRAL_SCENARIO are
@@ -428,8 +449,9 @@ class ObligationStatusResponse(BaseModel):
     # when compelled is True.
     status: Optional[str] = None
     horizon: int                  # AM-104: steps explored beyond the anchored world
-    # AM-110: deadline scale factor k the model was built with (1 = unscaled);
-    # path steps after the anchored world are scaled, k unscaled steps each.
+    # AM-110: deadline scale factor k the model was built with (1 = unscaled;
+    # by default the active scenario's configured k, AM-111); path steps
+    # after the anchored world are scaled, k unscaled steps each.
     deadline_scale: int = 1
     worlds_checked: int
     counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
@@ -794,16 +816,19 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         "false and 'counterexample_path' absent. A counterexample, when "
         "present, ends at a genuine failure (violation, dead end below the "
         "horizon, or cycle). 'horizon' is the number of steps explored beyond "
-        "the anchored world. 'deadline_scale' (query, default 1, AM-110) "
-        "builds the model with every enforceable deadline d scaled to "
-        "ceil(d / k), so deadlines beyond the horizon become checkable; the "
-        "response reports the k used. Only applies "
+        "the anchored world. 'deadline_scale' (query, AM-110) builds the "
+        "model with every enforceable deadline d scaled to ceil(d / k), so "
+        "deadlines beyond the horizon become checkable; it defaults to the "
+        "active scenario's configured k (AM-111) and the response reports "
+        "the k used. Only applies "
         "to burden-kind tokens (obligations); 400 for permit/embargo tokens, "
         "404 for an unknown token name."
     ),
 )
-def get_obligation_status(token_name: str, deadline_scale: int = 1) -> ObligationStatusResponse:
-    _require_deadline_scale(deadline_scale)
+def get_obligation_status(
+    token_name: str, deadline_scale: Optional[int] = None,
+) -> ObligationStatusResponse:
+    deadline_scale = _resolve_deadline_scale(deadline_scale)
     tokens = _runtime.current_state().tokens
     matching = [t for t in tokens if t.token_name == token_name]
     if not matching:
@@ -1789,12 +1814,15 @@ def switch_scenario(scenario_name: str) -> ScenarioSwitchResponse:
         "unknown mode. scenario_name in the response reports whichever "
         "scenario was actually active for this request, since (unlike every "
         "other parameter here) it isn't something the caller supplied. "
-        "'deadline_scale' (default 1, AM-110) scales every enforceable "
-        "deadline d to ceil(d / k) and is echoed in the response."
+        "'deadline_scale' (AM-110) scales every enforceable deadline d to "
+        "ceil(d / k); it defaults to the active scenario's configured k "
+        "(AM-111) and is echoed in the response."
     ),
 )
-def get_witness_path(proposition: str, mode: str = "hybrid", deadline_scale: int = 1) -> Dict:
-    _require_deadline_scale(deadline_scale)
+def get_witness_path(
+    proposition: str, mode: str = "hybrid", deadline_scale: Optional[int] = None,
+) -> Dict:
+    deadline_scale = _resolve_deadline_scale(deadline_scale)
     if mode not in ("hybrid", "spec"):
         raise HTTPException(
             status_code=400,
