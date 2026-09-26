@@ -8402,6 +8402,7 @@ without Part 3, the T1/T11/T9 tests fail (4).
   embargo covering such an action is not seen by T1.
 - **available-actions lists "obligated" entries without an embargo
   check** (pre-existing; only "permitted" entries are filtered).
+  **Resolved by AM-103** (`"obligated_blocked"`).
 
 Logged as open findings in CONCEPTS_INDEX (2026-09-26): V-17 compares
 `for_action` strings, not coverage; embargo holder resolution (static
@@ -8424,3 +8425,121 @@ docstrings); `toolchain/el_validator.py` (`[W-18]`);
 last-updated note); `docs/CONCEPTS_INDEX.md` (finding resolved;
 ConditionalAction finding updated; OPEN FINDING marker on the V-NEW-10
 paragraph; five new open findings); this file (new entry).
+
+---
+
+## AM-103 (2026-09-26) — `[W-19]`/`[W-20]` for strict burdens without a safety net; available-actions `obligated_blocked`; stale strict-mode text retired (`toolchain/el_validator.py`, `el_api.py`, `el_engine.py` docstring)
+
+**Status:** IMPLEMENTED (2026-09-26), in four parts (commits `69a1501`,
+`c8a4b13`, `422ea03` and this docs commit). Type: validator warnings
+(advisory) plus an API response value. **No semantics change** in the
+engine or the verifier. Follows the CONCEPTS_INDEX findings "Step 3.5 as
+a denial-of-service vector" and "Strict mode, model vs deployment".
+
+**Design context (2026-09-26, design chat):** a blocking-compelled strict
+burden is to get its deployment safety net from an external, authorised
+violation declaration (later amendment). That declaration needs a
+deadline and a ViolationResponse; this amendment flags strict burdens
+that lack them. Also decided: the Step 3.5 freeze is narrowed from
+system-wide (candidate: holder scope plus explicit embargoes for
+cross-actor blocking, community scope as fallback; tested in the scope
+amendment's Phase 1 by remodelling the terms-of-engagement scenarios);
+weak fairness accepted either way. Both recorded in CONCEPTS_INDEX.
+
+### Part 1 — `[W-19]`, `[W-20]` (`69a1501`)
+
+Both advisory (AM-89 channel), over top-level DeonticTokens and
+role-scoped InlineTokens (`_strict_burdens()`).
+
+- **`[W-19]`** — a strict burden without a deadline carrying an
+  elapsed-time magnitude: `el_engine._has_deadline_magnitude()` false,
+  the same test `check_live_violations()` uses for a genuine deadline.
+  The token's own `deadline` is the only source (Commitment has no
+  deadline field). A prose deadline ("clinical session") or a bare
+  number only yields `_parse_deadline_steps()`'s default of 5, which does
+  not count. Two message variants: no deadline; deadline without
+  magnitude.
+- **`[W-20]`** — a strict burden that no ViolationResponse names in
+  `on_violation_of`. Fires on every such burden, including likely-noise
+  cases the validator cannot tell apart; the message names the
+  exception: not needed if the enforcement point discharges the burden
+  atomically.
+
+Fires on (tracked scenarios): `[W-19]` — 7 burdens (both consent files,
+ereferral, fhir generated, transfer probe, both terms-of-engagement
+files); `[W-20]` — all 15 strict burdens in the 13 parseable files with
+one (no strict burden in any scenario has a ViolationResponse). Likely
+noise, kept by decision: the transfer probe and SOP test variants
+(fixtures for other rules), `pressureInterlockTrip` (declared an
+automatic trip — executing-compelled), `escalationNoticeBurden` (itself
+created by a ViolationResponse).
+
+**Existing tests scoped, not re-pinned** (by decision): 11 tests pinned a
+scenario's exact warning list. Each now asserts only the codes it is
+about — `test_am91` `[W-16e]`, `test_am93` the `[W-16*]` family,
+`test_am95` `[W-16g]`, `test_am96` `[W-16h]`; `test_am89`'s clean-scenario
+test and the public data portal fixture accept no warnings other than
+`[W-19]`/`[W-20]`, with a comment that these are known deployment gaps
+pending the violation-declaration amendment. No scenario changed.
+
+### Part 2 — available-actions `obligated_blocked` (`c8a4b13`)
+
+An "obligated" entry whose action is covered by an active embargo the
+actor holds (`_embargo_coverage()`, as the engine's Step 5) is kept, with
+reason `"obligated_blocked"`, so a stuck obligation stays visible. The
+response-model comment and endpoint description list `"obligated" |
+"obligated_blocked" | "permitted"`. Consumers checked first: the
+coordination simulator ignores `reason` (renders every entry as
+executable); the ereferral simulator matches `/obligat|required/i`, so
+the new value would show as "Required" and clickable. Neither crashes;
+both are updated in a separate `computable-governance-ui` commit
+referencing AM-103. The endpoint still ignores Step 3.5 during a strict
+freeze — logged under "Step 3.5 as a denial-of-service vector", for the
+scope amendment.
+
+### Part 3 — tests (`422ea03`)
+
+`tests/test_am103_strict_safety_net.py` (new), 17 tests: `[W-19]` no
+deadline, prose and bare-number deadlines, silence with a magnitude and
+for eventual burdens; `[W-19]`/`[W-20]` on an inline strict burden;
+`[W-20]` firing, silence when named and for eventual; the consent and
+referral scenarios' exact hits; available-actions parity with Step 5
+(`obligated_blocked` iff the engine refuses by embargo). **Known open
+finding pinned as current behaviour** (6): a strict burden whose
+discharging action is embargoed (case A) or whose required permit was
+revoked (case B) — engine entry points and both builders' dead end.
+Against the pre-AM-103 validator/API, the 7 firing and parity tests fail;
+the silence and deadlock tests hold either way.
+
+### Part 4 — docs
+
+- `check_live_violations()` docstring: the exclusion of strict burdens is
+  kept, with the true reason (the engine refuses `advance_clock()` and
+  non-discharging actions while a strict burden is actionable, so elapsed
+  ticks do not measure the holder's delay; violation is to come from an
+  external declaration). The old text said nothing suppressed the clock,
+  untrue since AM-49/76/78.
+- CONCEPTS_INDEX: the 2026-08-20 finding "`discharge_mode: strict` —
+  enforcement exists only in the verifier" marked **SUPERSEDED**, pointing
+  to the two 2026-09-26 findings; "Strict mode, model vs deployment"
+  gains the `refusalRecordBurden` instance (modelled as a separate gateway
+  action, so blocking-compelled; deployment needs refuse-and-record to be
+  atomic) and the design decisions; "Step 3.5 as a denial-of-service
+  vector" gains the freeze-scope decision and the available-actions note;
+  new OPEN FINDING "A strict burden whose discharge is itself blocked
+  deadlocks" (engine entry-point table, verifier dead end).
+
+**Verification:** full suite (`pytest -c pytest.ini`) — 659 → 659 → 676
+→ 676 passed, 1 xfailed.
+
+**Standard reference(s):** §6.4.3 (Burden), §7.8.7 (token lifecycle:
+deadlines), §6.3.8 and §7.8.6 (violation and its response), §6.4.4 and
+§6.4.6 (Embargo, conditional action — available-actions).
+
+**Files changed:** `toolchain/el_validator.py` (`[W-19]`, `[W-20]`,
+`_strict_burdens()`; header); `toolchain/el_api.py` (available-actions);
+`toolchain/el_engine.py` (`check_live_violations()` docstring);
+`tests/test_am103_strict_safety_net.py` (new); `tests/test_am89_…`,
+`test_am91_…`, `test_am93_…`, `test_am95_…`, `test_am96_…`,
+`test_public_data_portal_scenario.py` (assertions scoped);
+`docs/CONCEPTS_INDEX.md`; this file.

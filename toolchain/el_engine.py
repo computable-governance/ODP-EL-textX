@@ -2165,16 +2165,15 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     out of scope (DN_010 §3).
 
     Deliberately excludes discharge_mode: strict Burdens entirely — not
-    checked, not transitioned, regardless of elapsed time. Strict-mode
-    enforcement is itself a live-runtime gap (see docs/CONCEPTS_INDEX.md,
-    "discharge_mode: strict — enforcement exists only in the verifier, not
-    the live runtime"): today nothing in advance()/revoke_authorization()/
-    reinstate_authorization() suppresses tick advancement for a pending
-    strict obligation, so tick-elapsed time is not a meaningful signal for
-    a strict Burden in the live system the way it is for eventual — treating
-    it as violatable on elapsed time here would fabricate an enforcement
-    guarantee this function does not actually provide. That gap is out of
-    scope for this function to fix.
+    checked, not transitioned, regardless of elapsed time. While a strict
+    Burden is actionable, the engine refuses advance_clock() (AM-49) and
+    every non-discharging action (Step 3.5, AM-78). Elapsed ticks then come
+    only from other actors' discharges and other burdens' violations, so
+    they do not measure how long the holder has failed to act. Violation of
+    a strict Burden is to come from an external, authorised violation
+    declaration (planned; see docs/CONCEPTS_INDEX.md, "Strict mode, model
+    vs deployment"), not from this clock. Until then, a strict Burden is
+    never violated live.
 
     deadline_steps is resolved via the same two-tier lookup
     build_kripke_from_runtime() (el_kripke.py) already uses for exactly

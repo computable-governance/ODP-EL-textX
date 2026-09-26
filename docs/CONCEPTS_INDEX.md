@@ -3663,9 +3663,17 @@ the design spec above — this is the next step, not done here).
 
 ---
 
-## `discharge_mode: strict` — enforcement exists only in the verifier, not the live runtime — OPEN FINDING (2026-08-20)
+## `discharge_mode: strict` — enforcement exists only in the verifier, not the live runtime — SUPERSEDED (2026-09-26)
 
-**Status: OPEN, not fixed. Surfaced as a side effect of the violation-detection
+**SUPERSEDED (2026-09-26, AM-103).** Its premise no longer holds: since
+AM-49/AM-76/AM-78 the live engine refuses `advance_clock()` and every
+non-discharging action while a strict burden is actionable. What remains
+open is recorded in "Step 3.5 as a denial-of-service vector" and "Strict
+mode, model vs deployment" (both 2026-09-26). The text below is kept as
+history; its later sections (e.g. the bucket-collision resolution) remain
+valid.
+
+**Original status (2026-08-20): OPEN, not fixed. Surfaced as a side effect of the violation-detection
 ground-truth check, not the original target of that check.**
 
 The paper's central formal claim (EDOC26final.tex, reviewer_response.md) is
@@ -6133,6 +6141,18 @@ violated rather than blocking). The verifier mirrors the same global
 scope (T3/T4/T5/T7–T11 use the same predicate), so its AF verdicts rest
 on this assumption. Not scheduled.
 
+**Design decision (2026-09-26, design chat) — freeze scope:** narrowed
+from system-wide. Candidate design: holder scope, plus explicit embargoes
+for any cross-actor blocking (e.g. terms of engagement: the refusal
+activates an embargo on the agent's requests, released on discharge),
+with community scope as the fallback. To be tested in the scope
+amendment's Phase 1 by remodelling the terms-of-engagement scenarios.
+Weak fairness accepted either way.
+
+**Related (AM-103):** `el_api`'s available-actions ignores Step 3.5, so
+during a strict freeze it lists permitted and obligated actions the
+engine would refuse. Logged, not fixed; belongs with the scope amendment.
+
 ## Strict mode, model vs deployment — OPEN FINDING (2026-09-26)
 
 **OPEN FINDING** — recorded during AM-102; refines "`discharge_mode:
@@ -6161,3 +6181,63 @@ modelled system. It carries into deployment only for executing-compelled
 burdens. For blocking-compelled ones, deployment guarantees that nothing
 else happens until discharge, not that discharge happens. Paper and
 reviewer-response wording should draw the distinction. Not scheduled.
+
+**Instance (AM-103):** `refusalRecordBurden` in both terms-of-engagement
+scenarios is modelled as a separate gateway action (`recordRefusal`, after
+`refuseRequest`), so as modelled it is blocking-compelled. Deployment
+needs refuse-and-record to be atomic at the gateway for it to be
+executing-compelled.
+
+**Design decisions (2026-09-26, design chat):**
+- A blocking-compelled strict burden gets its deployment safety net from
+  an **external, authorised violation declaration** (later amendment),
+  not from the engine's clock. Its deadline and ViolationResponse must
+  therefore exist; AM-103 added `[W-19]` (no deadline with an elapsed-time
+  magnitude) and `[W-20]` (no ViolationResponse) to flag when they don't.
+- The **freeze is narrowed from system-wide**; see the scope decision in
+  "Step 3.5 as a denial-of-service vector".
+- **Weak fairness accepted**: guarantees assume an enabled discharge is
+  eventually taken; where it is not, the external declaration is the
+  backstop.
+- **Later amendments planned:** the violation declaration; the freeze
+  scope (its Phase 1 remodels the terms-of-engagement scenarios).
+
+## A strict burden whose discharge is itself blocked deadlocks — OPEN FINDING (2026-09-26)
+
+**OPEN FINDING** — found during AM-103 Phase 1. If the holder of an
+actionable strict burden cannot perform its discharging action, nothing
+but an external `discharge_burden()` call ever ends the freeze. Two
+inline fixtures, pinned as current behaviour in
+`tests/test_am103_strict_safety_net.py`:
+
+- **A (embargo):** the discharging action is covered by an active
+  embargo the holder holds.
+- **B (permit revoked):** the discharging action requires a permit whose
+  Authorization was revoked before the burden's trigger fired
+  (revocation is refused once the burden is actionable).
+
+**Engine, in the stuck state (both cases):**
+
+| Entry point | Outcome |
+|---|---|
+| holder's discharging action | blocked — the embargo (A) / "required permit not held" (B) |
+| any other actor's non-discharging action (permit exercise, event-emitting action) | blocked — Step 3.5 |
+| another actor's discharging action | allowed; tick advances; the strict burden stays `active` |
+| `advance_clock()` | blocked — AM-49 (also after the discharge above) |
+| `fire_event()` | blocked — Step 3.5 |
+| revoke/reinstate authorization (B) | blocked — Step 3.5 |
+| `check_live_violations()`, `fire_violation_responses()` | no-op: strict burdens are never violated, so the ViolationResponse never fires |
+| `discharge_burden()` | discharges it — the only exit |
+
+**Verifier, both builders:** the stuck world's only successor is the
+other actor's eventual discharge, after which the path is a dead end
+below the horizon. AF (bounded response for the triggered case B) is
+false, EF is false, and "eventually violated" is false: T3 is suppressed,
+so the step never reaches T2's deadline. The verifier shows the deadlock
+honestly; the engine just freezes. (Static case B uses an inactive
+permit as its analogue of a revoked one: the static builder has no T7.)
+
+**Evidence for** the violation-declaration and freeze-scope amendments;
+no fix here. `[W-18]`-style static detection (a strict burden's
+discharging action covered by an embargo, or gated by a revocable
+permit) is a possible follow-on. Not scheduled.
