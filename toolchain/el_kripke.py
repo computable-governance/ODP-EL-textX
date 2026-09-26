@@ -3486,11 +3486,11 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     (e for e in spec.elements
                      if type(e).__name__ == "DeonticToken" and e.name == tok.token_name), None
                 )
-                dl = getattr(spec_tok, "deadline", None)
-                try:
-                    steps = int(dl) if dl else 5
-                except (ValueError, TypeError):
-                    steps = _parse_deadline_steps(dl, default=5)
+                # AM-106: parsed exactly as _build_obligation_descriptors()
+                # does for the static builder. Previously int(dl) first, so a
+                # bare number "10" gave 10 steps here but 5 (the default) in
+                # static.
+                steps = _parse_deadline_steps(getattr(spec_tok, "deadline", None))
                 discharge_mode = tok.discharge_mode or "eventual"
                 priority_weight = _priority_weight(tok.priority)
                 revocable = False
@@ -3501,7 +3501,10 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 # WAITING below.
                 triggered_by = getattr(getattr(spec_tok, "triggered_by", None), "name", None)
                 fires_event = getattr(getattr(spec_tok, "discharged_by", None), "name", None)
-                for_action = None
+                # AM-106: the live token's own for_action, which the engine's
+                # Step 3 reads — previously None, so neither T1's permit gate
+                # nor its embargo check could apply to this burden.
+                for_action = tok.for_action
 
             if tok.state in ("discharged", "terminated") or tok.token_name in discharged_in_ledger:
                 obl_st = ObligationState.DISCHARGED
