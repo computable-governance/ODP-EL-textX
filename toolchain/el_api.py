@@ -57,6 +57,15 @@ _SCENARIO = _REPO_ROOT / "scenarios" / "gp_referral" / "gp_referral_scenario.el"
 _KRIPKE_HORIZON = 10
 
 
+def _require_deadline_scale(deadline_scale: int) -> None:
+    """AM-110: 400 for a deadline scale factor below 1."""
+    if deadline_scale < 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"deadline_scale must be an integer >= 1, got {deadline_scale}.",
+        )
+
+
 def _serialize_path(path: Optional[list]) -> Optional[List[PathStep]]:
     if not path:
         return None
@@ -419,6 +428,9 @@ class ObligationStatusResponse(BaseModel):
     # when compelled is True.
     status: Optional[str] = None
     horizon: int                  # AM-104: steps explored beyond the anchored world
+    # AM-110: deadline scale factor k the model was built with (1 = unscaled);
+    # path steps after the anchored world are scaled, k unscaled steps each.
+    deadline_scale: int = 1
     worlds_checked: int
     counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
     witness_path: Optional[List[PathStep]] = None          # present iff detectable
@@ -782,12 +794,16 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         "false and 'counterexample_path' absent. A counterexample, when "
         "present, ends at a genuine failure (violation, dead end below the "
         "horizon, or cycle). 'horizon' is the number of steps explored beyond "
-        "the anchored world. Only applies "
+        "the anchored world. 'deadline_scale' (query, default 1, AM-110) "
+        "builds the model with every enforceable deadline d scaled to "
+        "ceil(d / k), so deadlines beyond the horizon become checkable; the "
+        "response reports the k used. Only applies "
         "to burden-kind tokens (obligations); 400 for permit/embargo tokens, "
         "404 for an unknown token name."
     ),
 )
-def get_obligation_status(token_name: str) -> ObligationStatusResponse:
+def get_obligation_status(token_name: str, deadline_scale: int = 1) -> ObligationStatusResponse:
+    _require_deadline_scale(deadline_scale)
     tokens = _runtime.current_state().tokens
     matching = [t for t in tokens if t.token_name == token_name]
     if not matching:
@@ -805,7 +821,8 @@ def get_obligation_status(token_name: str) -> ObligationStatusResponse:
             ),
         )
 
-    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+    km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON,
+                                   deadline_scale=deadline_scale)
     af_verdict = km.check_obligation(token_name)
     ef_verdict = km.check_permission(token_name)
 
@@ -819,6 +836,7 @@ def get_obligation_status(token_name: str) -> ObligationStatusResponse:
         modal_operator=af_verdict.modal_operator,
         status=af_verdict.status,
         horizon=_KRIPKE_HORIZON,
+        deadline_scale=af_verdict.deadline_scale,
         worlds_checked=af_verdict.worlds_checked,
         counterexample_path=_serialize_path(af_verdict.counterexample_path) if not af_verdict.satisfied else None,
         witness_path=_serialize_path(ef_verdict.witness_path) if ef_verdict.satisfied else None,
@@ -1770,10 +1788,13 @@ def switch_scenario(scenario_name: str) -> ScenarioSwitchResponse:
         "satisfied on any reachable world within the horizon. 400 for an "
         "unknown mode. scenario_name in the response reports whichever "
         "scenario was actually active for this request, since (unlike every "
-        "other parameter here) it isn't something the caller supplied."
+        "other parameter here) it isn't something the caller supplied. "
+        "'deadline_scale' (default 1, AM-110) scales every enforceable "
+        "deadline d to ceil(d / k) and is echoed in the response."
     ),
 )
-def get_witness_path(proposition: str, mode: str = "hybrid") -> Dict:
+def get_witness_path(proposition: str, mode: str = "hybrid", deadline_scale: int = 1) -> Dict:
+    _require_deadline_scale(deadline_scale)
     if mode not in ("hybrid", "spec"):
         raise HTTPException(
             status_code=400,
@@ -1781,14 +1802,17 @@ def get_witness_path(proposition: str, mode: str = "hybrid") -> Dict:
         )
 
     if mode == "hybrid":
-        km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
+        km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON,
+                                       deadline_scale=deadline_scale)
     else:
         result = parse(_SCENARIO_PATHS[_active_scenario], validate=False)
         if not result.ok:
             raise RuntimeError(f"{_active_scenario} parse failed: {result.errors}")
-        km = build_kripke_model(result.model, horizon=_KRIPKE_HORIZON)
+        km = build_kripke_model(result.model, horizon=_KRIPKE_HORIZON,
+                                deadline_scale=deadline_scale)
 
     return {
         "scenario_name": _active_scenario,
+        "deadline_scale": km.deadline_scale,  # AM-110
         "witness_path": extract_witness_path(km, target_proposition=proposition),
     }

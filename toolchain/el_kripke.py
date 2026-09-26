@@ -78,9 +78,10 @@ Standalone test (consent scenario)
 
 from __future__ import annotations
 
+import math
 import sys
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from typing import Any, Dict, FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple
 
@@ -689,6 +690,15 @@ class KripkeModel:
     # (_build_enforceable_deadlines()); only these can be violated by T2's
     # clock. None (a hand-built model) means every obligation's deadline is
     # enforceable, the pre-AM-108 behaviour.
+    deadline_scale: int = 1
+    # AM-110: the deadline scale factor k this model was built with. Every
+    # enforceable deadline_steps is ceil(d / k) of its unscaled d, so one
+    # step stands for k unscaled steps (coarser tick granularity). 1 means
+    # unscaled. Stated per build, never derived (suggest_deadline_scale()
+    # only proposes a value).
+    unscaled_deadlines: Dict[str, int] = field(default_factory=dict)
+    # AM-110: {obligation_id: d} — the unscaled deadline_steps of every
+    # enforceable deadline, for the T2 label and the summary.
 
     # ── Satisfaction relation ──────────────────────────────────────────────────
 
@@ -930,6 +940,7 @@ class KripkeModel:
             holder=desc.holder if desc else "unknown",
             chain=desc.chain if desc else [],
             status=status,
+            deadline_scale=self.deadline_scale,
         )
 
     def check_response(self, obligation_id: str) -> "ObligationVerdict":
@@ -997,6 +1008,7 @@ class KripkeModel:
             holder=desc.holder if desc else "unknown",
             chain=desc.chain if desc else [],
             status=status,
+            deadline_scale=self.deadline_scale,
         )
 
     def _path_to(self, target: World) -> Optional[List[Tuple[World, str]]]:
@@ -1047,6 +1059,7 @@ class KripkeModel:
             witness_path=witness,
             holder=desc.holder if desc else "unknown",
             chain=desc.chain if desc else [],
+            deadline_scale=self.deadline_scale,
         )
 
     # ── §C.3 / §C.4  —  Utility ───────────────────────────────────────────────
@@ -1661,6 +1674,9 @@ class KripkeModel:
             f"  Worlds         : {len(self.worlds)}",
             f"  Edges (R)      : {sum(len(v) for v in self.edges.values())}",
             f"  Horizon (steps): {self.horizon}",
+            *([f"  Deadline scale : k={self.deadline_scale} "
+               f"(one step = {self.deadline_scale} unscaled steps)"]
+              if self.deadline_scale != 1 else []),  # AM-110
             f"  Obligations    : {len(self.obligation_descriptors)}",
             "",
             "  Obligations tracked:",
@@ -1674,6 +1690,9 @@ class KripkeModel:
             enforceable = (self.enforceable_deadlines is None
                            or oid in self.enforceable_deadlines)
             deadline_str = f"{desc.deadline_steps} steps" if enforceable else "none"
+            if enforceable and self.deadline_scale != 1:  # AM-110
+                deadline_str += (f" ({self.unscaled_deadlines.get(oid, desc.deadline_steps)}"
+                                 f" unscaled, k={self.deadline_scale})")
             lines.append(
                 f"    [{oid}]  priority={priority_label}"
                 f"  mode={desc.discharge_mode}"
@@ -2320,6 +2339,63 @@ def _build_enforceable_deadlines(model: Any) -> FrozenSet[str]:
     )
 
 
+def _check_deadline_scale(deadline_scale: int) -> None:
+    """AM-110: k must be a positive integer."""
+    if not isinstance(deadline_scale, int) or isinstance(deadline_scale, bool) \
+            or deadline_scale < 1:
+        raise ValueError(f"deadline_scale must be an integer >= 1, got {deadline_scale!r}")
+
+
+def _scale_deadlines(
+    descriptors: Dict[str, ObligationDescriptor],
+    enforceable_deadlines: FrozenSet[str],
+    deadline_scale: int,
+) -> Tuple[Dict[str, ObligationDescriptor], Dict[str, int]]:
+    """
+    AM-110: (descriptors with every enforceable deadline_steps d replaced
+    by ceil(d / k), {obligation_id: d}). Deadlines without an elapsed-time
+    magnitude are left as they are: T2 never reads them (AM-108). At k = 1
+    the descriptors are returned unchanged.
+
+    Sound as coarser tick granularity: T1 has no deadline guard and T2 is
+    an option, not forced, so a deadline only fixes the earliest step at
+    which the violation is available, and ceil(d / k) is exactly the first
+    scaled step j with j * k >= d — never earlier than unscaled. ceil is
+    monotone: deadlines can merge, never swap order. See the AM-110 entry
+    in docs/el_grammar_amendments.md.
+    """
+    unscaled = {oid: d.deadline_steps for oid, d in descriptors.items()
+                if oid in enforceable_deadlines}
+    if deadline_scale == 1:
+        return descriptors, unscaled
+    return {
+        oid: (replace(d, deadline_steps=math.ceil(d.deadline_steps / deadline_scale))
+              if oid in enforceable_deadlines else d)
+        for oid, d in descriptors.items()
+    }, unscaled
+
+
+def suggest_deadline_scale(model: Any, horizon: int) -> int:
+    """
+    AM-110: the smallest k at which every enforceable deadline in `model`
+    (a parsed spec) fits below the horizon: ceil(max_d / (horizon - 1)),
+    or 1 if there is none or all already fit. horizon - 1, because a world
+    at the horizon step is not expanded: a violation there counts for
+    nothing (see the horizon-enqueue asymmetry finding).
+
+    A suggestion only — builders never apply it. It ignores activation
+    offsets: a burden activated at step s needs s + ceil(d / k) below the
+    horizon, so a chain of deadlines may need a larger k.
+    """
+    enforceable = _build_enforceable_deadlines(model)
+    deadlines = [d.deadline_steps
+                 for oid, d in _build_obligation_descriptors(model).items()
+                 if oid in enforceable]
+    if not deadlines or horizon < 2:
+        return 1
+    return max(1, math.ceil(max(deadlines) / (horizon - 1)))
+
+
 def _build_conclusion_index(model: Any) -> Dict[str, List[Tuple[str, Tuple[str, ...]]]]:
     """
     AM-108: {burden: [(operator, other members), ...]} for every satisfaction
@@ -2510,7 +2586,8 @@ def _build_propositions(
     return props
 
 
-def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
+def build_kripke_model(model: Any, horizon: int = 10,
+                       deadline_scale: int = 1) -> KripkeModel:
     """
     Build a finite Kripke model M = (W, R, V, w₀) from a parsed DSL-EL spec.
 
@@ -2546,6 +2623,9 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
            AM-108: only for an obligation whose deadline has an
            elapsed-time magnitude (enforceable_deadlines); the engine never
            clock-violates any other.
+           AM-110: with deadline_scale k, desc.deadline_steps is
+           ceil(d / k) for those deadlines, and the label names both the
+           scaled and the unscaled deadline.
 
          Rule T2b — EPISODE CONCLUSION (AM-108):
            If O is PENDING, eventual, has no enforceable deadline, and an
@@ -2652,14 +2732,21 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
     ----------
     model   : parsed EnterpriseSpec (output of el_parser.parse)
     horizon : maximum number of steps to expand (default 10)
+    deadline_scale : AM-110 — deadline scale factor k (default 1, unscaled).
+              Every enforceable deadline d becomes ceil(d / k): one step
+              stands for k unscaled steps. Stated per build and reported on
+              the model and every verdict; see suggest_deadline_scale().
 
     Returns
     -------
     KripkeModel with all worlds, edges, propositions, and descriptors populated.
     """
+    _check_deadline_scale(deadline_scale)  # AM-110
     descriptors = _build_obligation_descriptors(model)
     violation_activation = _build_violation_activation_index(model, descriptors)  # AM-105
     enforceable_deadlines = _build_enforceable_deadlines(model)  # AM-108
+    descriptors, unscaled_deadlines = _scale_deadlines(  # AM-110
+        descriptors, enforceable_deadlines, deadline_scale)
     conclusion_index = _build_conclusion_index(model)  # AM-108 — T2b
     permit_descriptors = _build_permit_descriptors(model)
     embargo_inhibition_index = _build_embargo_inhibition_index(model)
@@ -2704,6 +2791,7 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             horizon=horizon,
             group_index=group_index,
             satisfaction_conditions=satisfaction_conditions,
+            deadline_scale=deadline_scale,
         )
 
     # Collect all actors appearing in any chain, plus every Permit holder
@@ -2905,6 +2993,10 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 if w.step - activated_at < desc.deadline_steps:
                     continue
                 violation_label = f"violate:{oid} (deadline={desc.deadline_steps} steps)"
+                if deadline_scale != 1:  # AM-110
+                    violation_label = (
+                        f"violate:{oid} (deadline={desc.deadline_steps} steps "
+                        f"at k={deadline_scale}; {unscaled_deadlines[oid]} unscaled)")
             else:
                 # T2b (AM-108): no enforceable deadline — the engine violates
                 # an eventual one only when its opted-in episode concludes
@@ -3159,6 +3251,8 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
         satisfaction_conditions=satisfaction_conditions,
         violation_activation=violation_activation,
         enforceable_deadlines=enforceable_deadlines,
+        deadline_scale=deadline_scale,  # AM-110
+        unscaled_deadlines=unscaled_deadlines,
     )
 
 
@@ -3251,6 +3345,8 @@ class ObligationVerdict:
     witness_path       : for EF, the shortest path that discharges (if satisfied)
     holder             : actor currently holding the obligation
     chain              : full delegation chain [root → holder]
+    deadline_scale     : AM-110 — the model's deadline scale factor k; path
+                         steps are scaled steps, each k unscaled steps
     """
     obligation_id: str
     obligation_text: str
@@ -3262,6 +3358,7 @@ class ObligationVerdict:
     counterexample_path: Optional[List[Tuple[World, str]]] = None
     witness_path: Optional[List[Tuple[World, str]]] = None
     status: Optional[str] = None
+    deadline_scale: int = 1  # AM-110
 
     def __post_init__(self) -> None:
         if self.status is not None and self.satisfied:
@@ -3285,6 +3382,9 @@ class ObligationVerdict:
         if self.chain:
             lines.append(f"  Chain      : {' → '.join(self.chain)}")
         lines.append(f"  Worlds     : {self.worlds_checked} explored")
+        if self.deadline_scale != 1:  # AM-110
+            lines.append(f"  Deadlines  : scaled, k={self.deadline_scale} "
+                         f"(one step = {self.deadline_scale} unscaled steps)")
 
         if self.modal_operator == RESPONSE_OPERATOR:
             if self.status is not None:
@@ -3631,7 +3731,8 @@ def _build_transfer_index(spec: Any, actors: Any) -> Dict[str, List[TransferLink
     return index
 
 
-def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
+def build_kripke_from_runtime(runtime: Any, horizon: int,
+                              deadline_scale: int = 1) -> KripkeModel:
     """
     Hybrid mode (ISO 15414 Annex C): KripkeModel anchored to runtime.current_state().
 
@@ -3648,7 +3749,14 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
     `horizon` is relative: worlds are expanded up to step
     state.tick + horizon (AM-99b); KripkeModel.horizon keeps the relative
     value, counted from initial.step.
+    AM-110: `deadline_scale` k as in build_kripke_model(). Steps after w0
+    are scaled; w0.step and the seeded activation ticks are raw runtime
+    ticks, so a burden already PENDING at w0 with e raw ticks elapsed has
+    its activation re-anchored so that T2 becomes available exactly
+    ceil((d - e) / k) scaled steps after w0 (at w0 if d <= e). At k = 1
+    nothing is re-anchored.
     """
+    _check_deadline_scale(deadline_scale)  # AM-110
     state, spec, ledger = runtime.current_state(), runtime._spec, runtime._ledger
     # AM-99b: horizon counts from the anchored world, not from tick 0.
     # w0.step is the runtime's tick, so an absolute bound left a runtime
@@ -3811,6 +3919,20 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             init_obligs[created] = ObligationState.WAITING
         descriptors[created] = spec_descriptors[created]
         violation_activation[created] = sources
+
+    # AM-110: scale enforceable deadlines, then re-anchor each seeded
+    # activation to the exact remainder: with a' = tick - (ceil(d/k) -
+    # ceil(max(d - e, 0)/k)), T2's w.step - a' >= ceil(d/k) holds iff
+    # w.step - tick >= ceil(max(d - e, 0)/k), e = tick - a raw ticks elapsed.
+    descriptors, unscaled_deadlines = _scale_deadlines(
+        descriptors, enforceable_deadlines, deadline_scale)
+    if deadline_scale != 1:
+        for oid, activated_at in list(init_activation.items()):
+            if oid not in unscaled_deadlines:
+                continue
+            d = unscaled_deadlines[oid]
+            remaining = math.ceil(max(d - (state.tick - activated_at), 0) / deadline_scale)
+            init_activation[oid] = state.tick - (descriptors[oid].deadline_steps - remaining)
 
     init_actors: Dict[str, ActorStatus] = {a.actor_name: ActorStatus.ACTIVE for a in state.actors}
     enrolled_actors = sorted(a.actor_name for a in state.actors)  # AM-102 — T11/T9 performers
@@ -4009,6 +4131,10 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 if w.step - activated_at < desc.deadline_steps:
                     continue
                 violation_label = f"violate:{oid}"
+                if deadline_scale != 1:  # AM-110
+                    violation_label = (
+                        f"violate:{oid} (deadline={desc.deadline_steps} steps "
+                        f"at k={deadline_scale}; {unscaled_deadlines[oid]} unscaled)")
             else:
                 if (desc.discharge_mode != "eventual"
                         or not _episode_concluded(conclusion_index, oid, obligs)):
@@ -4396,6 +4522,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
         satisfaction_conditions=satisfaction_conditions,
         violation_activation=violation_activation,
         enforceable_deadlines=enforceable_deadlines,
+        deadline_scale=deadline_scale,  # AM-110
+        unscaled_deadlines=unscaled_deadlines,
     )
 
 
