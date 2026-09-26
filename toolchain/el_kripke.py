@@ -2463,6 +2463,10 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
                 continue
             if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
                 continue
+            # AM-102: the holder performs for_action, and the engine's Step 5
+            # refuses it if an active embargo the holder holds covers it.
+            if embargo_blocks(desc.holder, desc.for_action):
+                continue
 
             # Holder discharges this obligation
             new_obligs = dict(current_obligs)
@@ -2770,6 +2774,12 @@ def build_kripke_model(model: Any, horizon: int = 10) -> KripkeModel:
             for action_name in actions:
                 if action_name in current_occurred:
                     continue  # already occurred on this path — as T5
+                # AM-102: an ungated action may be performed by any actor in
+                # the engine; Step 5 refuses it only for an actor holding a
+                # covering embargo, so the edge goes only if every actor does.
+                if all(embargo_blocks(a, action_name)
+                       for a, st in current_actors.items() if st == ActorStatus.ACTIVE):
+                    continue
 
                 new_obligs = dict(current_obligs)
                 new_activation = dict(w.activation_steps)
@@ -3435,6 +3445,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
             init_embargo_states[tok.token_name] = tok.state
 
     init_actors: Dict[str, ActorStatus] = {a.actor_name: ActorStatus.ACTIVE for a in state.actors}
+    enrolled_actors = sorted(a.actor_name for a in state.actors)  # AM-102 — T11/T9 performers
     for desc in descriptors.values():
         for m in desc.chain:
             if m not in init_actors:
@@ -3584,7 +3595,10 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 continue  # gated — T6 handles this obligation's discharge, not T1
             if obligs.get(oid) == ObligationState.PENDING:
                 effective_holder = _effective_holder(w, oid, desc)  # AM-81
-                if actors.get(effective_holder) == ActorStatus.ACTIVE:
+                # AM-102: the engine's Step 5 refuses the discharging action
+                # if an active embargo the holder holds covers it.
+                if (actors.get(effective_holder) == ActorStatus.ACTIVE
+                        and not embargo_blocks(w, effective_holder, desc.for_action)):
                     new_obligs = {**obligs, oid: ObligationState.DISCHARGED}
                     new_activation = dict(w.activation_steps)
                     permit_states, embargo_states = w.permit_states, w.embargo_states
@@ -3788,6 +3802,11 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                 for action_name in actions:
                     if action_name in occurred:
                         continue  # already occurred on this path — as T5
+                    # AM-102: any enrolled actor may perform an ungated
+                    # action; the engine's Step 5 refuses it only for one
+                    # holding a covering embargo — edge only if not all do.
+                    if all(embargo_blocks(w, a, action_name) for a in enrolled_actors):
+                        continue
                     w_fired = _make_world(
                         new_obligs, actors, occurred | {action_name},
                         permit_states=permit_states, embargo_states=embargo_states,
@@ -3948,6 +3967,12 @@ def build_kripke_from_runtime(runtime: Any, horizon: int) -> KripkeModel:
                     if current_holder != link.from_actor:
                         continue
                     if actors.get(link.from_actor) != ActorStatus.ACTIVE:
+                        continue
+                    # AM-102: the carrying action may be performed by any
+                    # enrolled actor (from_role resolves the source holder,
+                    # not the performer); Step 5 refuses it only for one
+                    # holding a covering embargo — edge only if not all do.
+                    if all(embargo_blocks(w, a, action_name) for a in enrolled_actors):
                         continue
 
                     new_overrides = {**w.holder_override_dict(), oid: link.to_actor}
