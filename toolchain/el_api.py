@@ -409,6 +409,14 @@ class ObligationStatusResponse(BaseModel):
     obligation_text: str
     compelled: bool               # AF satisfied — architecturally guaranteed
     detectable: bool              # EF satisfied — possible on at least one path
+    # AM-104: which property `compelled` reports — "AF" from w0, or
+    # "AG(pending→AF)" (bounded response, AM-99a) for a triggered_by burden.
+    modal_operator: str
+    # AM-104: None, or why a bounded response verdict is false without a
+    # counterexample: "not triggered within horizon" / "not resolved
+    # within horizon". Never set when compelled is True.
+    status: Optional[str] = None
+    horizon: int                  # AM-104: steps explored beyond the anchored world
     worlds_checked: int
     counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
     witness_path: Optional[List[PathStep]] = None          # present iff detectable
@@ -761,7 +769,14 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         "discharge on every possible future path — architecturally enforced, "
         "violation unreachable. 'detectable' means it can discharge on at "
         "least one path, but is not guaranteed — the system will observe "
-        "failure if it happens, but cannot by itself prevent it. Only applies "
+        "failure if it happens, but cannot by itself prevent it. "
+        "'modal_operator' names the property 'compelled' reports: 'AF' from "
+        "the anchored world, or 'AG(pending→AF)' — the bounded response "
+        "property — for a burden with triggered_by. 'status' is set when a "
+        "bounded response verdict is false for lack of evidence rather than "
+        "a counterexample ('not triggered within horizon' / 'not resolved "
+        "within horizon'). 'horizon' is the number of steps explored beyond "
+        "the anchored world. Only applies "
         "to burden-kind tokens (obligations); 400 for permit/embargo tokens, "
         "404 for an unknown token name."
     ),
@@ -795,6 +810,9 @@ def get_obligation_status(token_name: str) -> ObligationStatusResponse:
         obligation_text=af_verdict.obligation_text,
         compelled=af_verdict.satisfied,
         detectable=ef_verdict.satisfied,
+        modal_operator=af_verdict.modal_operator,
+        status=af_verdict.status,
+        horizon=_KRIPKE_HORIZON,
         worlds_checked=af_verdict.worlds_checked,
         counterexample_path=_serialize_path(af_verdict.counterexample_path) if not af_verdict.satisfied else None,
         witness_path=_serialize_path(ef_verdict.witness_path) if ef_verdict.satisfied else None,
