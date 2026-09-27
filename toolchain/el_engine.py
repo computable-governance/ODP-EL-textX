@@ -987,6 +987,9 @@ def join_role(state: WorldState, spec: Any, actor_name: str, role_name: str,
     Idempotency mirrors the `create` DeonticEffect handler (~line 673
     above): skip granting a token the actor already holds by name,
     rather than appending a second, indistinguishable instance.
+
+    AM-114: each token is granted in its declared state (token_from_spec()),
+    not always 'active'.
     """
     state = enroll(state, actor_name, role_name, community_tag)
     tokens = list(state.tokens)
@@ -1005,17 +1008,9 @@ def join_role(state: WorldState, spec: Any, actor_name: str, role_name: str,
                    for t in tokens):
                 continue
 
-            tokens.append(TokenInstance(
-                token_name=tok_ref.name,
-                kind=tok_ref.kind,
-                holder=actor_name,
-                state="active",
-                discharge_mode=tok_ref.discharge_mode or "eventual",
-                priority=tok_ref.priority or "normal",
-                granted_at_tick=state.tick,
-                deadline=getattr(tok_ref, "deadline", None),
-                for_action=getattr(tok_ref, "for_action", None),
-            ))
+            # AM-114: granted in its declared state (a pending token, e.g.
+            # one triggered_by an event, stays pending until activated).
+            tokens.append(token_from_spec(spec, tok_ref.name, actor_name, state.tick))
             effects_log.append(
                 f"on_join '{role_name}': granted '{tok_ref.name}' to '{actor_name}'"
             )

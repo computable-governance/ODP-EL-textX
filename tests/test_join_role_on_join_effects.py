@@ -150,3 +150,52 @@ def test_bare_enroll_still_produces_zero_token_effects():
         a.actor_name == "UntouchedActor" and a.role_name == "gpClinicianRole"
         for a in new_state.actors
     )
+
+
+# ── AM-114: on_join tokens keep their declared state ─────────────────────────
+
+_PENDING_ON_JOIN = """
+enterprise specification PendingOnJoinProbe
+    description: "AM-114: an on_join token declared pending stays pending"
+
+agent Joiner
+
+embargo standingEmbargo {
+    for_action: "doOutside"
+    state: active
+}
+
+embargo afterRefusalEmbargo {
+    for_action: "retry"
+    state: pending
+    triggered_by: refused
+}
+
+community C {
+    objective: "probe"
+    event refused
+    on_join joinerRole transfer standingEmbargo
+    on_join joinerRole transfer afterRefusalEmbargo
+    role joinerRole {
+        action retry {
+            actor: joinerRole
+        }
+    }
+    role gateRole {
+        action refuse {
+            actor: gateRole
+            emits: refused
+        }
+    }
+}
+"""
+
+
+def test_join_role_grants_on_join_tokens_in_their_declared_state():
+    from el_parser import parse_string
+    spec = parse_string(_PENDING_ON_JOIN, validate=False).model
+
+    state, _ = join_role(initial_state(), spec, "Joiner", "joinerRole")
+
+    assert _tokens(state, "standingEmbargo", "Joiner")[0].state == "active"
+    assert _tokens(state, "afterRefusalEmbargo", "Joiner")[0].state == "pending"
