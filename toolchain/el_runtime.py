@@ -19,6 +19,7 @@ from el_engine import (
     check_live_violations as _engine_check_live_violations,
     claim as _engine_claim,
     decline as _engine_decline,
+    declare_violation as _engine_declare_violation,
     discharge_burden as _engine_discharge_burden,
     enroll,
     enroll_role_fillers,
@@ -286,6 +287,19 @@ class Runtime:
         docstring."""
         new_state, record = _engine_discharge_burden(
             self._state, self._spec, burden_name
+        )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def declare_violation(self, burden_name: str, declarer: str, at_tick: int,
+                          facts: Optional[dict] = None) -> TransitionRecord:
+        """AM-115: declare an overdue strict Burden violated, as `declarer`,
+        judged at wall-clock step `at_tick`; append the event to the ledger.
+        Fires no ViolationResponse — call fire_violation_responses() next.
+        See el_engine.declare_violation()'s docstring."""
+        new_state, record = _engine_declare_violation(
+            self._state, self._spec, burden_name, declarer, at_tick, facts
         )
         self._state = new_state
         self._ledger.append(record)

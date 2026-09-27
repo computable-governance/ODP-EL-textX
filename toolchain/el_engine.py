@@ -187,6 +187,26 @@ def _role_refusal(spec, state: "WorldState", actor_name: str,
             f"which declares action '{action_name}'")
 
 
+def _declaration_actions(spec) -> Dict[str, List[Any]]:
+    """AM-115: burden name -> the role Actions that declare it violated
+    (`declares_violation_of`, §6.6.5), across every Community/Domain/
+    Federation, in declaration order."""
+    index: Dict[str, List[Any]] = {}
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            for action in getattr(role, "actions", []):
+                for tok in getattr(action, "declares_violation_of", []) or []:
+                    index.setdefault(tok.name, []).append(action)
+    return index
+
+
+def _declaration_action_names(spec) -> Set[str]:
+    """AM-115: names of the Actions that are declarations."""
+    return {a.name for actions in _declaration_actions(spec).values() for a in actions}
+
+
 def _embargo_naming_actions(spec) -> Dict[str, Set[str]]:
     """AM-102: embargo name -> the role Actions that declare
     `inhibited_by_embargo` on it (§6.4.6). Rule 1 of _embargo_coverage();
@@ -672,6 +692,13 @@ def advance(
     role_reason = _role_refusal(spec, state, actor_name, action_name)
     if role_reason:
         return _blocked(state, actor_name, action_name, role_reason, tick)
+
+    # AM-115: a declaration (§6.6.5) is made only through declare_violation(),
+    # which judges the burden's deadline against the declarer's clock.
+    if action_name in _declaration_action_names(spec):
+        return _blocked(state, actor_name, action_name,
+                        f"action '{action_name}' is a declaration; make it through "
+                        f"declare_violation()", tick)
 
     # ── Step 3: Discharge key ─────────────────────────────────────────────────
     grammar_action, grammar_role = _find_action(spec, action_name)
@@ -1568,6 +1595,12 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
         if burden_name is None:
             continue
         actor_name = getattr(getattr(vr, "responding_actor", None), "name", None)
+        # AM-115: creates_burden_for_role — the burden goes to the role's
+        # filler (first `fills` statement, as the engine grants to each
+        # filler); none, no descriptor ([W-29]).
+        burden_role = getattr(getattr(vr, "burden_role", None), "name", None)
+        if burden_role:
+            actor_name = next((a for a, r in role_fillers(model) if r == burden_role), None)
         obl_text   = getattr(vr, "description", None) or burden_name
         _add_descriptor(burden_name, actor_name, obl_text)
 
@@ -2265,6 +2298,175 @@ def fire_event(
     return new_state, record
 
 
+def declare_violation(
+    state: WorldState,
+    spec,
+    burden_name: str,
+    declarer: str,
+    at_tick: int,
+    facts: Optional[dict] = None,
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    AM-115: an authorised violation declaration (§6.6.5): the declarer
+    establishes, by the act itself, that a strict burden is violated.
+
+    A strict burden is never violated by the engine's clock
+    (check_live_violations() excludes it): while it is actionable the
+    engine refuses advance_clock() and every non-discharging action (AM-49,
+    Step 3.5), so WorldState.tick cannot measure how long its holder has
+    failed to act. The declarer — in deployment an automated watchdog —
+    evaluates (§6.6.7) the burden against wall-clock time, then declares.
+    `at_tick` is that time in steps: ceil((now - epoch) / step duration),
+    one step being _STEP_SECONDS. check_live_violations() makes the same
+    evaluate-and-declare move implicitly, on the tick, for eventual burdens.
+
+    The declaration is an Action carrying `declares_violation_of
+    burden_name` (V-NEW-24: the burden is strict and the Action requires a
+    permit, §7.10.4). The declarer must pass, for one such Action, the
+    checks advance() applies: enrolled (Step 2), fills a role declaring the
+    Action (AM-114), preconditions (Step 4, fail-safe on `facts`), no
+    active embargo it holds covering the Action (Step 5), and every
+    required permit held (Step 6). advance() refuses declaration Actions.
+
+    Prohibitions, enforced here (refused, not only monitored):
+      - no declaration before the deadline: every declared instance must
+        satisfy at_tick - _activation_tick(instance) >= its deadline in
+        steps (the two-tier lookup check_live_violations() uses), and the
+        burden's deadline must carry an elapsed-time magnitude
+        (_has_deadline_magnitude(), [W-19]);
+      - no declaration of a burden the declarer holds;
+      - a declaration produces 'violated' only: an instance that is not
+        'active' (discharged, violated, pending, ...) is never touched.
+    Only discharge_mode: strict instances are declared.
+
+    No strict-mode guard: the declaration resolves the burden that blocks,
+    so it can end a Step 3.5 freeze (the "strict burden whose discharge
+    is itself blocked deadlocks" finding). It fires no ViolationResponse:
+    fire_violation_responses() stays the separate, once-only responder
+    (AM-104), as after check_live_violations(). Tick advances by 1 on
+    success (a real external act, like discharge_burden()/fire_event()),
+    never to at_tick: the caller catches the clock up with advance_clock()
+    once no strict burden blocks it.
+
+    Raises KeyError if burden_name is not a declared burden. Returns
+    (new_state, record); record.outcome is 'violation' with the burden in
+    record.violations, or 'blocked' with a reason (state unchanged).
+    """
+    if facts is None:
+        facts = {}
+    token_el = next(
+        (el for el in spec.elements
+         if type(el).__name__ == "DeonticToken" and el.name == burden_name),
+        None,
+    )
+    if token_el is None:
+        raise KeyError(f"DeonticToken '{burden_name}' not found in spec")
+    if token_el.kind != "burden":
+        raise KeyError(
+            f"DeonticToken '{burden_name}' is a '{token_el.kind}', not a burden"
+        )
+
+    tick = state.tick
+    label = f"declare_violation:{burden_name}"
+
+    # Step 2 — the declarer
+    if declarer not in {a.actor_name for a in state.actors}:
+        return _blocked(state, declarer, label, f"actor '{declarer}' is not enrolled", tick)
+
+    # The declaration Action: the first one the declarer passes every check for.
+    actions = _declaration_actions(spec).get(burden_name, [])
+    if not actions:
+        return _blocked(state, declarer, label,
+                        f"no action declares '{burden_name}' violated "
+                        f"(declares_violation_of)", tick)
+    coverage = _embargo_coverage(spec)
+    action = None
+    first_reason = None
+    for candidate in actions:
+        reason = _role_refusal(spec, state, declarer, candidate.name)
+        if reason is None:
+            missing = [p for p in candidate.preconditions if not facts.get(p)]
+            if missing:
+                reason = f"precondition not satisfied: '{missing[0]}'"
+        if reason is None:
+            for tok in state.tokens:
+                if (tok.holder == declarer and tok.kind == "embargo"
+                        and tok.state == "active"
+                        and _embargo_covers(coverage, tok.token_name, tok.for_action,
+                                            candidate.name)):
+                    reason = f"active embargo '{tok.token_name}' blocks action"
+                    break
+        if reason is None:
+            for req in candidate.deontic_requirements:
+                if (req.kind == "requires_permit" and req.token
+                        and not _actor_holds_permit(state, declarer, req.token.name)):
+                    reason = f"required permit '{req.token.name}' not held by actor"
+                    break
+        if reason is None:
+            action = candidate
+            break
+        first_reason = first_reason or reason
+    if action is None:
+        return _blocked(state, declarer, label, first_reason, tick)
+    label = action.name
+
+    # Prohibition: not a burden the declarer holds.
+    if any(t.token_name == burden_name and t.kind == "burden" and t.holder == declarer
+           for t in state.tokens):
+        return _blocked(state, declarer, label,
+                        f"'{declarer}' holds '{burden_name}' and may not declare it violated",
+                        tick)
+
+    # Prohibition: only an active instance becomes violated.
+    instances = [t for t in state.tokens if t.token_name == burden_name and t.kind == "burden"]
+    live = [t for t in instances if t.state == "active"]
+    if not live:
+        states = ", ".join(sorted({t.state for t in instances})) or "never granted"
+        return _blocked(state, declarer, label,
+                        f"'{burden_name}' has no active instance ({states}); a declaration "
+                        f"can only make an active burden violated", tick)
+    live = [t for t in live if t.discharge_mode == "strict"]
+    if not live:
+        return _blocked(state, declarer, label,
+                        f"'{burden_name}' is not strict; its deadline violates it "
+                        f"(check_live_violations())", tick)
+
+    # Prohibition: not before the deadline.
+    raw_deadline = getattr(token_el, "deadline", None)
+    if not _has_deadline_magnitude(raw_deadline):
+        return _blocked(state, declarer, label,
+                        f"'{burden_name}' has no deadline with an elapsed-time magnitude "
+                        f"to judge against", tick)
+    desc = _build_obligation_descriptors(spec).get(burden_name)
+    deadline_steps = (desc.deadline_steps if desc is not None
+                      else _parse_deadline_steps(raw_deadline, default=5))
+    overdue = [t for t in live if at_tick - _activation_tick(t) >= deadline_steps]
+    if not overdue:
+        elapsed = max(at_tick - _activation_tick(t) for t in live)
+        return _blocked(state, declarer, label,
+                        f"'{burden_name}' is not overdue: {elapsed} of {deadline_steps} "
+                        f"steps elapsed at step {at_tick}", tick)
+
+    tokens = [_transition(t, "violated") if t in overdue else t for t in state.tokens]
+    effects = tuple(
+        f"declared '{burden_name}' held by '{t.holder}' violated "
+        f"(elapsed {at_tick - _activation_tick(t)} >= deadline {deadline_steps} steps "
+        f"at step {at_tick})"
+        for t in overdue
+    )
+    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    record = TransitionRecord(
+        tick=tick,
+        actor_name=declarer,
+        action_name=label,
+        outcome="violation",
+        discharged=(),
+        effects=effects,
+        violations=(burden_name,),
+    )
+    return new_state, record
+
+
 def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, TransitionRecord]:
     """
     Sweep every live, active, discharge_mode: eventual Burden for an elapsed
@@ -2317,11 +2519,10 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     Burden is actionable, the engine refuses advance_clock() (AM-49) and
     every non-discharging action (Step 3.5, AM-78). Elapsed ticks then come
     only from other actors' discharges and other burdens' violations, so
-    they do not measure how long the holder has failed to act. Violation of
-    a strict Burden is to come from an external, authorised violation
-    declaration (planned; see docs/CONCEPTS_INDEX.md, "Strict mode, model
-    vs deployment"), not from this clock. Until then, a strict Burden is
-    never violated live.
+    they do not measure how long the holder has failed to act. A strict
+    Burden is violated live only by an authorised declaration against the
+    declarer's wall-clock step (declare_violation(), AM-115), not by this
+    clock.
 
     deadline_steps is resolved via the same two-tier lookup
     build_kripke_from_runtime() (el_kripke.py) already uses for exactly
@@ -2458,36 +2659,50 @@ def _violator_chain(spec, holder: str) -> Set[str]:
     return chain
 
 
+def _revoke_for_response(
+    tokens, spec, auth, responder: str, tick: int, effects_log: List[str]
+) -> List[TokenInstance]:
+    """AM-104/AM-115: revoke one Authorization for a firing response via
+    _apply_revocation(), if it is revocable with an on_revocation embargo,
+    granted by the responder, and its permit is still active; otherwise
+    log why not. Returns the new token list; appends to effects_log."""
+    if not getattr(auth, "revocable", False) or not getattr(auth, "on_revocation_embargo", ""):
+        effects_log.append(f"not revoked '{auth.name}': not revocable with an on_revocation embargo")
+        return list(tokens)
+    authority = getattr(getattr(auth, "authority", None), "name", None)
+    if authority != responder:
+        effects_log.append(
+            f"not revoked '{auth.name}': authority is '{authority}', not '{responder}'"
+        )
+        return list(tokens)
+    permit_name = auth.permit.name
+    if not any(t.token_name == permit_name and t.kind == "permit" and t.state == "active"
+               for t in tokens):
+        effects_log.append(f"not revoked '{auth.name}': permit '{permit_name}' is not active")
+        return list(tokens)
+    tokens, revocation_effects = _apply_revocation(tokens, spec, auth, tick)
+    to_agent = getattr(getattr(auth, "authorized_agent", None), "name", None)
+    target = f"to '{to_agent}'" if to_agent else f"to role '{getattr(auth, 'authorized_role', None)}'"
+    effects_log.append(f"revoked '{auth.name}' ({target})")
+    effects_log.extend(f"  {e}" for e in revocation_effects)
+    return list(tokens)
+
+
 def _terminate_authorizations(
     tokens, spec, violators: Set[str], responder: str, tick: int, effects_log: List[str]
 ) -> List[TokenInstance]:
     """AM-104: effect 4 of fire_violation_responses() for response_kind
-    terminate. Revokes each qualifying to_agent Authorization via
-    _apply_revocation(); logs why any other one in the chain is not
-    revoked. Returns the new token list; appends to effects_log."""
+    terminate with no revokes list. Revokes each qualifying to_agent
+    Authorization in the violator chain via _revoke_for_response(), which
+    logs why any other one in the chain is not revoked. Returns the new
+    token list; appends to effects_log."""
     for auth in spec.elements:
         if type(auth).__name__ != "Authorization":
             continue
         to_agent = getattr(getattr(auth, "authorized_agent", None), "name", None)
         if to_agent not in violators:
             continue
-        if not getattr(auth, "revocable", False) or not getattr(auth, "on_revocation_embargo", ""):
-            effects_log.append(f"not revoked '{auth.name}': not revocable with an on_revocation embargo")
-            continue
-        authority = getattr(getattr(auth, "authority", None), "name", None)
-        if authority != responder:
-            effects_log.append(
-                f"not revoked '{auth.name}': authority is '{authority}', not '{responder}'"
-            )
-            continue
-        permit_name = auth.permit.name
-        if not any(t.token_name == permit_name and t.kind == "permit" and t.state == "active"
-                   for t in tokens):
-            effects_log.append(f"not revoked '{auth.name}': permit '{permit_name}' is not active")
-            continue
-        tokens, revocation_effects = _apply_revocation(tokens, spec, auth, tick)
-        effects_log.append(f"revoked '{auth.name}' (to '{to_agent}')")
-        effects_log.extend(f"  {e}" for e in revocation_effects)
+        tokens = _revoke_for_response(tokens, spec, auth, responder, tick, effects_log)
     return list(tokens)
 
 
@@ -2543,7 +2758,14 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
          the chain that fails any of these is not revoked; the ledger says
          why, and the response still counts as fired. to_role
          Authorizations are not covered.
-    escalate, remediate and penalise have no effect beyond 1–3.
+      AM-115: a response with a revokes list revokes exactly those
+         Authorizations instead, whatever its response_kind, under the same
+         conditions (V-NEW-23 checks them statically); a to_role one is
+         covered this way. With creates_burden_for_role, effect 1 grants
+         the burden to each actor filling that role instead of obligates
+         (none: nothing granted, logged).
+    escalate, remediate and penalise have no effect beyond 1–3 without a
+    revokes list.
 
     Tick only advances when at least one response actually fires — same
     conditional-advance pattern and poll-safety rationale as
@@ -2573,6 +2795,8 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
         kind = getattr(vr, "response_kind", "") or ""
         creates_burden_ref = getattr(vr, "creates_burden", None)
         escalate_to_ref = getattr(vr, "escalate_to", None)
+        burden_role = getattr(getattr(vr, "burden_role", None), "name", None)  # AM-115
+        revokes = getattr(vr, "revokes", None) or []  # AM-115
 
         violated = [t for t in tokens
                     if t.token_name == violated_burden_name and t.state == "violated"]
@@ -2585,18 +2809,30 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
             kind_line = (f"fired '{vr.name}' ({kind}) on violation of "
                          f"'{inst.token_name}' by '{inst.holder}'")
 
-            # 1 — creates_burden
+            # 1 — creates_burden, to obligates or (AM-115) to each actor
+            # filling creates_burden_for_role; with no filler, nobody.
             if creates_burden_ref is not None:
                 cb = creates_burden_ref.name
-                if any(t.token_name == cb and t.holder == responding_actor
-                       and t.state == "active" for t in tokens):
-                    effects_log.append(
-                        f"fired '{vr.name}': '{responding_actor}' already holds "
-                        f"active '{cb}'; not granted again"
-                    )
+                if burden_role:
+                    recipients = sorted({a.actor_name for a in state.actors
+                                         if a.role_name == burden_role})
+                    if not recipients:
+                        effects_log.append(
+                            f"fired '{vr.name}': no actor fills role '{burden_role}'; "
+                            f"'{cb}' not granted"
+                        )
                 else:
-                    tokens.append(token_from_spec(spec, cb, responding_actor, tick))
-                    effects_log.append(f"fired '{vr.name}': granted '{cb}' to '{responding_actor}'")
+                    recipients = [responding_actor]
+                for recipient in recipients:
+                    if any(t.token_name == cb and t.holder == recipient
+                           and t.state == "active" for t in tokens):
+                        effects_log.append(
+                            f"fired '{vr.name}': '{recipient}' already holds "
+                            f"active '{cb}'; not granted again"
+                        )
+                    else:
+                        tokens.append(token_from_spec(spec, cb, recipient, tick))
+                        effects_log.append(f"fired '{vr.name}': granted '{cb}' to '{recipient}'")
             else:
                 effects_log.append(kind_line)
 
@@ -2608,8 +2844,13 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
             if creates_burden_ref is not None:
                 effects_log.append(kind_line)
 
-            # 4 — terminate: revoke the violator chain's Authorizations
-            if kind == "terminate":
+            # 4 — AM-115: revoke exactly the listed Authorizations, whatever
+            # the response_kind; else terminate revokes the violator chain's.
+            if revokes:
+                for auth in revokes:
+                    tokens = _revoke_for_response(
+                        tokens, spec, auth, responding_actor, tick, effects_log)
+            elif kind == "terminate":
                 tokens = _terminate_authorizations(
                     tokens, spec, _violator_chain(spec, inst.holder),
                     responding_actor, tick, effects_log,
