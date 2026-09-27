@@ -236,8 +236,9 @@ class World:
                             (AM-100).
                             In the static builder, obligations PENDING at
                             w0 are not recorded (implicit activation step
-                            0); it is populated by the P6a cascade and
-                            Rule T11. The hybrid builder seeds every
+                            0); it is populated by event firings (Rules
+                            T5, T6 and T11; the T1 P6a cascade until
+                            AM-113). The hybrid builder seeds every
                             obligation PENDING at w0 with its engine
                             activation tick (activated_at_tick, else
                             granted_at_tick — AM-99b), in the same
@@ -2121,15 +2122,16 @@ def _build_event_firing_index(
       - has `emits` (EmitsDecl, AM-22);
       - is not deontically gated (no `requires_permit`, i.e. absent from
         permit_requirement_index) — gated actions never fire through T11;
-      - is not a discharging action: not any descriptor's for_action, and
-        its emitted event is not any descriptor's fires_event
-        (discharged_by). Events raised by discharge already fire through
-        T1's P6a cascade; firing them here as well would activate the
-        dependents without the discharge ever happening.
+      - is not a discharging action: not the for_action of any descriptor
+        without discharged_by (T1 models that action).
+    AM-113: an action emitting a discharged_by event is kept — its firing
+    is the discharge — and the for_action of a burden with discharged_by
+    is an ordinary action (only the event discharges that burden). Before
+    AM-113 both were excluded, and T1's P6a cascade raised the event.
     State-free, built once before the BFS like every other index.
     """
-    discharging_actions = {d.for_action for d in descriptors.values() if d.for_action}
-    discharge_events = {d.fires_event for d in descriptors.values() if d.fires_event}
+    discharging_actions = {
+        d.for_action for d in descriptors.values() if d.for_action and not d.fires_event}
     index: Dict[str, List[str]] = {}
     for el in model.elements:
         if _cls(el) not in ("Community", "Domain", "Federation"):
@@ -2145,7 +2147,7 @@ def _build_event_firing_index(
                     continue
                 if action.name in permit_requirement_index:
                     continue
-                if action.name in discharging_actions or event in discharge_events:
+                if action.name in discharging_actions:
                     continue
                 index.setdefault(event, []).append(action.name)
     return index
@@ -2209,19 +2211,65 @@ def _discharges_any(
     one burden — the verifier mirror of the engine's Step 3 `dischargeable`
     list, which exempts an action from Step 3.5's strict-mode guard.
     `pending_holders` is (oid, holder) for every PENDING obligation (the
-    engine's state == 'active'); a burden counts if its holder is `actor`
-    and the action destroys it, matches its for_action, or emits its
-    discharged_by event.
+    engine's state == 'active'); a burden counts if the action emits its
+    discharged_by event, whoever holds it (AM-113), or if its holder is
+    `actor` and the action destroys it or matches its for_action (not for
+    a burden with discharged_by, AM-113).
     """
     emitted = action_emits_index.get(action)
     destroyed = action_destroys_index.get(action, set())
     return any(
-        holder == actor
-        and (oid in destroyed
-             or for_action_of.get(oid) == action
-             or (emitted is not None and descriptors[oid].fires_event == emitted))
+        (emitted is not None and descriptors[oid].fires_event == emitted)  # AM-113: any holder
+        or (holder == actor
+            and (oid in destroyed
+                 or (for_action_of.get(oid) == action and not descriptors[oid].fires_event)))
         for oid, holder in pending_holders
     )
+
+
+def _discharge_by_event(
+    descriptors: Dict[str, ObligationDescriptor],
+    event: str,
+    new_obligs: Dict[str, ObligationState],
+) -> List[str]:
+    """AM-113: every PENDING obligation whose discharged_by (fires_event)
+    is `event` becomes DISCHARGED, whoever holds it (new_obligs updated in
+    place). Returns their ids, sorted. The discharge half of an event
+    firing — the engine's Step 3 `discharge_keys` — shared by both
+    builders' T5/T6/T11."""
+    fired = sorted(
+        oid for oid, d in descriptors.items()
+        if d.fires_event == event and new_obligs.get(oid) == ObligationState.PENDING
+    )
+    for oid in fired:
+        new_obligs[oid] = ObligationState.DISCHARGED
+    return fired
+
+
+def _supersede_siblings(
+    oid: str,
+    new_obligs: Dict[str, ObligationState],
+    group_index: Dict[str, List[str]],
+    any_discharged_groups: Set[str],
+) -> None:
+    """P6b — SUPERSEDED sibling suppression (any_discharged groups only),
+    for the discharged obligation `oid` (new_obligs updated in place).
+    When a member of an any_discharged group discharges, the remaining
+    siblings are superseded — their purpose is fulfilled by the discharged
+    member. SUPERSEDED overrides any P6a activation. Skipped for
+    all_discharged groups: every member must independently discharge;
+    suppressing siblings would prevent the group condition from ever being
+    fully satisfied."""
+    for group_name, group_members in group_index.items():
+        if group_name not in any_discharged_groups:
+            continue
+        if oid in group_members:
+            for sibling_oid in group_members:
+                if sibling_oid == oid:
+                    continue
+                if new_obligs.get(sibling_oid) in (ObligationState.PENDING,
+                                                   ObligationState.WAITING):
+                    new_obligs[sibling_oid] = ObligationState.SUPERSEDED
 
 
 def _activate_waiting(
@@ -2605,7 +2653,11 @@ def build_kripke_model(model: Any, horizon: int = 10,
            obligation O is DISCHARGED. This models the actor performing
            the obligated action. AM-102: suppressed if an active embargo
            held by A covers O's for_action (el_engine._embargo_coverage(),
-           the engine's Step 5 rule).
+           the engine's Step 5 rule). AM-113: not for an obligation with
+           discharged_by — only its event discharges it, whoever emits
+           it (T5 for a gated emitting action, T11 otherwise); T1 raises
+           no event (the P6a cascade, which raised the discharged_by
+           event on discharge, is retired).
 
          Rule T2 — DEADLINE EXPIRY:
            If w.step - activated_at >= desc.deadline_steps and O is
@@ -2681,16 +2733,18 @@ def build_kripke_model(model: Any, horizon: int = 10,
            AM-99b: if the exercised action emits an event, WAITING
            obligations triggered_by it become PENDING on the same edge —
            gated actions fire their events here, not through T11, as the
-           engine fires Step 7c after its Step 6 permit check. An event
-           that is some burden's discharged_by is not fired (as T11).
-           Rule T6 (gated discharge) likewise runs P6a on the burden's
-           discharged_by event and fires its action's emitted event.
+           engine fires Step 7c after its Step 6 permit check. AM-113:
+           the event also discharges every PENDING obligation whose
+           discharged_by it is, whoever holds it (with P6b); a
+           discharged_by event that discharges nothing is not fired (as
+           T11). Rule T6 (gated discharge, obligations without
+           discharged_by) likewise fires its action's emitted event.
            AM-101: suppressed while a strict obligation is PENDING with an
            ACTIVE holder (the T3 condition), unless the exercised action
-           discharges a PENDING burden the permit holder holds (destroy
-           effect, matching for_action, or emitting its discharged_by
-           event) — the engine's Step 3.5 guard and its Step 3
-           `dischargeable` exemption. Embargo guard: an active embargo
+           discharges a PENDING burden (a destroy effect or matching
+           for_action for one the permit holder holds, or emitting its
+           discharged_by event, whoever holds it — AM-113) — the engine's
+           Step 3.5 guard and its Step 3 `dischargeable` exemption. Embargo guard: an active embargo
            held by the permit holder that covers the action, per
            el_engine._embargo_coverage() (AM-102).
 
@@ -2716,11 +2770,15 @@ def build_kripke_model(model: Any, horizon: int = 10,
            has `emits`, no `requires_permit`, not a discharging action),
            if that action has not already occurred in w, add an edge
            w → w' where every WAITING obligation triggered_by the event
-           becomes PENDING (activation step recorded, as P6a does) and
-           the action is added to occurred_actions. No step advance.
-           Suppressed while a strict obligation is PENDING with an ACTIVE
-           holder — the same condition as T3, mirroring the engine's
-           Step 3.5 guard (a T11 action discharges nothing). AM-102:
+           becomes PENDING (activation step recorded) and the action is
+           added to occurred_actions. No step advance. AM-113: the same
+           edge discharges every PENDING obligation whose discharged_by
+           is the event, whoever holds it (with P6b), labelled
+           "discharge:O via action (event)"; a discharged_by event
+           fires only when it discharges something. Suppressed while a
+           strict obligation is PENDING with an ACTIVE holder — the same
+           condition as T3, mirroring the engine's Step 3.5 guard —
+           unless the firing discharges something (AM-113). AM-102:
            suppressed when every ACTIVE actor holds an active embargo
            covering the action (any actor may perform an ungated action
            in the engine; Step 5 refuses only the embargoed one). Verifier
@@ -2867,6 +2925,8 @@ def build_kripke_model(model: Any, horizon: int = 10,
 
         # ── Rule T1: DISCHARGE (one obligation per transition) ────────────────
         for oid, desc in descriptors.items():
+            if desc.fires_event:
+                continue  # AM-113: discharged only by its event (T5/T11)
             if desc.for_action and desc.for_action in permit_requirement_index:
                 continue  # gated — T6 handles this obligation's discharge, not T1
             if current_obligs.get(oid) != ObligationState.PENDING:
@@ -2882,38 +2942,10 @@ def build_kripke_model(model: Any, horizon: int = 10,
             new_obligs = dict(current_obligs)
             new_obligs[oid] = ObligationState.DISCHARGED
 
-            # P6a — triggered_by cascade: if this obligation fires an event,
-            # any WAITING obligation with triggered_by = that event becomes PENDING.
-            # Applied before SUPERSEDED suppression so P6b can override P6a when
-            # the same token is both a group sibling and a cascade target.
-            # AM-99a: each activation's step is recorded so T2 counts the
-            # activated obligation's deadline from here, not from step 0.
+            # AM-113: no P6a here — a burden with discharged_by is not
+            # discharged by T1, so this discharge raises no event.
             new_activation = dict(w.activation_steps)
-            if desc.fires_event:
-                for other_oid, other_desc in descriptors.items():
-                    if (other_desc.triggered_by == desc.fires_event
-                            and new_obligs.get(other_oid) == ObligationState.WAITING):
-                        new_obligs[other_oid] = ObligationState.PENDING
-                        new_activation[other_oid] = w.step
-
-            # P6b — SUPERSEDED sibling suppression (any_discharged groups only).
-            # When a member of an any_discharged group discharges, the remaining
-            # siblings are superseded — their purpose is fulfilled by the
-            # discharged member.  SUPERSEDED overrides any P6a activation.
-            # Skipped for all_discharged groups: every member must independently
-            # discharge; suppressing siblings would prevent the group condition
-            # from ever being fully satisfied.
-            for group_name, group_members in group_index.items():
-                if group_name not in any_discharged_groups:
-                    continue
-                if oid in group_members:
-                    for sibling_oid in group_members:
-                        if sibling_oid == oid:
-                            continue
-                        sibling_state = new_obligs.get(sibling_oid)
-                        if sibling_state in (ObligationState.PENDING,
-                                             ObligationState.WAITING):
-                            new_obligs[sibling_oid] = ObligationState.SUPERSEDED
+            _supersede_siblings(oid, new_obligs, group_index, any_discharged_groups)
 
             w_prime = _make_world(new_obligs, current_actors, current_occurred,
                                   activation_steps=new_activation, step=w.step)
@@ -3121,12 +3153,19 @@ def build_kripke_model(model: Any, horizon: int = 10,
 
             new_occurred = current_occurred | {pdesc.for_action}
             # AM-99b — fire the exercised action's emitted event (see the
-            # T5 docstring above); discharge events are left to T1/T6.
+            # T5 docstring above). AM-113: the event also discharges every
+            # PENDING burden whose discharged_by it is, whoever holds it.
             new_obligs = dict(current_obligs)
             new_activation = dict(w.activation_steps)
             event = action_emits_index.get(pdesc.for_action)
-            if event and event not in discharge_events:
-                _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
+            if event:
+                fired = _discharge_by_event(descriptors, event, new_obligs)
+                for d_oid in fired:
+                    _supersede_siblings(d_oid, new_obligs, group_index, any_discharged_groups)
+                # A discharged_by event that discharges nothing is not fired
+                # (see the T11 comment below).
+                if fired or event not in discharge_events:
+                    _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
             w_prime = _make_world(new_obligs, current_actors, new_occurred,
                                   activation_steps=new_activation, step=w.step)
             label   = f"exercise:{permit_id} → {pdesc.for_action}"
@@ -3141,9 +3180,10 @@ def build_kripke_model(model: Any, horizon: int = 10,
             successors_for_w.add(w_prime)
 
         # ── Rule T6: EXAMINE (Burden discharge gated on requires_permit) ───────
-        # AM-99b: P6a runs here as in T1 (the burden's discharged_by event),
-        # and the gated action's own emitted event fires too (engine Step
-        # 7c after Step 6). Known limitation, matching current data
+        # AM-99b: the gated action's own emitted event fires (engine Step
+        # 7c after Step 6); AM-113: it also discharges the PENDING burdens
+        # whose discharged_by it is, and a burden with discharged_by is not
+        # discharged here (only its event discharges it). Known limitation, matching current data
         # exactly (verified 2026-08-18): no P6b (any_discharged sibling
         # suppression) here, unlike T1. Safe today because no gated Burden
         # is an any_discharged group member. Would need extending if one is.
@@ -3152,6 +3192,8 @@ def build_kripke_model(model: Any, horizon: int = 10,
                 continue
             if not desc.for_action or desc.for_action not in permit_requirement_index:
                 continue  # not gated — T1 already handled this case
+            if desc.fires_event:
+                continue  # AM-113: discharged only by its event (T5/T11)
             if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
                 continue
 
@@ -3177,8 +3219,11 @@ def build_kripke_model(model: Any, horizon: int = 10,
             new_obligs[oid] = ObligationState.DISCHARGED
             new_occurred = current_occurred | {desc.for_action}
             new_activation = dict(w.activation_steps)
-            for event in {desc.fires_event, action_emits_index.get(desc.for_action)} - {None}:
-                _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
+            event = action_emits_index.get(desc.for_action)
+            if event:  # AM-113: the action's event discharges as it activates
+                fired = _discharge_by_event(descriptors, event, new_obligs)
+                if fired or event not in discharge_events:
+                    _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
             w_prime = _make_world(new_obligs, current_actors, new_occurred,
                                   activation_steps=new_activation, step=w.step)
             label   = f"examine:{oid} → {desc.for_action}"
@@ -3194,16 +3239,32 @@ def build_kripke_model(model: Any, horizon: int = 10,
 
         # ── Rule T11: EVENT FIRING (action-emitted triggers, AM-99a) ─────────
         # Hybrid counterpart in build_kripke_from_runtime() (AM-99b).
-        # Same strict guard as T3 (strict_blocks, computed above T5):
-        # a T11 action discharges nothing, so it is a no-progress action
-        # the engine's Step 3.5 blocks while a strict burden is actionable.
-        for event, actions in ([] if strict_blocks else event_firing_index.items()):
+        # AM-113: the firing discharges every PENDING burden whose
+        # discharged_by is the event, whoever holds it. Same strict guard as
+        # T3 (strict_blocks, computed above T5) for a firing that discharges
+        # nothing: a no-progress action the engine's Step 3.5 blocks while a
+        # strict burden is actionable. A firing that discharges is progress.
+        for event, actions in event_firing_index.items():
             targets = [
                 oid for oid, d in descriptors.items()
                 if d.triggered_by == event
                 and current_obligs.get(oid) == ObligationState.WAITING
             ]
-            if not targets:
+            discharges = [
+                oid for oid, d in descriptors.items()
+                if d.fires_event == event
+                and current_obligs.get(oid) == ObligationState.PENDING
+            ]
+            if not targets and not discharges:
+                continue
+            if strict_blocks and not discharges:
+                continue
+            # A discharged_by event fires only when it discharges something.
+            # The engine also lets it activate its dependents with nothing
+            # to discharge (e.g. recordRefusal before any refusal); that is
+            # not modelled — see CONCEPTS_INDEX, "Emitting a discharged_by
+            # event with nothing to discharge is unmodelled".
+            if not discharges and event in discharge_events:
                 continue
             for action_name in actions:
                 if action_name in current_occurred:
@@ -3217,13 +3278,14 @@ def build_kripke_model(model: Any, horizon: int = 10,
 
                 new_obligs = dict(current_obligs)
                 new_activation = dict(w.activation_steps)
-                for oid in targets:
-                    new_obligs[oid] = ObligationState.PENDING
-                    new_activation[oid] = w.step
+                for oid in _discharge_by_event(descriptors, event, new_obligs):
+                    _supersede_siblings(oid, new_obligs, group_index, any_discharged_groups)
+                _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
                 new_occurred = current_occurred | {action_name}
                 w_prime = _make_world(new_obligs, current_actors, new_occurred,
                                       activation_steps=new_activation, step=w.step)
-                label   = f"fire:{event} via {action_name}"
+                label   = (f"discharge:{'+'.join(discharges)} via {action_name} ({event})"
+                           if discharges else f"fire:{event} via {action_name}")
 
                 if w_prime not in worlds:
                     worlds.add(w_prime)
@@ -3988,6 +4050,12 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
         states with those activations."""
         permits, embargoes = w.permit_dict(), w.embargo_dict()
         for event in events:
+            # AM-113: the event discharges every PENDING burden whose
+            # discharged_by it is, whoever holds it (no P6b, as hybrid T1).
+            # A discharged_by event fires only when it discharges something
+            # (see static T11).
+            if not _discharge_by_event(descriptors, event, new_obligs) and event in discharge_events:
+                continue
             _activate_waiting(descriptors, event, new_obligs, new_activation, w.step)
             if event not in event_token_cache:
                 event_token_cache[event] = _find_spec_tokens_for_event(
@@ -4081,6 +4149,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
         obligs, actors = w.obligation_dict(), w.actor_dict()
         occurred = w.occurred_actions
         for oid, desc in descriptors.items():
+            if desc.fires_event:
+                continue  # AM-113: discharged only by its event (T5/T11)
             if desc.for_action and desc.for_action in permit_requirement_index:
                 continue  # gated — T6 handles this obligation's discharge, not T1
                           # (T2 is its own loop below, gated or not — AM-106)
@@ -4093,13 +4163,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
                     new_obligs = {**obligs, oid: ObligationState.DISCHARGED}
                     new_activation = dict(w.activation_steps)
                     permit_states, embargo_states = w.permit_states, w.embargo_states
-                    # P6a (AM-99b) — the discharge event activates its
-                    # dependents, as the static builder's T1 does; the
-                    # engine's Step 7c does the same for the discharging
-                    # action's emits. No P6b here yet (hybrid gap).
-                    if desc.fires_event:
-                        permit_states, embargo_states = _fire_event(
-                            w, [desc.fires_event], new_obligs, new_activation)
+                    # AM-113: no P6a — a burden with discharged_by is not
+                    # discharged by T1. No P6b here yet (hybrid gap).
                     wd = _make_world(
                         new_obligs, actors, occurred,
                         permit_states=permit_states, embargo_states=embargo_states,
@@ -4219,13 +4284,12 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
 
             new_occurred = occurred | {pdesc.for_action}
             # AM-99b — fire the exercised action's emitted event, as static
-            # T5 does (discharge events are left to T1/T6).
+            # T5 does; AM-113: _fire_event() also discharges.
             new_obligs = dict(obligs)
             new_activation = dict(w.activation_steps)
             event = action_emits_index.get(pdesc.for_action)
-            permit_states, embargo_states = _fire_event(
-                w, [event] if event and event not in discharge_events else [],
-                new_obligs, new_activation)
+            permit_states, embargo_states = _fire_event(  # AM-113: discharges too
+                w, [event] if event else [], new_obligs, new_activation)
             w_prime = _make_world(
                 new_obligs, actors, new_occurred,
                 permit_states=permit_states, embargo_states=embargo_states,
@@ -4246,14 +4310,17 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
 
         # ── Rule T6: EXAMINE (Burden discharge gated on requires_permit) ────
         # Ported from build_kripke_model()'s T6 — see that block's comment:
-        # P6a and the action's emitted event fire here (AM-99b), through
-        # _fire_event(); no P6b (safe today: no gated Burden is an
-        # any_discharged group member).
+        # the action's emitted event fires here (AM-99b), through
+        # _fire_event(), and discharges too (AM-113); a burden with
+        # discharged_by is not discharged here. No P6b (safe today: no gated
+        # Burden is an any_discharged group member).
         for oid, desc in descriptors.items():
             if obligs.get(oid) != ObligationState.PENDING:
                 continue
             if not desc.for_action or desc.for_action not in permit_requirement_index:
                 continue  # not gated — T1 already handled this case
+            if desc.fires_event:
+                continue  # AM-113: discharged only by its event (T5/T11)
             effective_holder = _effective_holder(w, oid, desc)  # AM-81
             if actors.get(effective_holder) != ActorStatus.ACTIVE:
                 continue
@@ -4279,9 +4346,9 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
             new_obligs[oid] = ObligationState.DISCHARGED
             new_occurred = occurred | {desc.for_action}
             new_activation = dict(w.activation_steps)
+            event = action_emits_index.get(desc.for_action)
             permit_states, embargo_states = _fire_event(
-                w, {desc.fires_event, action_emits_index.get(desc.for_action)} - {None},
-                new_obligs, new_activation)
+                w, [event] if event else [], new_obligs, new_activation)
             w_prime = _make_world(
                 new_obligs, actors, new_occurred,
                 permit_states=permit_states, embargo_states=embargo_states,
@@ -4305,41 +4372,49 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
         # emitting action (ungated, non-discharging — see
         # _build_event_firing_index) fires its event through _fire_event(),
         # which also activates pending Permits/Embargoes, as the engine's
-        # Step 7c does. Taken only if the event activates something in w.
-        # Same strict guard as tick/T4/T7/T8/T9 (strict_burden_blocks): a
-        # T11 action discharges nothing, so the engine's Step 3.5 blocks it
-        # while a strict burden is actionable. No step advance.
-        if not strict_burden_blocks(w):
-            for event, actions in event_firing_index.items():
-                new_obligs = dict(obligs)
-                new_activation = dict(w.activation_steps)
-                permit_states, embargo_states = _fire_event(
-                    w, [event], new_obligs, new_activation)
-                if (new_obligs == obligs and permit_states == w.permit_states
-                        and embargo_states == w.embargo_states):
-                    continue  # nothing waiting on this event in w
-                for action_name in actions:
-                    if action_name in occurred:
-                        continue  # already occurred on this path — as T5
-                    # AM-102: any enrolled actor may perform an ungated
-                    # action; the engine's Step 5 refuses it only for one
-                    # holding a covering embargo — edge only if not all do.
-                    if all(embargo_blocks(w, a, action_name) for a in enrolled_actors):
-                        continue
-                    w_fired = _make_world(
-                        new_obligs, actors, occurred | {action_name},
-                        permit_states=permit_states, embargo_states=embargo_states,
-                        delegation_states=w.delegation_states,
-                        holder_overrides=w.holder_overrides,
-                        activation_steps=new_activation,
-                        step=w.step,
-                    )
-                    if w_fired not in worlds:
-                        worlds.add(w_fired)
-                        if w_fired.step < horizon_step:
-                            queue.append(w_fired)
-                    edges.setdefault(w, set()).add(w_fired)
-                    labels[(w, w_fired)] = f"fire:{event} via {action_name}"
+        # Step 7c does. Taken only if the event activates or (AM-113)
+        # discharges something in w. Same strict guard as tick/T4/T7/T8/T9
+        # (strict_burden_blocks) for a firing that discharges nothing: the
+        # engine's Step 3.5 blocks it while a strict burden is actionable;
+        # a firing that discharges is progress (AM-113). No step advance.
+        t11_strict = strict_burden_blocks(w)
+        for event, actions in event_firing_index.items():
+            new_obligs = dict(obligs)
+            new_activation = dict(w.activation_steps)
+            permit_states, embargo_states = _fire_event(
+                w, [event], new_obligs, new_activation)
+            if (new_obligs == obligs and permit_states == w.permit_states
+                    and embargo_states == w.embargo_states):
+                continue  # nothing waiting on this event in w
+            discharges = sorted(
+                o for o, st in new_obligs.items()
+                if st == ObligationState.DISCHARGED and obligs.get(o) != st)
+            if t11_strict and not discharges:
+                continue
+            for action_name in actions:
+                if action_name in occurred:
+                    continue  # already occurred on this path — as T5
+                # AM-102: any enrolled actor may perform an ungated
+                # action; the engine's Step 5 refuses it only for one
+                # holding a covering embargo — edge only if not all do.
+                if all(embargo_blocks(w, a, action_name) for a in enrolled_actors):
+                    continue
+                w_fired = _make_world(
+                    new_obligs, actors, occurred | {action_name},
+                    permit_states=permit_states, embargo_states=embargo_states,
+                    delegation_states=w.delegation_states,
+                    holder_overrides=w.holder_overrides,
+                    activation_steps=new_activation,
+                    step=w.step,
+                )
+                if w_fired not in worlds:
+                    worlds.add(w_fired)
+                    if w_fired.step < horizon_step:
+                        queue.append(w_fired)
+                edges.setdefault(w, set()).add(w_fired)
+                labels[(w, w_fired)] = (
+                    f"discharge:{'+'.join(discharges)} via {action_name} ({event})"
+                    if discharges else f"fire:{event} via {action_name}")
 
         # ── Rule T7/T8: AUTHORIZATION REVOKE / REINSTATE ─────────────────────
         # DN_014 §6. Mirrors revoke_authorization()/reinstate_authorization()

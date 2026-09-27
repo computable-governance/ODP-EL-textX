@@ -1095,9 +1095,10 @@ class ObligationDescriptor:
     # Event name (from DeonticToken.triggered_by) whose firing moves this
     # obligation from WAITING → PENDING. None means obligation starts PENDING.
     fires_event: Optional[str] = None
-    # Event name (from DeonticToken.discharged_by) emitted when this obligation
-    # is discharged. Bidirectional convention: discharging this obligation fires
-    # this event, which may cascade to trigger other WAITING obligations (P6).
+    # Event name (from DeonticToken.discharged_by) that discharges this
+    # obligation when emitted, whoever emits it (AM-113). Before AM-113 the
+    # verifier also read it the other way ("bidirectional convention"):
+    # discharging the obligation raised the event (T1's P6a cascade).
     for_action: Optional[str] = None
     # Name of the Action (within a community Role body) whose ConditionalAction
     # has this obligation as a favoured_by_burden entry. Resolved by
@@ -1457,10 +1458,9 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
         # P6: extract event wiring from the burden token
         triggered_by = getattr(getattr(burden, "triggered_by", None), "name", None)
         fires_event  = getattr(getattr(burden, "discharged_by", None), "name", None)
-        # fires_event convention: DeonticToken.discharged_by names the event that
-        # fires when this obligation is discharged (bidirectional: the same event
-        # that the holder's action emits). Used by T1 cascade to activate WAITING
-        # obligations whose triggered_by matches this event name.
+        # fires_event: DeonticToken.discharged_by names the event that
+        # discharges this obligation, whoever emits it (AM-113; see the
+        # ObligationDescriptor field).
 
         # Tier 1: explicit for_action on the DeonticToken grammar attribute
         # Tier 2: structural search through community Role → Action → ConditionalAction
