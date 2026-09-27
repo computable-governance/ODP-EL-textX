@@ -292,6 +292,9 @@ def validate_spec(model) -> List[str]:
     # W-25 — deadline with a number but no recognised time unit (AM-111, §6.4.3, §7.8.7)
     errors.extend(_validate_deadline_without_unit(model))
 
+    # W-26 — discharged_by event that no action emits (AM-113, §6.4.3, §7.8.7)
+    errors.extend(_validate_undischargeable_event_burden(model))
+
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
 
@@ -1570,6 +1573,45 @@ def _validate_deadline_without_unit(model) -> List[str]:
             f"a number but no recognised time unit ({units}), so the number is "
             f"ignored and the deadline is never measured, at runtime or in the "
             f"verifier. Write the unit out, e.g. \"2 hours\". (§6.4.3, §7.8.7)"
+        )
+    return warnings
+
+
+def _validate_undischargeable_event_burden(model) -> List[str]:
+    """W-26 (AM-113): a Burden (top-level or role-scoped) whose
+    discharged_by event no Action emits. Since AM-113 only that event
+    discharges such a burden — its for_action no longer does — so no
+    action in the specification can discharge it; only an external
+    fire_event() or discharge_burden() call can. Before AM-113 the holder's
+    for_action discharged it, and the verifier raised the event on that
+    discharge. Advisory."""
+    tokens = list(_collect(model, "DeonticToken"))
+    emitted: Set[str] = set()
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            tokens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                          if _cls(t) == "InlineToken")
+            for action in getattr(role, "actions", []) or []:
+                event = getattr(action, "emits", None)
+                if event is not None and getattr(event, "name", None):
+                    emitted.add(event.name)
+
+    warnings: List[str] = []
+    for tok in tokens:
+        if getattr(tok, "kind", None) != "burden":
+            continue
+        event = getattr(getattr(tok, "discharged_by", None), "name", None)
+        if not event or event in emitted:
+            continue
+        warnings.append(
+            f"[W-26] Burden '{tok.name}' is discharged_by '{event}', which no "
+            f"action emits: this burden can never be discharged by its event, "
+            f"and its for_action does not discharge it either. Only an "
+            f"external fire_event('{event}') or discharge_burden() call can. "
+            f"Add 'emits: {event}' to the action that should discharge it. "
+            f"(§6.4.3, §7.8.7)"
         )
     return warnings
 
