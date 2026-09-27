@@ -98,6 +98,7 @@ from el_engine import (
     _embargo_coverage,
     _build_obligation_descriptors,
     _commitment_root_for_token,
+    _declaration_action_names,
     _declaring_roles,
     _find_spec_tokens_for_event,
     role_fillers,
@@ -2852,6 +2853,9 @@ def build_kripke_model(model: Any, horizon: int = 10,
         static_actor_roles = static_actor_roles or {}
         static_actor_roles.setdefault(actor, set()).add(role)
     may_perform = _role_performer_check(model, static_actor_roles)
+    # AM-115: a declaration Action (declares_violation_of) is made through
+    # el_engine.declare_violation(), outside the model; T5 never exercises it.
+    declaration_actions = _declaration_action_names(model)
 
     # A permit/embargo-only spec (no burdens) must not hit the trivial-model
     # path below — T5 (Exercise) still needs to generate occurrence edges for
@@ -3154,6 +3158,8 @@ def build_kripke_model(model: Any, horizon: int = 10,
         # ── Rule T5: EXERCISE (Permit occurrence) ──────────────────────────────
         for permit_id, pdesc in permit_descriptors.items():
             if pdesc.for_action is None:
+                continue
+            if pdesc.for_action in declaration_actions:  # AM-115
                 continue
             if current_actors.get(pdesc.holder) != ActorStatus.ACTIVE:
                 continue
@@ -4049,6 +4055,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
         if a.role_name:
             hybrid_actor_roles.setdefault(a.actor_name, set()).add(a.role_name)
     may_perform = _role_performer_check(spec, hybrid_actor_roles)
+    declaration_actions = _declaration_action_names(spec)  # AM-115, as static T5
     for desc in descriptors.values():
         for m in desc.chain:
             if m not in init_actors:
@@ -4308,6 +4315,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
         ]
         for permit_id, pdesc in permit_descriptors.items():
             if pdesc.for_action is None:
+                continue
+            if pdesc.for_action in declaration_actions:  # AM-115
                 continue
             if actors.get(pdesc.holder) != ActorStatus.ACTIVE:
                 continue

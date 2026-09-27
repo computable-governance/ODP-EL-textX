@@ -37,6 +37,7 @@ from el_engine import (
 )
 from el_engine import _embargo_coverage, _embargo_covers  # AM-102
 from el_engine import _role_refusal  # AM-114
+from el_engine import _declaration_action_names  # AM-115
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -774,6 +775,7 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
         )
 
     actions: List[AvailableAction] = []
+    declaration_actions = _declaration_action_names(_runtime._spec)  # AM-115
 
     for tok in state.tokens:
         if tok.holder != actor_name:
@@ -805,7 +807,11 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
             ))
         elif tok.kind == "permit":
             # AM-114: a permit whose action the holder may not perform (no
-            # role declaring it) is omitted, like an embargoed one.
+            # role declaring it) is omitted, like an embargoed one. AM-115:
+            # so is a declaration permit — execute-action (advance()) refuses
+            # a declaration; it is made through declare_violation().
+            if tok.for_action in declaration_actions:
+                continue
             if not _is_embargoed(tok.for_action) and not out_of_role:
                 actions.append(AvailableAction(
                     action=tok.for_action,
