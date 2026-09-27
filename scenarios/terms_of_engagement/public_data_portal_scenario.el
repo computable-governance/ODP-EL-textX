@@ -47,6 +47,18 @@ agent AgencyGateway
     delegated_from DataAgency
 }
 
+// AM-115: the declarer. An automated watchdog evaluates each strict burden
+// against wall-clock time and, once its deadline has passed undischarged,
+// declares it violated (§6.6.7 evaluation, then §6.6.5 declaration).
+agent AgencyViolationWatchdog
+    description: "Automated watchdog: declares an overdue strict burden violated; its health is monitored by operations tooling"
+{
+    delegated_from DataAgency
+}
+
+party AgencySecurityManager
+    description: "Security manager: investigates gateway failures and handles escalated reviews"
+
 party AgentOperator
     description: "Organisation that develops and runs the external AI agent; accountable principal"
 {
@@ -93,9 +105,13 @@ embargo noCircumventionEmbargo {
 }
 
 // Compelled: discharged by the gateway in the same step as the refusal.
+// AM-115: if it is not, the refusal freezes the community (strict); once
+// the deadline has passed, the watchdog declares the burden violated,
+// which ends the freeze and fires unrecordedRefusalResponse.
 burden refusalRecordBurden {
     for_action: "recordRefusal"
     state: pending
+    deadline: "5 minutes"
     triggered_by: accessRefused
     discharged_by: refusalRecorded
     discharge_mode: strict
@@ -127,6 +143,78 @@ burden incidentNotificationBurden {
     discharge_mode: eventual
     priority: critical
     description: "Operator notifies the agency's designated contact of any incident involving its agent"
+}
+
+// AM-115: the declarer's authority and duty (held by declarerRole).
+permit violationDeclarationPermit {
+    for_action: "declareRefusalRecordViolation"
+    state: active
+    description: "Declare refusalRecordBurden violated once its deadline has passed"
+}
+
+// The declarer's own duty is only detectable: nothing in this specification
+// declares the watchdog's failure. The regress ends in a mechanism, an
+// automated watchdog whose health is monitored by operations tooling.
+// Held by declarerRole, never granted or activated at runtime (GAP-6).
+burden declarationDutyBurden {
+    for_action: "declareRefusalRecordViolation"
+    state: pending
+    deadline: "5 minutes"
+    discharge_mode: eventual
+    priority: critical
+    description: "Declare an overdue refusalRecordBurden violated within 5 minutes of its deadline"
+}
+
+// Prohibitions on the declarer, enforced by declare_violation() (a
+// declaration against them is refused, not only monitored). Held by
+// declarerRole; their for_action names no action, so they block nothing
+// in the engine themselves.
+embargo earlyDeclarationEmbargo {
+    for_action: "declareBeforeDeadline"
+    state: active
+    description: "No declaration before the burden's deadline has passed"
+}
+
+embargo selfDeclarationEmbargo {
+    for_action: "declareOwnBurden"
+    state: active
+    description: "No declaration of a burden the declarer holds"
+}
+
+embargo dischargeDeclarationEmbargo {
+    for_action: "declareDischarged"
+    state: active
+    description: "A declaration can only make a burden violated, never discharged"
+}
+
+// AM-115: created by unrecordedRefusalResponse for gatewayFailureInvestigatorRole.
+burden gatewayInvestigationBurden {
+    for_action: "investigateGatewayFailure"
+    state: active
+    deadline: "1 day"
+    discharge_mode: eventual
+    priority: critical
+    description: "Investigate the gateway failure and reconstruct the refusal record from other logs"
+}
+
+// The authority to restore the agent's access after the investigation.
+// Reinstatement is a manual reinstate_authorization() call, which checks
+// no actor (GAP-7); nothing reinstates automatically on discharge of
+// gatewayInvestigationBurden.
+permit accessReinstatementPermit {
+    for_action: "reinstateAgentAccess"
+    state: active
+    description: "Reinstate the agent's authorizations after a gateway failure investigation"
+}
+
+// AM-115: created by missedReviewResponse for reviewEscalationRole.
+burden reviewEscalationBurden {
+    for_action: "completeOrReassignReview"
+    state: active
+    deadline: "1 day"
+    discharge_mode: eventual
+    priority: high
+    description: "Complete the missed refusal review, or reassign it"
 }
 
 // ── Security policies (policed; mechanisms named) ───────────────────────────
@@ -206,6 +294,8 @@ domain AgencyPortalDomain
     controlled_object: StatisticsPortal
     controlled_object: AgencyGateway
     controlled_object: AgencySecurityContact
+    controlled_object: AgencyViolationWatchdog
+    controlled_object: AgencySecurityManager
     normative_policy: InformationSecurityManual
     normative_policy: ProtectiveSecurityPolicyFramework
     normative_policy: PrivacyAct1988
@@ -242,6 +332,10 @@ contract community ExternalAgentAccess
         requires_relation: "principal_of the agent filling externalRequesterRole"
         requires_token burden: "holds incidentNotificationBurden via commitment"
     }
+    // AM-115: separation of duties (§7.8.2 assignment rule; GAP-2 applies).
+    assignment_policy for declarerRole {
+        requires_relation: "does not fill accessGatewayRole: the declarer is not the holder it judges"
+    }
 
     // Entry attaches the restrictions at the moment the agent joins.
     on_join externalRequesterRole transfer outsideScopeEmbargo
@@ -253,6 +347,12 @@ contract community ExternalAgentAccess
     AgencyGateway fills accessGatewayRole
     AgencySecurityContact fills incidentContactRole
     AgentOperator fills accountablePrincipalRole
+    AgencyViolationWatchdog fills declarerRole
+    // Both escalation roles are filled by one party for now; they stay
+    // separate roles so the agency can assign them to different parties
+    // by changing only these statements.
+    AgencySecurityManager fills gatewayFailureInvestigatorRole
+    AgencySecurityManager fills reviewEscalationRole
 
     role externalRequesterRole
         description: "Filled by an external AI agent"
@@ -322,6 +422,44 @@ contract community ExternalAgentAccess
         action notifyIncident {
             actor: accountablePrincipalRole
             favoured_by_burden incidentNotificationBurden
+        }
+    }
+
+    // AM-115: the declarer (the watchdog). Its declaration is made through
+    // declare_violation(), never as an ordinary action, and stays outside
+    // the verifier's model.
+    role declarerRole
+        description: "Filled by the automated watchdog; declares overdue strict burdens violated"
+    {
+        holds declarationDutyBurden
+        holds violationDeclarationPermit
+        holds earlyDeclarationEmbargo
+        holds selfDeclarationEmbargo
+        holds dischargeDeclarationEmbargo
+        action declareRefusalRecordViolation {
+            actor: declarerRole
+            requires_permit violationDeclarationPermit
+            declares_violation_of refusalRecordBurden
+            favoured_by_burden declarationDutyBurden
+        }
+    }
+
+    role gatewayFailureInvestigatorRole
+        description: "Investigates a declared gateway recording failure; may then reinstate the agent's access"
+    {
+        holds accessReinstatementPermit
+        action investigateGatewayFailure {
+            actor: gatewayFailureInvestigatorRole
+            favoured_by_burden gatewayInvestigationBurden
+        }
+    }
+
+    role reviewEscalationRole
+        description: "Completes or reassigns a refusal review the security contact missed"
+    {
+        action completeOrReassignReview {
+            actor: reviewEscalationRole
+            favoured_by_burden reviewEscalationBurden
         }
     }
 
@@ -403,7 +541,18 @@ authorization AggregateQueryAuthorization {
     domain_scope: "AgencyPortalDomain"
 }
 
-// GAP-3: ViolationResponse burdens are invisible to the verifier (backlog item 16).
+// AM-115: the permit to declare (§7.10.4: a declaration is made under a permit).
+authorization ViolationDeclarationAuthorization {
+    authority: DataAgency
+    to_agent: AgencyViolationWatchdog
+    grants_permit: violationDeclarationPermit
+    conditions: "declare only an overdue strict burden, judged against wall-clock time"
+    domain_scope: "AgencyPortalDomain"
+}
+
+// A ViolationResponse's created burden waits in the verifier until the
+// violation it answers (AM-105); a declared violation is outside the model,
+// so gatewayInvestigationBurden never activates there (AM-115).
 violation_response lateNotificationResponse {
     on_violation_of: incidentNotificationBurden
     obligates: DataAgency
@@ -415,8 +564,24 @@ violation_response missedReviewResponse {
     on_violation_of: refusalReviewBurden
     obligates: DataAgency
     response_kind: escalate
-    escalate_to: AgencySecurityContact
-    description: "Unreviewed refusal escalates within the agency"
+    creates_burden: reviewEscalationBurden
+    creates_burden_for_role: reviewEscalationRole
+    description: "Unreviewed refusal escalates to reviewEscalationRole, not the contact who missed it"
+}
+
+// AM-115: a declared recording failure suspends the agent's access (the
+// listed Authorizations; the violator is the gateway, so terminate's
+// inferred chain would revoke nothing of the agent's) and obliges an
+// investigation.
+violation_response unrecordedRefusalResponse {
+    on_violation_of: refusalRecordBurden
+    obligates: DataAgency
+    response_kind: remediate
+    creates_burden: gatewayInvestigationBurden
+    creates_burden_for_role: gatewayFailureInvestigatorRole
+    revokes: DatasetReadAuthorization
+    revokes: AggregateQueryAuthorization
+    description: "Unrecorded refusal: suspend the agent's access and investigate the gateway failure"
 }
 
 // ── Correspondences: where each security policy is realised ─────────────────

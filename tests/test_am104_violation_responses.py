@@ -9,7 +9,7 @@ chain's Authorizations whose authority is the response's obligates, via
 _apply_revocation(), which skips revoke_authorization()'s strict guard.
 
 Covers: DN_019 step 2.10b (terminate) and the missed-review case
-(escalate) in both terms-of-engagement scenarios; terminate during a
+(escalate; to a role since AM-115) in both terms-of-engagement scenarios; terminate during a
 strict freeze; the authority-mismatch no-op; re-firing on a re-granted
 instance. The creates_burden path is covered by
 tests/test_fire_violation_responses.py, unchanged.
@@ -107,25 +107,29 @@ def test_late_notification_terminates_agent_access(name):
 
 
 @pytest.mark.parametrize("name", sorted(_SCENARIOS))
-def test_missed_review_escalates_without_creates_burden(name):
-    """escalate with no creates_burden fires as a ledger entry only: no
-    token changes, and the agent keeps its access."""
+def test_missed_review_escalates_to_review_escalation_role(name):
+    """AM-115: missedReviewResponse escalates to reviewEscalationRole (not
+    the contact who missed the review): it grants reviewEscalationBurden to
+    the role's filler, the security manager; the agent keeps its access.
+    Before AM-115 it had no creates_burden and fired as a ledger entry only."""
     make, agent, operator, contact, gateway, read, auths, permits = _SCENARIOS[name]
     rt = make()
+    manager = next(a.actor_name for a in rt.current_state().actors
+                   if a.role_name == "reviewEscalationRole")
     rt.advance("refuseRequest", gateway)
     rt.advance("recordRefusal", gateway)
     assert _violate(rt, "1 day").violations == ("refusalReviewBurden",)
-    tokens_before = rt.current_state().tokens
 
     record = rt.fire_violation_responses()
 
     assert record.fired_responses == ("missedReviewResponse",)
     assert record.effects == (
+        f"fired 'missedReviewResponse': granted 'reviewEscalationBurden' to '{manager}'",
         f"fired 'missedReviewResponse' (escalate) on violation of "
         f"'refusalReviewBurden' by '{contact}'",
-        f"escalated 'missedReviewResponse' to '{contact}'",
     )
-    assert rt.current_state().tokens == tokens_before
+    assert _states(rt, manager)["reviewEscalationBurden"] == "active"
+    assert "reviewEscalationBurden" not in _states(rt, contact)
     assert rt.advance(read, agent).outcome == "ok"
     assert rt.fire_violation_responses().fired_responses == ()
 

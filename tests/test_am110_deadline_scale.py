@@ -33,7 +33,7 @@ from el_kripke import (
     build_kripke_model,
     suggest_deadline_scale,
 )
-from el_parser import parse
+from el_parser import parse, parse_string
 from el_runtime import Runtime
 
 
@@ -112,11 +112,13 @@ def test_cross_check_gp_referral_static_wide():
 
 
 def test_cross_check_public_data_portal_static():
-    """k = 480 at horizon 10 against k = 120 at horizon 40: the 4320-step
-    notification deadline is 9 and 36 steps respectively."""
+    """k = 480 at horizon 10 against k = 240 at horizon 20: the 4320-step
+    notification deadline is 9 and 18 steps respectively. (k = 120 at
+    horizon 40 until AM-115, whose response-created burdens made that
+    model take minutes to check.)"""
     spec = _spec(_PORTAL)
     scaled = _quiet(build_kripke_model, spec, horizon=10, deadline_scale=480)
-    finer = _quiet(build_kripke_model, spec, horizon=40, deadline_scale=120)
+    finer = _quiet(build_kripke_model, spec, horizon=20, deadline_scale=240)
     assert _verdicts(scaled) == _verdicts(finer)
 
 
@@ -181,15 +183,34 @@ def test_k1_hybrid_unchanged(name):
 def test_only_enforceable_deadlines_scale():
     km = _quiet(build_kripke_model, _spec(_PORTAL), horizon=10, deadline_scale=480)
     steps = {o: d.deadline_steps for o, d in km.obligation_descriptors.items()}
-    assert steps == {"refusalRecordBurden": 5,        # no magnitude: untouched
-                     "refusalReviewBurden": 3,        # ceil(1440 / 480)
-                     "incidentNotificationBurden": 9}  # ceil(4320 / 480)
-    assert km.unscaled_deadlines == {"refusalReviewBurden": 1440,
-                                     "incidentNotificationBurden": 4320}
+    assert steps == {"refusalRecordBurden": 1,          # ceil(5 / 480), AM-115
+                     "refusalReviewBurden": 3,          # ceil(1440 / 480)
+                     "incidentNotificationBurden": 9,   # ceil(4320 / 480)
+                     "gatewayInvestigationBurden": 3,   # AM-115 responses
+                     "reviewEscalationBurden": 3}
+    assert km.unscaled_deadlines == {"refusalRecordBurden": 5,
+                                     "refusalReviewBurden": 1440,
+                                     "incidentNotificationBurden": 4320,
+                                     "gatewayInvestigationBurden": 1440,
+                                     "reviewEscalationBurden": 1440}
     summary = km.render_summary()
     assert "Deadline scale : k=480" in summary
     assert "deadline=9 steps (4320 unscaled, k=480)" in summary
-    assert "mode=strict  deadline=none" in summary
+
+
+def test_deadline_without_magnitude_is_not_scaled():
+    """The portal with refusalRecordBurden's deadline removed (its state
+    before AM-115): a deadline with no magnitude keeps the default 5 steps
+    and is not scaled."""
+    src = _PORTAL.read_text().replace('    deadline: "5 minutes"\n    triggered_by: accessRefused',
+                                      '    triggered_by: accessRefused', 1)
+    assert src != _PORTAL.read_text()
+    result = _quiet(parse_string, src, validate=False)
+    assert result.ok, result.errors
+    km = _quiet(build_kripke_model, result.model, horizon=10, deadline_scale=480)
+    assert km.obligation_descriptors["refusalRecordBurden"].deadline_steps == 5
+    assert "refusalRecordBurden" not in km.unscaled_deadlines
+    assert "mode=strict  deadline=none" in km.render_summary()
 
 
 @pytest.mark.parametrize("rel, k", [

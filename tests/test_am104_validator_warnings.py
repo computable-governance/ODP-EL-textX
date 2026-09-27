@@ -152,8 +152,8 @@ violation_response toParty {
 
 _EXPECTED_W22 = {
     "scenarios/ereferral/ereferral_model.el": 2,
-    "scenarios/terms_of_engagement/public_data_portal_scenario.el": 1,
-    "scenarios/terms_of_engagement/external_agent_access_scenario.el": 1,
+    "scenarios/terms_of_engagement/public_data_portal_scenario.el": 0,     # AM-115: was 1
+    "scenarios/terms_of_engagement/external_agent_access_scenario.el": 0,  # AM-115: was 1
     "scenarios/referral/referral_scenario.el": 0,
     "scenarios/gp_referral/gp_referral_scenario.el": 0,
 }
@@ -161,7 +161,8 @@ _EXPECTED_W22 = {
 
 @pytest.mark.parametrize("rel", sorted(_EXPECTED_W22))
 def test_tracked_scenarios(rel):
-    """W-22 on the four escalate responses without creates_burden; no
+    """W-22 on ereferral's two escalate responses without creates_burden
+    (the terms-of-engagement ones gained one, to a role, in AM-115); no
     tracked scenario triggers W-21 or W-23."""
     result = _quiet(parse, _ROOT / rel)
     assert len([w for w in result.warnings if w.startswith("[W-22]")]) == _EXPECTED_W22[rel]

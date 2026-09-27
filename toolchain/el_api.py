@@ -356,6 +356,7 @@ _PUBLIC_DATA_PORTAL_GRANTS = [
     ("incidentNotificationBurden", "AgentOperator"),
     ("publishedDatasetReadPermit", "ExternalAIAgent"),
     ("aggregateQueryPermit", "ExternalAIAgent"),
+    ("violationDeclarationPermit", "AgencyViolationWatchdog"),  # AM-115
 ]
 _EXTERNAL_AGENT_ACCESS_ACTORS = ["ProviderOrg"]
 _EXTERNAL_AGENT_ACCESS_GRANTS = [
@@ -364,6 +365,7 @@ _EXTERNAL_AGENT_ACCESS_GRANTS = [
     ("incidentNotificationBurden", "VendorOrg"),
     ("serviceRequestSubmitPermit", "VendorReferralAgent"),
     ("patientLookupPermit", "VendorReferralAgent"),
+    ("violationDeclarationPermit", "ProviderViolationWatchdog"),  # AM-115
 ]
 
 

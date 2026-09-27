@@ -41,33 +41,43 @@ def _token_set(state):
                   for t in state.tokens)
 
 
-# The pre-AM-114 construction: five actors without roles, every token hand-granted.
+# The pre-AM-114 construction: the actors without roles, every token hand-granted.
+# AM-115 added the watchdog (declarerRole, with its declaration permit) and the
+# security manager (two escalation roles), so roles map each actor to a set.
 _LEGACY = {
     "public_data_portal": (
         _TOE_DIR / "public_data_portal_scenario.el",
-        ["DataAgency", "AgencySecurityContact", "AgencyGateway", "AgentOperator", "ExternalAIAgent"],
+        ["DataAgency", "AgencySecurityContact", "AgencyGateway", "AgentOperator", "ExternalAIAgent",
+         "AgencyViolationWatchdog", "AgencySecurityManager"],
         [("refusalRecordBurden", "AgencyGateway"),
          ("refusalReviewBurden", "AgencySecurityContact"),
          ("incidentNotificationBurden", "AgentOperator"),
          ("publishedDatasetReadPermit", "ExternalAIAgent"),
          ("aggregateQueryPermit", "ExternalAIAgent"),
+         ("violationDeclarationPermit", "AgencyViolationWatchdog"),
          ("outsideScopeEmbargo", "ExternalAIAgent"),
          ("noCircumventionEmbargo", "ExternalAIAgent")],
-        {"AgencySecurityContact": "incidentContactRole", "AgencyGateway": "accessGatewayRole",
-         "AgentOperator": "accountablePrincipalRole", "ExternalAIAgent": "externalRequesterRole"},
+        {"AgencySecurityContact": {"incidentContactRole"}, "AgencyGateway": {"accessGatewayRole"},
+         "AgentOperator": {"accountablePrincipalRole"}, "ExternalAIAgent": {"externalRequesterRole"},
+         "AgencyViolationWatchdog": {"declarerRole"},
+         "AgencySecurityManager": {"gatewayFailureInvestigatorRole", "reviewEscalationRole"}},
     ),
     "external_agent_access": (
         _TOE_DIR / "external_agent_access_scenario.el",
-        ["ProviderOrg", "ProviderSecurityContact", "ProviderAPIGateway", "VendorOrg", "VendorReferralAgent"],
+        ["ProviderOrg", "ProviderSecurityContact", "ProviderAPIGateway", "VendorOrg", "VendorReferralAgent",
+         "ProviderViolationWatchdog", "ProviderSecurityManager"],
         [("refusalRecordBurden", "ProviderAPIGateway"),
          ("refusalReviewBurden", "ProviderSecurityContact"),
          ("incidentNotificationBurden", "VendorOrg"),
          ("serviceRequestSubmitPermit", "VendorReferralAgent"),
          ("patientLookupPermit", "VendorReferralAgent"),
+         ("violationDeclarationPermit", "ProviderViolationWatchdog"),
          ("outsideScopeEmbargo", "VendorReferralAgent"),
          ("noCircumventionEmbargo", "VendorReferralAgent")],
-        {"ProviderSecurityContact": "incidentContactRole", "ProviderAPIGateway": "accessGatewayRole",
-         "VendorOrg": "accountablePrincipalRole", "VendorReferralAgent": "externalRequesterRole"},
+        {"ProviderSecurityContact": {"incidentContactRole"}, "ProviderAPIGateway": {"accessGatewayRole"},
+         "VendorOrg": {"accountablePrincipalRole"}, "VendorReferralAgent": {"externalRequesterRole"},
+         "ProviderViolationWatchdog": {"declarerRole"},
+         "ProviderSecurityManager": {"gatewayFailureInvestigatorRole", "reviewEscalationRole"}},
     ),
 }
 
@@ -87,8 +97,8 @@ def test_terms_of_engagement_runtime_starts_as_before_now_with_roles(name):
     assert _token_set(state) == _token_set(legacy)
     assert state.tick == legacy.tick == 0
     assert {a.actor_name for a in state.actors} == set(actors)
-    assert {a.actor_name: a.role_name for a in state.actors} == {
-        actor: roles.get(actor) for actor in actors}
+    assert {(a.actor_name, a.role_name) for a in state.actors} == {
+        (actor, role) for actor in actors for role in roles.get(actor, {None})}
 
 
 @pytest.mark.parametrize("name", sorted(_LEGACY))

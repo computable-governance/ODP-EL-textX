@@ -92,12 +92,18 @@ community C2 {
         ("AgencyGateway", "accessGatewayRole"),
         ("AgencySecurityContact", "incidentContactRole"),
         ("AgentOperator", "accountablePrincipalRole"),
+        ("AgencyViolationWatchdog", "declarerRole"),                 # AM-115
+        ("AgencySecurityManager", "gatewayFailureInvestigatorRole"),
+        ("AgencySecurityManager", "reviewEscalationRole"),
     ]),
     (_TOE_DIR / "external_agent_access_scenario.el", [
         ("VendorReferralAgent", "externalRequesterRole"),
         ("ProviderAPIGateway", "accessGatewayRole"),
         ("ProviderSecurityContact", "incidentContactRole"),
         ("VendorOrg", "accountablePrincipalRole"),
+        ("ProviderViolationWatchdog", "declarerRole"),               # AM-115
+        ("ProviderSecurityManager", "gatewayFailureInvestigatorRole"),
+        ("ProviderSecurityManager", "reviewEscalationRole"),
     ]),
 ], ids=lambda p: p.stem if isinstance(p, Path) else "")
 def test_terms_of_engagement_scenarios_state_their_fillers(path, fillers):
