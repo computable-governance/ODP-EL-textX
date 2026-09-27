@@ -36,6 +36,7 @@ from el_engine import (
     enroll, enroll_role_fillers, grant_token, initial_state, token_from_spec, TransitionRecord,
 )
 from el_engine import _embargo_coverage, _embargo_covers  # AM-102
+from el_engine import _role_refusal  # AM-114
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -473,7 +474,8 @@ app.add_middleware(
 
 class AvailableAction(BaseModel):
     action: str
-    reason: str            # "obligated" | "obligated_blocked" | "permitted" (AM-103)
+    reason: str            # "obligated" | "obligated_blocked" (AM-103) |
+                           # "obligated_not_role" (AM-114) | "permitted"
     token: str             # burden or permit name that makes this action available
     deadline: Optional[str] = None
 
@@ -735,11 +737,14 @@ class ScenarioListResponse(BaseModel):
     description=(
         "Synthesises available actions from the actor's current permits, "
         "embargoes, and active obligations. Each entry is tagged 'obligated' "
-        "(an active burden requires the action), 'obligated_blocked' (an active "
-        "burden requires it, but an active embargo the actor holds covers it, so "
-        "the engine's Step 5 would refuse it) or 'permitted' (a permit grants it "
-        "and no embargo blocks it). Reads directly from the current Layer 3 "
-        "runtime state — no Kripke model is needed for this endpoint."
+        "(an active burden requires the action), 'obligated_not_role' (an active "
+        "burden requires it, but the actor fills no role declaring the action, so "
+        "the engine's Step 2 would refuse it — AM-114), 'obligated_blocked' (an "
+        "active burden requires it, but an active embargo the actor holds covers "
+        "it, so the engine's Step 5 would refuse it) or 'permitted' (a permit "
+        "grants it, the actor fills a role declaring it, and no embargo blocks "
+        "it). Reads directly from the current Layer 3 runtime state — no Kripke "
+        "model is needed for this endpoint."
     ),
 )
 def get_available_actions(actor_name: str) -> AvailableActionsResponse:
@@ -778,17 +783,30 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
         if not tok.for_action:
             continue  # token carries no action association — nothing to surface
 
+        # AM-114: the engine's Step 2 refuses an actor that fills no role
+        # declaring the action (checked before the embargo, as in advance()).
+        out_of_role = _role_refusal(_runtime._spec, state, actor_name, tok.for_action) is not None
+
         if tok.kind == "burden":
             # AM-103: an obligation whose action an embargo covers is kept,
-            # marked blocked, so a stuck obligation stays visible.
+            # marked blocked, so a stuck obligation stays visible; AM-114:
+            # likewise one whose holder fills no role declaring its action.
+            if out_of_role:
+                reason = "obligated_not_role"
+            elif _is_embargoed(tok.for_action):
+                reason = "obligated_blocked"
+            else:
+                reason = "obligated"
             actions.append(AvailableAction(
                 action=tok.for_action,
-                reason="obligated_blocked" if _is_embargoed(tok.for_action) else "obligated",
+                reason=reason,
                 token=tok.token_name,
                 deadline=tok.deadline,
             ))
         elif tok.kind == "permit":
-            if not _is_embargoed(tok.for_action):
+            # AM-114: a permit whose action the holder may not perform (no
+            # role declaring it) is omitted, like an embargoed one.
+            if not _is_embargoed(tok.for_action) and not out_of_role:
                 actions.append(AvailableAction(
                     action=tok.for_action,
                     reason="permitted",
