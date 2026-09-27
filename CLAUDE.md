@@ -281,6 +281,18 @@ Most-recent confirmed amendments: AM-18 (Decl suffix removal), AM-19
 AM-23 (typed PolicyValue), AM-24 (InlineToken), AM-25 (Federation/Domain as
 community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition).
 
+### 5.7 Role fulfilment (AM-114)
+`obj fills role` in a Community or Federation body (§7.8.2; the AM-40
+idiom) states who fills a role. An action declared in a role may be
+performed only by an actor filling a role that declares it — engine
+(`advance()` Step 2), both Kripke builders, and `available-actions`
+(`obligated_not_role`). Fail-closed: an actor enrolled without a role
+fills none, so a new runtime, fixture or probe must enrol each acting
+actor with its role (`enroll(..., role_name=...)`, or state `fills` and
+use `Runtime.build_from_spec()` / `enroll_role_fillers()`). Undeclared
+actions stay unrestricted. The static builder stays unrestricted for a
+spec with no `fills` statement (transitional; see CONCEPTS_INDEX).
+
 ---
 
 ## 6. The textX Custom Classes Architecture

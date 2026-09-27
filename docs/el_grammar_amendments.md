@@ -9988,3 +9988,208 @@ existing test files; new `tests/test_am113_event_discharge.py`;
 `docs/CONCEPTS_INDEX.md`, `docs/KRIPKE_TRANSITION_RULES.md`,
 `docs/OPERATIONAL_VS_VERIFICATION_SEMANTICS.md`,
 `docs/design_notes/DN_019_incident_simulator_storyboard.md`; this file.
+
+## AM-114 (2026-09-27) — an action may be performed only by an actor that fills a role declaring it; `obj fills role` in Community and Federation bodies (`grammar/v2/el_grammar.tx`, `toolchain/el_engine.py`, `toolchain/el_kripke.py`, `toolchain/el_runtime.py`, `toolchain/el_api.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-27), in eight parts. Type: grammar
+amendment (`RoleFiller`), engine and verifier semantics, one new validator
+error (`[V-NEW-22]`) and two warnings (`[W-27]`, `[W-28]`). Resolves the
+CONCEPTS_INDEX finding "The engine never enforces an action's actor role"
+(high priority, found in AM-113 Phase 1).
+
+**Standard reference:** §7.8.2 (role rules). Each role has an assignment
+rule setting requirements for the objects that may fulfil it, and "the
+constraints of the behaviour identified by the role become constraints on
+the object fulfilling the role"; the fulfil/assigned wording is from the
+text immediately preceding §7.8.2. `fills` expresses §7.8.2 fulfilment.
+Annex B.1.5.7: the assignment policy is where requirements such as
+authentication attach to role fulfilment (`assignment_policy`, still
+documentation only — GAP-2 in the terms-of-engagement scenarios).
+
+**Before.** `advance()` Step 3 looked up the action's Role
+(`_find_action()`) and never used it. Any enrolled actor could perform any
+action a permit (Step 6) or embargo (Step 5) did not block: in the
+terms-of-engagement scenarios the agent could record or review its own
+refusal, and the agent or the operator could acknowledge the operator's
+incident notification (which, since AM-113, discharges it). Both builders
+followed the engine (T11/T9 performers: every ACTIVE or enrolled actor).
+The specification could not say who fills a community role: only Domain
+bodies had `obj fills role` (AM-40), and the role descriptions ("Filled by
+ProviderAPIGateway") were prose. `Runtime.build_from_spec()` and
+`build_from_federation()` enrolled every actor without a role; the two
+terms-of-engagement API runtimes hand-listed five actors without roles.
+`join_role()` granted every `on_join` token `active`, whatever its
+declared state.
+
+**Decision.**
+- **Rule.** An action declared in some role may be performed only by an
+  actor that fills a role declaring it (any one, if several declare it).
+  An actor enrolled without a role fills none (fail-closed). An
+  undeclared action (a `for_action` string no role declares) has no role
+  to check and stays unrestricted.
+- **No exception for burden holders.** A delegated or transferred burden
+  gives no capacity to act: its holder must fill a role declaring the
+  discharging action.
+- **`claim()` and `decline()`** go through `advance()` and are subject to
+  the rule. **`discharge_burden()`, `fire_event()`**, the clock, violation
+  sweeps and authorization revoke/reinstate are not actions and are
+  unchanged.
+- **Placement:** Step 2 (Initiator), after the enrolment check and before
+  Steps 3, 3.5 and 5: an out-of-role action is an authorisation failure,
+  never "discharging progress" for the strict guard, and never reaches
+  the embargo check. Refusal reason: `actor 'X' does not fill role 'R',
+  which declares action 'A'` (`'R1' or 'R2'` for several).
+- **Role source:** the specification. `obj fills role` (the AM-40 idiom,
+  without `via`) in Community and Federation bodies; the runtimes and the
+  static verifier read the same statements.
+- **Verifier parity:** a fixed actor → roles map. Role membership never
+  changes during a run (no leave primitive; `join_role()` only at
+  construction), so `World` needs no role-membership dimension (the
+  AM-83 finding stays open for the day it can change). Hybrid: from
+  `state.actors`. Static: from the `fills` statements — **transitional
+  exception:** a specification with no `fills` statement at all stays
+  unrestricted in the static builder (logged as an open finding, to be
+  removed once scenarios state their fillers).
+
+### Part 1 — tests: gitignored scenarios
+
+`scenarios/industrial_procedure/` and `scenarios/xmpro_mediator/` are
+gitignored but read by the suite. `test_am110_deadline_scale.py::
+test_suggest_deadline_scale[...industrial_procedure...]` now skips when
+the file is absent (it failed in a clean clone). The AM-111 corpus test
+globs the directory and simply collects four fewer cases. 871 → 871.
+
+### Part 2 — engine: `join_role()` grants on_join tokens in their declared state
+
+`join_role()` builds each token with `token_from_spec()` (declared state,
+deadline, `for_action` fallback), so `noCircumventionEmbargo`
+(`state: pending`, `triggered_by: accessRefused`) stays pending on join.
+No runtime called `join_role()` yet. New test. 871 → 872.
+
+### Part 3 — grammar: `obj fills role`
+
+```
+RoleFiller:
+    obj=[EnterpriseObject] 'fills' role=[Role]
+;
+```
+In Community's fixed-order body after `join_leave_effects`, before
+`roles`; one more `FedBodyItem` alternative in Federation. P11
+(`process_community`) and P9 (`process_federation`) collect each as a
+`RoleFillerRef` (Domain's class, `via` None) in `role_fillers`; new domain
+class `RoleFiller`. `[V-NEW-22]` (error): the role must be declared in the
+same element (identity comparison, as V-NEW-21). Both terms-of-engagement
+scenarios state their fillers: agent → `externalRequesterRole`, gateway →
+`accessGatewayRole`, security contact → `incidentContactRole`,
+operator/vendor → `accountablePrincipalRole` (the controlling party
+fills none). Nothing reads them yet. New `tests/test_am114_fills_grammar.py`
+(5). 872 → 877.
+
+### Part 4 — runtimes enrol role fillers from the specification
+
+`el_engine.role_fillers(spec)` (declaration order) and
+`enroll_role_fillers()` (through `join_role()`, so on_join grants apply).
+`build_from_spec()`: non-fillers enrolled without a role, fillers once per
+role; `holds` grants skip a token an on_join already granted.
+`build_from_federation()`: domain actors as before, then each filler
+through `join_role()` with its domain tag. API builders: all six call
+`enroll_role_fillers()`; the four clinical scenarios state no fillers and
+keep their hand-listed roles. The terms-of-engagement builders now list
+only the party that fills no role (`DataAgency` / `ProviderOrg`) and the
+Commitment/Delegation/Authorization grants; the agent's two embargoes
+come from `on_join`. Both runtimes start in exactly the state they had
+before, now with roles (test). All 16 static and 6 API models unchanged.
+New `tests/test_am114_role_filler_enrolment.py` (7). 877 → 884.
+
+### Part 5 — engine and verifier: the rule
+
+Engine: `_declaring_roles()`, `_actor_roles()`, `_role_refusal()`; the
+Step 2 check. Builders: `_role_performer_check()` → `may_perform(actor,
+action)`. T1 and T6 (effective holder), T5 (permit holder), C1 (claim,
+static), T11 and T9 (hybrid) — performers are actors filling a declaring
+role, and an edge needs at least one that is not embargoed. Static: the
+actor → roles map from `role_fillers(model)`, and every filler joins the
+static actor set (a filler holding nothing can still perform T11).
+
+Test updates (the 26 tests the rule broke): inline probes enrol actors
+with the roles they act in (AM-101, AM-103, AM-99b); probes built with
+`Runtime.build_from_spec()` state `fills` (AM-106, AM-109, GP escalation,
+hybrid T5/T6, witness endpoint). Two premises updated, with comments:
+AM-102 `test_t9_kept_while_an_actor_is_not_embargoed` (Taker performed
+giverRole's action; now a separate `clerkRole` with an embargoed and an
+unembargoed clerk, since T9 models single-source transfers only), and
+`test_hybrid_t5_revoke_authorization_removes_its_exercise_edge`
+(SpecialistClinician's `patientRecordAccessPermitByRole` exercise edge is
+now absent before and after the revocation — see the new referral
+finding). New `tests/test_am114_role_enforcement.py` (19): the eight
+refusals (agent `recordRefusal`, `reviewRefusal`, `acknowledgeIncident`;
+operator/vendor `acknowledgeIncident`, both scenarios), the legitimate
+refusal and incident flows, hybrid parity, the static builder reading
+`fills` and staying unrestricted without, `claim()`/`decline()`, and an
+undeclared action.
+
+Readings, before (HEAD) → after: no AF status, bounded response, EF or
+"eventually violated" reading changed in any of the 16 static models, the
+6 API hybrid models, or the 324 models the suite builds in both trees.
+Sizes: `referral` hybrid (API model and the 66 suite models built from it)
+3,562 worlds, 16,772 → 16,210 edges — SpecialistClinician can no longer
+exercise `patientRecordAccessPermitByRole` on
+`access_patient_clinical_records` (an `aiExaminationRole` action). The
+terms-of-engagement static models are unchanged although now restricted:
+every filler already performs its own actions. 884 → 858 (26 failed) with
+the rule alone; 903 with the test updates.
+
+### Part 6 — API: `obligated_not_role`
+
+`/actors/{actor}/available-actions`: an obligation whose holder fills no
+role declaring its action is listed as `obligated_not_role` (checked
+before `obligated_blocked`, as Step 2 precedes Step 5); a permit whose
+holder fills no such role is omitted, like an embargoed one. In the API
+runtimes: gp_referral `SpecialistParty` / `assessmentSchedulingBurden`
+flagged; referral `SpecialistClinician` / `patientRecordAccessPermitByRole`
+omitted. New `tests/test_am114_available_actions_role.py` (9), including
+engine parity for every listed obligation and a test pinning exactly
+those two out-of-role tokens. 903 → 912.
+
+### Part 7 — validator: `[W-27]`, `[W-28]`
+
+`[W-27]`: a burden that can never be discharged — its holder (the one
+`_build_obligation_descriptors()` resolves) fills no role declaring its
+`for_action`, or, for a burden with `discharged_by` (discharged by
+whoever emits the event, AM-113), nobody fills a role declaring an
+emitting action. `[W-28]`: a permit whose holder (Authorization
+`to_agent`, or an object's `holds`) fills no role declaring its
+`for_action`. Both only where every element declaring the action states
+its fillers (at least one `fills`); undeclared actions are skipped.
+Advisory. No tracked scenario raises either: only the
+terms-of-engagement scenarios state fillers, and they are consistent. The
+gp_referral case is raised once the scenario states
+`SpecialistClinician fills specialistRole` (test, in memory). New
+`tests/test_am114_role_performer_warnings.py` (21, 1 skipped: ecommerce
+does not parse). 912 → 932 (1 skipped).
+
+### Part 8 — docs
+
+This entry. CONCEPTS_INDEX: the role-enforcement finding RESOLVED; the
+AM-113 finding's caveat updated (its premise now holds); new OPEN
+FINDINGS — gp_referral SpecialistParty holds a burden it may not
+discharge; referral SpecialistClinician holds a permit it may not
+exercise; Step 6's permit check applies only to declared actions; the
+static builder's transitional no-`fills` exception; §7.8.2 role
+cardinality (at most one filler per role at a time) unchecked; duplicate
+action names (idea for a warning); tracked tests reading gitignored
+scenarios (resolved by part 1). `docs/KRIPKE_TRANSITION_RULES.md`
+(performers), DN_019 (2.10a caption note), CLAUDE.md.
+
+**Verification:** full suite (`pytest -c pytest.ini`) after each part —
+871 → 871 → 872 → 877 → 884 → 903 → 912 → 932 passed (1 skipped from
+part 7); 1 deselected (slow), 1 xfailed throughout.
+
+**Files changed:** `grammar/v2/el_grammar.tx`; `toolchain/el_domain.py`,
+`toolchain/el_parser.py`, `toolchain/el_validator.py`,
+`toolchain/el_engine.py`, `toolchain/el_runtime.py`, `toolchain/el_api.py`,
+`toolchain/el_kripke.py`; both terms-of-engagement scenarios; twelve
+existing test files; five new test files; `docs/CONCEPTS_INDEX.md`,
+`docs/KRIPKE_TRANSITION_RULES.md`,
+`docs/design_notes/DN_019_incident_simulator_storyboard.md`, `CLAUDE.md`;
+this file.

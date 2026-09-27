@@ -6337,10 +6337,13 @@ terms-of-engagement scenarios `notifyIncident` alone now leaves
 discharges it; its readings are unchanged ("not compelled, detectable"),
 with the EF witness now `discharge:incidentNotificationBurden via
 acknowledgeIncident (incidentAcknowledged)`. No verdict changed in any
-tracked scenario. Caveat: the engine does not enforce an action's actor
-role, so any enrolled actor, the holder included, can perform
-`acknowledgeIncident` (see "The engine never enforces an action's actor
-role" below). The original finding follows.
+tracked scenario. Caveat (2026-09-27): the engine did not enforce an
+action's actor role, so any enrolled actor, the holder included, could
+perform `acknowledgeIncident`. **AM-114 closes it:** only a filler of
+`incidentContactRole` may acknowledge, so AM-113's premise — who may cause
+the event is who may perform the emitting action — now holds (see "The
+engine never enforces an action's actor role", RESOLVED). The original
+finding follows.
 
 **OPEN FINDING** — found while verifying DN_019 step 2.10a
 (`docs/design_notes/DN_019_incident_simulator_storyboard.md`). Both
@@ -6905,7 +6908,23 @@ the global utility). Defining what the engagement's objective is — e.g.
 something else — is a design decision for the maintainer, not an
 engineering fix. Not scheduled.
 
-## The engine never enforces an action's actor role — OPEN FINDING (2026-09-27, high priority)
+## The engine never enforces an action's actor role — OPEN FINDING (2026-09-27, high priority), RESOLVED (2026-09-27)
+
+**OPEN FINDING (2026-09-27, high priority), RESOLVED 2026-09-27 by
+AM-114** (see `docs/el_grammar_amendments.md`). An action declared in some
+role may now be performed only by an actor that fills a role declaring it
+(§7.8.2); an actor enrolled without a role fills none, and an undeclared
+action stays unrestricted. The check is `advance()` Step 2, so it also
+covers `claim()`/`decline()`. Role fillers come from the specification:
+`obj fills role` in Community and Federation bodies, read by
+`build_from_spec()`, `build_from_federation()`, the API builders and the
+static builder; the hybrid builder reads `state.actors`. Both
+terms-of-engagement scenarios state their fillers; the agent's and the
+operator's out-of-role attempts (`recordRefusal`, `reviewRefusal`,
+`acknowledgeIncident`) are refused, and no verifier reading changed.
+Follow-on findings: gp_referral SpecialistParty, referral
+SpecialistClinician, the static builder's no-`fills` exception, and the
+others below. The original finding follows.
 
 **OPEN FINDING — high priority, scheduled next.** Found in AM-113
 Phase 1. `advance()` Step 3 looks up the action's Role
@@ -6990,3 +7009,114 @@ Community or Federation, and a role-scoped (Inline) token's
 Needs a standard reference (the grammar cites ODP Part 2 §8.4 for
 `EventDecl`) and a decision on whether a member community's action may
 emit its federation's events. Not scheduled.
+
+## gp_referral: SpecialistParty holds a burden it may not discharge — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-114 Phase 1. In
+`scenarios/gp_referral/gp_referral_scenario.el`, SpecialistParty commits
+to `assessmentSchedulingBurden` (`assessmentSchedulingCommitment`, no
+Delegation follows), but its `for_action` `scheduleAssessment` is a
+`specialistRole` action, filled by SpecialistClinician.
+`initiateReferral` also creates the burden `to specialistRole`, so after
+it SpecialistClinician holds a second instance. The API runtime
+(`_build_gp_referral_runtime()`) grants the committed instance to
+SpecialistParty, which fills no role.
+
+Since AM-114 (fail-closed) SpecialistParty may not perform
+`scheduleAssessment`: `/available-actions` lists the obligation as
+`obligated_not_role`, and `tests/test_am114_available_actions_role.py`
+pins it. No reading changed: HEAD already refused it (precondition), and
+the hybrid model already had no discharge edge for it (gated by
+`patientRecordAccessPermitByRole`, which SpecialistParty does not hold).
+`[W-27]` does not fire because the scenario states no fillers; it fires
+once `SpecialistClinician fills specialistRole` is added (tested in
+memory).
+
+**Fix direction:** SpecialistParty stays accountable and delegates the
+burden to the clinician (a `Delegation` with `transfers_burden:
+assessmentSchedulingBurden` to SpecialistClinician, as the
+terms-of-engagement scenarios do for the gateway and the contact), and
+the scenario states its fillers. Scenario left unchanged. Not scheduled.
+
+## referral: SpecialistClinician holds a permit it may not exercise — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-114 Phase 1. In
+`scenarios/referral/referral_scenario.el`, SpecialistClinician holds
+`patientRecordAccessPermitByRole` (`on_join referredToRole`, role-level
+`holds`), whose `for_action` `access_patient_clinical_records` is declared
+only in `aiExaminationRole` (filled by SpecialistAIAgent). The
+`referredToRole` actions use the permit as a gate (`requires_permit
+patientRecordAccessPermitByRole for referredToRole` on
+`acknowledgeReferral`/`scheduleAssessment`), not as a grant of
+`access_patient_clinical_records`.
+
+Since AM-114 SpecialistClinician may not perform
+`access_patient_clinical_records`: `/available-actions` omits the permit,
+and the hybrid model lost its exercise edge (3,562 worlds, 16,772 →
+16,210 edges; no reading changed). `[W-28]` does not fire: the scenario
+states no fillers, and the holder comes from a role-level `holds`/`on_join`,
+which W-28 does not read. Decide whether the clinician should access the
+record directly (declare the action in `referredToRole` too) or the
+permit's `for_action` is misnamed. Scenario left unchanged. Not scheduled.
+
+## Step 6's permit check applies only to declared actions — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-114 Phase 1. `advance()` Step 6 reads
+`requires_permit` from the grammar Action, so an action no role declares
+(a bare `for_action` string) needs no permit at all. Example: the consent
+scenario's `aiAnalysisPermit` (`for_action:
+"perform_ai_diagnostic_analysis"`) — no role declares
+`perform_ai_diagnostic_analysis`, so any enrolled actor can perform it,
+with or without the permit. AM-114 keeps undeclared actions unrestricted
+(no role to check either). Options: refuse an undeclared action unless it
+discharges one of the actor's own burdens; or require the permit named by
+any permit token whose `for_action` it is; or a validator warning for a
+permit/embargo `for_action` no role declares. Not scheduled.
+
+## Static builder: a specification with no `fills` statement stays unrestricted — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — transitional exception, accepted in AM-114. The static
+builder restricts each action's performers to the fillers the
+specification states (`obj fills role`). A specification with no `fills`
+statement at all is left unrestricted — otherwise every static model of a
+scenario that states no fillers would lose all its declared actions.
+Today only the two terms-of-engagement scenarios state fillers, so the
+static models of every clinical scenario are unrestricted while their API
+runtimes (hand-listed roles) are restricted. (No reading differs today: in
+gp_referral, for example, SpecialistParty's `scheduleAssessment` has no
+static edge only because it is permit-gated, not because of its role.)
+`[W-27]`/`[W-28]` have
+the same scope. **Remove the exception** once the scenarios state their
+fillers (at which point the API builders' hand-listed roles can go too).
+
+## Role cardinality: at most one object fulfils a role at a time — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — recorded in AM-114. §7.8.2 says at most one object
+fulfils each role at any time, unless the specification uses several
+roles of the same type. Nothing checks it: several `fills` statements may
+name the same role, and the runtime enrols them all. A validator rule
+could check it later (compare the controlling-role cardinality finding
+under AM-40, still open). Note Annex B.1.5.7: the assignment policy is
+where requirements such as authentication attach to role fulfilment;
+`assignment_policy` is still documentation only (GAP-2 in the
+terms-of-engagement scenarios). No change now.
+
+## Duplicate action names across roles — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — idea recorded in AM-114. Two roles (in one community
+or in different ones) may declare actions with the same name; this parses
+and validates without warning (verified). AM-114's role rule accepts a
+filler of any declaring role, but `_find_action()` applies the first
+declaration's preconditions, requirements and effects, whichever role the
+actor fills. No tracked scenario has a duplicate. Candidate validator
+warning: an action name declared in more than one role. Not scheduled.
+
+## Tracked tests read gitignored scenarios — RESOLVED (2026-09-27)
+
+**OPEN FINDING, RESOLVED 2026-09-27 by AM-114 part 1.**
+`scenarios/industrial_procedure/` and `scenarios/xmpro_mediator/` are
+gitignored, but the suite reads them: in a clean clone
+`test_am110_deadline_scale.py::test_suggest_deadline_scale[...industrial_procedure...]`
+failed and the AM-111 corpus test collected four fewer cases. The AM-110
+case now skips when the file is absent. Whether these directories should
+be tracked is a separate decision.

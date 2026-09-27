@@ -107,8 +107,11 @@ true). The UI captions 2.10a as **"notification sent; burden discharged
 by the acknowledgement"**. Not "only by the contact": the engine does not
 enforce an action's actor role, so any enrolled actor, the operator
 included, could perform `acknowledgeIncident` (CONCEPTS_INDEX, "The engine
-never enforces an action's actor role", high priority). The original
-finding follows.
+never enforces an action's actor role", high priority). **AM-114
+(2026-09-27):** now enforced — only a filler of `incidentContactRole` may
+perform `acknowledgeIncident`, so the caption may read "discharged only by
+the contact's acknowledgement" (caption left for the maintainer). The
+original finding follows.
 
 **Finding (2.10a, 2026-09-26): the acknowledgement does not discharge the
 notification burden.** The scenario says incidentNotificationBurden is
