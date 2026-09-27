@@ -391,6 +391,7 @@ Community:
         (invariants+=Invariant)*
         (assignment_policies+=AssignmentPolicy)*
         (join_leave_effects+=JoinLeaveEffect)*
+        (role_fillers+=RoleFiller)*                 // AM-114
         (roles+=Role)*
         (processes+=Process)*
         (policy_refs+=PolicyRef)*
@@ -505,6 +506,20 @@ RequiresRelationRule   : 'requires_relation'     ':' description=STRING ;
 JoinLeaveEffect:
     ( kind='on_join'  role_name=ID 'transfer' token=[DeonticToken] )
     | ( kind='on_leave' role_name=ID 'revert'   token=[DeonticToken] )
+;
+
+/*
+ * RoleFiller — AM-114, §7.8.2
+ * States that an enterprise object fulfils a role of this community
+ * (§7.8.2 fulfilment: "the constraints of the behaviour identified by
+ * the role become constraints on the object fulfilling the role").
+ * The AM-40 `fills` idiom (DomainRoleFiller), without `via`, in a
+ * Community or Federation body; the role must be declared in the same
+ * element (V-NEW-22). The runtime and the verifier read these statements:
+ * an actor may perform only the actions of the roles it fills (AM-114).
+ */
+RoleFiller:
+    obj=[EnterpriseObject] 'fills' role=[Role]
 ;
 
 // ----------------------------------------------------------------
@@ -846,6 +861,7 @@ FedBodyItem:
     FedSharedObjective
     | EventDecl
     | Role
+    | RoleFiller                                   // AM-114
     | MemberRef
     | PolicyRef
     | NormativePolicyRef

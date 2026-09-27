@@ -247,6 +247,13 @@ contract community ExternalAgentAccess
     on_join externalRequesterRole transfer outsideScopeEmbargo
     on_join externalRequesterRole transfer noCircumventionEmbargo
 
+    // Role fulfilment (§7.8.2, AM-114): the only actions an object may
+    // perform are those of the roles it fills.
+    ExternalAIAgent fills externalRequesterRole
+    AgencyGateway fills accessGatewayRole
+    AgencySecurityContact fills incidentContactRole
+    AgentOperator fills accountablePrincipalRole
+
     role externalRequesterRole
         description: "Filled by an external AI agent"
     {

@@ -47,7 +47,7 @@ Class inventory (mirrors STEP1_grammar_audit.md):
                Terminating
     Group H  — CommunityObject, Domain, DomainControllingObj, DomainControlledObj,
                DomainControllingRole, DomainControlledRole, DomainRoleFiller,
-               Federation, FedSharedObjective, MemberRef,
+               RoleFiller (AM-114), Federation, FedSharedObjective, MemberRef,
                WithdrawalBehaviour, ConflictResolution
                (RoleFillerRef is also defined in this group but is a plain
                Python helper, not a registered grammar class — see below)
@@ -722,6 +722,7 @@ class Community(_ELParentable):
     invariants:          List = field(default_factory=list)  # AM-21: List[Invariant]
     assignment_policies: List = field(default_factory=list)  # AM-21: List[AssignmentPolicy]
     join_leave_effects:  List = field(default_factory=list)  # AM-21: List[JoinLeaveEffect]
+    role_fillers:        List = field(default_factory=list)  # AM-114: List[RoleFillerRef] (P11)
     roles:               List = field(default_factory=list)  # List[Role]
     processes:           List = field(default_factory=list)  # List[Process]
     policy_refs:         List = field(default_factory=list)  # List[PolicyRef]
@@ -1018,8 +1019,16 @@ class DomainRoleFiller(_ELParentable):
     via:  Optional[object] = None   # → Federation ref, optional
 
 @dataclass
+class RoleFiller(_ELParentable):
+    """Grammar rule: RoleFiller (AM-114, §7.8.2) — `obj fills role` in a
+    Community or Federation body. P9/P11 convert each to a RoleFillerRef."""
+    obj:  Optional[object] = None   # → EnterpriseObject ref
+    role: Optional[object] = None   # → Role ref
+
+@dataclass
 class RoleFillerRef:
-    """AM-40 (proposed) — a resolved obj/role/via triple for Domain role-filling."""
+    """AM-40 (proposed) — a resolved obj/role/via triple for Domain role-filling.
+    AM-114: also Community/Federation `fills` statements (via None)."""
     obj:  Optional[object] = None   # → EnterpriseObject ref
     role: Optional[object] = None   # → Role ref
     via:  Optional[object] = None   # → Federation ref, optional
@@ -1114,6 +1123,7 @@ class Federation(_ELParentable):
 
     # Populated by object processor P9:
     roles:                List = field(default_factory=list)  # List[Role] (AM-26)
+    role_fillers:         List = field(default_factory=list)  # AM-114: List[RoleFillerRef]
     shared_objectives:    List = field(default_factory=list)  # List[str]
     members:              List = field(default_factory=list)  # List[MemberRef] (AM-26)
     policy_refs:          List = field(default_factory=list)  # List[PolicyRef]
@@ -1330,7 +1340,7 @@ DOMAIN_CLASSES = [
     # H
     CommunityObject,
     Domain, DomainControllingObj, DomainControlledObj,
-    DomainControllingRole, DomainControlledRole, DomainRoleFiller,
+    DomainControllingRole, DomainControlledRole, DomainRoleFiller, RoleFiller,
     Federation, FedSharedObjective, MemberRef, WithdrawalBehaviour,
     ConflictResolution,
     # I

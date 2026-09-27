@@ -219,6 +219,10 @@ def process_community(community):
     community.normative_policies = [
         ref.policy for ref in community.normative_policies
     ]
+    # AM-114: `obj fills role` statements, as Domain's (P8) RoleFillerRef.
+    community.role_fillers = [
+        RoleFillerRef(obj=rf.obj, role=rf.role) for rf in community.role_fillers
+    ]
 
 
 def process_domain(domain):
@@ -304,6 +308,8 @@ def process_federation(fed):
             fed.shared_objectives.append(item.description)
         elif cls == 'Role':                   # AM-26: federation role
             fed.roles.append(item)
+        elif cls == 'RoleFiller':             # AM-114: `obj fills role`
+            fed.role_fillers.append(RoleFillerRef(obj=item.obj, role=item.role))
         elif cls == 'MemberRef':              # AM-26: store whole ref, not item.community
             fed.members.append(item)
         elif cls == 'PolicyRef':

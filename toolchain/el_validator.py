@@ -48,6 +48,8 @@ Rules implemented
         syntax (controlling_object/controlled_object) or the
         role-based syntax (controlling_role/controlled_role,
         filled by 'fills' — AM-40, proposed).                    §7.5.1
+  V-NEW-22  A Community or Federation 'fills' statement must name a
+        role declared in that same element.              AM-114, §7.8.2
   V-16a  Every TokenGroup member must have a backing Commitment or
         Delegation — static check for missing obligation descriptor. §6.4.2
   V-16b  SatisfactionCondition with a single member has no
@@ -243,6 +245,9 @@ def validate_spec(model) -> List[str]:
 
     # V-NEW-21 — Domain controlling/controlled filler, either syntax (AM-40)
     errors.extend(_validate_domain_controlling_controlled(model))
+
+    # V-NEW-22 — 'fills' names a role of the same element (AM-114, §7.8.2)
+    errors.extend(_validate_role_fillers(model))
 
     # V-16a — TokenGroup member provenance check (§6.4.2)
     errors.extend(_validate_token_group_provenance(model))
@@ -1219,6 +1224,26 @@ def _validate_domain_controlling_controlled(model) -> List[str]:
                 f"least one controlling_role and one controlled_role each "
                 f"filled by a role-filling statement ('fills'). (§7.5.1)"
             )
+    return errors
+
+
+def _validate_role_fillers(model) -> List[str]:
+    """V-NEW-22 (AM-114): a Community or Federation `obj fills role`
+    statement must name a role declared in that same element. (§7.8.2)
+
+    Identity comparison (`is`), as V-NEW-21: role=[Role] resolves
+    globally, so a same-named role of another element could otherwise pass.
+    """
+    errors: List[str] = []
+    for kind in ("Community", "Federation"):
+        for el in _collect(model, kind):
+            for rf in getattr(el, "role_fillers", []):
+                if not any(rf.role is r for r in getattr(el, "roles", [])):
+                    errors.append(
+                        f"[V-NEW-22] {kind} '{el.name}': '{_obj_name(rf.obj)} fills "
+                        f"{_obj_name(rf.role)}' names a role not declared in "
+                        f"'{el.name}'. (§7.8.2)"
+                    )
     return errors
 
 
