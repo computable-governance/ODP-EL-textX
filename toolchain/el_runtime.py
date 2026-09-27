@@ -318,6 +318,8 @@ class Runtime:
         Used for externally-driven events (e.g. FHIR resource state changes)
         that have no corresponding DSL action, mirroring revoke_authorization()'s
         direct-call pattern (AM-31) rather than routing through advance().
+        AM-113: also discharges every active burden whose discharged_by names
+        the event, whoever holds it.
 
         `source` documents the event's origin in the ledger (e.g. a FHIR
         resource reference) since there is no DSL actor performing this event.

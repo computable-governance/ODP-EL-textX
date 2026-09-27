@@ -10,8 +10,11 @@ Seven-step execution pipeline (CLAUDE.md §7.1):
   2. Initiator       — actor must appear in state.actors
   3. Discharge key   — identify burdens this action discharges:
                        a) explicit DeonticEffect(destroy, burden) in grammar action
-                       b) burden.for_action == action_name  (informational match)
-                       c) burden.discharged_by event == action's emits event (AM-22)
+                       b) burden.for_action == action_name  (informational match),
+                          unless the burden declares discharged_by (AM-113)
+                       c) burden.discharged_by event == action's emits event (AM-22),
+                          whoever holds the burden (AM-113); a) and b) only for
+                          burdens the actor holds
   4. Preconditions   — grammar precondition strings checked against facts dict;
                        absent key → blocked  (fail-safe, not fail-open — see §7.3)
   5. Embargo sweep   — active embargo held by the actor that covers this
@@ -303,6 +306,83 @@ def _find_spec_tokens_for_event(spec, event_name: str, attr: str) -> set:
     return result
 
 
+def _event_bound_tokens(spec) -> set:
+    """AM-113: names of spec tokens that declare discharged_by. Their
+    for_action alone no longer discharges them: only their event does."""
+    result = set()
+    for el in spec.elements:
+        if type(el).__name__ == "DeonticToken" and getattr(el, "discharged_by", None) is not None:
+            result.add(el.name)
+        if type(el).__name__ == "Community":
+            for role in el.roles:
+                for tok in role.holds_tokens:
+                    if (type(tok).__name__ == "InlineToken"
+                            and getattr(tok, "discharged_by", None) is not None):
+                        result.add(tok.name)
+    return result
+
+
+def _discharge(spec, tokens: list, keys: Set[Tuple[str, str]],
+               effects_log: list) -> Tuple[list, List[str]]:
+    """Transition every active burden instance in `keys` ((token_name,
+    holder) pairs) to 'discharged', then supersede its active
+    any_discharged siblings (AM-57). Returns (tokens, discharged names in
+    first-seen order). Shared by advance() Step 7a and fire_event()
+    (AM-113)."""
+    names: List[str] = []
+    for i, t in enumerate(tokens):
+        if (t.token_name, t.holder) in keys and t.kind == "burden" and t.state == "active":
+            tokens[i] = _transition(t, "discharged")
+            if t.token_name not in names:
+                names.append(t.token_name)
+    for name in names:
+        effects_log.append(f"discharged burden '{name}'")
+
+    # AM-57: any_discharged sibling supersession, mirroring el_kripke.py's
+    # P6b transition. Scope: 'active'-state siblings only (the plain
+    # un-discharged live-obligation state). Deliberately does NOT touch
+    # 'pending' (masked, NOTE 5/6) siblings — no current or planned
+    # scenario exercises a masked sibling inside an any_discharged group,
+    # and guessing at that interaction without a test case to validate
+    # against would be exactly the kind of unverified design this project
+    # avoids. See docs/CONCEPTS_INDEX.md for the logged gap.
+    #
+    # Siblings are matched by token_name across ALL holders — the whole
+    # point is that a sibling burden is held by a different peer than the
+    # one whose burden was just discharged.
+    if names:
+        group_index = _build_group_index(spec)
+        any_discharged_groups = _build_any_discharged_groups(spec)
+        for discharged_name in names:
+            for group_name, members in group_index.items():
+                if group_name not in any_discharged_groups:
+                    continue
+                if discharged_name not in members:
+                    continue
+                for sibling_name in members:
+                    if sibling_name == discharged_name:
+                        continue
+                    for i, t in enumerate(tokens):
+                        if t.token_name == sibling_name and t.state == "active":
+                            tokens[i] = _transition(t, "superseded")
+                            effects_log.append(
+                                f"superseded burden '{sibling_name}' held by "
+                                f"'{t.holder}' (sibling '{discharged_name}' "
+                                f"discharged, group '{group_name}')"
+                            )
+    return tokens, names
+
+
+def _event_discharge_keys(spec, state: "WorldState", event_name: str) -> Set[Tuple[str, str]]:
+    """AM-113: (token_name, holder) of every active burden whose
+    discharged_by names event_name, whoever emits the event."""
+    names = _find_spec_tokens_for_event(spec, event_name, "discharged_by")
+    return {
+        (t.token_name, t.holder) for t in state.tokens
+        if t.kind == "burden" and t.state == "active" and t.token_name in names
+    }
+
+
 def _activate_triggered_tokens(spec, tokens: list, event_name: str,
                                tick: int) -> tuple[list, list[str]]:
     """
@@ -560,23 +640,26 @@ def advance(
             if eff.operation == "destroy" and eff.token:
                 explicit_destroys.add(eff.token.name)
 
-    # AM-22: burdens discharged by the event this action emits
-    event_discharged: set = set()
+    # AM-22/AM-113: burdens discharged by the event this action emits,
+    # whoever holds them — who may cause the event is who may perform the
+    # emitting action.
+    discharge_keys: Set[Tuple[str, str]] = set()
     if grammar_action and grammar_action.emits:
-        event_discharged = _find_spec_tokens_for_event(
-            spec, grammar_action.emits.name, "discharged_by"
-        )
+        discharge_keys = _event_discharge_keys(spec, state, grammar_action.emits.name)
 
-    # Burdens dischargeable by this action (actor must hold them, state active)
-    dischargeable: list[str] = []
+    # Burdens the actor holds that this action discharges by a destroy
+    # effect, or by for_action — AM-113: not for a burden that declares
+    # discharged_by, which only its event discharges.
+    event_bound = _event_bound_tokens(spec)
     for tok in state.tokens:
         if (tok.holder == actor_name
                 and tok.kind == "burden"
                 and tok.state == "active"):
             if (tok.token_name in explicit_destroys
-                    or tok.for_action == action_name
-                    or tok.token_name in event_discharged):
-                dischargeable.append(tok.token_name)
+                    or (tok.for_action == action_name
+                        and tok.token_name not in event_bound)):
+                discharge_keys.add((tok.token_name, tok.holder))
+    dischargeable = sorted({name for name, _ in discharge_keys})
 
     # Burdens claimable by this action (AM-62 — see DN_003):
     # actor must hold them, state == 'claimable' (distinct from 'active' —
@@ -659,53 +742,10 @@ def advance(
     # ── Step 7: Effect application ────────────────────────────────────────────
     tokens = list(state.tokens)
     effects_log: list[str] = []
-    discharged_names: list[str] = []
 
-    # 7a — Discharge identified burdens (transition to 'discharged')
-    tokens = [
-        _transition(t, "discharged")
-        if t.token_name in dischargeable and t.holder == actor_name
-        else t
-        for t in tokens
-    ]
-    for name in dischargeable:
-        discharged_names.append(name)
-        effects_log.append(f"discharged burden '{name}'")
-
-    # 7a-cont — AM-57: any_discharged sibling supersession, mirroring
-    # el_kripke.py's P6b transition. Scope: 'active'-state siblings only
-    # (the plain un-discharged live-obligation state). Deliberately does
-    # NOT touch 'pending' (masked, NOTE 5/6) siblings — no current or
-    # planned scenario exercises a masked sibling inside an any_discharged
-    # group, and guessing at that interaction without a test case to
-    # validate against would be exactly the kind of unverified design this
-    # project avoids. See docs/CONCEPTS_INDEX.md for the logged gap.
-    #
-    # Siblings are matched by token_name across ALL holders, not just
-    # actor_name — the whole point is that a sibling burden is held by a
-    # different peer than the one who just discharged.
-    if dischargeable:
-        group_index = _build_group_index(spec)
-        any_discharged_groups = _build_any_discharged_groups(spec)
-        superseded_names: list[str] = []
-        for discharged_name in dischargeable:
-            for group_name, members in group_index.items():
-                if group_name not in any_discharged_groups:
-                    continue
-                if discharged_name not in members:
-                    continue
-                for sibling_name in members:
-                    if sibling_name == discharged_name:
-                        continue
-                    for i, t in enumerate(tokens):
-                        if t.token_name == sibling_name and t.state == "active":
-                            tokens[i] = _transition(t, "superseded")
-                            superseded_names.append(sibling_name)
-                            effects_log.append(
-                                f"superseded burden '{sibling_name}' held by "
-                                f"'{t.holder}' (sibling '{discharged_name}' "
-                                f"discharged, group '{group_name}')"
-                            )
+    # 7a — Discharge identified burdens (transition to 'discharged'), then
+    # AM-57 any_discharged sibling supersession (_discharge()).
+    tokens, discharged_names = _discharge(spec, tokens, discharge_keys, effects_log)
 
     # 7a-claim — AM-62 (see DN_003): CLAIM transitions
     # ('claimable' -> 'active'). Distinct from discharge above — claiming
@@ -2122,7 +2162,9 @@ def fire_event(
     Directly fire a named event against state, activating any token whose
     triggered_by matches it — without requiring an Action/emits. Used for
     externally-driven events (e.g. FHIR resource state changes) that have
-    no corresponding DSL action.
+    no corresponding DSL action. AM-113: it also discharges every active
+    burden whose discharged_by names the event, whoever holds it, as an
+    emitting action does in advance().
 
     Mirrors revoke_authorization()'s direct-call pattern (AM-31): there is
     no calling actor the way advance() has one, so `source` documents the
@@ -2134,12 +2176,20 @@ def fire_event(
     """
     tick = state.tick
 
-    blocking = _unaddressed_strict_burdens(state)
-    if blocking:
-        reason = _strict_block_reason(blocking, "before the event can be fired")
-        return _blocked(state, source, f"fire_event:{event_name}", reason, tick)
+    # AM-113: the event discharges every active burden whose discharged_by
+    # names it, as an emitting action's does (advance() Step 3); a call
+    # that discharges something passes the strict guard, as in Step 3.5.
+    discharge_keys = _event_discharge_keys(spec, state, event_name)
+    if not discharge_keys:
+        blocking = _unaddressed_strict_burdens(state)
+        if blocking:
+            reason = _strict_block_reason(blocking, "before the event can be fired")
+            return _blocked(state, source, f"fire_event:{event_name}", reason, tick)
 
-    tokens, effects_log = _activate_triggered_tokens(spec, list(state.tokens), event_name, tick)
+    effects_log: list[str] = []
+    tokens, discharged_names = _discharge(spec, list(state.tokens), discharge_keys, effects_log)
+    tokens, triggered_log = _activate_triggered_tokens(spec, tokens, event_name, tick)
+    effects_log.extend(triggered_log)
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
     record = TransitionRecord(
@@ -2147,7 +2197,7 @@ def fire_event(
         actor_name=source,
         action_name=f"fire_event:{event_name}",
         outcome="ok",
-        discharged=(),
+        discharged=tuple(discharged_names),
         effects=tuple(effects_log),
         violations=(),
     )
