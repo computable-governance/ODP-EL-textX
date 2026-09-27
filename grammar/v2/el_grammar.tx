@@ -628,7 +628,21 @@ Action:
 ActionBodyItem:
     ActorRef | ArtefactRef | ResourceRef
     | PreconditionDecl | FavouredByItem | DeonticRequirement | DeonticEffect
-    | EmitsDecl
+    | EmitsDecl | DeclaresViolationItem
+;
+
+/*
+ * DeclaresViolationItem — AM-115, §6.6.5, §7.10.4
+ * Makes the action a declaration (§6.6.5): performing it establishes, by
+ * the act itself, that the named burden is violated. §7.10.4 ties a
+ * declaration to a permit, so the action must require one (V-NEW-24).
+ * Performed only through el_engine.declare_violation(), which applies the
+ * action's role, embargo and permit checks and refuses a declaration
+ * before the burden's deadline; advance() refuses it. One line per burden
+ * (the per-line pattern, CLAUDE.md §5.3).
+ */
+DeclaresViolationItem:
+    'declares_violation_of' burden=[DeonticToken]
 ;
 
 /*
@@ -1135,6 +1149,15 @@ AcceptabilityResult:
  *   remediate  — take corrective action to address the violation
  *   penalise   — apply a specified sanction
  *   terminate  — terminate the community / delegation / session
+ *
+ * AM-115: creates_burden_for_role grants creates_burden to the objects
+ * filling that role (§7.8.2) instead of to obligates, which stays the
+ * party the response rule applies to (§7.8.6 NOTE 2); reassigning the
+ * work then changes only a `fills` statement. revokes lists, one per
+ * line (RevokesItem), the Authorizations the response withdraws
+ * (§6.6.4); each must be revocable with an on_revocation embargo and
+ * granted by obligates (V-NEW-23). When revokes is present it replaces
+ * terminate's inferred violator chain (AM-104).
  */
 ViolationResponse:
     'violation_response' name=ID '{'
@@ -1142,13 +1165,25 @@ ViolationResponse:
         'obligates'        ':' responding_actor=[EnterpriseObject]
         'response_kind'    ':' response_kind=ViolationResponseKind
         ('creates_burden'  ':' creates_burden=[DeonticToken])?
+        ('creates_burden_for_role' ':' burden_role=[Role])?     // AM-115
         ('escalate_to'     ':' escalate_to=[EnterpriseObject])?
+        (revokes+=RevokesItem)*                                 // AM-115
         ('description'     ':' description=STRING)?
     '}'
 ;
 
 ViolationResponseKind:
     'escalate' | 'remediate' | 'penalise' | 'terminate'
+;
+
+/*
+ * RevokesItem — AM-115, §6.6.4
+ * One Authorization a ViolationResponse withdraws. A wrapper rule, one per
+ * line, because an inline repeated cross-reference hits the arpeggio list
+ * bug (CLAUDE.md §5.3). P13 unwraps it into ViolationResponse.revokes.
+ */
+RevokesItem:
+    'revokes' ':' authorization=[Authorization]
 ;
 
 

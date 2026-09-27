@@ -156,6 +156,8 @@ def process_action(action):
         elif cls == 'EmitsDecl':
             # AM-22: last EmitsDecl wins if multiple appear (grammar allows only one)
             action.emits = item.event
+        elif cls == 'DeclaresViolationItem':  # AM-115
+            action.declares_violation_of.append(item.burden)
     action.items = []
 
 
@@ -293,6 +295,12 @@ def process_evaluation(ev):
         ev.result_code = None
 
 
+def process_violation_response(vr):
+    """P13 (AM-115): unwrap each RevokesItem into the Authorization it
+    names, so ViolationResponse.revokes is a List[Authorization]."""
+    vr.revokes = [item.authorization for item in vr.revokes]
+
+
 def process_federation(fed):
     """P9: split body_items into typed sublists; unwrap thin wrappers.
 
@@ -355,6 +363,7 @@ def _build_metamodel():
         'TokenGroup':         process_token_group,         # P10 (AM-26)
         'Community':          process_community,           # P11 (AM-41)
         'Evaluation':         process_evaluation,          # P12 (AM-60)
+        'ViolationResponse':  process_violation_response,  # P13 (AM-115)
     })
     return mm
 

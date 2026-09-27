@@ -300,6 +300,18 @@ def validate_spec(model) -> List[str]:
     # W-23 — escalate_to must be a party; the dormant V-NEW-16 (AM-104, §6.3.8, §7.4)
     errors.extend(_validate_escalate_to_party(model))
 
+    # V-NEW-23 — revoked Authorizations: revocable, embargo, obligates' grant (AM-115, §6.6.4)
+    errors.extend(_validate_response_revocations(model))
+
+    # V-NEW-24 — declaration actions: strict burden, under a permit (AM-115, §6.6.5, §7.10.4)
+    errors.extend(_validate_declaration_actions(model))
+
+    # V-NEW-25 — creates_burden_for_role needs creates_burden (AM-115, §7.8.6 NOTE 2)
+    errors.extend(_validate_response_role_target(model))
+
+    # W-29 — creates_burden_for_role names an unfilled role (AM-115, §7.8.2)
+    errors.extend(_validate_response_role_filled(model))
+
     # W-24 — eventual burden that can never be violated (AM-108, §6.4.3, §7.8.7)
     errors.extend(_validate_unviolatable_eventual_burden(model))
 
@@ -1444,7 +1456,8 @@ def _validate_terminate_response_target(model) -> List[str]:
     of these. The holder is the one el_engine._build_obligation_descriptors()
     resolves (root construct, then the delegation walk); a burden with no
     descriptor has no static holder and is skipped. to_role Authorizations
-    are not revoked by terminate, so they do not count. Advisory."""
+    are not revoked by terminate, so they do not count. A response with an
+    explicit revokes list (AM-115) is V-NEW-23's, not this rule's. Advisory."""
     from el_engine import _build_obligation_descriptors, _violator_chain
 
     descriptors = _build_obligation_descriptors(model)
@@ -1453,6 +1466,8 @@ def _validate_terminate_response_target(model) -> List[str]:
     for vr in _collect(model, "ViolationResponse"):
         if getattr(vr, "response_kind", None) != "terminate":
             continue
+        if getattr(vr, "revokes", None):
+            continue  # AM-115: an explicit revokes list replaces the chain (V-NEW-23)
         burden = _obj_name(getattr(vr, "violated_burden", None))
         desc = descriptors.get(burden)
         if desc is None:
@@ -1500,13 +1515,17 @@ def _validate_escalate_response_burden(model) -> List[str]:
 def _validate_escalate_to_party(model) -> List[str]:
     """W-23 (AM-104): the dormant V-NEW-16 from el_domain.ViolationResponse's
     docstring, as a warning — a response_kind escalate ViolationResponse
-    must name a party in escalate_to. Missing escalate_to also warns.
+    must name a party in escalate_to. Missing escalate_to also warns,
+    unless the response escalates to a role through creates_burden_for_role
+    (AM-115): the role's fillers become obligated, which is the escalation.
     Advisory."""
     warnings: List[str] = []
     for vr in _collect(model, "ViolationResponse"):
         if getattr(vr, "response_kind", None) != "escalate":
             continue
         target = getattr(vr, "escalate_to", None)
+        if target is None and getattr(vr, "burden_role", None) is not None:
+            continue
         if target is None:
             problem = "names no escalate_to"
         elif getattr(target, "kind", None) != "party":
@@ -1517,6 +1536,107 @@ def _validate_escalate_to_party(model) -> List[str]:
             f"[W-23] Escalate response '{vr.name}' {problem}. Escalation goes "
             f"to a party. (V-NEW-16; §6.3.8, §7.4)"
         )
+    return warnings
+
+
+def _validate_response_revocations(model) -> List[str]:
+    """V-NEW-23 (AM-115): each Authorization a ViolationResponse lists in
+    revokes must be revocable with an on_revocation embargo, and granted
+    by the response's obligates — the party withdrawing a grant is the
+    authority that made it (§6.6.4; AM-104's rule for terminate). The
+    typed reference already makes the Authorization exist. Error: the
+    engine would log the revocation as not made."""
+    errors: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        responder = _obj_name(getattr(vr, "responding_actor", None))
+        for auth in getattr(vr, "revokes", []) or []:
+            problems = []
+            if not getattr(auth, "revocable", False):
+                problems.append("is not revocable")
+            if not getattr(auth, "on_revocation_embargo", ""):
+                problems.append("has no on_revocation embargo")
+            authority = _obj_name(getattr(auth, "authority", None))
+            if authority != responder:
+                problems.append(f"is granted by '{authority}', not by obligates '{responder}'")
+            if problems:
+                errors.append(
+                    f"[V-NEW-23] ViolationResponse '{vr.name}' revokes Authorization "
+                    f"'{auth.name}', which {" and ".join(problems)}. (§6.6.4, §7.8.6)"
+                )
+    return errors
+
+
+def _validate_declaration_actions(model) -> List[str]:
+    """V-NEW-24 (AM-115): an Action with `declares_violation_of B` is a
+    declaration (§6.6.5). B must be a strict burden: an eventual burden is
+    violated by the clock (check_live_violations()), and declaring it could
+    only anticipate its deadline. The Action must require a permit
+    (§7.10.4: declaration is tied to a permit), which
+    el_engine.declare_violation() checks. Error."""
+    errors: List[str] = []
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            for action in getattr(role, "actions", []) or []:
+                declared = getattr(action, "declares_violation_of", []) or []
+                if not declared:
+                    continue
+                for tok in declared:
+                    if getattr(tok, "kind", None) != "burden":
+                        errors.append(
+                            f"[V-NEW-24] Action '{action.name}' declares_violation_of "
+                            f"'{tok.name}', a {getattr(tok, 'kind', None)}: only a burden "
+                            f"can be violated. (§6.6.5, §6.4.3)"
+                        )
+                    elif (getattr(tok, "discharge_mode", None) or "eventual") != "strict":
+                        errors.append(
+                            f"[V-NEW-24] Action '{action.name}' declares_violation_of "
+                            f"'{tok.name}', an eventual burden: its deadline violates it "
+                            f"(check_live_violations()); only a strict burden is declared "
+                            f"violated. (§6.6.5, §7.8.7)"
+                        )
+                if not any(req.kind == "requires_permit"
+                           for req in getattr(action, "deontic_requirements", []) or []):
+                    errors.append(
+                        f"[V-NEW-24] Declaration action '{action.name}' requires no permit; "
+                        f"a declaration is made under a permit. Add requires_permit. "
+                        f"(§6.6.5, §7.10.4)"
+                    )
+    return errors
+
+
+def _validate_response_role_target(model) -> List[str]:
+    """V-NEW-25 (AM-115): creates_burden_for_role names who receives
+    creates_burden, so it needs one. Error."""
+    errors: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        role = getattr(vr, "burden_role", None)
+        if role is not None and getattr(vr, "creates_burden", None) is None:
+            errors.append(
+                f"[V-NEW-25] ViolationResponse '{vr.name}' has creates_burden_for_role "
+                f"'{_obj_name(role)}' but no creates_burden. (§7.8.6 NOTE 2, §7.8.2)"
+            )
+    return errors
+
+
+def _validate_response_role_filled(model) -> List[str]:
+    """W-29 (AM-115): creates_burden_for_role names a role no `fills`
+    statement fills. The engine grants the burden to the role's fillers
+    only; with none it grants nothing (fail-closed, as AM-114), and the
+    verifier has no holder for it. Advisory."""
+    from el_engine import role_fillers
+
+    filled = {role for _, role in role_fillers(model)}
+    warnings: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        role = _obj_name(getattr(vr, "burden_role", None))
+        if role and getattr(vr, "creates_burden", None) is not None and role not in filled:
+            warnings.append(
+                f"[W-29] ViolationResponse '{vr.name}' creates '{_obj_name(vr.creates_burden)}' "
+                f"for role '{role}', which no object fills: on firing, nobody receives it. "
+                f"Add an `obj fills {role}` statement. (§7.8.2, §7.8.6 NOTE 2)"
+            )
     return warnings
 
 

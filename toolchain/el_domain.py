@@ -38,7 +38,8 @@ Class inventory (mirrors STEP1_grammar_audit.md):
     Group E  — Community, EventDecl, Objective, SubObjective, Invariant,
                AssignmentPolicy, AssignmentRule subtypes, JoinLeaveEffect,
                CommunityInteraction
-    Group F  — Role, InlineToken, Action, EmitsDecl, DeonticRequirement,
+    Group F  — Role, InlineToken, Action, EmitsDecl, DeclaresViolationItem (AM-115),
+               DeonticRequirement,
                DeonticEffect, ConditionalAction, Process, Step,
                ActorRef, ArtefactRef, ResourceRef, DescriptionAttr,
                SubObjectiveRef, SatisfiesObjective,
@@ -52,7 +53,7 @@ Class inventory (mirrors STEP1_grammar_audit.md):
                (RoleFillerRef is also defined in this group but is a plain
                Python helper, not a registered grammar class — see below)
     Group I  — Commitment, Delegation, Authorization, Prescription,
-               Declaration, Evaluation, ViolationResponse
+               Declaration, Evaluation, ViolationResponse, RevokesItem (AM-115)
     Group J  — Correspondence
     Group K  — PolicyRef
     Enums    — all enum types (incl. AM-23: DurationUnit, EnvelopeRuleKind)
@@ -802,6 +803,14 @@ class EmitsDecl(_ELParentable):
     event: Optional[object] = None   # → EventDecl ref
 
 
+@dataclass
+class DeclaresViolationItem(_ELParentable):
+    """AM-115, §6.6.5, §7.10.4 — `declares_violation_of <burden>` in an
+    Action body. Object processor P4 collects .burden into
+    Action.declares_violation_of."""
+    burden: Optional[object] = None   # → DeonticToken ref
+
+
 # ConditionalAction item wrappers — dissolved by P5
 
 @dataclass
@@ -840,6 +849,7 @@ class Action(_ELParentable):
     deontic_effects:      List = field(default_factory=list)  # List[DeonticEffect]
     emits:                Optional[object] = None  # AM-22: → EventDecl ref; P4 from EmitsDecl
     favoured_by:          List = field(default_factory=list)  # List[DeonticToken]; P4 from FavouredByItem
+    declares_violation_of: List = field(default_factory=list)  # AM-115: List[DeonticToken]; P4 from DeclaresViolationItem
 
 
 @dataclass
@@ -1271,14 +1281,24 @@ class ViolationResponse(_ELParentable):
     V-NEW-16: if response_kind is escalate, escalate_to must be a party.
     (AM-104: implemented as warning [W-23], not an error.)
     AM-104: el_engine.fire_violation_responses() reads response_kind.
+    AM-115: burden_role (creates_burden_for_role) and revokes; V-NEW-23.
     """
     name:             str            = ""
     violated_burden:  Optional[object] = None   # → DeonticToken (burden)
     responding_actor: Optional[object] = None   # → EnterpriseObject
     response_kind:    str            = ""        # ViolationResponseKind
     creates_burden:   Optional[object] = None   # → DeonticToken
+    burden_role:      Optional[object] = None   # AM-115: → Role (creates_burden_for_role)
     escalate_to:      Optional[object] = None   # → EnterpriseObject (party)
+    revokes:          List = field(default_factory=list)  # AM-115: List[Authorization] (P13 unwraps RevokesItem)
     description:      Optional[str]   = None
+
+
+@dataclass
+class RevokesItem(_ELParentable):
+    """AM-115, §6.6.4 — `revokes: <Authorization>` in a ViolationResponse.
+    Object processor P13 unwraps each into ViolationResponse.revokes."""
+    authorization: Optional[object] = None   # → Authorization ref
 
 
 # ---------------------------------------------------------------------------
@@ -1330,7 +1350,7 @@ DOMAIN_CLASSES = [
     RequiresTokenRule, RequiresRelationRule,
     JoinLeaveEffect, CommunityInteraction,
     # F
-    Role, InlineToken, Action, EmitsDecl, ConditionalAction, Process, Step,
+    Role, InlineToken, Action, EmitsDecl, DeclaresViolationItem, ConditionalAction, Process, Step,
     DeonticRequirement, DeonticEffect, PreconditionDecl,
     DescriptionAttr, ActorRef, ArtefactRef, ResourceRef,
     RequiresPermitItem, InhibitedByItem, FavouredByItem,
@@ -1345,7 +1365,7 @@ DOMAIN_CLASSES = [
     ConflictResolution,
     # I
     Commitment, Delegation, Authorization, Prescription, Declaration,
-    Evaluation, ViolationResponse,
+    Evaluation, ViolationResponse, RevokesItem,
     # J
     Correspondence,
 ]
