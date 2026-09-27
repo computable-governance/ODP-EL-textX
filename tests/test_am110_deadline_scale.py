@@ -202,6 +202,9 @@ def test_only_enforceable_deadlines_scale():
     ("scenarios/consent/consent_scenario.el", 1),
 ])
 def test_suggest_deadline_scale(rel, k):
+    # scenarios/industrial_procedure/ is gitignored: absent in a clean clone.
+    if not (_REPO / rel).exists():
+        pytest.skip(f"{rel} not present (gitignored scenario directory)")
     assert suggest_deadline_scale(_spec(_REPO / rel), 10) == k
 
 
