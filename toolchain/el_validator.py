@@ -113,6 +113,15 @@ Rules implemented
         recognised time unit (e.g. "2 hrs", "10", "by
         2026-05-20") — the number is ignored, so the deadline is
         never measured. Advisory.                 AM-111, §6.4.3, §7.8.7
+  W-27  A Burden that can never be discharged because nobody who may
+        perform its discharging action does: its holder fills no role
+        declaring its for_action, or (discharged_by) nobody fills a role
+        declaring an action that emits the event. Only where every
+        declaring element states its fillers ('fills'). Advisory.
+                                                  AM-114, §7.8.2, §6.4.3
+  W-28  A Permit whose holder (Authorization to_agent, or object
+        'holds') fills no role declaring its for_action — it can never
+        be exercised. Same scope as W-27. Advisory.  AM-114, §7.8.2, §6.4.5
   V-17  An ACTIVE Burden's for_action must not match an ACTIVE
         Embargo's for_action — direct normative conflict
         (obligated to do the one thing that is prohibited).
@@ -299,6 +308,9 @@ def validate_spec(model) -> List[str]:
 
     # W-26 — discharged_by event that no action emits (AM-113, §6.4.3, §7.8.7)
     errors.extend(_validate_undischargeable_event_burden(model))
+
+    # W-27/W-28 — burden/permit whose action no role filler may perform (AM-114, §7.8.2)
+    errors.extend(_validate_role_filler_performers(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1637,6 +1649,108 @@ def _validate_undischargeable_event_burden(model) -> List[str]:
             f"external fire_event('{event}') or discharge_burden() call can. "
             f"Add 'emits: {event}' to the action that should discharge it. "
             f"(§6.4.3, §7.8.7)"
+        )
+    return warnings
+
+
+def _validate_role_filler_performers(model) -> List[str]:
+    """W-27/W-28 (AM-114): since AM-114 an action may be performed only by
+    an actor filling a role that declares it (§7.8.2), and the runtimes
+    and the static verifier take role fillers from `fills` statements.
+
+    W-27: a Burden that can never be discharged. For a burden with
+    discharged_by, the event discharges it whoever emits it (AM-113): warn
+    when nobody fills a role declaring an emitting action. Otherwise warn
+    when its holder fills no role declaring its for_action. The holder is
+    the one el_engine._build_obligation_descriptors() resolves.
+    W-28: a Permit whose holder (Authorization to_agent, or an object's
+    `holds`) fills no role declaring its for_action.
+
+    Checked only where every element declaring the relevant action states
+    its fillers (has at least one `fills`): elsewhere role membership is
+    not in the specification (API builders may still assign it). An
+    undeclared action has no role to fill and is skipped. Advisory."""
+    from el_engine import _build_obligation_descriptors
+
+    fillers: Dict[int, Dict[str, Set[str]]] = {}   # id(element) -> actor -> roles
+    declared: Dict[str, List[Tuple[Any, str]]] = {}  # action -> [(element, role)]
+    emitters: Dict[str, List[str]] = {}              # event -> [action]
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        by_actor: Dict[str, Set[str]] = {}
+        if _cls(el) != "Domain":
+            for rf in getattr(el, "role_fillers", []) or []:
+                by_actor.setdefault(_obj_name(rf.obj), set()).add(_obj_name(rf.role))
+        fillers[id(el)] = by_actor
+        for role in getattr(el, "roles", []) or []:
+            for action in getattr(role, "actions", []) or []:
+                declared.setdefault(action.name, []).append((el, role.name))
+                event = getattr(getattr(action, "emits", None), "name", None)
+                if event:
+                    emitters.setdefault(event, []).append(action.name)
+
+    def _scope(actions: List[str]) -> Optional[List[Tuple[Any, str]]]:
+        decl = [d for a in actions for d in declared.get(a, [])]
+        if not decl or not all(fillers[id(el)] for el, _ in decl):
+            return None
+        return decl
+
+    def _fills_one(actor: Optional[str], decl: List[Tuple[Any, str]]) -> bool:
+        return any(role in fillers[id(el)].get(actor, set()) for el, role in decl)
+
+    def _roles(decl: List[Tuple[Any, str]]) -> str:
+        return " or ".join(repr(r) for r in sorted({r for _, r in decl}))
+
+    warnings: List[str] = []
+    for oid, desc in sorted(_build_obligation_descriptors(model).items()):
+        if desc.fires_event:
+            actions = emitters.get(desc.fires_event, [])
+            decl = _scope(actions)
+            if decl is None:
+                continue
+            if not any(_fills_one(actor, decl)
+                       for el, _ in decl for actor in fillers[id(el)]):
+                warnings.append(
+                    f"[W-27] Burden '{oid}' is discharged_by '{desc.fires_event}', "
+                    f"emitted only by {', '.join(repr(a) for a in sorted(set(actions)))}, "
+                    f"but nobody fills role {_roles(decl)}: the burden can never "
+                    f"be discharged. (§7.8.2, §6.4.3)"
+                )
+            continue
+        decl = _scope([desc.for_action] if desc.for_action else [])
+        if decl is None or _fills_one(desc.holder, decl):
+            continue
+        warnings.append(
+            f"[W-27] Burden '{oid}' is held by '{desc.holder}', which fills no "
+            f"role declaring its for_action '{desc.for_action}' ({_roles(decl)}): "
+            f"the holder may not perform it, so the burden can never be "
+            f"discharged. (§7.8.2, §6.4.3)"
+        )
+
+    permit_holders: Set[Tuple[str, str]] = set()
+    for auth in _collect(model, "Authorization"):
+        permit = _obj_name(getattr(auth, "permit", None))
+        agent = _obj_name(getattr(auth, "authorized_agent", None))
+        if permit and agent:
+            permit_holders.add((permit, agent))
+    for obj in _collect(model, "EnterpriseObject"):
+        for ref in getattr(obj, "holds_tokens", []) or []:
+            tok = getattr(ref, "token", None) or ref
+            if getattr(tok, "kind", None) == "permit":
+                permit_holders.add((tok.name, obj.name))
+    permits = {t.name: t for t in _collect(model, "DeonticToken")
+               if getattr(t, "kind", None) == "permit"}
+    for permit, holder in sorted(permit_holders):
+        tok = permits.get(permit)
+        action = getattr(tok, "for_action", None)
+        decl = _scope([action] if action else [])
+        if decl is None or _fills_one(holder, decl):
+            continue
+        warnings.append(
+            f"[W-28] Permit '{permit}' is held by '{holder}', which fills no role "
+            f"declaring its for_action '{action}' ({_roles(decl)}): the permit "
+            f"can never be exercised. (§7.8.2, §6.4.5)"
         )
     return warnings
 
