@@ -9,9 +9,14 @@ dead-ended at 4 worlds with AF and EF both false.
 T11 adds an edge firing the event: matching WAITING obligations become
 PENDING, the action is marked occurred, no step advance. Excluded:
 gated actions (requires_permit), discharging actions (a descriptor's
-for_action, or emitting a descriptor's discharged_by event), and any
-T11 edge while a strict obligation is actionable (same guard as T3).
-Static builder only; hybrid is AM-99b (docs/el_grammar_amendments.md).
+for_action), and any T11 edge while a strict obligation is actionable
+(same guard as T3). Static builder only; hybrid is AM-99b
+(docs/el_grammar_amendments.md).
+
+AM-113: an action emitting a discharged_by event now fires through T11
+too, and its firing is the discharge (labelled "discharge:O via action
+(event)"), whoever holds O; it fires only when it discharges something.
+The for_action of a burden with discharged_by no longer discharges it.
 """
 from pathlib import Path
 
@@ -58,21 +63,28 @@ def test_toe_all_three_burdens_reachable():
 
 
 def test_toe_t11_fires_only_the_two_non_discharging_emitters():
-    """refuseRequest and detectIncident are the only eligible emitters:
-    recordRefusal/reviewRefusal are for_action of a burden (discharge
-    fires their events via P6a), and the gated submit/read actions
-    emit nothing."""
+    """refuseRequest and detectIncident are the only emitters that fire
+    without discharging. AM-113: recordRefusal, reviewRefusal and
+    acknowledgeIncident emit discharged_by events, so they fire only as
+    discharges; the gated submit/read actions emit nothing."""
     km = _km_from_file(_TOE)
     fired = {lbl for lbl in _all_labels(km) if lbl.startswith("fire:")}
     assert fired == {
         "fire:accessRefused via refuseRequest",
         "fire:vendorIncidentDetected via detectIncident",
     }
+    discharged = {lbl for lbl in _all_labels(km) if lbl.startswith("discharge:")}
+    assert discharged == {
+        "discharge:refusalRecordBurden via recordRefusal (refusalRecorded)",
+        "discharge:refusalReviewBurden via reviewRefusal (refusalReviewed)",
+        "discharge:incidentNotificationBurden via acknowledgeIncident (incidentAcknowledged)",
+    }
 
 
 def test_toe_review_burden_still_activated_by_discharge_cascade():
-    """refusalReviewBurden is triggered_by refusalRecorded, which only
-    discharging refusalRecordBurden raises (P6a) — never T11."""
+    """refusalReviewBurden is triggered_by refusalRecorded, which fires
+    only as the discharge of refusalRecordBurden. AM-113: that discharge
+    is recordRefusal emitting the event (T11), not T1's P6a cascade."""
     km = _km_from_file(_TOE)
     activating = {
         km.labels[(w, s)]
@@ -80,7 +92,7 @@ def test_toe_review_burden_still_activated_by_discharge_cascade():
         if w.get_obligation("refusalReviewBurden") == ObligationState.WAITING
         and s.get_obligation("refusalReviewBurden") == ObligationState.PENDING
     }
-    assert activating == {"discharge:refusalRecordBurden by ProviderAPIGateway"}
+    assert activating == {"discharge:refusalRecordBurden via recordRefusal (refusalRecorded)"}
 
 
 # ── Exclusions, on minimal fixtures ──────────────────────────────────────────
@@ -195,11 +207,14 @@ def test_strict_obligation_blocks_t11_until_discharged():
     assert "fire:probeEvent via emitProbe" in _labels_from(km, after)
 
 
-def test_emitter_of_a_discharged_by_event_does_not_fire():
-    """An action whose emitted event is some burden's discharged_by is
-    also a discharging action (engine Step 3 discharges via that event);
-    T11 must not fire it, or dependents would activate without the
-    discharge."""
+def test_emitter_of_a_discharged_by_event_fires_only_as_a_discharge():
+    """AM-113: an action whose emitted event is some burden's
+    discharged_by fires through T11, and the firing is the discharge
+    (engine Step 3), activating the event's dependents on the same edge.
+    It never fires without discharging (the engine would; see
+    CONCEPTS_INDEX, "Emitting a discharged_by event with nothing to
+    discharge is unmodelled"), so dependents never activate first.
+    Before AM-113 it did not fire at all."""
     km = _km_from_string(
         _spec("            emits: probeEvent",
               extra=(
@@ -217,3 +232,12 @@ def test_emitter_of_a_discharged_by_event_does_not_fire():
               )),
     )
     assert not any(lbl.startswith("fire:") for lbl in _all_labels(km))
+    label = "discharge:dischargedByEventBurden via emitProbe (probeEvent)"
+    (w,) = [s for s in km.successors(km.initial) if km.labels[(km.initial, s)] == label]
+    assert w.get_obligation("dischargedByEventBurden") == ObligationState.DISCHARGED
+    assert w.get_obligation("waitingBurden") == ObligationState.PENDING
+    assert not any(
+        v.get_obligation("waitingBurden") == ObligationState.PENDING
+        and v.get_obligation("dischargedByEventBurden") != ObligationState.DISCHARGED
+        for v in km.worlds
+    )

@@ -12,7 +12,8 @@ Part 1: w0 seeding and Rule T2.
 
 Part 2: events inside the hybrid model.
   - Rule T11 fires action-emitted events (strict guard as the engine's
-    Step 3.5), and T1 runs the P6a cascade on a discharge event;
+    Step 3.5); AM-113: an emitted discharged_by event discharges its
+    burden on the same edge (before, T1 raised it by the P6a cascade);
   - an event also activates pending Permits/Embargoes per world, as the
     engine's Step 7c does, and the T5/T6 embargo guards read that
     per-world state.
@@ -25,8 +26,9 @@ Part 2: events inside the hybrid model.
 Part 3: gated actions fire their events, in both builders.
   - T5: exercising a permit fires the event its action emits (gated
     actions fire here, not through T11 — engine Step 7c after Step 6);
-  - T6: a gated discharge runs P6a on the burden's discharged_by event
-    and fires its action's emitted event.
+  - T6: a gated discharge fires its action's emitted event.
+  - AM-113: a gated action emitting a burden's discharged_by event
+    discharges it (T5), and the burden's own gated for_action does not.
 
 Part 4: the hybrid horizon is relative to the anchored world.
   - worlds are expanded up to step state.tick + horizon; before, a
@@ -230,10 +232,13 @@ def test_t11_suppressed_while_strict_burden_actionable(toe_spec):
     km = _quiet(build_kripke_from_runtime, _after_refusal(toe_spec), horizon=10)
     labels = {km.labels[(km.initial, w)] for w in km.successors(km.initial)}
     assert not any(l.startswith("fire:") for l in labels)
-    assert "discharge:refusalRecordBurden by ProviderAPIGateway" in labels
+    assert "discharge:refusalRecordBurden via recordRefusal (refusalRecorded)" in labels
 
 
-def test_t1_p6a_discharge_activates_dependent(toe_spec):
+def test_event_discharge_activates_dependent(toe_spec):
+    """AM-113: recordRefusal emitting refusalRecorded discharges
+    refusalRecordBurden and activates refusalReviewBurden on one edge
+    (before, T1's P6a cascade raised the event on the discharge)."""
     km = _quiet(build_kripke_from_runtime, _after_refusal(toe_spec), horizon=10)
     (w,) = [w for w in km.successors(km.initial)
             if km.labels[(km.initial, w)].startswith("discharge:refusalRecordBurden")]
@@ -309,6 +314,7 @@ enterprise specification GatedEmitsProbe
 agent Worker {
     holds submitPermit
     holds examinePermit
+    holds closePermit
 }
 
 permit submitPermit {
@@ -318,6 +324,11 @@ permit submitPermit {
 
 permit examinePermit {
     for_action: "examineCase"
+    state: active
+}
+
+permit closePermit {
+    for_action: "closeCase"
     state: active
 }
 
@@ -366,6 +377,11 @@ community ProbeCommunity {
             requires_permit examinePermit
             emits: caseExamined
         }
+        action closeCase {
+            actor: workerRole
+            requires_permit closePermit
+            emits: caseClosed
+        }
     }
 }
 
@@ -394,7 +410,7 @@ commitment WorkerArchives {
 }
 """
 
-_GATED_GRANTS = ["submitPermit", "examinePermit", "followUpBurden",
+_GATED_GRANTS = ["submitPermit", "examinePermit", "closePermit", "followUpBurden",
                  "examineBurden", "reportBurden", "archiveBurden"]
 
 
@@ -437,20 +453,118 @@ def test_t5_exercise_fires_gated_action_event(gated_spec, builder):
     assert w.has_occurred("submitForm")
 
 
+# T6 needs a gated burden without discharged_by (AM-113: examineBurden
+# above is discharged only by caseClosed); a separate fixture keeps the
+# gated one small.
+_T6_PROBE = """
+enterprise specification GatedT6Probe
+
+agent Worker {
+    holds reviewPermit
+}
+
+permit reviewPermit {
+    for_action: "reviewCase"
+    state: active
+}
+
+burden reviewBurden {
+    for_action: "reviewCase"
+    state: active
+    discharge_mode: eventual
+}
+
+burden filingBurden {
+    for_action: "fileReview"
+    state: pending
+    triggered_by: caseReviewed
+    discharge_mode: eventual
+}
+
+burden followUpBurden {
+    for_action: "followUp"
+    state: pending
+    triggered_by: caseFiled
+    discharge_mode: eventual
+}
+
+community ProbeCommunity {
+    objective: "probe a gated discharge firing its action's event"
+    event caseReviewed
+    event caseFiled
+
+    role workerRole {
+        action reviewCase {
+            actor: workerRole
+            requires_permit reviewPermit
+            emits: caseReviewed
+        }
+    }
+}
+
+commitment WorkerReviews {
+    by: Worker
+    obligation: "review the case"
+    creates_burden: reviewBurden
+}
+
+commitment WorkerFiles {
+    by: Worker
+    obligation: "file a reviewed case"
+    creates_burden: filingBurden
+}
+
+commitment WorkerFollowsUp {
+    by: Worker
+    obligation: "follow up a filed case"
+    creates_burden: followUpBurden
+}
+"""
+
+
 @pytest.mark.parametrize("builder", ["static", "hybrid"])
-def test_t6_examine_fires_emits_and_runs_p6a(gated_spec, builder):
-    km = _gated_models(gated_spec)[builder]
-    w = _successor(km, "examine:examineBurden → examineCase")
-    assert w.get_obligation("examineBurden") == ObligationState.DISCHARGED
-    assert w.get_obligation("reportBurden") == ObligationState.PENDING    # emits
-    assert w.get_obligation("archiveBurden") == ObligationState.PENDING   # P6a
+def test_t6_examine_fires_emits(builder):
+    spec = parse_string(_T6_PROBE, validate=False).model
+    state = enroll(initial_state(), "Worker")
+    for token in ("reviewPermit", "reviewBurden", "filingBurden", "followUpBurden"):
+        state = grant_token(state, token_from_spec(spec, token, "Worker", 0))
+    km = (_quiet(build_kripke_model, spec, horizon=5) if builder == "static"
+          else _quiet(build_kripke_from_runtime, Runtime(state, spec), horizon=5))
+    w = _successor(km, "examine:reviewBurden → reviewCase")
+    assert w.get_obligation("reviewBurden") == ObligationState.DISCHARGED
+    assert w.get_obligation("filingBurden") == ObligationState.PENDING    # emits
     assert w.get_obligation("followUpBurden") == ObligationState.WAITING  # untouched
+
+
+@pytest.mark.parametrize("builder", ["static", "hybrid"])
+def test_for_action_alone_does_not_discharge_event_bound_burden(gated_spec, builder):
+    """AM-113: examineBurden declares discharged_by caseClosed, so its
+    for_action examineCase no longer discharges it: no T6 edge, and
+    exercising examineCase only fires caseExamined."""
+    km = _gated_models(gated_spec)[builder]
+    assert not any(l.startswith("examine:examineBurden") for l in km.labels.values())
+    w = _successor(km, "exercise:examinePermit → examineCase")
+    assert w.get_obligation("examineBurden") == ObligationState.PENDING
+    assert w.get_obligation("reportBurden") == ObligationState.PENDING    # emits
+    assert w.get_obligation("archiveBurden") == ObligationState.WAITING
+
+
+@pytest.mark.parametrize("builder", ["static", "hybrid"])
+def test_gated_emitter_discharges_by_event(gated_spec, builder):
+    """AM-113: closeCase (gated) emits caseClosed, examineBurden's
+    discharged_by: exercising it discharges examineBurden and activates
+    archiveBurden (triggered_by caseClosed) on the same edge."""
+    km = _gated_models(gated_spec)[builder]
+    w = _successor(km, "exercise:closePermit → closeCase")
+    assert w.get_obligation("examineBurden") == ObligationState.DISCHARGED
+    assert w.get_obligation("archiveBurden") == ObligationState.PENDING
+    assert w.has_occurred("closeCase")
 
 
 @pytest.mark.parametrize("builder", ["static", "hybrid"])
 def test_gated_event_burdens_reachable(gated_spec, builder):
     km = _gated_models(gated_spec)[builder]
-    for oid in ("followUpBurden", "reportBurden", "archiveBurden"):
+    for oid in ("followUpBurden", "reportBurden", "archiveBurden", "examineBurden"):
         assert km.check_permission(oid).satisfied is True, oid
 
 

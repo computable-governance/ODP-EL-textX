@@ -13,12 +13,16 @@ the engine side by AM-100, TokenInstance.activated_at_tick.)
 Fix: World.activation_steps records the step P6a activated each
 obligation; T2 counts from there (docs/el_grammar_amendments.md, AM-99a).
 
-Fixture: firstBurden (long deadline, so it can be discharged late)
-fires firstDone on discharge; secondBurden is triggered_by firstDone
-and has a 5-step deadline ("5 minutes"). AM-108: it had no deadline and
-relied on the parser's default of 5, which T2 no longer enforces (no
-elapsed-time magnitude); "1 hour" gave the same 5 steps until AM-111 made
-one step one minute, hence "5 minutes".
+Fixture: firstBurden (long deadline, so it can be discharged late) is
+discharged_by firstDone, which doFirst emits; secondBurden is
+triggered_by firstDone and has a 5-step deadline ("5 minutes").
+AM-108: it had no deadline and relied on the parser's default of 5,
+which T2 no longer enforces (no elapsed-time magnitude); "1 hour" gave
+the same 5 steps until AM-111 made one step one minute, hence
+"5 minutes". AM-113: before, nothing emitted firstDone and the
+verifier's P6a cascade raised it on firstBurden's discharge; now only an
+emitted event discharges firstBurden and raises the event, so doFirst
+emits it.
 """
 from el_kripke import ObligationState, build_kripke_model
 from el_parser import parse_string
@@ -48,6 +52,12 @@ burden secondBurden {
 community ProbeCommunity {
     objective: "probe deadline counting from activation"
     event firstDone
+    role operatorRole {
+        action doFirst {
+            actor: operatorRole
+            emits: firstDone
+        }
+    }
 }
 
 commitment OperatorDoesFirst {
