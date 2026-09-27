@@ -6133,6 +6133,14 @@ Not scheduled.
 
 ## Step 3.5 as a denial-of-service vector — OPEN FINDING (2026-09-26)
 
+**Update (AM-115, 2026-09-27):** a release path now exists. An
+authorised declaration (`el_engine.declare_violation()`) makes an overdue
+strict burden `violated`, which ends the freeze; the watchdog judges the
+deadline against wall-clock time, not the frozen tick. A holder that never
+acts now holds the community for at most the burden's deadline plus the
+declarer's reaction time, where a deadline and a declaration Action exist.
+The freeze **scope** question below is unchanged and still open.
+
 **OPEN FINDING** — recorded during AM-102. The engine's Step 3.5 (AM-78)
 refuses every action that discharges nothing, by **every** actor, while
 **any** enrolled holder has an actionable strict burden
@@ -6173,6 +6181,18 @@ during a strict freeze it lists permitted and obligated actions the
 engine would refuse. Logged, not fixed; belongs with the scope amendment.
 
 ## Strict mode, model vs deployment — OPEN FINDING (2026-09-26)
+
+**Update (AM-115, 2026-09-27):** the planned external, authorised
+violation declaration exists (`declare_violation()`; see the AM-115 entry
+in `docs/el_grammar_amendments.md`). A blocking-compelled strict burden
+with a deadline and a declaration Action is now violable live — by
+declaration, never by the clock — and its ViolationResponse fires
+(`fire_violation_responses()`). Inside the model nothing changed: the
+declaration is not a transition, and AF(discharged) still holds by
+construction. The deployment property (discharged, or violated with its
+response fired, within the deadline) is not yet checked; see "Deployment
+property for strict burdens is unchecked" below. The distinction the
+paper wording should draw stands.
 
 **Note (AM-106, 2026-09-26):** T2 can violate a `strict` burden in both
 Kripke builders — neither excludes strict burdens — while the engine
@@ -6229,6 +6249,12 @@ executing-compelled.
   scope (its Phase 1 remodels the terms-of-engagement scenarios).
 
 ## A strict burden whose discharge is itself blocked deadlocks — OPEN FINDING (2026-09-26)
+
+**Update (AM-115, 2026-09-27):** a declaration now ends the deadlock
+when the burden has a deadline with a magnitude and some Action declares
+it (`declares_violation_of`), performed by an authorised declarer
+(`declare_violation()`). The two AM-103 fixtures have neither, so their
+pinned behaviour (`discharge_burden()` the only exit) is unchanged.
 
 **OPEN FINDING** — found during AM-103 Phase 1. If the holder of an
 actionable strict burden cannot perform its discharging action, nothing
@@ -6869,6 +6895,13 @@ the UI repository, possibly with a small API addition here.
 
 ## The tick is both elapsed time and event counter — OPEN FINDING (2026-09-27)
 
+**Update (AM-115, 2026-09-27):** `declare_violation()` takes the
+watchdog's wall-clock step (`at_tick`) and judges the deadline against it,
+not against `WorldState.tick`, which a strict freeze stops. It advances
+the tick by 1, never to `at_tick`; the watchdog catches the clock up with
+`advance_clock()` afterwards. Where epoch and step duration live is
+recorded under "No watchdog yet" below.
+
 **OPEN FINDING** — found in AM-111 Phase 1. `WorldState.tick` advances by
 one on every successful action (`advance()`, including `claim()` and
 `decline()`), `discharge_burden()`, `fire_event()`, each
@@ -6955,6 +6988,13 @@ runtimes enrol every actor without a role (AM-112), so they would need
 role assignments.
 
 ## `fire_event()` discharges burdens: event injection needs authentication and authorisation — OPEN FINDING (2026-09-27)
+
+**Update (AM-115, 2026-09-27):** the violation declaration is authorised
+against the specification (declarer's role, permit and embargoes;
+`declare_violation()`), which is the pattern this finding asks for.
+`fire_event()` and `discharge_burden()` are unchanged; see
+"`discharge_burden()` bypasses the strict guard with no authorisation"
+below.
 
 **OPEN FINDING** — follows from AM-113. `fire_event()` (and
 `Runtime.fire_event()`) now discharges every active burden whose
@@ -7120,3 +7160,105 @@ gitignored, but the suite reads them: in a clean clone
 failed and the AM-111 corpus test collected four fewer cases. The AM-110
 case now skips when the file is absent. Whether these directories should
 be tracked is a separate decision.
+
+## `discharge_burden()` bypasses the strict guard with no authorisation — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-115 Phase 1. `discharge_burden()`
+discharges any burden by name, strict ones included, with no caller
+identity and no check against the specification; it is the one exit
+from a strict freeze that needs no authority. Its ledger entry also names
+the burden's holder as the actor, although the holder did nothing.
+Callers: `Runtime.discharge_burden()`; `fhir_event_handler`
+(R37b, R38b) behind `POST /fhir/procedure-events` and
+`POST /fhir/medication-dispense-events`; about twenty test files, most
+using it as a setup shortcut past `referralInitiationBurden`, which is
+strict — refusing strict burdens would break about twelve of them.
+Candidate fix: a `source` parameter (as `fire_event()` has) so the ledger
+names the real caller; refuse strict burdens unless the caller is
+authorised as for a declaration; FHIR adapters' trust under the
+`fire_event()` authorisation finding above. Deferred from AM-115.
+
+## Separation of duties: the gateway's filler must not fill declarerRole — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — recorded in AM-115; a §7.8.2 assignment-rule
+candidate. In the terms-of-engagement scenarios the declarer must not be
+the enforcement point whose burden it judges. Stated as
+`assignment_policy for declarerRole { requires_relation: "does not fill
+accessGatewayRole..." }`, which is documentation only (GAP-2).
+`declare_violation()` enforces the narrower rule it can check (no
+declaration of a burden the declarer holds); nothing stops one object
+from filling both `accessGatewayRole` and `declarerRole`. A checked
+assignment rule (validator or `join_role()`) is future work, with the
+role cardinality finding above.
+
+## The declarer's own burden is only detectable — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — recorded in AM-115, accepted by design.
+`declarationDutyBurden` (declare an overdue strict burden violated within
+5 minutes of its deadline) is held by `declarerRole` and never granted or
+activated at runtime; no event marks "the deadline has passed", so the
+engine cannot start its clock, and a live version would raise the same
+question one level up (who declares the watchdog's failure?). The regress
+ends in a mechanism: an automated watchdog whose health is monitored by
+operations tooling. Stated in both scenarios' comments. The declarer's
+three prohibitions are likewise held by the role as embargoes
+(`for_action` naming no action, so they block nothing themselves) and
+enforced unconditionally by `declare_violation()`.
+
+## Reinstatement after an investigation is manual and unchecked — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — recorded in AM-115 (GAP-7 in the terms-of-engagement
+scenarios). `unrecordedRefusalResponse` revokes the agent's two
+Authorizations; `gatewayFailureInvestigatorRole` holds
+`accessReinstatementPermit`, the authority to restore them. Reinstatement
+is a manual `reinstate_authorization()` call, which checks no actor, so
+the permit is declarative. Discharging `gatewayInvestigationBurden` does
+not reinstate anything: automatic reinstatement on discharge is not
+modelled. Neither builder models the response's revocations (static has
+no T7; hybrid reads the state after they happen).
+
+## Deployment property for strict burdens is unchecked — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — recorded in AM-115 Phase 1. With declarations, the
+deployment guarantee for a blocking-compelled strict burden is:
+discharged, or violated with its response fired, within the deadline
+(plus the declarer's reaction time). The verifier cannot check it: the
+declaration is deliberately outside the model (AF for the modelled system
+is unchanged), and a world records a fired response only when it creates
+a burden (AM-105). Candidates: a separate deployment-mode build that lets
+time pass for strict burdens and adds a declaration edge once one is
+overdue, with a per-world "responded" marker; or a trace property checked
+over the ledger. Not scheduled.
+
+## No watchdog yet; where epoch and step duration live — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — recorded in AM-115. `declare_violation()` takes the
+watchdog's step, `at_tick = ceil((now − epoch) / step duration)`; nothing
+computes it yet. Proposed: the step duration stays
+`el_engine._STEP_SECONDS` (one minute); the epoch (wall-clock time of
+tick 0) belongs on `Runtime` and should be persisted with the ledger once
+persistence exists. A minimal watchdog — for each active strict burden
+with a declaration Action, declare it if overdue at `at_tick`, then
+`fire_violation_responses()`, then `advance_clock()` up to `at_tick` — is
+future work, as is an API endpoint for declarations. Because every action
+also advances the tick, activation ticks run ahead of real time, so
+declarations err late, never early.
+
+## Hybrid verdict label for a violated triggered burden says "not triggered" — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-115 Phase 1. A hybrid model built after a
+triggered strict burden (`refusalRecordBurden`) was declared violated
+reports its bounded-response verdict as unsatisfied with status "not
+triggered within horizon", although it was triggered and then violated.
+The static model reports the same status for `gatewayInvestigationBurden`,
+which waits on a violation the model never makes (the declaration is
+outside it); that one is accurate. The label needs a VIOLATED case.
+
+## A response to a role with several fillers: one model holder, several engine grants — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — AM-115 edge case, not in any tracked scenario. With
+`creates_burden_for_role`, `fire_violation_responses()` grants the burden
+to every actor filling the role, while the obligation descriptor (and so
+both builders) takes the first `fills` statement's object as its single
+holder. Compare the AM-105 finding on a burden created by several
+responses. Each role has one filler today.

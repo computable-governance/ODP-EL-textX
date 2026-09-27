@@ -293,6 +293,20 @@ use `Runtime.build_from_spec()` / `enroll_role_fillers()`). Undeclared
 actions stay unrestricted. The static builder stays unrestricted for a
 spec with no `fills` statement (transitional; see CONCEPTS_INDEX).
 
+### 5.8 Violation declaration (AM-115)
+A strict burden is never violated by the engine's clock. An Action with
+`declares_violation_of <burden>` (and a `requires_permit`, V-NEW-24) is a
+declaration (§6.6.5): only `el_engine.declare_violation(state, spec,
+burden, declarer, at_tick)` performs it — role, embargo and permit checks
+as `advance()`, refused before the deadline judged at the watchdog's
+wall-clock step `at_tick`, never by the holder, only active → violated.
+It ends a Step 3.5 freeze, fires no response (call
+`fire_violation_responses()` next) and stays outside the Kripke model
+(T5 skips it; AF for strict burdens unchanged). ViolationResponse
+`creates_burden_for_role: <Role>` grants to the role's fillers;
+`revokes: <Authorization>` (one per line) lists what it withdraws
+(V-NEW-23).
+
 ---
 
 ## 6. The textX Custom Classes Architecture

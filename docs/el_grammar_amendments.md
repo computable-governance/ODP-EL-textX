@@ -10193,3 +10193,216 @@ existing test files; five new test files; `docs/CONCEPTS_INDEX.md`,
 `docs/KRIPKE_TRANSITION_RULES.md`,
 `docs/design_notes/DN_019_incident_simulator_storyboard.md`, `CLAUDE.md`;
 this file.
+
+## AM-115 (2026-09-27) — authorised violation declaration for strict burdens; responses to a role and with an explicit revokes list (`grammar/v2/el_grammar.tx`, `toolchain/el_engine.py`, `toolchain/el_runtime.py`, `toolchain/el_kripke.py`, `toolchain/el_api.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-27), in five parts. Type: grammar
+amendment (`DeclaresViolationItem`; ViolationResponse
+`creates_burden_for_role`, `revokes` via `RevokesItem`), a new engine
+entry point, verifier and API exclusions, three new validator errors
+(`[V-NEW-23]`, `[V-NEW-24]`, `[V-NEW-25]`), one new warning (`[W-29]`),
+`[W-21]`/`[W-23]` adjusted, both terms-of-engagement scenarios extended.
+Addresses the release-path half of "Step 3.5 as a denial-of-service
+vector", the planned declaration of "Strict mode, model vs deployment",
+and "A strict burden whose discharge is itself blocked deadlocks" (all
+annotated in CONCEPTS_INDEX, still open for scope and the deployment
+property).
+
+**Standard reference:** §6.6.5 (declaration: an action by which an object
+establishes a state of affairs by the act itself) and §7.10.4 (a
+declaration is made under a permit); §6.6.7 (evaluation); §6.3.8 and
+§7.8.6 NOTE 2 (violation response as an obligation on the object it
+applies to); §6.6.4 (authorization and its withdrawal); §7.8.2 (role
+fulfilment).
+
+**Before.** While a strict burden is actionable the engine refuses every
+non-discharging action and `advance_clock()` (Step 3.5, AM-49), and
+`check_live_violations()` never violates a strict burden. A holder that
+never acts froze the community, nothing recorded a violation, and no
+response could fire; only an unauthorised `discharge_burden()` ended it.
+A ViolationResponse could obligate only a named object, and terminate
+revoked an inferred violator chain — in the terms-of-engagement scenarios
+the violator of `refusalRecordBurden` is the provider's own gateway, so
+terminate would revoke nothing of the agent's.
+
+**Decisions (design chat and Phase 1, 2026-09-27).**
+- **What a declaration is.** An ODP declaration (§6.6.5): the burden
+  becomes VIOLATED by the act itself plus the declarer's authorisation (a
+  permit, §7.10.4, issued by the domain's controlling party). The
+  declarer — in deployment an automated watchdog — first **evaluates**
+  (§6.6.7: the real deadline has passed, the burden is undischarged) and
+  then **declares**. `check_live_violations()` makes the same
+  evaluate-and-declare move implicitly, on the tick, for eventual burdens.
+- **Grammar hook.** An Action carrying `declares_violation_of <burden>`
+  (one per line) is a declaration Action; `[V-NEW-24]`: the burden is
+  strict and the Action requires a permit.
+- **Entry point.** `declare_violation(state, spec, burden, declarer,
+  at_tick, facts=None)` and `Runtime.declare_violation()`. The declarer
+  must pass, for one declaration Action of the burden, `advance()`'s role
+  (AM-114), precondition (fail-safe), embargo and permit checks.
+  Prohibitions, **refused** (not only monitored): no declaration before
+  the deadline — every declared instance satisfies `at_tick −
+  activation tick ≥ deadline steps`, and the deadline must carry an
+  elapsed-time magnitude; no declaration of a burden the declarer holds;
+  only `active` → `violated`, never anything else. Strict instances only.
+  `at_tick` is the watchdog's wall-clock step, because the engine's tick
+  stops during a freeze. `advance()` refuses a declaration Action.
+- **Interactions.** No strict guard (the declaration resolves the
+  blocking burden, so it ends the freeze). No response fired:
+  `fire_violation_responses()` stays the separate, once-only responder
+  (AM-104 marker unchanged). Tick + 1 on success, never to `at_tick`; the
+  watchdog catches the clock up with `advance_clock()` afterwards. Ledger:
+  the declarer as actor, the declaration Action as action name, outcome
+  `violation`, the burden in `violations`. After a declaration a late
+  `recordRefusal` discharges nothing (the burden is `violated`) but its
+  `refusalRecorded` event still starts the review.
+- **Verifier.** Unchanged in substance: the declaration is not a
+  transition, so AF(discharged) for a strict burden still holds by
+  construction. The only change keeps it that way — T5 never exercises a
+  declaration permit (without it both builders would add an exercise edge
+  once a freeze lifts). The deployment property is logged as open.
+- **Responses.** `creates_burden_for_role: <Role>` grants
+  `creates_burden` to the role's fillers; `obligates` stays the party the
+  response applies to (it revokes, as authority). `revokes: <Authorization>`
+  (one per line) lists exactly what the response withdraws, whatever its
+  `response_kind`; `[V-NEW-23]`: each is revocable with an on_revocation
+  embargo and granted by `obligates` (AM-104's rule). More auditable than
+  terminate's inferred chain, which stays for a terminate response without
+  a list.
+- **Scenarios.** `refusalRecordBurden` gets `deadline: "5 minutes"`. New
+  roles, stated with `fills`: `declarerRole` (the watchdog; holds the
+  declaration permit, the descriptive `declarationDutyBurden` and three
+  prohibitions as embargoes), `gatewayFailureInvestigatorRole` and
+  `reviewEscalationRole` (both filled by one security-manager party for
+  now, kept separate so they can be reassigned by `fills` alone).
+  `unrecordedRefusalResponse` (remediate) revokes the agent's two
+  Authorizations and creates `gatewayInvestigationBurden` for the
+  investigator role; `missedReviewResponse` escalates to
+  `reviewEscalationRole` with `reviewEscalationBurden` (not to the contact
+  who missed the review).
+- **Deferred (logged).** Restricting `discharge_burden()`; the
+  watchdog function and an API endpoint; a checked separation-of-duties
+  assignment rule; automatic reinstatement; the deployment-property check.
+
+### Part 1 — grammar and validator
+
+```
+DeclaresViolationItem:
+    'declares_violation_of' burden=[DeonticToken]
+;
+ViolationResponse: ...
+    ('creates_burden'  ':' creates_burden=[DeonticToken])?
+    ('creates_burden_for_role' ':' burden_role=[Role])?
+    ('escalate_to'     ':' escalate_to=[EnterpriseObject])?
+    (revokes+=RevokesItem)*
+    ('description'     ':' description=STRING)?
+RevokesItem:
+    'revokes' ':' authorization=[Authorization]
+;
+```
+`DeclaresViolationItem` is one more `ActionBodyItem` alternative; P4
+collects `Action.declares_violation_of`. An inline repeated
+`('revokes' ':' revokes+=[Authorization])*` hit the arpeggio
+cross-reference list bug (CLAUDE.md §5.3: the second `revokes:` failed to
+parse), so `RevokesItem` is a wrapper rule, unwrapped by the new P13
+(`process_violation_response`). New domain classes
+`DeclaresViolationItem`, `RevokesItem`. Validator: `[V-NEW-23]`,
+`[V-NEW-24]`, `[V-NEW-25]` (creates_burden_for_role needs
+creates_burden), `[W-29]` (creates_burden_for_role names a role nobody
+fills); `[W-21]` leaves a terminate response with a revokes list to
+V-NEW-23; `[W-23]` accepts creates_burden_for_role as the escalation
+target. New `tests/test_am115_declaration_grammar.py` (19). 932 → 951.
+
+### Part 2 — engine: `declare_violation()`, response targets
+
+`_declaration_actions()`, `_declaration_action_names()`,
+`declare_violation()`, `Runtime.declare_violation()`; `advance()` refuses
+a declaration Action after the AM-114 role check.
+`fire_violation_responses()`: creates_burden to each filler of
+`creates_burden_for_role` (none: logged, nothing granted); a revokes list
+revoked through the new `_revoke_for_response()`, which terminate's chain
+now also uses (same checks and ledger lines as AM-104).
+`_build_obligation_descriptors()` root 2: a role-targeted burden's holder
+is the role's first filler (none: no descriptor), so `[W-27]` and both
+builders see the right holder. `check_live_violations()` docstring
+updated. New `tests/test_am115_declare_violation.py` (23). 951 → 974.
+
+### Part 3 — verifier and API: declarations stay outside
+
+Both builders' T5 skip a permit whose `for_action` is a declaration
+Action. `GET /actors/{actor}/available-actions` omits a declaration
+permit (execute-action would be refused). No verdict or world count
+changed in any of the 22 models the API scenarios give (static and hybrid,
+k = 1 and each scenario's configured k), compared with HEAD. New
+`tests/test_am115_declaration_outside_model.py` (5; three fail without
+the part). 974 → 979.
+
+### Part 4 — scenarios
+
+Both terms-of-engagement scenarios as decided above, plus
+`ViolationDeclarationAuthorization` (the domain's controlling party to
+the watchdog), `accessReinstatementPermit` (held by the investigator
+role; reinstatement stays a manual `reinstate_authorization()` — GAP-7),
+an `assignment_policy for declarerRole` stating the separation of duties
+(documentation, GAP-2), and the two new parties in the domain. Both
+validate with **no warnings** (`[W-19]`, `[W-20]`, `[W-22]` cleared). The
+API builders grant `violationDeclarationPermit` to the watchdog.
+
+Readings, before → after, all 22 API-scenario models: every existing
+obligation's verdict unchanged (`refusalRecordBurden` AF still true).
+New obligations in the four terms-of-engagement models:
+`gatewayInvestigationBurden` unsatisfied, "not triggered within horizon"
+(it waits on a violation the model never makes — the declaration is
+outside it); `reviewEscalationBurden` "not triggered" at k = 1,
+unsatisfied at the configured k = 480 (detectable, like the review it
+escalates). Sizes: unchanged at k = 1; at k = 480 static 3,108 → 10,572
+worlds (7,856 → 25,920 edges), hybrid 21,612 → 72,596 (82,292 → 264,880),
+because `reviewEscalationBurden` activates when the review is violated
+and carries its own deadline.
+
+Test updates (nine failures, all pins of the scenarios' earlier state):
+`test_am104_validator_warnings` (W-22 counts 1 → 0);
+`test_am104_violation_responses` (the missed-review escalation now grants
+`reviewEscalationBurden` to the security manager; renamed);
+`test_am110_deadline_scale` (portal scaled deadlines now include
+`refusalRecordBurden` and the two new burdens; the no-magnitude case moves
+to a new test on the portal with the deadline removed in memory; the
+portal cross-check runs k = 240 at horizon 20 instead of k = 120 at 40,
+which took 165–206 s with the larger model, now 13 s);
+`test_am114_fills_grammar` and `test_am114_role_filler_enrolment` (the
+new fillers, the permit grant, and a role set per actor since the
+security manager fills two). New `tests/test_am115_terms_of_engagement.py`
+(16): the replay in both scenarios — freeze, six unauthorised declarers
+and an unenrolled one refused, an early declaration refused, the
+watchdog's declaration at the deadline ends the freeze; the response
+revokes both Authorizations and gives the investigation to the security
+manager; manual reinstatement restores access; a late record still starts
+the review; a timely record leaves nothing to declare; the watchdog has no
+available action; static AF kept with the investigation never activated;
+hybrid after the response has it live. 979 → 996.
+
+### Part 5 — docs
+
+This entry. CONCEPTS_INDEX: AM-115 updates on "Step 3.5 as a
+denial-of-service vector", "Strict mode, model vs deployment", "A strict
+burden whose discharge is itself blocked deadlocks", "`fire_event()`
+discharges burdens" and "The tick is both elapsed time and event
+counter"; new OPEN FINDINGS — `discharge_burden()` bypasses the strict
+guard with no authorisation; separation of duties (§7.8.2 assignment-rule
+candidate); the declarer's own burden is only detectable; reinstatement is
+manual and unchecked; the deployment property is unchecked; no watchdog
+yet (epoch on `Runtime`, step `_STEP_SECONDS`); the hybrid label "not
+triggered" for a violated triggered burden; a response to a role with
+several fillers. `docs/KRIPKE_TRANSITION_RULES.md` (T5), CLAUDE.md §5.8.
+
+**Verification:** full suite (`pytest -c pytest.ini`) after each part —
+932 → 951 → 974 → 979 → 996 → 996 passed; 1 skipped, 1 deselected
+(slow), 1 xfailed throughout.
+
+**Files changed:** `grammar/v2/el_grammar.tx`; `toolchain/el_domain.py`,
+`toolchain/el_parser.py`, `toolchain/el_validator.py`,
+`toolchain/el_engine.py`, `toolchain/el_runtime.py`,
+`toolchain/el_kripke.py`, `toolchain/el_api.py`; both
+terms-of-engagement scenarios; five existing test files; four new test
+files; `docs/CONCEPTS_INDEX.md`, `docs/KRIPKE_TRANSITION_RULES.md`,
+`CLAUDE.md`; this file.
