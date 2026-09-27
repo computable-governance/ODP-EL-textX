@@ -290,8 +290,9 @@ def test_event_activated_embargo_blocks_exercise_per_world():
     assert result.ok, result.errors
     spec = result.model
     state = initial_state()
-    for actor in ("Operator", "Requester"):
-        state = enroll(state, actor)
+    # AM-114: each actor fills the role whose actions it performs.
+    for actor, role in (("Operator", "operatorRole"), ("Requester", "requesterRole")):
+        state = enroll(state, actor, role_name=role)
     for token in ("readPermit", "lockEmbargo"):
         state = grant_token(state, token_from_spec(spec, token, "Requester", 0))
     km = _quiet(build_kripke_from_runtime, Runtime(state, spec), horizon=5)
@@ -422,7 +423,7 @@ def gated_spec():
 
 
 def _gated_models(spec):
-    state = enroll(initial_state(), "Worker")
+    state = enroll(initial_state(), "Worker", role_name="workerRole")  # AM-114
     for token in _GATED_GRANTS:
         state = grant_token(state, token_from_spec(spec, token, "Worker", 0))
     return {
@@ -525,7 +526,7 @@ commitment WorkerFollowsUp {
 @pytest.mark.parametrize("builder", ["static", "hybrid"])
 def test_t6_examine_fires_emits(builder):
     spec = parse_string(_T6_PROBE, validate=False).model
-    state = enroll(initial_state(), "Worker")
+    state = enroll(initial_state(), "Worker", role_name="workerRole")  # AM-114
     for token in ("reviewPermit", "reviewBurden", "filingBurden", "followUpBurden"):
         state = grant_token(state, token_from_spec(spec, token, "Worker", 0))
     km = (_quiet(build_kripke_model, spec, horizon=5) if builder == "static"

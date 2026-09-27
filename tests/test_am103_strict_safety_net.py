@@ -172,7 +172,7 @@ commitment WorkerLogs  { by: Worker obligation: "log"  creates_burden: logBurden
 
 def _available_runtime():
     spec = parse_string(_AVAILABLE, validate=False).model
-    state = enroll(initial_state(), "Worker")
+    state = enroll(initial_state(), "Worker", role_name="r")  # AM-114: fills r
     for token in ("fileBurden", "logBurden", "fileEmbargo"):
         state = grant_token(state, token_from_spec(spec, token, "Worker", 0))
     return Runtime(state, spec)
@@ -253,8 +253,9 @@ def _spec(src):
 def _embargo_case():
     spec = _spec(_DEADLOCK_EMBARGO)
     state = initial_state()
-    for actor in ("Gate", "Worker"):
-        state = enroll(state, actor)
+    # AM-114: each actor fills the role whose actions it performs.
+    for actor, role in (("Gate", "gateRole"), ("Worker", "workerRole")):
+        state = enroll(state, actor, role_name=role)
     for token, holder in [("recordBurden", "Gate"), ("recordEmbargo", "Gate"),
                           ("readPermit", "Worker"), ("chatBurden", "Worker")]:
         state = grant_token(state, token_from_spec(spec, token, holder, 0))
@@ -266,8 +267,9 @@ def _permit_case():
     strict burden is actionable), then fire it."""
     spec = _spec(_DEADLOCK_PERMIT.replace("PERMIT_STATE", "active"))
     state = initial_state()
-    for actor in ("Authority", "Gate", "Worker"):
-        state = enroll(state, actor)
+    # AM-114: each actor fills the role whose actions it performs.
+    for actor, role in (("Authority", None), ("Gate", "gateRole"), ("Worker", "workerRole")):
+        state = enroll(state, actor, role_name=role)
     for token, holder in [("examinePermit", "Gate"), ("examineBurden", "Gate"),
                           ("chatBurden", "Worker")]:
         state = grant_token(state, token_from_spec(spec, token, holder, 0))

@@ -222,8 +222,9 @@ def probe_spec():
 
 def _probe_runtime(spec) -> Runtime:
     state = initial_state()
-    for actor in ("Gate", "Worker"):
-        state = enroll(state, actor)
+    # AM-114: each actor fills the role whose actions it performs.
+    for actor, role in (("Gate", "gateRole"), ("Worker", "workerRole")):
+        state = enroll(state, actor, role_name=role)
     for token, holder in _PROBE_GRANTS:
         state = grant_token(state, token_from_spec(spec, token, holder, 0))
     return Runtime(state, spec)

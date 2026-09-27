@@ -56,6 +56,8 @@ community EscalationCommunity
         event escalationNotified
             description: "Fired when respondToEscalation runs"
 
+        Responder fills responderRole
+
         role responderRole
             description: "Single role performing respondToEscalation"
             {

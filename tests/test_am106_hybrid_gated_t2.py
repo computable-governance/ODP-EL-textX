@@ -52,6 +52,8 @@ commitment ClinicAnswers { by: Clinic obligation: "answer" creates_burden: answe
 
 community ProbeCommunity {
     objective: "probe hybrid T2 on a gated burden"
+    Clinic fills clinicRole
+    Practice fills practiceRole
     role clinicRole {
         action answer { requires_permit answerPermit }
     }

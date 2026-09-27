@@ -153,6 +153,40 @@ def _find_action(spec, action_name):
     return None, None
 
 
+def _declaring_roles(spec, action_name: str) -> Set[str]:
+    """AM-114: the Roles whose bodies declare an Action named action_name,
+    across every Community/Domain/Federation (§7.8.2: the constraints of
+    the behaviour identified by a role become constraints on the object
+    fulfilling it). Empty for an undeclared action."""
+    roles: Set[str] = set()
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []):
+            if any(a.name == action_name for a in getattr(role, "actions", [])):
+                roles.add(role.name)
+    return roles
+
+
+def _actor_roles(state: "WorldState", actor_name: str) -> Set[str]:
+    """AM-114: the roles actor_name fills (one ActorState per role filled)."""
+    return {a.role_name for a in state.actors
+            if a.actor_name == actor_name and a.role_name}
+
+
+def _role_refusal(spec, state: "WorldState", actor_name: str,
+                  action_name: str) -> Optional[str]:
+    """AM-114: the refusal reason when actor_name fills none of the roles
+    declaring action_name; None when it fills one, or when no role
+    declares the action."""
+    declaring = _declaring_roles(spec, action_name)
+    if not declaring or declaring & _actor_roles(state, actor_name):
+        return None
+    return (f"actor '{actor_name}' does not fill role "
+            f"{' or '.join(repr(r) for r in sorted(declaring))}, "
+            f"which declares action '{action_name}'")
+
+
 def _embargo_naming_actions(spec) -> Dict[str, Set[str]]:
     """AM-102: embargo name -> the role Actions that declare
     `inhibited_by_embargo` on it (§6.4.6). Rule 1 of _embargo_coverage();
@@ -630,6 +664,14 @@ def advance(
     if actor_name not in enrolled:
         return _blocked(state, actor_name, action_name,
                         f"actor '{actor_name}' is not enrolled", tick)
+
+    # AM-114 (§7.8.2): the actor must fill a role that declares the action;
+    # an actor enrolled without a role fills none. An undeclared action
+    # (e.g. a for_action string no role declares) has no role to check.
+    # Before Steps 3/3.5: an out-of-role action is never progress.
+    role_reason = _role_refusal(spec, state, actor_name, action_name)
+    if role_reason:
+        return _blocked(state, actor_name, action_name, role_reason, tick)
 
     # ── Step 3: Discharge key ─────────────────────────────────────────────────
     grammar_action, grammar_role = _find_action(spec, action_name)

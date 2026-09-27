@@ -107,6 +107,7 @@ commitment gatedCommitment {
 
 community ProbeCommunity {
     objective: "probe T6 embargo guard suppression"
+    Holder fills holderRole
     role holderRole {
         action performExamine {
             requires_permit accessPermit
@@ -150,6 +151,7 @@ commitment gatedCommitment {
 
 community ProbeCommunity {
     objective: "probe T6 embargo guard actor-scoping"
+    Holder fills holderRole
     role holderRole {
         action performExamine {
             requires_permit accessPermit

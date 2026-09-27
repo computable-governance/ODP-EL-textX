@@ -83,7 +83,7 @@ import sys
 from collections import deque
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
-from typing import Any, Dict, FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple
 
 # Relocated 2026-08-20 (see docs/CONCEPTS_INDEX.md, "discharge_mode: strict —
 # enforcement exists only in the verifier, not the live runtime" and "Live
@@ -98,7 +98,9 @@ from el_engine import (
     _embargo_coverage,
     _build_obligation_descriptors,
     _commitment_root_for_token,
+    _declaring_roles,
     _find_spec_tokens_for_event,
+    role_fillers,
     _parse_deadline_steps,
 )
 
@@ -2153,6 +2155,28 @@ def _build_event_firing_index(
     return index
 
 
+def _role_performer_check(
+    model: Any, actor_roles: Optional[Dict[str, Set[str]]],
+) -> Callable[[Optional[str], Optional[str]], bool]:
+    """AM-114: may_perform(actor, action) — the engine's role rule
+    (el_engine._role_refusal()): the actor fills a role declaring the
+    action, or no role declares it. A fixed actor -> roles map: role
+    membership never changes during a run, so World needs no role
+    dimension. `actor_roles` None means membership is unknown (static
+    builder over a spec with no `fills` statement, transitional): no
+    restriction."""
+    cache: Dict[str, Set[str]] = {}
+
+    def may_perform(actor: Optional[str], action: Optional[str]) -> bool:
+        if actor_roles is None or not action:
+            return True
+        if action not in cache:
+            cache[action] = _declaring_roles(model, action)
+        declaring = cache[action]
+        return not declaring or bool(declaring & actor_roles.get(actor, set()))
+    return may_perform
+
+
 def _build_action_emits_index(model: Any) -> Dict[str, str]:
     """
     AM-99b: map action_name -> the event it emits, for every action with
@@ -2821,6 +2845,13 @@ def build_kripke_model(model: Any, horizon: int = 10,
     for_action_of = {oid: d.for_action for oid, d in descriptors.items()}  # AM-101
     discharge_events = {d.fires_event for d in descriptors.values() if d.fires_event}
     satisfaction_conditions = _build_satisfaction_conditions(model)
+    # AM-114: performers restricted to role fillers, from the spec's `fills`
+    # statements. Transitional: a spec with none stays unrestricted.
+    static_actor_roles: Optional[Dict[str, Set[str]]] = None
+    for actor, role in role_fillers(model):
+        static_actor_roles = static_actor_roles or {}
+        static_actor_roles.setdefault(actor, set()).add(role)
+    may_perform = _role_performer_check(model, static_actor_roles)
 
     # A permit/embargo-only spec (no burdens) must not hit the trivial-model
     # path below — T5 (Exercise) still needs to generate occurrence edges for
@@ -2860,6 +2891,9 @@ def build_kripke_model(model: Any, horizon: int = 10,
         all_actors.update(desc.chain)
     for pdesc in permit_descriptors.values():
         all_actors.add(pdesc.holder)
+    # AM-114: every stated role filler is an actor (a T11 performer), even
+    # one that holds nothing.
+    all_actors.update(static_actor_roles or {})
 
     # Build initial world: obligations with triggered_by start WAITING (trigger
     # not yet fired), as do burdens a ViolationResponse creates (AM-105,
@@ -2933,6 +2967,8 @@ def build_kripke_model(model: Any, horizon: int = 10,
                 continue
             if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
                 continue
+            if not may_perform(desc.holder, desc.for_action):  # AM-114
+                continue
             # AM-102: the holder performs for_action, and the engine's Step 5
             # refuses it if an active embargo the holder holds covers it.
             if embargo_blocks(desc.holder, desc.for_action):
@@ -2976,6 +3012,9 @@ def build_kripke_model(model: Any, horizon: int = 10,
             if current_obligs.get(oid) != ObligationState.CLAIMABLE:
                 continue
             if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
+                continue
+            # AM-114: claiming performs for_action (el_engine.claim()).
+            if not may_perform(desc.holder, desc.for_action):
                 continue
 
             evals = claim_evaluations.get(oid, [])
@@ -3118,6 +3157,8 @@ def build_kripke_model(model: Any, horizon: int = 10,
                 continue
             if current_actors.get(pdesc.holder) != ActorStatus.ACTIVE:
                 continue
+            if not may_perform(pdesc.holder, pdesc.for_action):  # AM-114
+                continue
             # AM-101 strict guard, mirroring the engine's Step 3.5: while a
             # strict burden is actionable, an exercise is refused unless its
             # action discharges some burden the permit holder holds (the
@@ -3196,6 +3237,8 @@ def build_kripke_model(model: Any, horizon: int = 10,
                 continue  # AM-113: discharged only by its event (T5/T11)
             if current_actors.get(desc.holder) != ActorStatus.ACTIVE:
                 continue
+            if not may_perform(desc.holder, desc.for_action):  # AM-114
+                continue
 
             required = permit_requirement_index[desc.for_action]
             all_active = all(
@@ -3272,8 +3315,11 @@ def build_kripke_model(model: Any, horizon: int = 10,
                 # AM-102: an ungated action may be performed by any actor in
                 # the engine; Step 5 refuses it only for an actor holding a
                 # covering embargo, so the edge goes only if every actor does.
+                # AM-114: performers are the ACTIVE actors filling a role
+                # that declares the action.
                 if all(embargo_blocks(a, action_name)
-                       for a, st in current_actors.items() if st == ActorStatus.ACTIVE):
+                       for a, st in current_actors.items()
+                       if st == ActorStatus.ACTIVE and may_perform(a, action_name)):
                     continue
 
                 new_obligs = dict(current_obligs)
@@ -3998,6 +4044,11 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
 
     init_actors: Dict[str, ActorStatus] = {a.actor_name: ActorStatus.ACTIVE for a in state.actors}
     enrolled_actors = sorted(a.actor_name for a in state.actors)  # AM-102 — T11/T9 performers
+    hybrid_actor_roles: Dict[str, Set[str]] = {}  # AM-114: fixed map, from state.actors
+    for a in state.actors:
+        if a.role_name:
+            hybrid_actor_roles.setdefault(a.actor_name, set()).add(a.role_name)
+    may_perform = _role_performer_check(spec, hybrid_actor_roles)
     for desc in descriptors.values():
         for m in desc.chain:
             if m not in init_actors:
@@ -4159,6 +4210,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
                 # AM-102: the engine's Step 5 refuses the discharging action
                 # if an active embargo the holder holds covers it.
                 if (actors.get(effective_holder) == ActorStatus.ACTIVE
+                        and may_perform(effective_holder, desc.for_action)  # AM-114
                         and not embargo_blocks(w, effective_holder, desc.for_action)):
                     new_obligs = {**obligs, oid: ObligationState.DISCHARGED}
                     new_activation = dict(w.activation_steps)
@@ -4259,6 +4311,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
                 continue
             if actors.get(pdesc.holder) != ActorStatus.ACTIVE:
                 continue
+            if not may_perform(pdesc.holder, pdesc.for_action):  # AM-114
+                continue
             # AM-101 strict guard, as static T5: refused while a strict
             # burden blocks unless the action discharges some burden the
             # permit holder holds (effective holder, as strict_burden_blocks
@@ -4323,6 +4377,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
                 continue  # AM-113: discharged only by its event (T5/T11)
             effective_holder = _effective_holder(w, oid, desc)  # AM-81
             if actors.get(effective_holder) != ActorStatus.ACTIVE:
+                continue
+            if not may_perform(effective_holder, desc.for_action):  # AM-114
                 continue
 
             required = permit_requirement_index[desc.for_action]
@@ -4397,7 +4453,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
                 # AM-102: any enrolled actor may perform an ungated
                 # action; the engine's Step 5 refuses it only for one
                 # holding a covering embargo — edge only if not all do.
-                if all(embargo_blocks(w, a, action_name) for a in enrolled_actors):
+                if all(embargo_blocks(w, a, action_name) for a in enrolled_actors
+                       if may_perform(a, action_name)):  # AM-114
                     continue
                 w_fired = _make_world(
                     new_obligs, actors, occurred | {action_name},
@@ -4566,7 +4623,8 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
                     # enrolled actor (from_role resolves the source holder,
                     # not the performer); Step 5 refuses it only for one
                     # holding a covering embargo — edge only if not all do.
-                    if all(embargo_blocks(w, a, action_name) for a in enrolled_actors):
+                    if all(embargo_blocks(w, a, action_name) for a in enrolled_actors
+                           if may_perform(a, action_name)):  # AM-114
                         continue
 
                     new_overrides = {**w.holder_override_dict(), oid: link.to_actor}

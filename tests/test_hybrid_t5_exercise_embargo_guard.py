@@ -110,6 +110,7 @@ embargo blockingEmbargo {
 
 community ProbeCommunity {
     objective: "probe embargo guard suppression"
+    Operator fills operatorRole
     role operatorRole {
         action performAccess {
             inhibited_by_embargo blockingEmbargo
@@ -157,6 +158,7 @@ embargo blockingEmbargo {
 
 community ProbeCommunity {
     objective: "probe embargo guard actor-scoping"
+    Operator fills operatorRole
     role operatorRole {
         action performAccess {
             inhibited_by_embargo blockingEmbargo
@@ -192,11 +194,12 @@ def test_hybrid_t5_revoke_authorization_removes_its_exercise_edge():
     Asserts on the specific exercise: label rather than action-level EF,
     because the referral scenario has a second, independent Permit
     (patientRecordAccessPermitByRole, held by SpecialistClinician) governing
-    the same for_action — revoking the AI agent's authorization-based
-    access correctly leaves the action reachable via the clinician's
-    role-based access, so EF(occurred:access_patient_clinical_records)
-    stays True by design, not by bug. See the 2026-08-13 CONCEPTS_INDEX.md
-    finding for the general label-collision property this sidesteps.
+    the same for_action. See the 2026-08-13 CONCEPTS_INDEX.md finding for
+    the general label-collision property this sidesteps. AM-114: that
+    second permit can no longer be exercised at all —
+    access_patient_clinical_records is declared only in aiExaminationRole,
+    which SpecialistClinician does not fill (CONCEPTS_INDEX open finding,
+    referral SpecialistClinician permit).
 
     DN_014/AM-79 (2026-09-09): the "not in after_labels" assertion here
     used to check the label's absence from the WHOLE graph. Since T8
@@ -234,9 +237,13 @@ def test_hybrid_t5_revoke_authorization_removes_its_exercise_edge():
     assert "exercise:patientRecordAccessPermitByAuthorization → access_patient_clinical_records" in after_labels
     assert "reinstate:patientDataAuthorization" in direct_from_w0
 
-    # The independently-granted role-based permit is unaffected by this
-    # specific revocation and correctly remains reachable.
-    assert "exercise:patientRecordAccessPermitByRole → access_patient_clinical_records" in after_labels
+    # AM-114: the role-based permit's exercise edge is absent before and
+    # after the revocation (previously present in both): its holder,
+    # SpecialistClinician, does not fill aiExaminationRole, the only role
+    # declaring access_patient_clinical_records, so the engine refuses the
+    # action and the verifier has no edge for it.
+    assert "exercise:patientRecordAccessPermitByRole → access_patient_clinical_records" not in before_labels
+    assert "exercise:patientRecordAccessPermitByRole → access_patient_clinical_records" not in after_labels
 
 
 def test_hybrid_t5_reinstate_authorization_restores_its_exercise_edge():

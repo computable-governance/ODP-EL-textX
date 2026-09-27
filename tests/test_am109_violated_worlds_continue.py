@@ -106,6 +106,7 @@ community ProbeCommunity {
     objective: "probe a bounded response moving true to false"
     event qDone
     event start
+    Holder fills r
     role r {
         action doQ { emits: qDone }
         action kickoff { emits: start }

@@ -319,6 +319,8 @@ def _transfers(km):
 
 def test_t9_suppressed_when_every_performer_is_embargoed(t9_spec):
     grants = [("carryBurden", "Giver"), ("giverEmbargo", "Giver"), ("takerEmbargo", "Taker")]
+    # Giver is refused by its embargo; Taker, since AM-114, by the role rule
+    # (it does not fill giverRole) before its embargo is reached.
     for actor, _ in _T9_ACTORS:
         rt = _runtime(t9_spec, _T9_ACTORS, grants)
         assert rt.advance("performTransfer", actor).outcome == "blocked"
@@ -326,11 +328,56 @@ def test_t9_suppressed_when_every_performer_is_embargoed(t9_spec):
     assert not _transfers(km)
 
 
-def test_t9_kept_while_an_actor_is_not_embargoed(t9_spec):
-    grants = [("carryBurden", "Giver"), ("giverEmbargo", "Giver")]
-    rt = _runtime(t9_spec, _T9_ACTORS, grants)
-    assert rt.advance("performTransfer", "Giver").outcome == "blocked"
-    rt = _runtime(t9_spec, _T9_ACTORS, grants)
-    assert rt.advance("performTransfer", "Taker").outcome == "ok"
-    km = _quiet(build_kripke_from_runtime, _runtime(t9_spec, _T9_ACTORS, grants), horizon=3)
+# AM-114: only a filler of the role declaring the carrying action may
+# perform it. Before AM-114 the unembargoed performer here was Taker (a
+# takerRole filler performing giverRole's performTransfer), which the role
+# rule now refuses. A second giverRole filler would not do either: T9 models
+# single-source transfers only (from_role must resolve to one actor, AM-82).
+# So the carrying action gets its own role, filled by two clerks.
+_T9_CLERK = """
+enterprise specification EmbargoT9ClerkProbe
+
+party Giver
+party Taker
+party Clerk1
+party Clerk2
+
+burden carryBurden { state: active discharge_mode: eventual }
+embargo clerkEmbargo { state: active }
+
+community ProbeCommunity {
+    objective: "probe T9 with a separate performer role"
+    role giverRole {
+        action give { actor: giverRole }
+    }
+    role takerRole {
+        action acknowledge { actor: takerRole }
+    }
+    role clerkRole {
+        action performTransfer {
+            actor: clerkRole
+            effect transfer carryBurden from giverRole to takerRole
+            inhibited_by_embargo clerkEmbargo
+        }
+    }
+}
+
+commitment GiverCarries { by: Giver obligation: "carry the burden" creates_burden: carryBurden }
+"""
+
+
+def test_t9_kept_while_an_actor_is_not_embargoed():
+    spec = _spec(_T9_CLERK)
+    actors = [("Giver", "giverRole"), ("Taker", "takerRole"),
+              ("Clerk1", "clerkRole"), ("Clerk2", "clerkRole")]
+    grants = [("carryBurden", "Giver"), ("clerkEmbargo", "Clerk1")]
+    assert _runtime(spec, actors, grants).advance("performTransfer", "Clerk1").outcome == "blocked"
+    rec = _runtime(spec, actors, grants).advance("performTransfer", "Giver")
+    assert rec.outcome == "blocked" and "does not fill role 'clerkRole'" in rec.reason
+    assert _runtime(spec, actors, grants).advance("performTransfer", "Clerk2").outcome == "ok"
+    km = _quiet(build_kripke_from_runtime, _runtime(spec, actors, grants), horizon=3)
     assert _transfers(km)
+    # Only the embargoed clerk fills clerkRole: no performer, no edge.
+    only_clerk1 = [a for a in actors if a[0] != "Clerk2"]
+    km = _quiet(build_kripke_from_runtime, _runtime(spec, only_clerk1, grants), horizon=3)
+    assert not _transfers(km)
