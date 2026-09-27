@@ -6323,7 +6323,24 @@ endpoint description gives the horizon (`_KRIPKE_HORIZON = 10`).
 Fix: add `modal_operator`, `status` and `horizon` to the response.
 Not scheduled.
 
-## `discharged_by` never fires for an event emitted by someone other than the holder — OPEN FINDING (2026-09-26)
+## `discharged_by` never fires for an event emitted by someone other than the holder — OPEN FINDING (2026-09-26), RESOLVED (2026-09-27)
+
+**OPEN FINDING (2026-09-26), RESOLVED 2026-09-27 by AM-113** (see
+`docs/el_grammar_amendments.md`), option 1 below. An emitted event
+discharges every active burden whose `discharged_by` names it, whoever
+emits it; where a burden declares both, its `for_action` no longer
+discharges it. `fire_event()` discharges the same way. Both builders fire
+the event through T5/T11 and discharge on that edge; T1/T6 skip such
+burdens, and the P6a "bidirectional convention" is retired. In both
+terms-of-engagement scenarios `notifyIncident` alone now leaves
+`incidentNotificationBurden` active and the contact's `acknowledgeIncident`
+discharges it; its readings are unchanged ("not compelled, detectable"),
+with the EF witness now `discharge:incidentNotificationBurden via
+acknowledgeIncident (incidentAcknowledged)`. No verdict changed in any
+tracked scenario. Caveat: the engine does not enforce an action's actor
+role, so any enrolled actor, the holder included, can perform
+`acknowledgeIncident` (see "The engine never enforces an action's actor
+role" below). The original finding follows.
 
 **OPEN FINDING** — found while verifying DN_019 step 2.10a
 (`docs/design_notes/DN_019_incident_simulator_storyboard.md`). Both
@@ -6887,3 +6904,89 @@ the global utility). Defining what the engagement's objective is — e.g.
 `all_discharged` over a TokenGroup of the three response burdens, or
 something else — is a design decision for the maintainer, not an
 engineering fix. Not scheduled.
+
+## The engine never enforces an action's actor role — OPEN FINDING (2026-09-27, high priority)
+
+**OPEN FINDING — high priority, scheduled next.** Found in AM-113
+Phase 1. `advance()` Step 3 looks up the action's Role
+(`grammar_action, grammar_role = _find_action(spec, action_name)`) but
+never uses `grammar_role`: nothing checks that the acting actor fills the
+role the action's `actor:` names. Any enrolled actor can perform any
+action that a permit (Step 6) or embargo (Step 5) does not block. Both
+Kripke builders follow the engine (T11 performers: every ACTIVE or
+enrolled actor).
+
+In the terms-of-engagement scenarios the agent (`ExternalAIAgent` /
+`VendorReferralAgent`) can perform `recordRefusal` or `reviewRefusal`,
+recording or reviewing its own refusal, and the operator can perform
+`acknowledgeIncident`, acknowledging its own notification. Since AM-113
+each of these discharges the corresponding burden, whoever performs it,
+so the AM-113 premise "who can cause the event is controlled by who may
+perform the emitting action" holds only once roles are enforced. Verified
+in AM-113 Phase 1: `acknowledgeIncident` by the agent and by the holder
+both return `ok`.
+
+This matters for `el_engine` as a decision point behind a gateway: the
+role an action names is the authorisation boundary the specification
+states, and the engine does not apply it. Fix direction: a Step 2 check
+that the actor fills the action's role (via `ActorState.role_name`, and
+for actors enrolled without a role, a decision on how they are treated),
+mirrored in the builders' performer sets. The terms-of-engagement API
+runtimes enrol every actor without a role (AM-112), so they would need
+role assignments.
+
+## `fire_event()` discharges burdens: event injection needs authentication and authorisation — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — follows from AM-113. `fire_event()` (and
+`Runtime.fire_event()`) now discharges every active burden whose
+`discharged_by` names the event, as well as activating triggered tokens.
+Its `source` is a free-text ledger label: any caller that can reach it
+can discharge an obligation (for example `incidentAcknowledged`) without
+being the party the specification names. Event injection must be
+authenticated and authorised, like the planned violation declaration: who
+may assert that an event happened, checked against the specification.
+The strict guard applies (a call that discharges nothing is blocked while
+a strict burden is actionable), but that is not an authorisation check.
+The verifier does not model externally fired events at all. Not scheduled.
+
+## Emitting a `discharged_by` event with nothing to discharge is unmodelled — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-113 Phase 1 ("variant B"). In the engine,
+an action that emits a `discharged_by` event activates the event's
+`triggered_by` dependents even when no burden is there to discharge: e.g.
+`recordRefusal` before any refusal activates `refusalReviewBurden`. Neither
+builder models this, before or after AM-113: the verifier fires such an
+event only when it discharges something (AM-113 "variant A").
+
+Modelling it directly exposes an artefact of T11's once-per-path guard
+(`action_name in occurred`): `recordRefusal` fired early cannot fire again
+after the real refusal, so the strict `refusalRecordBurden` dead-ends and
+its bounded response flips true → false in every terms-of-engagement
+model (static, spec mode and API hybrid; 16 tests fail). The engine lets
+`recordRefusal` happen twice. Fix the once-per-path artefact first (e.g.
+let an emitting action recur when its event would change the world), then
+model the no-discharge firing. Whether a scenario should forbid the early
+emission (a precondition, or `recordRefusal` requiring the refusal) is a
+separate modelling question. Not scheduled.
+
+## Event scoping: an action may emit another community's event — OPEN FINDING (2026-09-27)
+
+**OPEN FINDING** — found in AM-113 Phase 1. Events are declared in a
+Community or Federation (`EventDecl`; Domain has none, and no actions).
+Names are unique across a specification — textX rejects a second
+declaration of the same name ("name ack is not unique") — and each
+runtime has one specification, so a same-named event in another community
+cannot discharge a burden: engine and builders match by name, which is
+identity here. What is not checked: an action in community C2 may `emits:`
+an event declared in C1 (parses and validates without warning, verified),
+and top-level burdens belong to no community, so their `discharged_by`
+event is in effect their scope. No tracked scenario does this (0 of 11
+emitting actions).
+
+Proposed rule (validator, not runtime): an event belongs to the element
+that declares it; an action may emit only an event declared in its own
+Community or Federation, and a role-scoped (Inline) token's
+`triggered_by`/`discharged_by` must name an event of its own community.
+Needs a standard reference (the grammar cites ODP Part 2 §8.4 for
+`EventDecl`) and a decision on whether a member community's action may
+emit its federation's events. Not scheduled.

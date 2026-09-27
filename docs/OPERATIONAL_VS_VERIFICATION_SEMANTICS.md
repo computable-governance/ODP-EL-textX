@@ -43,7 +43,7 @@ grammar is the shared specification both semantics are interpretations
 |---|---|---|
 | `DeonticToken.state` | `TokenInstance.state` — plain string, mutated in place via `_transition()` | `ObligationState` — typed enum, computed per hypothetical world |
 | `triggered_by` | Checked by `_activate_triggered_tokens()`, called from `advance()` Step 7c (action-driven) and `Runtime.fire_event()` (direct-call, AM-39) | Read into `ObligationDescriptor.triggered_by`; drives initial `WAITING` state in `build_kripke_from_runtime()` / the pure spec-only builder |
-| `discharged_by` / `emits` | `event_discharged` set (Step 3 of `advance()`) | `ObligationDescriptor.fires_event`; drives the P6a cascade (`WAITING → PENDING`) |
+| `discharged_by` / `emits` | `_event_discharge_keys()` (Step 3 of `advance()`, and `fire_event()`): every active burden whose `discharged_by` is the emitted event, whoever holds it (AM-113) | `ObligationDescriptor.fires_event`; T5/T11 (hybrid `_fire_event()`) discharge those obligations on the emitting edge (AM-113; before, T1's P6a cascade raised the event on discharge) |
 
 ## The open problem: correspondence
 

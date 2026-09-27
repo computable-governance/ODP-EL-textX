@@ -9846,3 +9846,145 @@ informative), §C.2.
 **Files changed:** `toolchain/el_api.py`; seven existing test files; new
 `tests/test_am112_status_spec_mode.py`; `docs/CONCEPTS_INDEX.md`;
 `docs/design_notes/DN_019_incident_simulator_storyboard.md`; this file.
+
+## AM-113 (2026-09-27) — `discharged_by` works whoever emits the event (`toolchain/el_engine.py`, `toolchain/el_kripke.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED (2026-09-27), in five parts (commits `645beaf`,
+`597717b`, `5c05178`, `640609d` and this docs commit). Type: engine and
+verifier semantics, one new validator warning (`[W-26]`). **No grammar or
+scenario change.** Resolves the CONCEPTS_INDEX finding "`discharged_by`
+never fires for an event emitted by someone other than the holder"
+(option 1), found in DN_019 step 2.10a.
+
+**Before.** Engine Step 3 collected dischargeable burdens only among those
+the acting actor held (`tok.holder == actor_name`): a destroy effect, a
+matching `for_action`, or the action emitting the burden's `discharged_by`
+event. In both terms-of-engagement scenarios `incidentNotificationBurden`
+(holder: AgentOperator / VendorOrg; `for_action: "notifyIncident"`;
+`discharged_by: incidentAcknowledged`, emitted by the contact's
+`acknowledgeIncident`) was discharged by the operator's own
+`notifyIncident` and never by the acknowledgement, contrary to the
+scenario ("discharged only by the designated contact's acknowledgement").
+`fire_event()` never discharged. The verifier agreed: T1/T6 discharged the
+burden "by" its holder and then raised its `discharged_by` event (the P6a
+cascade, the "bidirectional convention" on
+`ObligationDescriptor.fires_event`), whether or not the discharging action
+emitted it; T5/T11 never fired a `discharged_by` event.
+
+**Decision.** An emitted event discharges every active burden whose
+`discharged_by` names it, whoever emits it. Where a burden declares both,
+`discharged_by` takes precedence: its `for_action` alone no longer
+discharges it. Who can cause the event is who may perform the emitting
+action (but see the new high-priority finding: the engine does not
+enforce an action's actor role).
+
+### Part 1 — engine (`645beaf`)
+
+Step 3: `_event_discharge_keys()` — every active instance (token name,
+holder) whose `discharged_by` is the action's emitted event, whoever holds
+it; destroy and `for_action` stay holder-only, and `for_action` is skipped
+for a burden that declares `discharged_by` (`_event_bound_tokens()`, top-
+level and role-scoped tokens). Step 7a and the AM-57 sibling supersession
+move into a shared `_discharge()` helper. Step 3.5 is unchanged: an action
+that discharges something (now including a non-holder's discharging
+event) passes the strict guard (AM-78). `fire_event()` discharges the same
+way, through `_discharge()`, and passes the strict guard when it
+discharges something; its record's `discharged` lists the burdens. Step 5
+(embargo, AM-102) and Step 6 (permit) apply to the emitting actor, not the
+holder. AM-104: a violated burden is not active, so a late event
+discharges nothing. 848 → 848 (no test exercised the notify path).
+
+### Part 2 — builders (`597717b`)
+
+Both builders: T1 and T6 skip an obligation with `discharged_by`; T1's
+P6a cascade is removed (the "bidirectional convention" is retired) and T6
+fires only its action's own event. `_discharge_by_event()` discharges every
+PENDING obligation whose `discharged_by` is a fired event, whoever holds
+it; T5 and T11 (hybrid: `_fire_event()`, also used by T5/T6) call it on
+the emitting edge, with P6b in the static builder (`_supersede_siblings()`,
+extracted from T1; hybrid still has no P6b). `_build_event_firing_index()`
+no longer excludes emitters of `discharged_by` events, and excludes only
+the `for_action` of obligations without `discharged_by`. T11's strict
+guard applies only to a firing that discharges nothing (Step 3.5). New
+label `discharge:<oid> via <action> (<event>)`. `_discharges_any()` (AM-101)
+matches the emitted event for any holder.
+
+A `discharged_by` event fires only when it discharges something
+("variant A"). The engine also lets such an event activate its dependents
+with nothing to discharge (e.g. `recordRefusal` before any refusal
+activates `refusalReviewBurden`); modelling that ("variant B") exposed
+T11's once-per-path guard as an artefact — `refusalRecordBurden`'s bounded
+response flipped true → false in every terms-of-engagement model — so it
+is left unmodelled and logged as an open finding.
+
+Readings, Phase 1 replay (before → after): no AF status, EF or "eventually
+violated" reading changed in any of 37 models (static models of every
+scenario at k = 1 and at the configured k; all six API runtimes in hybrid
+mode at w0 and in spec mode, at their configured k; the DN_019 hybrid
+model after step 2.9 at k = 480 and k = 1), nor in any of the 317 models
+the test suite builds, except the two fixtures below. In the twelve
+terms-of-engagement models only EF witnesses and sizes changed:
+`incidentNotificationBurden` stays "not compelled, detectable" (bounded
+response fails, EF true), its witness now `discharge:incidentNotificationBurden
+via acknowledgeIncident (incidentAcknowledged)`; `refusalRecordBurden` and
+`refusalReviewBurden` are discharged `via recordRefusal` / `via
+reviewRefusal`. Worlds: static k = 1 2,176 → 2,140; static/spec k = 480
+3,148 → 3,108; API hybrid k = 480 21,012 → 21,612; DN_019 after 2.9
+unchanged (602 at k = 1, 644 at k = 480). The two test fixtures whose
+`discharged_by` event no action emitted (`firstBurden` in
+`test_am99a_deadline_from_activation`, `examineBurden` in
+`test_am99b_hybrid_event_model`) relied on the retired convention: EF true
+→ false, their dependents "not triggered within horizon". 848 → 840
+(8 failed: those fixtures and two label tests).
+
+### Part 3 — validator (`5c05178`)
+
+`[W-26]` (`_validate_undischargeable_event_burden()`): a burden, top-level
+or role-scoped, whose `discharged_by` event no action emits — it can never
+be discharged by its event, and its `for_action` does not discharge it
+either; only an external `fire_event()` or `discharge_burden()` can.
+Advisory. No tracked scenario triggers it. (§6.4.3, §7.8.7.) 840 → 840.
+
+### Part 4 — tests (`640609d`)
+
+Fixtures: `doFirst emits: firstDone` added to the AM-99a deadline fixture;
+a gated `closeCase` (`closePermit`) emitting `caseClosed` added to the
+AM-99b gated fixture. T6's own event firing moves to a small separate
+fixture (`reviewBurden`, gated `reviewCase` emitting `caseReviewed`),
+because `examineBurden` is no longer discharged by its `for_action`; new
+tests that `examineCase` alone leaves it PENDING and that exercising
+`closeCase` discharges it (both builders). Two label tests updated; the
+AM-99a T11 tests now also assert the three discharge labels and that a
+`discharged_by` emitter fires only as a discharge. New
+`tests/test_am113_event_discharge.py` (19): the DN_019 replay in both
+scenarios (notify alone leaves the burden active; the contact's
+acknowledgement discharges it; acknowledgement during a strict freeze
+goes through; no effect after the violation), `fire_event()` discharging
+and its strict guard, the hybrid EF witness at the configured k, and
+`[W-26]`. 840 → 871.
+
+### Part 5 — docs
+
+This entry. CONCEPTS_INDEX: the finding RESOLVED; four new OPEN FINDINGS —
+the engine never enforces an action's actor role (high priority, next);
+`fire_event()` discharges, so event injection needs authentication and
+authorisation; emitting a `discharged_by` event with nothing to discharge
+is unmodelled (variant B, T11 once-per-path artefact); event scoping (an
+action may emit another community's event; proposed validator rule).
+DN_019: step 2.10a and its caption ("discharged by the acknowledgement",
+not "only by the contact"). `docs/KRIPKE_TRANSITION_RULES.md` (T1, T5,
+T6, T11) and `docs/OPERATIONAL_VS_VERIFICATION_SEMANTICS.md` updated.
+
+**Verification:** full suite (`pytest -c pytest.ini`) after each part —
+848 passed → 848 → 840 (8 failed, expected) → 840 (8 failed) → 871
+passed; 1 deselected (slow), 1 xfailed throughout.
+
+**Standard reference(s):** §6.4.3 (burden), §7.8.7 (deontic token
+lifecycle); Annex C (Kripke semantics, informative), §C.2.
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_runtime.py`
+(docstring), `toolchain/el_kripke.py`, `toolchain/el_validator.py`; three
+existing test files; new `tests/test_am113_event_discharge.py`;
+`docs/CONCEPTS_INDEX.md`, `docs/KRIPKE_TRANSITION_RULES.md`,
+`docs/OPERATIONAL_VS_VERIFICATION_SEMANTICS.md`,
+`docs/design_notes/DN_019_incident_simulator_storyboard.md`; this file.

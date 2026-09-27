@@ -85,7 +85,7 @@ Steps 2.2–2.7 are the sequence already asserted in
 | 2.7 | Agent | Tries a non-public file again | execute-action `accessNonPublicFile` | blocked |
 | 2.8 | Security contact | Reviews the refusal | execute-action `reviewRefusal` | ok; refusalReviewBurden discharged (verified) |
 | 2.9 | Operator | Detects an incident; notification clock starts | execute-action `detectIncident` | ok; incidentNotificationBurden pending → active (verified) |
-| 2.10a | Operator, contact | Notifies; contact acknowledges | `notifyIncident`, `acknowledgeIncident` | burden discharged by `notifyIncident` itself, not by incidentAcknowledged (verified; see finding below) |
+| 2.10a | Operator, contact | Notifies; contact acknowledges | `notifyIncident`, `acknowledgeIncident` | `notifyIncident`: ok, burden still active; `acknowledgeIncident` (AgencySecurityContact): ok, incidentNotificationBurden discharged by the acknowledgement (verified since AM-113; before, `notifyIncident` discharged it — see finding below) |
 | 2.10b | Operator | Stays silent past the deadline | `advance-clock`, `check-violations`, `fire-violation-responses` | violated at the first check 4,320 ticks after activation ("72 hours" = 4,320 steps since AM-111, one step per minute; 360 before); since AM-104, `fire-violation-responses` fires lateNotificationResponse (terminate): both of the agent's Authorizations are revoked, its permits superseded, and its next read is blocked (verified; before AM-104 this was a no-op) |
 
 **Verified 2026-09-26** by replaying the test fixture's `_runtime()`
@@ -93,7 +93,24 @@ through 2.2–2.10b in the engine (`Runtime.advance`, `advance_clock`,
 `check_live_violations`, `fire_violation_responses`), and by building
 the hybrid model after 2.9.
 
-**Finding (2.10a): the acknowledgement does not discharge the
+**Finding (2.10a), RESOLVED 2026-09-27 by AM-113.** An emitted event now
+discharges every active burden whose `discharged_by` names it, whoever
+emits it, and `notifyIncident` (the `for_action`) no longer discharges a
+burden that declares `discharged_by`. Replayed in both terms-of-engagement
+scenarios: `notifyIncident` leaves the burden active; the contact's
+`acknowledgeIncident` discharges it; an acknowledgement during the strict
+freeze after a refusal goes through (it discharges something); after the
+violation (2.10b) it has no effect. The hybrid verifier's EF witness is
+now "discharge:incidentNotificationBurden via acknowledgeIncident
+(incidentAcknowledged)"; the panel reading is unchanged (AF false, EF
+true). The UI captions 2.10a as **"notification sent; burden discharged
+by the acknowledgement"**. Not "only by the contact": the engine does not
+enforce an action's actor role, so any enrolled actor, the operator
+included, could perform `acknowledgeIncident` (CONCEPTS_INDEX, "The engine
+never enforces an action's actor role", high priority). The original
+finding follows.
+
+**Finding (2.10a, 2026-09-26): the acknowledgement does not discharge the
 notification burden.** The scenario says incidentNotificationBurden is
 "discharged only by the designated contact's acknowledgement", but:
 
@@ -108,7 +125,8 @@ notification burden.** The scenario says incidentNotificationBurden is
 - The hybrid verifier agrees: its EF witness discharges the burden with
   "discharge:incidentNotificationBurden by AgentOperator".
 
-So the UI must caption 2.10a as "notification sent: burden discharged".
+So the UI had to caption 2.10a as "notification sent: burden discharged"
+(interim caption, superseded by AM-113 above).
 The contact's acknowledgement is only a follow-up with no deontic effect
 today. Making the acknowledgement the discharge needs either a scenario
 change (e.g. drop `for_action: "notifyIncident"` and let a non-holder's
