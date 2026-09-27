@@ -1018,6 +1018,30 @@ def join_role(state: WorldState, spec: Any, actor_name: str, role_name: str,
     return state.with_tokens(tokens), effects_log
 
 
+def role_fillers(spec: Any) -> List[Tuple[str, str]]:
+    """AM-114: (actor name, role name) for every `obj fills role` statement
+    in a Community or Federation body (§7.8.2), in declaration order."""
+    pairs: List[Tuple[str, str]] = []
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Federation"):
+            continue
+        for rf in getattr(el, "role_fillers", []):
+            pairs.append((rf.obj.name, rf.role.name))
+    return pairs
+
+
+def enroll_role_fillers(state: WorldState, spec: Any,
+                        community_tag: str = "") -> Tuple[WorldState, List[str]]:
+    """AM-114: enrol every role filler the specification states
+    (role_fillers()) through join_role(), so each role's on_join grants
+    apply. Returns (state, effects log)."""
+    effects: List[str] = []
+    for actor_name, role_name in role_fillers(spec):
+        state, log = join_role(state, spec, actor_name, role_name, community_tag)
+        effects.extend(log)
+    return state, effects
+
+
 def grant_token(state: WorldState, token: TokenInstance) -> WorldState:
     """Add a TokenInstance to the WorldState."""
     return state.with_tokens(list(state.tokens) + [token])

@@ -32,7 +32,9 @@ _REPO_ROOT = _HERE.parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from el_engine import enroll, grant_token, initial_state, token_from_spec, TransitionRecord
+from el_engine import (
+    enroll, enroll_role_fillers, grant_token, initial_state, token_from_spec, TransitionRecord,
+)
 from el_engine import _embargo_coverage, _embargo_covers  # AM-102
 from el_kripke import (
     build_kripke_from_runtime,
@@ -139,6 +141,7 @@ def _build_gp_referral_runtime() -> Runtime:
     state = enroll(state, "SpecialistParty")
     state = enroll(state, "SpecialistClinician",  role_name="specialistRole")
     state = enroll(state, "SpecialistAIAgent")
+    state, _ = enroll_role_fillers(state, spec)  # AM-114: none stated in this scenario
 
     for token_name, holder in [
         ("referralInitiationBurden",   "GPClinician"),
@@ -184,6 +187,7 @@ def _build_ereferral_runtime() -> Runtime:
     state = enroll(state, "SpecialistPractice")
     state = enroll(state, "SpecialistClinician",  role_name="referredToSpecialistRole")
     state = enroll(state, "SpecialistAIAgent",    role_name="aiExaminationRole")
+    state, _ = enroll_role_fillers(state, spec)  # AM-114: none stated in this scenario
 
     for token_name, holder in [
         ("referralBurden",            "GPClinician"),
@@ -285,6 +289,7 @@ def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None
     state = enroll(state, "SpecialistAIAgent",   role_name="aiExaminationRole")
     state = enroll(state, "Patient",             role_name="patientRole")
     state = enroll(state, "Patient",             role_name="episodePatientRole")
+    state, _ = enroll_role_fillers(state, spec)  # AM-114: none stated in this scenario
 
     for token_name, holder in [
         ("referralInitiationBurden",   referring_practitioner),
@@ -323,6 +328,7 @@ def _build_erequesting_claiming_runtime() -> Runtime:
 
     state = enroll(state, "DiagnosticProviderA", role_name="eligibleProviderA")
     state = enroll(state, "DiagnosticProviderB", role_name="eligibleProviderB")
+    state, _ = enroll_role_fillers(state, spec)  # AM-114: none stated in this scenario
 
     for token_name, holder in [
         ("providerAClaimBurden", "DiagnosticProviderA"),
@@ -336,29 +342,26 @@ def _build_erequesting_claiming_runtime() -> Runtime:
 _PUBLIC_DATA_PORTAL_SCENARIO = _REPO_ROOT / "scenarios" / "terms_of_engagement" / "public_data_portal_scenario.el"
 _EXTERNAL_AGENT_ACCESS_SCENARIO = _REPO_ROOT / "scenarios" / "terms_of_engagement" / "external_agent_access_scenario.el"
 
-# Holders follow each scenario's Commitment/Delegation chains and on_join
-# transfers; build_from_spec() enrols none of these (no `holds` in bodies).
-_PUBLIC_DATA_PORTAL_ACTORS = ["DataAgency", "AgencySecurityContact", "AgencyGateway",
-                              "AgentOperator", "ExternalAIAgent"]
+# AM-114: the role fillers come from each scenario's `fills` statements,
+# enrolled through join_role(), whose on_join transfers grant the agent's two
+# embargoes in their declared states. Listed here: the parties that fill no
+# role, and the grants that follow the Commitment/Delegation/Authorization
+# chains (build_from_spec() makes none of these; no `holds` in bodies).
+_PUBLIC_DATA_PORTAL_ACTORS = ["DataAgency"]
 _PUBLIC_DATA_PORTAL_GRANTS = [
     ("refusalRecordBurden", "AgencyGateway"),
     ("refusalReviewBurden", "AgencySecurityContact"),
     ("incidentNotificationBurden", "AgentOperator"),
     ("publishedDatasetReadPermit", "ExternalAIAgent"),
     ("aggregateQueryPermit", "ExternalAIAgent"),
-    ("outsideScopeEmbargo", "ExternalAIAgent"),
-    ("noCircumventionEmbargo", "ExternalAIAgent"),
 ]
-_EXTERNAL_AGENT_ACCESS_ACTORS = ["ProviderOrg", "ProviderSecurityContact", "ProviderAPIGateway",
-                                 "VendorOrg", "VendorReferralAgent"]
+_EXTERNAL_AGENT_ACCESS_ACTORS = ["ProviderOrg"]
 _EXTERNAL_AGENT_ACCESS_GRANTS = [
     ("refusalRecordBurden", "ProviderAPIGateway"),
     ("refusalReviewBurden", "ProviderSecurityContact"),
     ("incidentNotificationBurden", "VendorOrg"),
     ("serviceRequestSubmitPermit", "VendorReferralAgent"),
     ("patientLookupPermit", "VendorReferralAgent"),
-    ("outsideScopeEmbargo", "VendorReferralAgent"),
-    ("noCircumventionEmbargo", "VendorReferralAgent"),
 ]
 
 
@@ -371,6 +374,7 @@ def _terms_of_engagement_runtime(path, spec, actors, grants) -> Runtime:
     state = initial_state()
     for actor in actors:
         state = enroll(state, actor)
+    state, _ = enroll_role_fillers(state, spec)
     for token, holder in grants:
         state = grant_token(state, token_from_spec(spec, token, holder, 0))
     return Runtime(state, spec)

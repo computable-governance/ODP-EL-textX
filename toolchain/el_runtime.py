@@ -21,12 +21,15 @@ from el_engine import (
     decline as _engine_decline,
     discharge_burden as _engine_discharge_burden,
     enroll,
+    enroll_role_fillers,
     fire_event as _engine_fire_event,
     fire_violation_responses as _engine_fire_violation_responses,
     grant_token,
     initial_state,
+    join_role,
     reinstate_authorization as _engine_reinstate_authorization,
     revoke_authorization as _engine_revoke_authorization,
+    role_fillers,
     token_from_spec,
 )
 
@@ -97,19 +100,28 @@ class Runtime:
         """
         Factory: enroll all EnterpriseObject actors from spec; grant their
         declared tokens instantiated as TokenInstance objects.
+
+        AM-114: an object that `fills` roles (Community/Federation body) is
+        enrolled once per role through join_role(), so on_join grants apply;
+        every other object is enrolled with no role, and fills none.
         """
         state = initial_state()
+
+        fillers = {actor for actor, _ in role_fillers(spec)}
+        for el in spec.elements:
+            if type(el).__name__ == "EnterpriseObject" and el.name not in fillers:
+                state = enroll(state, el.name)
+        state, _ = enroll_role_fillers(state, spec)
 
         for el in spec.elements:
             if type(el).__name__ != "EnterpriseObject":
                 continue
 
-            role = getattr(el, "role", None)
-            role_name = role.name if (role and hasattr(role, "name")) else None
-            state = enroll(state, el.name, role_name)
-
             for tok_ref in getattr(el, "holds_tokens", []) or []:
                 tok_name = tok_ref.name if hasattr(tok_ref, "name") else str(tok_ref)
+                if any(t.token_name == tok_name and t.holder == el.name
+                       for t in state.tokens):
+                    continue  # AM-114: already granted by an on_join
                 try:
                     state = grant_token(state, token_from_spec(spec, tok_name, el.name, state.tick))
                 except KeyError:
@@ -157,6 +169,14 @@ class Runtime:
                     already = any(a.actor_name == actor_name for a in state.actors)
                     if not already:
                         state = enroll(state, actor_name, community_tag=domain_name)
+
+        # AM-114: role fillers stated in Community/Federation bodies, through
+        # join_role() (on_join grants apply), tagged with the filler's domain
+        # when it has one.
+        tags = {a.actor_name: a.community_tag for a in state.actors}
+        for actor_name, role_name in role_fillers(spec):
+            state, _ = join_role(state, spec, actor_name, role_name,
+                                 tags.get(actor_name, ""))
 
         # Step 4: auto-grant terminal burden via Commitment → Delegation chain
         for el in spec.elements:
