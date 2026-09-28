@@ -6,14 +6,7 @@ from setuptools import setup
 
 this_dir = os.path.abspath(os.path.dirname(__file__))
 
-VERSIONFILE = os.path.join(this_dir, "odpel", "__init__.py")
-VERSION = None
-for line in open(VERSIONFILE, "r").readlines():
-    if line.startswith('__version__'):
-        VERSION = line.split('"')[1]
-
-if not VERSION:
-    raise RuntimeError('No version defined in odpel.__init__.py')
+VERSION = "2.0.0"
 
 
 if sys.argv[-1].startswith('publish'):
