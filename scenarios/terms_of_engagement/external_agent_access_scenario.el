@@ -1,7 +1,7 @@
 enterprise specification ExternalAgentAccessScenario
     description: "Tier-1 terms of engagement: a provider's unilateral conditions for any external AI agent calling its FHIR service"
     field_of_application: "Digital health; external AI agents interacting with a provider FHIR endpoint"
-    scope: "Security policies, normative policies and deontic tokens in one specification (worked example, draft)"
+    scope: "Security policies, normative policies and deontic tokens in one specification (worked example)"
 
 /*
  * Motivation: the 2026 Medicare portal incident. An external agent with no
