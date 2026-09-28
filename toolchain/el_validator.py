@@ -1561,7 +1561,7 @@ def _validate_response_revocations(model) -> List[str]:
             if problems:
                 errors.append(
                     f"[V-NEW-23] ViolationResponse '{vr.name}' revokes Authorization "
-                    f"'{auth.name}', which {" and ".join(problems)}. (§6.6.4, §7.8.6)"
+                    f"'{auth.name}', which {' and '.join(problems)}. (§6.6.4, §7.8.6)"
                 )
     return errors
 
