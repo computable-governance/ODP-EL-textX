@@ -59,9 +59,12 @@ notes) is [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
 ### Known limitations
 
 - Install from source; packaging to follow.
-- Hybrid-mode verification of "detectable" obligations: the counterexample
-  reported is a revoke/reinstate cycle, not the deadline violation the
-  obligation is meant to catch. A fix is planned.
+- Hybrid-mode verification of "detectable" obligations: the verdict is correct,
+  but the counterexample reported for AF and bounded-response checks is a
+  revoke/reinstate cycle, not the deadline violation. The "detectable, not
+  compelled" reading is shown in full only in static mode; in hybrid mode it
+  appears through EF(violated). A fix is expected with the fairness work
+  (weak fairness rules these cycles out).
 - No watchdog runs: deadline violations are declared only by an explicit
   call to `declare_violation`; nothing in the toolchain monitors deadlines
   or invokes it automatically.
