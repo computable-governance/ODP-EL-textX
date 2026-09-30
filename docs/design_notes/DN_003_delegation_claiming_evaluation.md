@@ -21,7 +21,7 @@ always-successful speech act. A delegate cannot decline. There is no
 representation of a delegated obligation being *claimed* (accepted) or
 *refused* before it becomes the delegate's active burden.
 
-**Where this came from:** the FHIR / Governed Autonomy analysis (§2.2)
+**Where this came from:** an earlier analysis of the FHIR IG
 identified this against AU eRequesting v1.0.0, which names *claiming of
 diagnostic requests by fillers* as explicitly out of scope for Release 1,
 and whose `Task.status` carries an explicit `rejected` state that the
@@ -101,7 +101,7 @@ pattern (§3, §5.3) than to a rejection.
 > address for any of these transitions, per its own scope statement.
 
 No rebuild of FHIR machinery. This is consistent with the mediator
-pattern's settled shape (non-invasive, external; see analysis §1).
+pattern's settled shape (non-invasive, external).
 
 **Also confirmed directly from the IG, strengthening §4's leverage point
 verbatim:** the Task Group relationship section states plainly:
