@@ -602,6 +602,10 @@ Two additional endpoints added (commit 7dcefcf):
 (port 8001, GP-referral scenario, role-selector + recommended-action
 panel + execute button). See coordination_design_note_v3.md §13.3.
 
+## Git remotes
+`origin` is the working remote. Never push to the remote named `public`
+unless explicitly asked.
+
 ## Commit Conventions
 
 Never add Co-Authored-By lines to commit messages. Commits must show
