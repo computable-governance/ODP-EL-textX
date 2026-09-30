@@ -121,20 +121,3 @@ transaction can't see each other by design. That doesn't remove
 accountability — it just means something else has to hold it. That's
 the role a governance layer is built for."*
 
----
-
-## Where this could go
-
-- **EDOC journal-version future work:** pattern 1 (CAS/optimistic
-  concurrency) pairs naturally with the existing "Can AI govern AI?"
-  recursive-verification thread — mutual exclusion over claims is a
-  concrete, formally verifiable property in the same family as the
-  free-rider risk already noted for `any_discharged`.
-- **LinkedIn Post 3/4 (AIVendor / "Can AI govern AI?" angle):** pattern 3
-  (blind intermediary) is a strong standalone post on its own — it doesn't
-  need the AIVendor framing at all, and could run independently as a piece
-  on why governance and privacy aren't in tension.
-- **Design-note cross-reference:** patterns 1 and 2 could be added as a
-  short "prior art" paragraph in DN_003 once it's revisited for
-  implementation, giving the pool-claiming/lapse design an independent
-  citable grounding beyond the ISO 15414 clauses already used there.

@@ -48,18 +48,18 @@ from that check.
 
 **"Claiming" is explicitly out of scope, and it is genuinely undefined —
 not implicitly covered by `Task.status`.** The Home page's own scope
-statement lists <cite index="17-1">"Claiming of diagnostic requests by
-fillers"</cite> among the technical aspects "not considered priority for the
+statement lists "Claiming of diagnostic requests by
+fillers" among the technical aspects "not considered priority for the
 scope of Release 1," alongside authentication/authorisation/auditing and
 provider discovery. This is a clean, named gap, not something we are
 reading between the lines to find.
 
 **But the word "claim" is *also* used informally inside the Task state
 machine, for a *different* transition than acceptance** — and this changes
-the design. The `received` state is glossed as: <cite index="31-1">"Indicates
+the design. The `received` state is glossed as: "Indicates
 that the task has been acknowledged and claimed by a filler. Some workflows
 may not distinguish between 'received' and 'accepted'. In such cases,
-implementations may transition directly from 'requested' to 'accepted'."</cite>
+implementations may transition directly from 'requested' to 'accepted'."
 So the IG's own informal usage places "claim" *before* acceptance
 (`requested → received → accepted`), with acceptance/rejection as a
 separate, later act — while explicitly permitting the two to collapse into
@@ -71,14 +71,14 @@ assume the collapsed form is the only shape.
 **And there is a third, distinct outcome the IG defines that our original
 framing conflated with rejection: losing a claim to a competing filler.**
 The Task Business Status value set includes a code named `claimed`, glossed
-as <cite index="31-1">"The service request has been claimed by an
-alternative filler,"</cite> mapped not to `rejected` but to
+as "The service request has been claimed by an
+alternative filler," mapped not to `rejected` but to
 `Task.status = cancelled`. The state-transition table independently confirms
 the same pattern from the losing filler's side: a task transitions to
-`cancelled` when <cite index="31-1">"the task is cancelled because it has
-been claimed by an alternative filler."</cite> This is **structurally
-distinct** from `rejected`, which the IG defines as <cite index="31-1">"the
-filler has declined to perform the task before beginning any work."</cite>
+`cancelled` when "the task is cancelled because it has
+been claimed by an alternative filler." This is **structurally
+distinct** from `rejected`, which the IG defines as "the
+filler has declined to perform the task before beginning any work."
 `rejected` = a genuine decline by the filler holding the task. `cancelled`
 (via `claimed`-by-alternative) = the filler's claim opportunity was
 overtaken by a peer, with no decision made by that filler at all.
@@ -105,9 +105,9 @@ pattern's settled shape (non-invasive, external; see analysis §1).
 
 **Also confirmed directly from the IG, strengthening §4's leverage point
 verbatim:** the Task Group relationship section states plainly:
-<cite index="31-1">"It is expected that the status of the task group will
+"It is expected that the status of the task group will
 reflect the most appropriate status among the individual ... however this
-is not enforced."</cite> This is the exact aggregation gap `any_discharged`/
+is not enforced." This is the exact aggregation gap `any_discharged`/
 SUPERSEDED already answers — now grounded in the IG's own wording rather
 than a paraphrase of it.
 
@@ -254,105 +254,40 @@ outcome and the reason to prefer the pool over bounce-back-first.
 
 ### 5.0 Two speech-act shapes for claiming — not one
 
-*Provenance note: this subsection and §5.0a describe general patterns
-Zoran relayed from R2-track material of uncertain publication status —
-not the published R1 IG (which §1's citations draw from and which remain
-fine to cite). Per standing practice for non-public/collaborator-supplied
-material (cf. the convention applied elsewhere in this repository), this is described generically, at the
-pattern level, with no operation names, parameter names, or verbatim text
-reproduced, and no claim that it is publicly citable standards text.*
+*Provenance note: this subsection, §5.0a and §5.4 reflect a general
+pattern from non-public discussion, not the published R1 IG (which §1's
+citations draw from and which remain fine to cite). Per the convention
+applied elsewhere in this repository, it is described only at the level of
+a design distinction, and no claim is made that it is publicly citable
+standards text.*
 
-Session discussion surfaced a claim-transfer pattern that changes the
-shape of this section. The pattern, described generically: a claim/transfer
-operation exists that is **not** an acceptability judgment. Given an
-identifier for the request and a reference to the claiming organisation,
-the operation either succeeds — atomically creating a new fulfilment
-record for the claiming party and cancelling the original, with the
-cancellation later separately acknowledged by the original holder so it
-isn't rediscovered as outstanding (a two-phase lapse, not one transition)
-— or it returns a precise structural reason it did not (bad identifier,
-unresolvable organisation, a conflicting concurrent claim, or the request
-already being held elsewhere/already held by the requesting party, the
-latter treated as a harmless idempotent no-op rather than an error). The
-underlying request-level record is left unchanged; only the
-fulfilment/delegation layer moves.
+Claiming has two distinct speech-act shapes, and this note's design should
+support both rather than pick one:
 
-**Neither this pattern nor the related variant discussed contains a
-judgment step.** There is no filler weighing whether to accept;
-the outcome is structural, not evaluative. This is closer to
-**Declaration (§6.6.5)** — a state of affairs established by virtue of the
-act itself, under authorisation, triggered by an external event — than to
-**Evaluation (§6.6.7)**. An organisation-reference precondition of this
-kind is an authorisation/domain-scope gate, not an acceptability
-assessment.
-
-**Consequence: this note's design should support two distinct speech-act
-shapes, not pick one.**
-
-1. **Evaluative acceptance** (§5.1 below, unchanged) — a delegate genuinely
+1. **Evaluative acceptance** (§5.1 below, unchanged): a delegate genuinely
    *judges* whether to take up an offered burden. This remains the right
    model wherever a real decision is being made: an AI agent or human
    deciding whether to accept a delegated obligation, the
-   `specialist_pool_scenario.el`-style peer-response case, or any future
-   scenario where "should I take this on" is a live question. Grounded in
-   §6.6.7/§B.1.9.6 as before.
-2. **Declarative/atomic transfer** (the pattern above, and the confirmed
-   privacy point below) — an authorised, structurally-gated re-assignment
-   with no evaluative content, triggered by an external event, resolved
-   atomically with a precise outcome. This is a **`Declaration`**, not an
-   `Evaluation` — and appears to be where real deployments' transfer
-   mechanism actually lives.
+   `specialist_pool_scenario.el`-style peer-response case, or any scenario
+   where "should I take this on" is a live question. Grounded in
+   §6.6.7/§B.1.9.6.
+2. **Declarative/atomic transfer**: an authorised, structurally gated
+   re-assignment with no evaluative content, triggered by an external
+   event. This is closer to **Declaration (§6.6.5)** than to
+   **Evaluation (§6.6.7)**: no one weighs whether to accept; the outcome
+   is structural.
 
-Both belong in the toolchain eventually; they answer different questions
-("should this delegate accept" vs. "was this authorised re-assignment
-valid, and what accountability resulted"). The scenario in §6 should be
-built to exercise **both**, not assume the evaluative form covers the real
-mechanism — it doesn't.
+They answer different questions ("should this delegate accept" vs. "was
+this authorised re-assignment valid, and what accountability resulted").
+The scenario in §6 exercises the evaluative form; the declarative form is
+not covered by it.
 
-### 5.0a A confirmed design tension: deliberate mutual anonymity
+### 5.0a Visibility between parties to a transfer
 
-Per the same session discussion (see provenance note above — described
-generically, not quoted): the claiming party and the original holder are
-each deliberately prevented from learning the other's identity through
-this operation.
-
-Confirmed directly (not inferred, though not independently verified
-against a public source): this is a deliberate privacy/commercial design
-decision — competing diagnostic providers are not meant to see each
-other's involvement in a single patient's care episode. This is a genuine
-tension with this toolchain's central accountability-chain claim ("who is
-ultimately accountable regardless of delegation depth"), and it should be
-named plainly rather than smoothed over:
-
-- **At the FHIR/inter-organisational layer, the accountability chain is
-  deliberately severed at the point of transfer, by design, for competitive
-  reasons.** No amount of FHIR extension work would remove this — the two
-  organisations do not want to disclose this to each other, and a
-  standards body cannot compel that disclosure without addressing the
-  underlying competitive concern, which is out of scope for a data
-  standard.
-- **This does not mean accountability is lost — it means it is held
-  somewhere the two FHIR endpoints cannot see.** A Governed Autonomy
-  mediator sitting above both organisations' FHIR servers can hold the
-  full accountability chain internally (exactly what a `WorldState`/chain
-
-  is for) — "an authorised transfer occurred, from party A to party B, at
-  time T, under rule R" — without either FHIR-facing party ever seeing the
-  other's identity. The governance layer's knowledge and the FHIR-level
-  exchange's disclosure are not in conflict; they are answering different
-  questions for different audiences (a regulator or auditor vs. two
-  competing operational systems).
-- **This reframes what "claiming" governance is for, in the real
-  deployment.** It is not to help two fillers negotiate a handoff (FHIR's
-  atomic operation already does this correctly and efficiently). It is to
-  give a **third party who legitimately needs the fuller picture** — a
-  regulator, an auditor, the patient's own governance-aware advocate, or a
-  neutral cross-vendor governance layer — an accountability record neither
-  competing FHIR party is willing or able to hold. Worth carrying into the
-  commercial framing (§9 of the analysis document) as a distinct value
-  proposition, separate from the pool-claiming/evaluation story: **a
-  privacy-preserving accountability ledger for a relationship the
-  participants have deliberately kept opaque to each other.**
+Some deployment settings limit what the parties to a transfer may learn of
+each other. This note does not record the detail: it is not needed for the
+evaluative path implemented in AM-60 to AM-63, and it bears on the
+declarative/atomic path (§5.0, §5.4) only.
 
 ### 5.1 Acceptance as an extended `Evaluation`
 
@@ -462,41 +397,16 @@ applies — see §7, deferred.
 
 ### 5.4 The declarative/atomic path's consequences for the engine
 
-*Provenance note: as with §5.0/§5.0a, this describes a general pattern
-Zoran relayed, not published standards text — no specific field or code
-names from that material are reproduced.*
+*Provenance note: as with §5.0, this reflects a general pattern from
+non-public discussion, not published standards text. Operational detail is
+not reproduced here.*
 
-Distinct from §5.1–5.3's evaluative flow. If a future session builds this
-second speech-act shape (§5.0), the following design implications follow
-from the general pattern discussed, not from any citable specification:
-
-- **Two-phase lapse, not one transition.** The losing side's task is first
-  marked lapsed, then separately *acknowledged* by the original holder to
-  stop it being rediscovered as outstanding. This is a handshake — mark-
-  lapsed → acknowledge-lapsed — not a single state flip. Whatever engine
-  representation is chosen for §5.2/§5.3's "lapsed" state, it should
-  support this two-step form for the declarative path (the evaluative
-  path's simple sibling-walk lapse in §5.3 may not need it).
-- **Idempotent retry is a first-class outcome, not an error.** A claimer
-  who already holds the burden gets "no action needed, you already hold
-  it," not a failure. Any engine/API surface for the declarative path
-  should return this as a distinct, non-error result, not collapse it into
-  either "accepted" or "rejected."
-- **Concurrency guard needed.** A transfer attempt racing another attempt
-  on the same request is a real case this kind of atomic operation
-  typically defends against explicitly. Any engine implementation of this
-  path needs its own concurrency story; this is not covered by the
-  evaluative pool's sibling-lapse walk, which assumes serial resolution.
-- **Infrastructure errors are not deontic and should not be modelled as
-  token states.** Failures such as a bad identifier or an unresolvable
-  organisation reference are request-level errors, not obligation-state
-  outcomes — exclude them from the token/obligation model entirely,
-  surface them as ordinary API errors.
-- **The underlying request record stays untouched by a transfer** — only
-  the fulfilment/delegation layer moves. This confirms
-  the existing Layer 1/Layer 3 boundary (§1) rather than requiring a new
-  one: a transfer is a delegation-layer event, never a commitment-layer
-  one.
+The declarative/atomic path is not implemented and not scheduled. Its engine
+implications (how superseded holders are handled, retry semantics,
+concurrency, and how request-level errors are separated from obligation
+states) are deferred and are not recorded in this note. Any future design
+must respect the existing Layer 1 / Layer 3 boundary (§1) and is distinct
+from the evaluative flow of §5.1-5.3.
 
 ---
 
