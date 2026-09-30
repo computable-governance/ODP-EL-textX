@@ -10053,7 +10053,7 @@ declared state.
 
 ### Part 1 — tests: gitignored scenarios
 
-`scenarios/industrial_procedure/` and `scenarios/xmpro_mediator/` are
+`scenarios/industrial_procedure/` and a second mediator-scenario directory are
 gitignored but read by the suite. `test_am110_deadline_scale.py::
 test_suggest_deadline_scale[...industrial_procedure...]` now skips when
 the file is absent (it failed in a clean clone). The AM-111 corpus test

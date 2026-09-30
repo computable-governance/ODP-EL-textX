@@ -258,7 +258,7 @@ outcome and the reason to prefer the pool over bounce-back-first.
 Zoran relayed from R2-track material of uncertain publication status —
 not the published R1 IG (which §1's citations draw from and which remain
 fine to cite). Per standing practice for non-public/collaborator-supplied
-material (cf. the XMPro convention), this is described generically, at the
+material (cf. the convention applied elsewhere in this repository), this is described generically, at the
 pattern level, with no operation names, parameter names, or verbatim text
 reproduced, and no claim that it is publicly citable standards text.*
 

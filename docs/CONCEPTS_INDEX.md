@@ -2356,7 +2356,7 @@ planner to have an opinion about *exercising* a Permit (e.g., "merely
 permitted but strategically valuable to do now"), that would be a
 genuine new extension — `utility()` would need to read `occurred_actions`,
 which it structurally does not today — not a bug fix to this finding.
-No such case identified yet (checked against the industrial/XMPro
+No such case identified yet (checked against the industrial-procedure
 context and IT-governance framing; neither surfaced one).
 
 **Status:** resolved by direct code inspection, 2026-08-11. No
@@ -7154,7 +7154,7 @@ warning: an action name declared in more than one role. Not scheduled.
 ## Tracked tests read gitignored scenarios — RESOLVED (2026-09-27)
 
 **OPEN FINDING, RESOLVED 2026-09-27 by AM-114 part 1.**
-`scenarios/industrial_procedure/` and `scenarios/xmpro_mediator/` are
+`scenarios/industrial_procedure/` and a second mediator-scenario directory are
 gitignored, but the suite reads them: in a clean clone
 `test_am110_deadline_scale.py::test_suggest_deadline_scale[...industrial_procedure...]`
 failed and the AM-111 corpus test collected four fewer cases. The AM-110
