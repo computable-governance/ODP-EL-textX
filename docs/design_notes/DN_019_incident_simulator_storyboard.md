@@ -2,8 +2,8 @@
 
 **Status:** DESIGN NOTE, not scheduled (2026-09-26). Spec for a view in
 computable-governance-ui's `coordination-simulator.html`, driven by
-`el_api`. Also intended as a figure source for the government note and
-the chief-architect note.
+`el_api`. Also intended as a figure source for related briefing
+material.
 
 **Scenario:** `scenarios/terms_of_engagement/public_data_portal_scenario.el`
 (mirrors the 2026 Medicare portal incident with generic names).
