@@ -59,6 +59,14 @@ notes) is [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
 ### Known limitations
 
 - Install from source; packaging to follow.
+- Hybrid-mode verification of "detectable" obligations: the counterexample
+  reported is a revoke/reinstate cycle, not the deadline violation the
+  obligation is meant to catch. A fix is planned.
+- No watchdog runs: deadline violations are declared only by an explicit
+  call to `declare_violation`; nothing in the toolchain monitors deadlines
+  or invokes it automatically.
+- Permits and embargoes declared outside an Authorization have no domain
+  scope, and the `domain_scope` field on an Authorization is not checked.
 
 
 [Unreleased]: https://github.com/computable-governance/ODP-EL-textX/compare/v2.0.0...HEAD
