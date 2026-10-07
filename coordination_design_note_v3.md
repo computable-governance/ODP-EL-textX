@@ -1315,8 +1315,6 @@ SUPERSEDED rather than being left dangling — the first time that fix
 has been exercised by a real multi-burden `any_discharged` group in an
 actual verification run, behaving as intended.
 
-Full details: `SESSION_SUMMARY_2026_06_16.md`.
-
 ### 13.2 Open items arising from the GP-referral session (2026-06-16)
 
 7. **Possible new validator rule (provisionally V-16) for unbacked

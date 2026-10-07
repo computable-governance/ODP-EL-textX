@@ -8,15 +8,11 @@ during development.
 
 ## Running the suite
 
-Use the interpreter that has textX and fastapi installed, and pass the
-config file explicitly:
+From the repository root, with the dependencies installed
+(`pip install -r requirements.txt -r requirements-dev.txt`), bare
+`python -m pytest` works; `pytest.ini` is picked up automatically:
 
-    /opt/homebrew/bin/python3.11 -m pytest -c pytest.ini -v
-
-The `-c pytest.ini` is currently required: bare `pytest` fails during
-config discovery because of a pre-existing INI syntax bug in `setup.cfg`
-(stale packaging scaffolding — see the "Known issue" note in `CLAUDE.md`).
-Any CI configuration must use `-c pytest.ini` until that is resolved.
+    python -m pytest -v
 
 ### Slow tests
 

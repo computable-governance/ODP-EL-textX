@@ -12,8 +12,8 @@ Thanks for your interest. This note keeps the terms simple.
 ## Scenario requirements
 
 - Illustrative data only. No confidential, client or third-party material.
-- The specification must parse and validate with no errors and no warnings
-  on the current release, and any tests you add must pass. Say which release
+- The specification must parse and validate with no errors on the current
+  release, with any warnings explained in the scenario README, and any tests you add must pass. Say which release
   you tested against.
 - Include a short README in the scenario folder: what it models, which
   constructs it uses, and any limits of the current release it runs into.

@@ -38,7 +38,7 @@ ODP-EL-textX/
 ├── toolchain/       Four-layer Python toolchain (parser, validator,
 │                    reasoner, Kripke verifier, FHIR mapper)
 │
-├── scenarios/       11 example governance specifications
+├── scenarios/       11 scenario folders
 │                    (see scenarios/README.md)
 │
 └── docs/            Design notes, toolchain reference, grammar amendments
@@ -46,7 +46,7 @@ ODP-EL-textX/
 
 ## Getting Started
 
-Tested with Python 3.12 and 3.13. The toolchain is run from source, from the
+Tested with Python 3.13. The toolchain is run from source, from the
 repository root; there is nothing to install beyond the dependencies.
 
 ```bash
@@ -77,7 +77,7 @@ Run the Kripke verifier demo on the consent scenario:
 python toolchain/el_kripke.py
 ```
 
-Start the read-only coordination API (interactive docs at
+Start the coordination API (interactive docs at
 http://127.0.0.1:8765/docs):
 
 ```bash
