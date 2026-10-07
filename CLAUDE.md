@@ -161,8 +161,6 @@ ODP-EL-textX/
 ├── README.md
 ├── CHANGELOG.md
 ├── requirements.txt
-├── setup.py / setup.cfg
-├── runtests.sh / install-dev.sh / install-test.sh
 ├── PULL_REQUEST_TEMPLATE.md
 └── LICENSE
 ```
@@ -170,28 +168,17 @@ ODP-EL-textX/
 **Grammar convention:** `.tx` is the textX file extension. Always refer to the
 v2 grammar as `grammar/v2/el_grammar.tx`.
 
-**Root scaffolding files** (`setup.py`, `setup.cfg`, `runtests.sh`, etc.) are
-inherited from Igor Dejanovic's original fork and belong at root. Do not move
-or remove them.
-
-**Known issue (found 2026-07-05):** `setup.cfg`'s `[options.package_data]`
-section references a package named `odpel` that does not exist in this repo
-(no `odpel/` directory; `setup.py` would itself crash on the missing
-`odpel/__init__.py`, independent of this). This is stale scaffolding — the
-actual grammar files live at `grammar/v1/odpel.tx` and `grammar/v2/el_grammar.tx`,
-not under a top-level `odpel` Python package. `setup.cfg:45` also has a
-pre-existing INI syntax bug (an indented line with no preceding `key =`)
-that causes bare `pytest` invocations to fail with `unexpected value
-continuation` during config discovery, before any test collection happens.
-Per the "do not move or remove" guidance above, this has been left
-untouched rather than patched — run the test suite as `pytest -c pytest.ini`
-(not bare `pytest`) until someone makes a deliberate decision to dedent,
-delete the dead section, or properly fix `setup.py`'s missing `odpel`
-package. Worth accounting for in any future CI configuration.
+**Packaging:** there is no installable package. The packaging scaffolding
+inherited from the original fork (`setup.py`, `setup.cfg`, `install-dev.sh`,
+`install-test.sh`, `runtests.sh`) was removed after v2.0.0: it named an
+`odpel` package that never existed, so `pip install -e .` installed nothing
+importable and registered a broken textX language entry point. The toolchain
+runs from source, from the repository root:
+`pip install -r requirements.txt -r requirements-dev.txt`.
 
 **Testing:** the automated test suite lives in `tests/`. See
-`tests/README.md` for the layered testing strategy and how to run the
-suite (note: use `pytest -c pytest.ini`, per the issue above).
+`tests/README.md` for the layered testing strategy. Run it from the
+repository root with `python -m pytest`.
 
 **v1 grammar** (`grammar/v1/`) covers approximately 60–70% of ISO/IEC 15414
 concepts, using a partitioned two-file design (`odpel.tx` + `odppolicy.tx`).
