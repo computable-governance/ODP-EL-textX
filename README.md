@@ -105,9 +105,9 @@ The v2 grammar extends the v1 MIT-licensed work by Igor Dejanović et al.
 ## References
 
 - Milosevic, Z. (2026). *Computable Governance for Autonomous Agents:
-  Architecture and Implementation.* SoEA4EE 2026. [add venue details]
+  Architecture and Implementation.* SoEA4EE 2026.
 - Milosevic, Z. (2026). *Compelled versus Merely Detectable Obligations in
-  Autonomous AI Governance.* EDOC 2026 Forum. [add venue details]
+  Autonomous AI Governance.* EDOC 2026 Forum.
 - Linington, P., Milosevic, Z., Tanaka, A., Dejanović, I. (2025).
   *Using DSLs to manage consistency in long-lived enterprise language
   specifications.* Software and Systems Modeling, 24, 741–754.
