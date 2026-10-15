@@ -379,6 +379,16 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - `policy_conflicts()` uses simple obligation/prohibition text matching;
   does not handle semantic equivalence of differently-worded rules
 
+**Runtime engine:**
+- `effect destroy` acts on burdens only (2.0.0): aimed at a permit or an
+  embargo, the action returns ok with no effects, both tokens stay active,
+  and the validator gives no warning
+- `effect create` creates the token active (2.0.0): whatever state the
+  token was declared with (for example `pending` with `triggered_by`), it
+  is created active and the trigger is ignored, so its deadline counts
+  from creation, not from the trigger. A token that must wait for an
+  event has to be held by its party from the start of the run
+
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)
   due to arpeggio cross-reference list resolution bug

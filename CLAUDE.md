@@ -218,6 +218,11 @@ subsequent sub-rule matches to fail (textX continues consuming tokens as
 cross-reference candidates). **Fix already applied**: `Federation` uses
 one `member: <name>` statement per community (`MemberRef` rule) rather than
 a comma-separated list. Apply the same pattern for any new multi-reference list.
+`MemberRef` parses only inside a federation body; `member: X` in a plain
+community is a syntax error. In 2.0.0, `member: C fills R` has no runtime
+effect: neither `Runtime.build_from_spec` nor `build_from_federation` enrols
+C as the filler of R. State who fills a role with `X fills role` in the
+community.
 
 ### 5.4 Key cross-references (typed, not plain ID)
 ```
@@ -400,7 +405,10 @@ Discovered during V-16a implementation (commit 3aae4be).
 ### 7.4 ODP-EL subset operationalized
 Fully active: DeonticToken lifecycle, Burden/Permit/Embargo, ActionTemplate,
 Policy/PolicyEnvelope, Rule (preconditions/effects), Violation materialisation,
-two-party delegation.
+two-party delegation. Rule (preconditions/effects) is active except for two
+effect limits: `effect destroy` does nothing on a permit or embargo and
+`effect create` always creates the token active (see Known Limitations in
+`docs/DSL_TOOLCHAIN_REFERENCE.md`).
 
 Not implemented: Federation, naming contexts, cross-community interactions,
 multi-party authorization chains, full speech act taxonomy, Calendar EO.

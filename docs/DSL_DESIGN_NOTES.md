@@ -370,9 +370,11 @@ community ResearchAccessCommunity
 Demonstrates federation of autonomous communities with shared objective, withdrawal behaviour, and conflict resolution strategy.
 
 ```
-federation LibraryServicesFederation {
+federation LibraryServicesFederation
     description: "Coordinates borrowing, reservation, and catalogue services
                   across all campus libraries"
+{
+    objective: "Provide integrated library services across all campus libraries"
 
     shared_objective: "Provide seamless integrated library services
                        to all affiliated users across campuses"
@@ -385,9 +387,6 @@ federation LibraryServicesFederation {
         "An item cannot be simultaneously borrowed and reserved"
     invariant membershipConsistency:
         "A user's borrowing privileges apply uniformly across all campuses"
-
-    applies itemAvailabilityPolicy to community BorrowingCommunity
-    applies itemAvailabilityPolicy to community ReservationCommunity
 
     withdrawal_behaviour: "Withdrawing community retains its internal
                            governance but loses access to shared catalogue
