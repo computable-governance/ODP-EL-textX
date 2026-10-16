@@ -493,6 +493,21 @@ standing duty's state in the model (PENDING while active).
 Send each value as text: a JSON number is not established, and the reason
 says to send text (`e.g. "25000000.00 AUD"`).
 
+**Adapter checklist.**
+- Send every value as text in the exact notation: `"25000000.00 AUD"`,
+  `"8.5%"`. Any other form (`"8.5"`, `"0.085"`, `"10 %"`, `"25000000"`
+  with no currency) is not established in a precondition and "not judged"
+  in a standing duty, never a breach.
+- Before passing an act on, run a check under a clock with the current
+  time as `as_at`: an act carries no time, so a late act made before the
+  next check counts as on time.
+- Treat the first breach as final and keep it: later checks do not report
+  it again.
+- Fire a term-ending event only after the duty is active: one that fires
+  earlier is forgotten.
+- Compute shares in the adapter and send them as percentages; the DSL
+  compares, it does not compute.
+
 **Not supported.** A term given as a duration; declaring a breach; ending a
 term by community conclusion; currency conversion; arithmetic; proof of
 where a reported value came from.
@@ -806,14 +821,6 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   does not handle semantic equivalence of differently-worded rules
 
 **Runtime engine:**
-- `effect destroy` acts on burdens only (2.0.0): aimed at a permit or an
-  embargo, the action returns ok with no effects, both tokens stay active,
-  and the validator gives no warning
-- `effect create` creates the token active (2.0.0): whatever state the
-  token was declared with (for example `pending` with `triggered_by`), it
-  is created active and the trigger is ignored, so its deadline counts
-  from creation, not from the trigger. A token that must wait for an
-  event has to be held by its party from the start of the run
 - Claiming (2.0.0): a burden offered to a pool is claimable, and the
   holder who made the accept Evaluation claims it by performing its action
   or calling `claim()`; an accept alone changes nothing and a reject is a
@@ -823,14 +830,6 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   and is discharged without a claim. The hybrid verifier has no claim
   step: it treats claimable as pending, so it can discharge a burden
   nobody claimed
-- `conditional_action` (2.0.0): parsed, and the token names inside it are
-  resolved, but nothing reads its contents. It has no effect in the
-  engine, validator, Kripke model or reasoner. It sits in a role beside
-  actions, not inside one
-- `for <role>` on a deontic requirement (2.0.0): in `requires_permit p for
-  r` the `for r` part is parsed and stored but never checked. An
-  undeclared role name is accepted without warning, and behaviour is
-  identical
 - `setting_behaviour` and `community_object` (2.0.0): both are parsed, and
   `community_object` is validated (its `abstracts` community must be
   declared), but nothing reads either at runtime or in the verifier.
@@ -914,10 +913,183 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   the verifier's claims about them instead of modelling them.
 - Reported values are asserted by the caller; kept means kept at the
   moments checked, and nothing runs a check on its own.
-- An `ended_by` event that fires before the duty starts is not remembered.
 - A term end by date needs a clock; one fixed UTC offset.
 - Not supported: a term given as a duration, declaring a breach, ending a
   term by community conclusion.
+
+**Found by running contract clauses (v2.0.0 and 2.1.0):**
+
+Procurement and contract clauses (a Contractor, a Principal) were written
+as small specifications and played through the Runtime on v2.0.0 and on
+2.1.0. Each code block below is an excerpt from a specification that
+parsed and validated with its scaffolding (parties, role fillers, the
+community); it is not a complete specification. Where a result is the
+same on both versions, it says so.
+
+- **`effect destroy` acts on burdens only.** v2.0.0 and 2.1.0, the same:
+  aimed at a permit or an embargo, the action returns ok, the token stays
+  active, the ledger has no effect line and the validator gives no
+  warning. After `endSiteAccess` the permit's action still runs; after
+  `liftRemovalEmbargo` the embargo still blocks. Aimed at a burden, it ends
+  it, but the ledger reads `discharged burden 'siteCleanupBurden'`, as if
+  the work had been done.
+
+  ```
+  action endSiteAccess { actor: contractorRole effect destroy siteAccessPermit }
+  action liftRemovalEmbargo { actor: contractorRole effect destroy equipmentRemovalEmbargo }
+  action cancelCleanup { actor: contractorRole effect destroy siteCleanupBurden }
+  ```
+
+- **`effect create` grants the token active.** v2.0.0 and 2.1.0, the same:
+  whatever state the token was declared with, it is created active and its
+  trigger is ignored, so its deadline counts from creation. Below, with the
+  defect never reported, `fixDefect` was violated two hours after the work
+  order (`elapsed 122 >= deadline 120 steps`). Reported 61 minutes after
+  the work order, it was violated at minute 123 (`elapsed 123 >= deadline
+  120 steps`), only 62 minutes after the report. A token that must wait for
+  an event has to be held by its party from the start of the run.
+
+  ```
+  burden fixDefect {
+      for_action: "repairDefect"
+      state: pending
+      deadline: "2 hours"
+      triggered_by: defectReported
+  }
+
+  action issueWorkOrder { actor: principalRole effect create fixDefect to contractorRole }
+  ```
+
+  2.1.0 only: a standing duty created this way is active and judged from
+  creation, so a check before its trigger can breach it. Its `ends_at` and
+  `ended_by` still end it.
+
+  ```
+  action issueWorkOrder { actor: principalRole effect create keepLiabilityCover to contractorRole }
+  ```
+
+- **`for <role>` is not checked.** v2.0.0 and 2.1.0, the same: in
+  `requires_permit p for r` the `for r` part is parsed and stored, but the
+  engine checks the performer's own permit. With the permit held by the
+  Principal, the Contractor's action below is refused (`required permit
+  'subcontractApproval' not held by actor`); held by the Contractor, it
+  runs. An undeclared role name is accepted without warning.
+  `inhibited_by_embargo e for r` parses through the same rule; only the
+  `requires_permit` form was run.
+
+  ```
+  action subcontractWork {
+      actor: contractorRole
+      requires_permit subcontractApproval for principalRole
+  }
+  ```
+
+- **The contents of a `conditional_action` are not read.** v2.0.0 and
+  2.1.0, the same: it is parsed and its token names are resolved, but
+  nothing reads it (engine, validator, Kripke model, reasoner). It sits in
+  a role beside actions, not inside one. Below, the ordinary action
+  `subcontractWork` (declared beside it with no `requires_permit`) runs
+  without the permit, and `subcontractWithApproval` can itself be
+  performed as an undeclared, unrestricted action. Write the rule as an
+  ordinary action with `requires_permit`.
+
+  ```
+  conditional_action subcontractWithApproval {
+      actor: contractorRole
+      requires_permit subcontractApproval
+  }
+  ```
+
+- **An act carries no time.** v2.0.0 never judged a deadline by its date.
+  2.1.0 judges a date deadline only at a check, against its `as_at`; an act
+  carries no wall-clock time. A delivery made after the due moment but
+  before the next check is recorded as `discharged burden
+  'deliverReport'`, and the later check reports nothing: the late act
+  counts as on time.
+
+  ```
+  deadline: "by 2027-06-30"
+  ```
+
+- **A standing duty's breach is reported once.** v2.0.0 cannot express a
+  standing duty. In 2.1.0 the first breach makes the duty violated; later
+  checks, with a bad or a good value, add nothing, and the API's
+  `standing` list no longer includes it (`standing=[]`).
+
+  ```
+  burden keepLiabilityCover {
+      standing
+      keeps: "public liability cover" >= MinimumLiabilityCover
+      ends_at: ContractEnd
+      ended_by: contractCompleted
+      state: pending
+      triggered_by: contractAwarded
+  }
+  ```
+
+- **A term-ending event that fires before the duty starts is forgotten.**
+  v2.0.0 cannot express a standing duty. In 2.1.0, with the duty above,
+  `contractCompleted` fired before `contractAwarded` changes nothing; at
+  the award the duty becomes active, and a later check with a low value
+  breaches it although the contract was already completed.
+
+- **Values must be in the exact notation.** v2.0.0 has no comparison
+  (`precondition: "x" >= 5` does not parse). In 2.1.0 a value written in
+  any other form is never compared. In a precondition the act is refused
+  as not established: `"25000000"` gives `precondition not established:
+  'public liability cover' reported 25000000: not an amount value`, and
+  `"25000000 NZD"` is refused for its currency. In a standing duty the
+  check gives "not judged", never a breach: `"8.5"`, `"0.085"` and `"10 %"`
+  each give `'subcontract share' reported <value>: not a percentage
+  value`.
+
+  ```
+  precondition: "public liability cover" >= MinimumLiabilityCover
+  keeps: "subcontract share" <= MaximumSubcontractShare
+  ```
+
+- **A date written in words is not enforced.** v2.0.0 and 2.1.0, the same:
+  the deadline below is accepted with two warnings and is never violated
+  (the step clock was run to 100000 minutes on both; on 2.1.0 a check with
+  an `as_at` in July also reports nothing, not even "not judged"). The
+  2.1.0 date warnings do not fire, because the text has no `YYYY-MM-DD`
+  date. Write `"by 2027-06-30"`.
+
+  ```
+  deadline: "by 30 June 2027"
+  ```
+
+  The two warnings, on both versions:
+  - `[W-24] Eventual burden 'deliverReport' has no enforceable deadline
+    ('by 30 June 2027') and no episode-conclusion path: it is never
+    violated, at runtime or in the verifier. Give it a deadline with a
+    time unit, or put it in a satisfaction group whose community opts in
+    with on_objective_achieved. (§6.4.3, §7.8.7)`
+  - `[W-25] Burden 'deliverReport' has deadline 'by 30 June 2027': it
+    contains a number but no recognised time unit (second, minute, hour,
+    day, week, month, year), so the number is ignored and the deadline is
+    never measured, at runtime or in the verifier. Write the unit out,
+    e.g. "2 hours". (§6.4.3, §7.8.7)`
+
+- **The suggested deadline scale misses a burden granted by `holds`.**
+  v2.0.0 and 2.1.0, the same: for the burden below, held by the Contractor
+  through `holds`, `el_kripke.suggest_deadline_scale(spec, 10)` returns 1,
+  because the suggestion reads only spec-level obligation descriptors and
+  this burden has none. At k = 1, after the incident,
+  `GET /obligations/notifySafetyIncident/status` gives `compelled: false`,
+  `detectable: true` and `status: "not resolved within horizon"`. With
+  `deadline_scale=160` set by hand, it gives a counterexample that ends
+  with the burden violated.
+
+  ```
+  burden notifySafetyIncident {
+      for_action: "notifyIncident"
+      state: pending
+      deadline: "24 hours"
+      triggered_by: safetyIncident
+      discharge_mode: eventual
+  }
+  ```
 
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)
