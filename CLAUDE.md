@@ -376,7 +376,7 @@ Discovered during V-16a implementation (commit 3aae4be).
   (P2 body dissolution) structural bugs fixed; V-01 extended to Federation;
   V-12 extended to include Domain in all_communities index
 
-**Next task:** GP-referral scenario (see §9 and §13).
+**Next task (2026-06-06):** GP-referral scenario (see §9 and §13); built 2026-06-16 (§13.1), since superseded (§9).
 
 ---
 
@@ -520,7 +520,7 @@ domain-independent. Never let clinical or FHIR concepts leak into
 | E-commerce | `scenarios/ecommerce/ecommerce_scenario.el` | Secondary validation scenario | Does not parse — see docs/CONCEPTS_INDEX.md (AM-93 note) |
 | FHIR-generated | `scenarios/fhir/generated_governance.el` | Output of FHIR mapper pipeline | ✓ Complete |
 | Kent Library | Annex B.2 of X.911 | Thomas's regression baseline (in pyodpel test suite) | ✓ Stable |
-| GP-referral | `scenarios/gp_referral/` (planned) | Multi-party delegation across primary/specialist care; federation scenario | **Not yet built** |
+| GP-referral | `scenarios/gp_referral/gp_referral_scenario.el` | Multi-party delegation across primary/specialist care; federation scenario | Superseded by `scenarios/referral/referral_scenario.el` (see `scenarios/README.md`) |
 
 ---
 

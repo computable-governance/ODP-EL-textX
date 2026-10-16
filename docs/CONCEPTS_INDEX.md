@@ -25,7 +25,7 @@ maturity status).
 | Establishing behaviour | Implemented (AM-33) — demonstrated in `referral_scenario.el` |
 | Creation-style / episodic community | Settled 2026-07-07: created COMMUNITY, not federation (corrected from a 2026-07-06 conclusion) — demonstrated in `referral_scenario.el` |
 | Implicit creation / standing communities | Implemented |
-| Party vs agent for clinicians | Fixed in `referral_scenario.el` (2026-07-07); `gp_referral_scenario.el` asymmetry remains until superseded |
+| Party vs agent for clinicians | Fixed in `referral_scenario.el` (2026-07-07); `gp_referral_scenario.el` asymmetry remains (that file is superseded, kept for record) |
 | Authorization ≠ delegation | Implemented + documented |
 | Permit split by grant mechanism | Implemented (AM-31b) |
 | Accountability chain composition | Insight captured, no formal treatment |

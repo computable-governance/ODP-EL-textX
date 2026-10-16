@@ -137,10 +137,17 @@ else:
   and instants, and the ISO 4217 three-letter form for currency codes (the
   code list itself is not checked); the source clauses are to be
   confirmed. Durations are written `60 days`, not ISO 8601 `P60D`, which
-  is refused.
-- Anything richer, such as computed values, structured data or rule
-  languages, belongs outside the DSL, behind the adapter that reports the
-  facts.
+  is refused. Where a domain has its own standard, a domain extension
+  should adopt it rather than invent a notation (for example, FHIR
+  quantities with UCUM units for clinical values; these source standards
+  are to be confirmed).
+- The set of value kinds is deliberately small and general. A domain that
+  needs more, such as quantities with units, may add its own kinds as an
+  extension to the language. An extension adopts that domain's own
+  standard notation, says so, and keeps the same rules: values are
+  compared, never computed. No such extension exists yet. Computation,
+  structured data and rule languages stay outside the DSL, behind the
+  adapter that reports the facts.
 
 ### Types and literals
 
