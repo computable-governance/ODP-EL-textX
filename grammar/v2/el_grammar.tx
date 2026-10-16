@@ -148,6 +148,10 @@ DeonticToken:
         // declared Action names.  See AM-01 for the proposed typed upgrade.
         ('for_action'      ':' for_action=STRING)?
         'state'            ':' state=TokenState
+        // 2.1.0-6: a deadline is one duration counted from activation: the
+        // first firing of triggered_by, an activate effect, or else the
+        // grant ("21 days"). Text containing a date (2026-11-30) is never
+        // read as a duration.
         ('deadline'        ':' deadline=STRING)?
         // AM-22: event-driven token lifecycle
         ('triggered_by'    ':' triggered_by=[EventDecl])?

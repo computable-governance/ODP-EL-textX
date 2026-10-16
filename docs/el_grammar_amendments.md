@@ -10463,9 +10463,11 @@ shipped scenario parses as before.
 "(clause to be confirmed)"); notations from ISO 8601 and ISO 4217 as in
 2.1.0-1.
 
-**Before.** Any policy value was accepted. `2026-02-30`, `T25:00`,
-`250 aud`, `4.5` for an integer policy and a range written high-to-low
-all passed.
+**Before.** No policy value was checked. In v2.0.0 a value of any type
+was accepted (`"five"` or `4.5` for an integer policy; `0` and `1` were
+read as the floats `0.0` and `1.0`); dates, instants, amounts and ranges
+did not parse. After 2.1.0-1 they parse, and `2026-02-30`, `T25:00`,
+`250 aud` and a range written high-to-low still passed.
 
 **Now.** Each rule runs over every Policy and NormativePolicy value: the
 `initial_value`, each list-envelope value and each range end.
@@ -10523,7 +10525,8 @@ reads them. A NormativePolicy is not seeded.
 new `tests/test_policy_values_seeding.py`.
 
 **Verification:** full suite 1182 → 1226 collected, 0 failures. Kripke
-world counts unchanged (policy values are the same in every world).
+world counts unchanged (policy values are the same in every world; the
+verifier does not read them). Untested here; tested from 2.1.0-5.
 
 ## 2.1.0-4 — typed values: docs, shared examples, API seeding (`toolchain/el_api.py`, `toolchain/el_validator.py`, docs)
 
@@ -10558,3 +10561,188 @@ follow-ups.
 
 **Verification:** full suite 1226 → 1235 collected, 0 failures. Every
 shipped scenario parses and validates as before.
+
+## 2.1.0-5 — public engine and verifier parity matrix; policy values invisible to the verifier (`docs/ENGINE_VERIFIER_PARITY.md`)
+
+**Status:** IMPLEMENTED. Type: documentation and one test. No code change.
+
+**Now.**
+- `docs/ENGINE_VERIFIER_PARITY.md`: rows R1 to R10 set each engine rule
+  about deadlines, the clock and policy values beside the Kripke rule that
+  models it, with its status (mirrored, abstracted, absent) and the
+  direction of error (over, under). The table is updated in the same
+  commit as any change to an engine rule or a Kripke rule.
+- The rule for when the verifier must change: only when leaving a row
+  absent or abstracted makes the verifier wrong in the unsafe direction
+  for a claim users rely on, mainly `compelled` (AF) on
+  `GET /obligations/{token}/status`.
+- `tests/test_policy_values_invisible_to_verifier.py`: for each API
+  scenario with policy values, the hybrid model with and without them has
+  the same worlds, edge labels and AF/EF verdicts (horizon 5), and at
+  least one scenario really has values. This backs the 2.1.0-3 statement.
+
+**Verification:** full suite 1235 → 1238 collected, 0 failures.
+
+## 2.1.0-6 — a date shape has no duration magnitude; the deadline convention (`toolchain/el_engine.py`; `grammar/v2/el_grammar.tx` comment only)
+
+**Status:** IMPLEMENTED. Type: engine predicate. No grammar rule change.
+
+**Standard reference:** §6.4.3, §7.8.7, as `[W-19]`/`[W-24]`/`[W-25]`. The
+standard does not say how a deadline is written or measured; the
+convention is an authoring convention.
+
+**Convention.** A burden deadline is one duration counted from activation:
+the first firing of `triggered_by`, an `activate` effect, or else the
+grant. "N days after event E" is a burden with `state: pending`,
+`triggered_by: E` and `deadline: "N days"`. Stated at `deadline` in the
+grammar and pinned by tests; this already held in v2.0.0.
+
+**Before (v2.0.0).** `_has_deadline_magnitude()` paired any number with a
+unit word up to 20 characters later. `"by 2026-11-30 end of day"` was
+enforced as 30 days after activation and `"within 5 days of 2026-11-30"`
+as 5 days, by the engine and both Kripke builders, with no warning.
+
+**Now.** `el_engine._DATE_SHAPE_RE` (YYYY-MM-DD, ASCII digits): a deadline
+containing a date has no magnitude, whatever follows it. The verifier
+takes the same predicate (`_build_enforceable_deadlines()`), so engine and
+verifier change together; `el_kripke.py` is not edited. Matrix row R5.
+
+**Limits.** Until 2.1.0-7 a date deadline is not judged by time at all.
+No shipped scenario has a date in a burden deadline.
+
+**Files changed:** `toolchain/el_engine.py`; `grammar/v2/el_grammar.tx`
+(comment); `docs/ENGINE_VERIFIER_PARITY.md`; new
+`tests/test_deadline_convention.py`.
+
+**Verification:** full suite 1238 → 1260 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+## 2.1.0-7 — the clock and date deadlines (`toolchain/el_engine.py`, `toolchain/el_runtime.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED, with a follow-up commit of fixes. Type: engine and
+runtime. No grammar change, no verifier change.
+
+**Standard reference:** §6.4.3, §7.8.7. Dates in the notation of the
+2.1.0 Date and Instant values (ISO 8601 extended format; part and edition
+to be confirmed).
+
+**Before (v2.0.0).** A date in a deadline was never judged by time: a
+date alone had no magnitude (and drew `[W-25]`), and in an opted-in group
+it was violated when its episode concluded.
+
+**Now.**
+- `DeadlineClock(*, utc_offset, epoch=None)`, keyword-only and frozen: one
+  fixed UTC offset for the run; `epoch` is optional and not yet read.
+- A date deadline is a date alone (`"by 2026-11-30"`) or a date and time
+  with an offset (`"2026-11-30T17:00+10:00"`, `"…T07:00Z"`), exactly one
+  date and no other digit, `T` and `Z` case-sensitive. A date alone is due
+  at 00:00 on the next day in the clock's offset; a date and time at that
+  moment, in its own offset.
+- `check_live_violations(state, spec, clock=None, as_at=None)`: an active
+  eventual date burden is violated when `as_at` is at or after its due
+  moment. Otherwise it is not judged, with a `not judged` line in the
+  effects (no clock, no as_at, a date with other numbers, not in the
+  2.1.0 notation, invalid date). It is never violated by episode
+  conclusion. The return shape is unchanged; durations are unchanged.
+- `not_judged_date_burdens(state, spec, clock, as_at)`: the same reasons as
+  data, read-only.
+- `Runtime(state, spec, clock=None)`, `build_from_spec(spec, clock=None)`,
+  `build_from_federation(spec, clock=None)`, properties `clock` and
+  `last_as_at`; `check_live_violations(as_at=None)` refuses an `as_at`
+  earlier than the last one accepted (`ValueError`, nothing ledgered).
+- The 2.1.0-2 date and instant helpers moved from `el_validator.py` into
+  `el_engine.py` unchanged; the validator imports them.
+
+**Fixes (follow-up commit).** `"by 9999-12-31"` is "invalid date" (its end
+is past the last representable time) instead of raising; the sweep and
+`not_judged_date_burdens()` share one selection function
+(`_swept_by_deadline()`); the matrix says an eventual burden is never
+reported compelled "while it is pending".
+
+**Limits.** `as_at` is asserted by the caller; a future `as_at` violates
+early and irreversibly. One fixed offset, no daylight saving or holidays.
+Strict date burdens are not judged. The verifier does not model dates:
+matrix rows R6 (absent, under; never makes `compelled` true, tested) and
+R7 (abstracted, over).
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_runtime.py`,
+`toolchain/el_validator.py`; `docs/ENGINE_VERIFIER_PARITY.md`; new
+`tests/test_date_deadlines.py`.
+
+**Verification:** full suite 1260 → 1291 collected, then 1294 with the
+fixes, 0 failures. Every shipped scenario parses and validates as before.
+
+## 2.1.0-8 — date-deadline warnings (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator, three advisory warnings.
+
+**Standard reference:** §6.4.3, §7.8.7.
+
+**Before (v2.0.0).** `"by 2026-11-30"` drew `[W-25]` ("a number but no
+recognised time unit") and, when eventual and outside an opted-in group,
+`[W-24]`. Nothing warned on `"by 2026-11-30 end of day"` (then enforced as
+30 days) or on `"2 weeks and 3 days"` (enforced as 2 weeks).
+
+**Now.** Burdens only, top-level and role-scoped, eventual or strict:
+- `[W-deadline-date-not-measured]`: a date that is never judged (a date
+  with other numbers or a second date, or not in the 2.1.0 notation).
+- `[W-deadline-date-invalid]`: a date in the 2.1.0 notation that is not a
+  valid date or time, naming the reason (not a calendar date, not a time
+  of day, not a whole minute, not a UTC offset).
+- `[W-deadline-several-durations]`: more than one duration; only the first
+  is measured.
+- `[W-19]` unchanged. `[W-24]` skips an eventual burden whose deadline is a
+  measured date. `[W-25]` skips any deadline containing a date.
+
+The names start `[W-` so that `parse()` files them as warnings.
+
+**Tests changed:** `tests/test_am111_deadline_without_unit.py`: `"by
+2026-05-20"` moves from the `[W-25]` firing list to the silent list.
+
+**Files changed:** `toolchain/el_validator.py`; one changed test file;
+new `tests/test_date_deadline_warnings.py`.
+
+**Verification:** full suite 1294 → 1360 collected, 0 failures. No shipped
+scenario fires the new warnings.
+
+## 2.1.0-9 — `as_at` on `POST /check-violations` (`toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED. Type: API.
+
+**Now.**
+- `_SCENARIO_CLOCK`, with the same key-set assert as
+  `_SCENARIO_DEADLINE_SCALE`; every shipped scenario is None. Runtimes are
+  built with the scenario's clock at import, on `POST /reset` and on a
+  scenario switch.
+- `POST /check-violations?as_at=<ISO 8601 with offset>`. A trailing `Z` is
+  accepted on every Python version. 422 for a value that cannot be parsed,
+  has no offset, or is earlier than the last accepted one; nothing is
+  ledgered. In a query string `+` must be sent as `%2B`; an unencoded `+`
+  arrives as a space and is refused.
+- The response adds `as_at` (echoed, or null) and `not_judged: [{token,
+  holder, reason}]` from `not_judged_date_burdens()`. Existing fields and
+  callers without `as_at` are unchanged.
+
+**Limits.** Unauthenticated, like the other routes: any client can send a
+future `as_at`. No shipped scenario has a clock, so nothing on the API is
+judged by date until one is configured.
+
+**Files changed:** `toolchain/el_api.py`; new
+`tests/test_check_violations_as_at.py`.
+
+**Verification:** full suite 1360 → 1374 collected, 0 failures.
+
+## 2.1.0-10 — deadline docs and log entries
+
+**Status:** IMPLEMENTED. Type: documentation.
+
+**Now.** `docs/DSL_TOOLCHAIN_REFERENCE.md`: section "Deadlines (2.1.0)"
+(the convention, the two clocks, the date notation, `DeadlineClock`,
+`as_at`, "not judged", the warnings, the API field and `%2B`) and Known
+Limitations lines; `CHANGELOG.md` [Unreleased]; entries 2.1.0-5 to
+2.1.0-10. Each statement about v2.0.0 in the 2.1.0 docs was checked by
+running the v2.0.0 code; the 2.1.0-2 "Before" was reworded to separate
+v2.0.0 from the state after 2.1.0-1.
+
+**Files changed:** `docs/DSL_TOOLCHAIN_REFERENCE.md`, `CHANGELOG.md`, this
+file.

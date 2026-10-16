@@ -56,7 +56,7 @@ def _w25(deadline, mode="eventual"):
     return [w for w in result.warnings if w.startswith("[W-25]")]
 
 
-@pytest.mark.parametrize("deadline", ["2 hrs", "10", "by 2026-05-20", "within 3 business"])
+@pytest.mark.parametrize("deadline", ["2 hrs", "10", "within 3 business"])
 @pytest.mark.parametrize("mode", ["eventual", "strict"])
 def test_fires_for_number_without_unit(deadline, mode):
     warnings = _w25(deadline, mode)
@@ -68,9 +68,11 @@ def test_fires_for_number_without_unit(deadline, mode):
 @pytest.mark.parametrize("deadline", [
     "2 hours", "1 year", "5 working days from referral receipt", "90 seconds",
     "referral episode", "thirty days",
+    "by 2026-05-20",   # 2.1.0-8: a date is the date-deadline warnings' case
 ])
 def test_silent_for_a_unit_or_no_number(deadline):
-    """A recognised unit, or no digit at all ([W-24]/[W-19] cover prose)."""
+    """A recognised unit, or no digit at all ([W-24]/[W-19] cover prose).
+    2.1.0-8: a deadline containing a calendar date is not [W-25]'s either."""
     assert _w25(deadline) == []
 
 

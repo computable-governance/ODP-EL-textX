@@ -30,6 +30,7 @@ from __future__ import annotations
 import math
 import re
 from decimal import Decimal
+from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
@@ -1305,6 +1306,223 @@ _DEADLINE_MAGNITUDE_RE = re.compile(
     r"(\d+)(\D{0,20}?)(" + "|".join(_DEADLINE_UNIT_SECONDS) + r")"
 )
 
+# 2.1.0-6: the shape of a calendar date (YYYY-MM-DD, ASCII digits), with or
+# without a time after it. A deadline containing one is never read as a
+# duration: before 2.1.0-6 "by 2026-11-30 end of day" paired the 30 with
+# "day" and was enforced as 30 days after activation.
+_DATE_SHAPE_RE = re.compile(r"(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])")
+
+# ── Calendar dates and instants (2.1.0-2 checks, moved here in 2.1.0-7) ──────
+
+# ISO 8601 extended date and time with a fixed UTC offset; the grammar's
+# Instant rule matches the same shape. ASCII digits only.
+_INSTANT_RE = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?"
+    r"(?:Z|([+-])([0-9]{2}):([0-9]{2}))"
+)
+
+
+def _calendar_date(text: str) -> Optional[date]:
+    """2.1.0-2: the date of 'YYYY-MM-DD', or None when it is no calendar date."""
+    try:
+        return date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+    except ValueError:
+        return None
+
+
+def _instant_problem(text: str) -> Optional[str]:
+    """2.1.0-2: why an instant's time of day or UTC offset is out of
+    range, or None. Its date part is calendar-date's check."""
+    m = _INSTANT_RE.fullmatch(text)
+    if m is None:
+        return "not a date and time with a UTC offset"
+    _, _, _, hour, minute, second, sign, off_h, off_m = m.groups()
+    if int(hour) > 23 or int(minute) > 59:
+        return "not a time of day"
+    if second is not None and second != "00":
+        return "not a whole minute"
+    if sign is not None:
+        if int(off_h) > 23 or int(off_m) > 59:
+            return "not a UTC offset"
+        if sign == "-" and off_h == "00" and off_m == "00":
+            return "-00:00 is not a UTC offset"
+    return None
+
+
+def _instant_moment(text: str) -> Optional[datetime]:
+    """2.1.0-2: an instant as an aware UTC datetime, or None when its date,
+    time or offset is out of range. Ordering by moment is a comparison,
+    not arithmetic: 17:00+10:00 equals 07:00Z."""
+    if _calendar_date(text[:10]) is None or _instant_problem(text) is not None:
+        return None
+    year, month, day, hour, minute, _, sign, off_h, off_m = \
+        _INSTANT_RE.fullmatch(text).groups()
+    tz = timezone.utc
+    if sign is not None:
+        offset = timedelta(hours=int(off_h), minutes=int(off_m))
+        tz = timezone(-offset if sign == "-" else offset)
+    try:
+        return datetime(int(year), int(month), int(day), int(hour),
+                        int(minute), tzinfo=tz).astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
+# ── Date deadlines (2.1.0-7) ──────────────────────────────────────────────────
+#
+# A burden deadline that is a date alone ("by 2026-11-30") or a date and time
+# with a UTC offset ("2026-11-30T17:00+10:00"), written in the 2.1.0 notation
+# of Date and Instant policy values (ISO 8601 extended format), is judged
+# against a caller-supplied wall-clock time `as_at`, never against the tick.
+# It needs a DeadlineClock: one fixed UTC offset for the run (no daylight
+# saving, no holidays). Without a clock or an as_at it is not judged.
+
+@dataclass(frozen=True, kw_only=True)
+class DeadlineClock:
+    """
+    2.1.0-7: a runtime's wall clock, the single opt-in for date deadlines.
+
+    `utc_offset` is one fixed offset (a datetime.timezone): a date alone is
+    due at the end of that day in this offset. `epoch`, optional, is the
+    wall-clock time of tick 0 on a whole minute (a naive epoch is read in
+    the offset). Nothing reads it yet: it is kept for a verifier that
+    models date deadlines. Keyword-only: DeadlineClock(utc_offset=...).
+    """
+    utc_offset: timezone
+    epoch: Optional[datetime] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.utc_offset, timezone):
+            raise ValueError("DeadlineClock.utc_offset must be a datetime.timezone")
+        if self.epoch is not None:
+            if self.epoch.tzinfo is None:
+                object.__setattr__(self, "epoch", self.epoch.replace(tzinfo=self.utc_offset))
+            if self.epoch.second or self.epoch.microsecond:
+                raise ValueError("DeadlineClock.epoch must fall on a whole minute")
+
+
+def _require_aware(as_at: Optional[datetime]) -> None:
+    """2.1.0-7: an as_at is an exact instant; a naive one is refused."""
+    if as_at is not None and (as_at.tzinfo is None or as_at.utcoffset() is None):
+        raise ValueError("as_at must be timezone-aware")
+
+
+# The text a date deadline is read from: a date shape and, when it is
+# directly followed by a T, the rest of that word (a time and offset).
+_DATE_TOKEN_RE = re.compile(
+    r"(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])(?:[Tt][0-9A-Za-z:+\-.]*)?")
+_DATE_ALONE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+NOT_MEASURED_OTHER_NUMBERS = "a date with other numbers is not measured"
+NOT_MEASURED_NOTATION = "date not in the 2.1.0 notation"
+
+
+def _read_date_deadline(deadline: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    2.1.0-7: (date text, None) for a date deadline, (None, reason) for a
+    deadline that contains a date shape (_DATE_SHAPE_RE) but will not be
+    measured, (None, None) for a deadline with no date shape.
+
+    A date deadline holds exactly one date and no other digit, and the date
+    is written as a Date ("2026-11-30") or an Instant ("2026-11-30T17:00+10:00",
+    "2026-11-30T07:00Z"; offset required) in the 2.1.0 notation. T and Z are
+    case-sensitive, as in the grammar. "2026-11-30 17:00", "2026-11-30T17:00"
+    (no offset) and a second number or date are not measured.
+    """
+    if not deadline or not _DATE_SHAPE_RE.search(deadline):
+        return None, None
+    tokens = list(_DATE_TOKEN_RE.finditer(deadline))
+    if len(tokens) != 1:
+        return None, NOT_MEASURED_OTHER_NUMBERS
+    token = tokens[0]
+    rest = deadline[:token.start()] + deadline[token.end():]
+    if any(c in "0123456789" for c in rest):
+        return None, NOT_MEASURED_OTHER_NUMBERS
+    text = token.group(0)
+    if _DATE_ALONE_RE.fullmatch(text) or _INSTANT_RE.fullmatch(text):
+        return text, None
+    return None, NOT_MEASURED_NOTATION
+
+
+def _due_instant(date_text: str, clock: DeadlineClock) -> Optional[datetime]:
+    """2.1.0-7: when a date deadline is due, or None for an invalid date or
+    time. A date alone is due at 00:00 on the next day in the clock's offset
+    (the whole day counts); an instant is due at that moment, in its own
+    offset. Range checks are those of the 2.1.0 Date and Instant values."""
+    if _DATE_ALONE_RE.fullmatch(date_text):
+        day = _calendar_date(date_text)
+        if day is None:
+            return None
+        try:
+            return datetime(day.year, day.month, day.day,
+                            tzinfo=clock.utc_offset) + timedelta(days=1)
+        except OverflowError:   # the end of 9999-12-31 is past datetime.max
+            return None
+    return _instant_moment(date_text)
+
+
+def _date_verdict(deadline: Optional[str], clock: Optional[DeadlineClock],
+                  as_at: Optional[datetime]) -> Tuple[Optional[datetime], Optional[str]]:
+    """2.1.0-7: (due, None) when a date deadline can be judged, else
+    (None, reason not judged). Only for a deadline with a date shape."""
+    text, reason = _read_date_deadline(deadline)
+    if reason is not None:
+        return None, reason
+    if clock is None:
+        return None, "date deadline, no clock"
+    if as_at is None:
+        return None, "date deadline, no as_at"
+    due = _due_instant(text, clock)
+    if due is None:
+        return None, "invalid date"
+    return due, None
+
+
+def _swept_by_deadline(tok: TokenInstance) -> bool:
+    """2.1.0-7: the burdens check_live_violations() judges by deadline:
+    active, discharge_mode: eventual. Shared with not_judged_date_burdens()
+    so the two always select the same burdens."""
+    return tok.kind == "burden" and tok.state == "active" and tok.discharge_mode == "eventual"
+
+
+def _has_date_shape(deadline: Optional[str]) -> bool:
+    """2.1.0-7: the deadline contains a calendar date (a date burden)."""
+    return bool(deadline) and bool(_DATE_SHAPE_RE.search(deadline))
+
+
+def _spec_deadline(spec, token_name: str) -> Optional[str]:
+    spec_tok = next(
+        (e for e in spec.elements
+         if type(e).__name__ == "DeonticToken" and e.name == token_name),
+        None,
+    )
+    return getattr(spec_tok, "deadline", None)
+
+
+def not_judged_date_burdens(state: WorldState, spec,
+                            clock: Optional[DeadlineClock] = None,
+                            as_at: Optional[datetime] = None) -> List[Tuple[str, str, str]]:
+    """
+    2.1.0-7: (token, holder, reason) for every active eventual burden whose
+    deadline contains a date that check_live_violations() would not judge
+    with this clock and as_at. Reads only; changes nothing. The same
+    reasons appear as "not judged" lines in that sweep's effects. A burden
+    not judged is never violated by the sweep, so the list is the same
+    before and after it.
+    """
+    _require_aware(as_at)
+    out: List[Tuple[str, str, str]] = []
+    for tok in state.tokens:
+        if not _swept_by_deadline(tok):
+            continue
+        deadline = _spec_deadline(spec, tok.token_name)
+        if not _has_date_shape(deadline):
+            continue
+        _, reason = _date_verdict(deadline, clock, as_at)
+        if reason is not None:
+            out.append((tok.token_name, tok.holder, reason))
+    return out
+
 
 def _duration_steps(seconds: Fraction) -> int:
     """AM-111: a duration in seconds as whole steps, rounded up (a
@@ -1392,8 +1610,15 @@ def _has_deadline_magnitude(deadline_str: Optional[str]) -> bool:
     callers (el_kripke.py's Kripke world-expansion in particular, which is
     unaffected by this fix — see check_live_violations()'s docstring for
     why that's a deliberately separate, still-open question).
+
+    2.1.0-6: a string containing a calendar date (_DATE_SHAPE_RE) has no
+    magnitude, whatever follows it. Both Kripke builders take this
+    predicate (_build_enforceable_deadlines()), so engine and verifier
+    change together.
     """
     if not deadline_str:
+        return False
+    if _DATE_SHAPE_RE.search(deadline_str):  # 2.1.0-6: a date is no duration
         return False
     return bool(_DEADLINE_MAGNITUDE_RE.search(deadline_str.lower()))
 
@@ -2538,10 +2763,26 @@ def declare_violation(
     return new_state, record
 
 
-def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, TransitionRecord]:
+def check_live_violations(
+    state: WorldState,
+    spec,
+    clock: Optional[DeadlineClock] = None,
+    as_at: Optional[datetime] = None,
+) -> Tuple[WorldState, TransitionRecord]:
     """
     Sweep every live, active, discharge_mode: eventual Burden for an elapsed
     deadline and transition it to 'violated'.
+
+    2.1.0-7: a Burden whose deadline contains a calendar date is a date
+    burden. It is judged only against `as_at` (timezone-aware, ValueError
+    otherwise), never against the tick: with a clock, an as_at and a date
+    deadline (_read_date_deadline()), it is violated when as_at is at or
+    after its due instant (_due_instant()). Otherwise it is not judged, and
+    a line "not judged 'X' held by 'H': <reason>" is added to the effects,
+    even when the outcome is 'ok' (reasons: no clock, no as_at, a date with
+    other numbers, not in the 2.1.0 notation, invalid date). It is never
+    reported as met, and never takes the episode-conclusion path below.
+    not_judged_date_burdens() returns the same reasons as data.
 
     Closes the live-detection gap logged in docs/CONCEPTS_INDEX.md ("Live
     violation triggering — detection mechanism exists and is tested; wiring
@@ -2627,6 +2868,7 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     live Burden's elapsed-vs-deadline count closer to violation,
     independent of any real actor action. Confirmed deliberate 2026-08-20.
     """
+    _require_aware(as_at)  # 2.1.0-7
     tick = state.tick
     spec_descriptors = _build_obligation_descriptors(spec)
     satisfaction_conditions = _build_satisfaction_conditions(spec)
@@ -2642,15 +2884,28 @@ def check_live_violations(state: WorldState, spec) -> Tuple[WorldState, Transiti
     for i, tok in enumerate(tokens):
         # AM-57: superseded burdens are already excluded here (state != "active"
         # required above) — no change needed for sibling-supersession parity.
-        if tok.kind != "burden" or tok.state != "active" or tok.discharge_mode != "eventual":
+        if not _swept_by_deadline(tok):  # 2.1.0-7: shared selection
             continue
 
-        spec_tok = next(
-            (e for e in spec.elements
-             if type(e).__name__ == "DeonticToken" and e.name == tok.token_name),
-            None,
-        )
-        raw_deadline = getattr(spec_tok, "deadline", None)
+        raw_deadline = _spec_deadline(spec, tok.token_name)
+        if _has_date_shape(raw_deadline):
+            # 2.1.0-7: a date burden is judged only against as_at, never the
+            # tick, and never takes the episode-conclusion path below.
+            due, not_judged = _date_verdict(raw_deadline, clock, as_at)
+            if not_judged is not None:
+                effects_log.append(
+                    f"not judged '{tok.token_name}' held by '{tok.holder}': {not_judged}"
+                )
+            elif as_at >= due:
+                tokens[i] = _transition(tok, "violated")
+                violated_names.append(tok.token_name)
+                effects_log.append(
+                    f"violated '{tok.token_name}' held by '{tok.holder}' "
+                    f"(due {due.isoformat()}; as_at {as_at.isoformat()}; "
+                    f"activated at tick {_activation_tick(tok)})"
+                )
+            continue
+
         if not _has_deadline_magnitude(raw_deadline):
             # No genuine elapsed-time magnitude to check against (e.g.
             # "referral episode" — see docs/CONCEPTS_INDEX.md, 2026-08-29).

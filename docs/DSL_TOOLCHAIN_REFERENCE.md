@@ -153,6 +153,94 @@ Shared examples, one valid file and one invalid file per rule, are in
 
 ---
 
+## Deadlines (2.1.0)
+
+A burden's `deadline` is a string. 2.1.0 reads it in one of two ways, on
+two different clocks.
+
+**A duration from activation.** `deadline: "21 days"` is one duration
+counted from the burden's activation: the first firing of its
+`triggered_by` event, an `activate` effect, or else the grant. It is
+measured on the engine's step clock, `WorldState.tick`, where one step is
+one minute (units: second, rounded up to a whole minute, minute, hour,
+day, week, month (30 days), year (365 days); "working" or "business" days
+count as 7/5 of a day and business hours as 168/40 of an hour, so "5
+working days" and "40 business hours" are both 7 days). For "N days after
+event E", write a burden with `state: pending`, `triggered_by: E` and
+`deadline: "N days"`. `check_live_violations()` violates an eventual burden
+when the tick minus its activation tick reaches the duration. This is
+unchanged from v2.0.0.
+
+**A date.** A deadline that is a date alone, `"by 2026-11-30"`, or a date
+and time with a UTC offset, `"2026-11-30T17:00+10:00"` or
+`"2026-11-30T07:00Z"`, is a fixed moment. It is written in the notation of
+the 2.1.0 Date and Instant policy values (ISO 8601 extended format; `T` and
+`Z` in upper case; seconds only `:00`). A date alone is due at 00:00 on the
+next day in the clock's offset, so the whole day counts; a date and time is
+due at that moment. It does not depend on activation.
+
+A date deadline is judged only against a wall-clock time the caller
+supplies, `as_at`, never against the tick, and only with a clock:
+
+```python
+from datetime import datetime, timedelta, timezone
+from el_engine import DeadlineClock
+from el_runtime import Runtime
+
+rt = Runtime.build_from_spec(spec, clock=DeadlineClock(utc_offset=timezone(timedelta(hours=10))))
+rt.check_live_violations(as_at=datetime(2026, 12, 1, 0, 0, tzinfo=timezone(timedelta(hours=10))))
+```
+
+- `DeadlineClock(utc_offset=..., epoch=None)` is keyword-only. The offset is
+  one fixed UTC offset for the run. `epoch` (the wall-clock time of tick 0)
+  is optional and not yet used.
+- An eventual date burden is violated when `as_at` is at or after its due
+  moment. The effect reads `violated 'X' held by 'H' (due <iso>; as_at
+  <iso>; activated at tick N)`.
+- Without a clock, without an `as_at`, or for a date that is not measured,
+  it is **not judged**. The effects gain `not judged 'X' held by 'H':
+  <reason>` (`date deadline, no clock`, `date deadline, no as_at`, `a date
+  with other numbers is not measured`, `date not in the 2.1.0 notation`,
+  `invalid date`). A burden not judged is never violated and never
+  reported as met. `el_engine.not_judged_date_burdens()` returns the same
+  list as data.
+- A date burden is never violated by episode conclusion.
+- `as_at` must carry a UTC offset (a naive value raises `ValueError`). It may
+  not go backwards within one runtime: an earlier `as_at` than the last one
+  accepted raises `ValueError` and nothing is ledgered; an equal one is
+  accepted.
+- Text containing a date is never read as a duration.
+
+**Warnings.** Burdens only, top-level and role-scoped:
+
+| Warning | When |
+|---|---|
+| `[W-deadline-date-not-measured]` | The deadline contains a date that is never judged: a date with other numbers or a second date, or a date not in the 2.1.0 notation (`"2026-11-30 17:00"`, `"2026-11-30T17:00"` without an offset). |
+| `[W-deadline-date-invalid]` | A date in the 2.1.0 notation is not a valid date or time, with the reason: not a calendar date, not a time of day, not a whole minute, not a UTC offset. |
+| `[W-deadline-several-durations]` | More than one duration (`"2 weeks and 3 days"`): only the first is measured, so the burden is violated earlier than stated. |
+
+`[W-24]` no longer warns on an eventual burden whose deadline is a measured
+date, and `[W-25]` no longer warns on any deadline containing a date.
+`[W-19]` still warns on a strict burden with a date deadline: strict date
+burdens are not judged in 2.1.0.
+
+**API.** `POST /check-violations?as_at=<ISO 8601 with offset>` passes
+`as_at` to the sweep. In a query string `+` must be sent as `%2B`
+(`as_at=2026-12-01T00:00%2B10:00`); an unencoded `+` arrives as a space and
+is refused. A trailing `Z` is accepted. 422 for a value that cannot be
+parsed, has no offset, or is earlier than the last accepted one (nothing is
+ledgered). The response adds `as_at` (echoed, or null) and `not_judged:
+[{token, holder, reason}]`. Each scenario's clock is in
+`el_api._SCENARIO_CLOCK`; no shipped scenario has a clock or a date
+deadline.
+
+**Verifier.** The verifier does not model date deadlines
+(`docs/ENGINE_VERIFIER_PARITY.md`, rows R5 to R7): it never proves anything
+about a date deadline, and an eventual date burden is never reported
+compelled while it is pending.
+
+---
+
 ## The Reasoner (`el_reasoner.py`)
 
 ### What it does
@@ -509,6 +597,34 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   user-defined type are not checked
 - A quoted string and a bare name both read as text and cannot be told
   apart
+
+**Deadlines (2.1.0):**
+- `as_at` is asserted by the caller, and nothing checks it against real
+  time. A future `as_at` violates a date burden early, and a violation
+  cannot be undone; the only guard is that `as_at` cannot go backwards
+  within one runtime. (v2.0.0 never judged a deadline by its date.)
+- One fixed UTC offset per run: no daylight saving, no holidays.
+- Two clocks in one ledger: durations are judged on the tick, dates on
+  `as_at`, so the ledger order is not wall-clock order.
+- Durations run on the step clock, where every applied act also costs one
+  minute: five acts inside a "5 minutes" window violate it with no time
+  passing (as in v2.0.0).
+- Strict burdens with a date deadline are not judged: the clock never
+  violates a strict burden, and `declare_violation()` refuses any deadline
+  containing a date. (v2.0.0 refused a date with no unit word, but
+  accepted `"by 2026-11-30 end of day"` as 30 days after activation.)
+- The verifier does not model date deadlines.
+- An episode that concludes before the date leaves a date burden open: it
+  is never violated by episode conclusion. (In v2.0.0 a date deadline with
+  no unit word, in an opted-in group, was violated when its episode
+  concluded.)
+- `as_at` appears in the ledger only in a violation's effect: a check that
+  violates nothing leaves no record of the `as_at` it used.
+- A date mixed with other numbers is not measured (v2.0.0 enforced
+  `"within 5 days of 2026-11-30"` as 5 days and `"by 2026-11-30 end of
+  day"` as 30 days after activation).
+- A deadline with several durations is measured by its first one only, as
+  in v2.0.0 (`"2 weeks and 3 days"` is 2 weeks); 2.1.0 warns.
 
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)

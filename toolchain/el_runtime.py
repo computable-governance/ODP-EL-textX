@@ -8,9 +8,12 @@ Standard reference: ISO/IEC 15414:2015 §6.6, §7.8, §7.10
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
 from el_engine import (
+    DeadlineClock,
+    _require_aware,
     WorldState,
     TokenInstance,
     TransitionRecord,
@@ -91,13 +94,38 @@ def _build_delegation_chain(spec, token_name: str) -> list:
 class Runtime:
     """Stateful governance runtime: WorldState + EnterpriseSpec + append-only ledger."""
 
-    def __init__(self, state: WorldState, spec) -> None:
+    def __init__(self, state: WorldState, spec,
+                 clock: Optional[DeadlineClock] = None) -> None:
         self._state = state
         self._spec = spec
         self._ledger: List[TransitionRecord] = []
+        # 2.1.0-7: the run's wall clock (None: date deadlines are not judged)
+        # and the latest as_at accepted by check_live_violations().
+        self._clock = clock
+        self._last_as_at: Optional[datetime] = None
+
+    @property
+    def clock(self) -> Optional[DeadlineClock]:
+        """2.1.0-7: the runtime's DeadlineClock, or None."""
+        return self._clock
+
+    @property
+    def last_as_at(self) -> Optional[datetime]:
+        """2.1.0-7: the latest as_at accepted by check_live_violations(), or None."""
+        return self._last_as_at
+
+    def _check_as_at(self, as_at: Optional[datetime]) -> None:
+        """2.1.0-7: as_at is timezone-aware and not earlier than last_as_at
+        (an equal one is accepted); ValueError otherwise."""
+        _require_aware(as_at)
+        if as_at is not None and self._last_as_at is not None and as_at < self._last_as_at:
+            raise ValueError(
+                f"as_at {as_at.isoformat()} is earlier than the last as_at "
+                f"{self._last_as_at.isoformat()}"
+            )
 
     @classmethod
-    def build_from_spec(cls, spec) -> "Runtime":
+    def build_from_spec(cls, spec, clock: Optional[DeadlineClock] = None) -> "Runtime":
         """
         Factory: enroll all EnterpriseObject actors from spec; grant their
         declared tokens instantiated as TokenInstance objects.
@@ -133,10 +161,11 @@ class Runtime:
         # tokens manually with grant_token() / el_engine.token_from_spec()
         # after calling build_from_spec().  Resolving the CommitmentDecl /
         # DelegationDecl chains automatically is a future refinement.
-        return cls(state, spec)
+        return cls(state, spec, clock)
 
     @classmethod
-    def build_from_federation(cls, spec) -> "Runtime":
+    def build_from_federation(cls, spec,
+                              clock: Optional[DeadlineClock] = None) -> "Runtime":
         """
         Factory (AM-25): enroll all actors from every Domain member of every
         Federation in spec, tagged with their domain name. Then traverse
@@ -228,7 +257,7 @@ class Runtime:
                 except KeyError:
                     pass
 
-        return cls(state, spec)
+        return cls(state, spec, clock)
 
     def advance(self, action_name: str, actor_name: str,
                 facts: Optional[dict] = None) -> TransitionRecord:
@@ -305,7 +334,7 @@ class Runtime:
         self._ledger.append(record)
         return record
 
-    def check_live_violations(self) -> TransitionRecord:
+    def check_live_violations(self, as_at: Optional[datetime] = None) -> TransitionRecord:
         """Sweep active, discharge_mode: eventual Burdens for elapsed deadlines,
         transitioning any past due to 'violated'; append the event to the
         ledger. discharge_mode: strict Burdens are never touched here — see
@@ -314,10 +343,19 @@ class Runtime:
         pattern: no calling actor, so the ledger entry attributes to
         'system' the same way fire_event() attributes to `source`. Unlike
         revoke/reinstate, tick only advances on a real transition, not on
-        a no-op poll — deliberate exception, see el_engine.py."""
-        new_state, record = _engine_check_live_violations(self._state, self._spec)
+        a no-op poll — deliberate exception, see el_engine.py.
+
+        2.1.0-7: date-deadline Burdens are judged against `as_at`
+        (timezone-aware) under the runtime's clock. An as_at earlier than
+        last_as_at raises ValueError, with nothing ledgered; an accepted one
+        becomes last_as_at, whether or not anything was violated."""
+        self._check_as_at(as_at)
+        new_state, record = _engine_check_live_violations(
+            self._state, self._spec, self._clock, as_at)
         self._state = new_state
         self._ledger.append(record)
+        if as_at is not None:
+            self._last_as_at = as_at
         return record
 
     def fire_violation_responses(self) -> TransitionRecord:

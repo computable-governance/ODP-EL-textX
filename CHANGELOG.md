@@ -7,11 +7,11 @@ adheres to _[Semantic Versioning][semver]_.
 
 ## [Unreleased]
 
-Typed policy values. Details per sub-change are in
+Typed policy values and date deadlines. Details per sub-change are in
 [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
-2.1.0-1 to 2.1.0-4); the type table is in
+2.1.0-1 to 2.1.0-10); the type table and the deadline rules are in
 [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md),
-"Typed policy values (2.1.0)".
+"Typed policy values (2.1.0)" and "Deadlines (2.1.0)".
 
 ### Added
 
@@ -29,6 +29,20 @@ Typed policy values. Details per sub-change are in
 - **2.1.0-4 Docs and examples.** The type table, shared examples in
   `tests/examples/typed_values/`, and seeding in the API scenario builders
   (except the superseded gp_referral).
+- **2.1.0-5 Parity matrix.** `docs/ENGINE_VERIFIER_PARITY.md` records,
+  row by row, where the verifier mirrors, abstracts or leaves out an engine
+  rule about deadlines, the clock and policy values.
+- **2.1.0-7 Date deadlines.** `DeadlineClock(utc_offset=...)` on
+  `Runtime.build_from_spec()`/`build_from_federation()`, and
+  `check_live_violations(as_at=...)`: a deadline that is a date alone
+  (`"by 2026-11-30"`) or a date and time with an offset
+  (`"2026-11-30T17:00+10:00"`) is judged against the caller's `as_at`.
+  Without a clock or an `as_at` it is reported "not judged".
+  `el_engine.not_judged_date_burdens()`.
+- **2.1.0-8 Date-deadline warnings.** `[W-deadline-date-not-measured]`,
+  `[W-deadline-date-invalid]`, `[W-deadline-several-durations]`.
+- **2.1.0-9 `as_at` on `POST /check-violations`.** The response adds
+  `as_at` and `not_judged`.
 
 ### Changed
 
@@ -39,6 +53,22 @@ Typed policy values. Details per sub-change are in
   parses.
 - **2.1.0-2** A policy whose value does not match its type keyword is now
   an error.
+- **2.1.0-6** A deadline containing a calendar date is never read as a
+  duration. In v2.0.0 `"by 2026-11-30 end of day"` was enforced as 30 days
+  after activation and `"within 5 days of 2026-11-30"` as 5 days, by the
+  engine and the verifier, with no warning. They are no longer enforced by
+  the clock.
+- **2.1.0-7** A burden whose deadline contains a date is never violated by
+  episode conclusion. In v2.0.0 `"by 2026-11-30"` was never enforced by
+  time, but in an opted-in group it was violated when its episode
+  concluded. Now it is judged only against `as_at`, under a clock.
+  `check_live_violations()` effects may gain "not judged" lines for date
+  burdens.
+- **2.1.0-8** `[W-25]` no longer fires on a deadline containing a date (in
+  v2.0.0 `"by 2026-11-30"` drew a "no recognised time unit" warning), and
+  `[W-24]` no longer fires on a measured date. A deadline with several
+  durations (`"2 weeks and 3 days"`, enforced as its first part, as in
+  v2.0.0) now warns.
 
 ### Limits
 
@@ -47,6 +77,11 @@ Typed policy values. Details per sub-change are in
   a year 365 for comparison. `60 days` is DSL notation, not ISO 8601.
 - Envelope membership is not checked. Policy values are read-only, and
   nothing in the engine or verifier reads them yet.
+- `as_at` is asserted by the caller: a future `as_at` violates a date
+  burden early and irreversibly. One fixed UTC offset, no daylight saving
+  or holidays. Durations stay on the step clock, dates on `as_at`, in one
+  ledger. Strict date burdens are not judged. The verifier does not model
+  date deadlines. No shipped scenario has a clock or a date deadline.
 
 ## [2.0.0] - 2026-09-28
 

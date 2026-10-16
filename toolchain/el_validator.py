@@ -112,7 +112,21 @@ Rules implemented
   W-25  A Burden whose deadline contains a number but no
         recognised time unit (e.g. "2 hrs", "10", "by
         2026-05-20") — the number is ignored, so the deadline is
-        never measured. Advisory.                 AM-111, §6.4.3, §7.8.7
+        never measured. Advisory. 2.1.0-8: a deadline containing a
+        calendar date is left to the date-deadline warnings.
+                                                  AM-111, §6.4.3, §7.8.7
+  W-deadline-date-not-measured  2.1.0-8: a Burden whose deadline
+        contains a calendar date that is never judged: a date with other
+        numbers, a second date, or a date not in the 2.1.0 notation (a
+        date alone, or a date and time with a UTC offset). Advisory.
+                                                         §6.4.3, §7.8.7
+  W-deadline-date-invalid  2.1.0-8: a Burden whose deadline contains a
+        date in the 2.1.0 notation that is not a calendar date, or whose
+        time or UTC offset is out of range. Advisory.    §6.4.3, §7.8.7
+  W-deadline-several-durations  2.1.0-8: a Burden whose deadline
+        contains more than one duration ("2 weeks and 3 days"): only the
+        first is measured, so it is violated early. Advisory.
+                                                         §6.4.3, §7.8.7
   W-27  A Burden that can never be discharged because nobody who may
         perform its discharging action does: its holder fills no role
         declaring its for_action, or (discharged_by) nobody fills a role
@@ -162,9 +176,12 @@ Usage
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+# 2.1.0-7: the date and instant helpers moved to el_engine (shared with date
+# deadlines); the 2.1.0-2 rules use them from there.
+from el_engine import _calendar_date, _instant_moment, _instant_problem
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -344,6 +361,9 @@ def validate_spec(model) -> List[str]:
 
     # W-25 — deadline with a number but no recognised time unit (AM-111, §6.4.3, §7.8.7)
     errors.extend(_validate_deadline_without_unit(model))
+
+    # 2.1.0-8 — date deadlines not measured or invalid; several durations (§6.4.3, §7.8.7)
+    errors.extend(_validate_date_deadlines(model))
 
     # W-26 — discharged_by event that no action emits (AM-113, §6.4.3, §7.8.7)
     errors.extend(_validate_undischargeable_event_burden(model))
@@ -780,13 +800,6 @@ _TYPE_ACCEPTS = {
     "instant":    {"instant"},
 }
 
-# ISO 8601 extended date and time with a fixed UTC offset; the grammar's
-# Instant rule matches the same shape. ASCII digits only.
-_INSTANT_RE = re.compile(
-    r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?"
-    r"(?:Z|([+-])([0-9]{2}):([0-9]{2}))"
-)
-
 # Three-letter abbreviations of a duration unit, read by currency-code to
 # suggest the duration an author probably meant ("5 min", "5 hrs").
 _DURATION_ABBREVIATIONS = {
@@ -828,52 +841,6 @@ def _value_text(v) -> str:
     if kind == "name":
         return f'"{v}"'
     return str(v)
-
-
-def _calendar_date(text: str) -> Optional[date]:
-    """2.1.0-2: the date of 'YYYY-MM-DD', or None when it is no calendar date."""
-    try:
-        return date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
-    except ValueError:
-        return None
-
-
-def _instant_problem(text: str) -> Optional[str]:
-    """2.1.0-2: why an instant's time of day or UTC offset is out of
-    range, or None. Its date part is calendar-date's check."""
-    m = _INSTANT_RE.fullmatch(text)
-    if m is None:
-        return "not a date and time with a UTC offset"
-    _, _, _, hour, minute, second, sign, off_h, off_m = m.groups()
-    if int(hour) > 23 or int(minute) > 59:
-        return "not a time of day"
-    if second is not None and second != "00":
-        return "not a whole minute"
-    if sign is not None:
-        if int(off_h) > 23 or int(off_m) > 59:
-            return "not a UTC offset"
-        if sign == "-" and off_h == "00" and off_m == "00":
-            return "-00:00 is not a UTC offset"
-    return None
-
-
-def _instant_moment(text: str) -> Optional[datetime]:
-    """2.1.0-2: an instant as an aware UTC datetime, or None when its date,
-    time or offset is out of range. Ordering by moment is a comparison,
-    not arithmetic: 17:00+10:00 equals 07:00Z."""
-    if _calendar_date(text[:10]) is None or _instant_problem(text) is not None:
-        return None
-    year, month, day, hour, minute, _, sign, off_h, off_m = \
-        _INSTANT_RE.fullmatch(text).groups()
-    tz = timezone.utc
-    if sign is not None:
-        offset = timedelta(hours=int(off_h), minutes=int(off_m))
-        tz = timezone(-offset if sign == "-" else offset)
-    try:
-        return datetime(int(year), int(month), int(day), int(hour),
-                        int(minute), tzinfo=tz).astimezone(timezone.utc)
-    except (ValueError, OverflowError):
-        return None
 
 
 def _value_form_fault(v) -> bool:
@@ -1971,6 +1938,7 @@ def _validate_unviolatable_eventual_burden(model) -> List[str]:
         _build_satisfaction_conditions,
         _concludes_on_objective_achieved,
         _has_deadline_magnitude,
+        _read_date_deadline,
     )
 
     concludes = {
@@ -2000,6 +1968,8 @@ def _validate_unviolatable_eventual_burden(model) -> List[str]:
         deadline = getattr(tok, "deadline", None) or None
         if _has_deadline_magnitude(deadline) or tok.name in concludable:
             continue
+        if _read_date_deadline(deadline)[0] is not None:
+            continue  # 2.1.0-8: a measured date, judged against as_at
         shown = f"'{deadline}'" if deadline else "none"
         warnings.append(
             f"[W-24] Eventual burden '{tok.name}' has no enforceable deadline "
@@ -2022,7 +1992,7 @@ def _validate_deadline_without_unit(model) -> List[str]:
     measures the deadline. Before AM-111 "1 year" was such a case. Fires
     alongside [W-24]/[W-19] where those apply; this one names the cause.
     Advisory."""
-    from el_engine import _DEADLINE_UNIT_SECONDS, _has_deadline_magnitude
+    from el_engine import _DATE_SHAPE_RE, _DEADLINE_UNIT_SECONDS, _has_deadline_magnitude
 
     tokens = list(_collect(model, "DeonticToken"))
     for el in model.elements:
@@ -2042,12 +2012,97 @@ def _validate_deadline_without_unit(model) -> List[str]:
             continue
         if _has_deadline_magnitude(deadline):
             continue
+        if _DATE_SHAPE_RE.search(deadline):
+            continue  # 2.1.0-8: the date-deadline warnings cover it
         warnings.append(
             f"[W-25] Burden '{tok.name}' has deadline '{deadline}': it contains "
             f"a number but no recognised time unit ({units}), so the number is "
             f"ignored and the deadline is never measured, at runtime or in the "
             f"verifier. Write the unit out, e.g. \"2 hours\". (§6.4.3, §7.8.7)"
         )
+    return warnings
+
+
+def _deadline_burdens(model) -> List[Any]:
+    """Burdens with their own deadline: top-level and role-scoped."""
+    tokens = list(_collect(model, "DeonticToken"))
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            tokens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                          if _cls(t) == "InlineToken")
+    return [t for t in tokens if getattr(t, "kind", None) == "burden"]
+
+
+def _date_problem(text: str) -> Optional[str]:
+    """2.1.0-8: why a date in the 2.1.0 notation (a Date, or an Instant
+    with its offset) cannot be judged, or None."""
+    from el_engine import _DATE_ALONE_RE, DeadlineClock, _due_instant
+    from datetime import timezone
+    if _calendar_date(text[:10]) is None:
+        return "not a calendar date"
+    if not _DATE_ALONE_RE.fullmatch(text):
+        problem = _instant_problem(text)
+        if problem is not None:
+            return problem
+    if _due_instant(text, DeadlineClock(utc_offset=timezone.utc)) is None:
+        return "after the last representable time"
+    return None
+
+
+def _validate_date_deadlines(model) -> List[str]:
+    """2.1.0-8: three advisory warnings on a Burden's deadline (top-level or
+    role-scoped, eventual or strict; permits and embargoes are not checked):
+
+    [W-deadline-date-not-measured] the deadline contains a calendar date
+    that the engine never judges (el_engine._read_date_deadline() gives a
+    reason): a date with other numbers or a second date, or a date not in
+    the 2.1.0 notation.
+    [W-deadline-date-invalid] a date in the 2.1.0 notation inside the
+    deadline is not a calendar date, or its time or UTC offset is out of
+    range (the checks of the 2.1.0 Date and Instant values).
+    [W-deadline-several-durations] no date, and more than one number with
+    a unit ("2 weeks and 3 days"): only the first is measured."""
+    from el_engine import (
+        _DATE_ALONE_RE, _DATE_SHAPE_RE, _DATE_TOKEN_RE, _DEADLINE_MAGNITUDE_RE,
+        _INSTANT_RE, _read_date_deadline,
+    )
+
+    warnings: List[str] = []
+    for tok in _deadline_burdens(model):
+        deadline = getattr(tok, "deadline", None) or None
+        if not deadline:
+            continue
+        if _DATE_SHAPE_RE.search(deadline):
+            _, reason = _read_date_deadline(deadline)
+            if reason is not None:
+                warnings.append(
+                    f"[W-deadline-date-not-measured] Burden '{tok.name}' has deadline "
+                    f"'{deadline}': {reason}, so it is never judged. Write a date alone "
+                    f"(\"by 2026-11-30\") or a date and time with its UTC offset "
+                    f"(\"2026-11-30T17:00+10:00\"), judged against a clock with one "
+                    f"fixed UTC offset (no daylight saving or holidays), or one duration "
+                    f"from activation (\"21 days\"). (§6.4.3, §7.8.7)"
+                )
+            for m in _DATE_TOKEN_RE.finditer(deadline):
+                text = m.group(0)
+                if not (_DATE_ALONE_RE.fullmatch(text) or _INSTANT_RE.fullmatch(text)):
+                    continue
+                problem = _date_problem(text)
+                if problem is not None:
+                    warnings.append(
+                        f"[W-deadline-date-invalid] Burden '{tok.name}' has deadline "
+                        f"'{deadline}': {text} is not a valid date or time ({problem}), "
+                        f"so the deadline is never judged. (§6.4.3, §7.8.7)"
+                    )
+        elif len(_DEADLINE_MAGNITUDE_RE.findall(deadline.lower())) > 1:
+            warnings.append(
+                f"[W-deadline-several-durations] Burden '{tok.name}' has deadline "
+                f"'{deadline}': it contains more than one duration; only the first "
+                f"is measured, so the burden is violated earlier than stated. Write "
+                f"one duration, e.g. \"17 days\". (§6.4.3, §7.8.7)"
+            )
     return warnings
 
 

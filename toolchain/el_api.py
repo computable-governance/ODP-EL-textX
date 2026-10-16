@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -38,6 +39,7 @@ from el_engine import (
 from el_engine import _embargo_coverage, _embargo_covers  # AM-102
 from el_engine import _role_refusal  # AM-114
 from el_engine import _declaration_action_names  # AM-115
+from el_engine import DeadlineClock, not_judged_date_burdens  # 2.1.0-9
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -426,6 +428,27 @@ _SCENARIO_DEADLINE_SCALE = {
 }
 assert set(_SCENARIO_DEADLINE_SCALE) == set(_SCENARIO_BUILDERS)
 
+# 2.1.0-9: each scenario's DeadlineClock (one fixed UTC offset), or None.
+# Without a clock a date deadline is never judged: POST /check-violations
+# reports it under not_judged. No shipped scenario has a date deadline, so
+# none has a clock.
+_SCENARIO_CLOCK: Dict[str, Optional[DeadlineClock]] = {
+    "gp_referral": None,
+    "ereferral":   None,
+    "referral":    None,
+    "erequesting_claiming": None,
+    "public_data_portal": None,
+    "external_agent_access": None,
+}
+assert set(_SCENARIO_CLOCK) == set(_SCENARIO_BUILDERS)
+
+
+def _new_runtime(name: str) -> Runtime:
+    """2.1.0-9: the scenario's runtime, with its clock (if any)."""
+    runtime = _SCENARIO_BUILDERS[name]()
+    runtime._clock = _SCENARIO_CLOCK[name]
+    return runtime
+
 # Scenario registry — maps scenario name to its .el file path, for
 # spec-only mode (build_kripke_model over the parsed model directly,
 # no live Runtime). _SCENARIO/_EREFERRAL_SCENARIO/_REFERRAL_SCENARIO are
@@ -443,7 +466,7 @@ _SCENARIO_PATHS = {
 _active_scenario: str = "referral"
 _active_community: str = "ReferralEpisodeCommunity"
 
-_runtime = _build_referral_runtime()
+_runtime = _new_runtime("referral")
 
 # Board-display side-store (AM-34 follow-up): fhir_provenance is stamped onto
 # ConsentEventResponse per-call but never persisted on WorldState/TokenInstance
@@ -630,6 +653,13 @@ class ReinstateAuthorizationResponse(BaseModel):
     objective_reachable: bool
 
 
+class NotJudgedEntry(BaseModel):
+    """2.1.0-9: an active eventual burden whose date deadline was not judged."""
+    token: str
+    holder: str
+    reason: str
+
+
 class CheckViolationsResponse(BaseModel):
     tick: int
     outcome: str                   # 'violation' | 'ok'
@@ -638,6 +668,8 @@ class CheckViolationsResponse(BaseModel):
     updated_world: dict
     new_objective_score: float
     objective_reachable: bool
+    as_at: Optional[str] = None    # 2.1.0-9: the as_at used, ISO 8601, or null
+    not_judged: List[NotJudgedEntry] = []   # 2.1.0-9: date deadlines not judged
 
 
 class FireViolationResponsesResponse(BaseModel):
@@ -1413,6 +1445,30 @@ def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthor
     )
 
 
+def _parse_as_at(text: str) -> datetime:
+    """2.1.0-9: an ISO 8601 date and time with a UTC offset; a trailing Z is
+    read as +00:00 on every Python version. 422 for anything else,
+    including a naive value."""
+    value = text.strip()
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"as_at '{text}' is not an ISO 8601 date and time. Send a UTC "
+                   f"offset, with '+' encoded as %2B in a query string.",
+        )
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"as_at '{text}' has no UTC offset; add one, e.g. "
+                   f"2026-12-01T00:00%2B10:00 or 2026-11-30T14:00Z.",
+        )
+    return parsed
+
+
 # ── Endpoint: POST /check-violations ───────────────────────────────────────────
 
 @app.post(
@@ -1435,11 +1491,31 @@ def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthor
         "nothing else in the runtime calls it, so callers decide when a "
         "deadline sweep happens. Then re-queries the Kripke model for the "
         "updated world state, objective score, and reachability, mirroring "
-        "POST /authorizations/{authorization_name}/revoke."
+        "POST /authorizations/{authorization_name}/revoke. "
+        "2.1.0-9: 'as_at' (query, optional): the wall-clock time of the "
+        "check, ISO 8601 with a UTC offset (send '+' as %2B; a trailing Z is "
+        "accepted). A burden whose deadline is a date ('by 2026-11-30', "
+        "'2026-11-30T17:00+10:00') is judged only against it, under the "
+        "scenario's clock, never against the tick: violated when as_at is at "
+        "or after the due time. 422 if as_at cannot be parsed, has no "
+        "offset, or is earlier than the last as_at accepted (nothing is "
+        "ledgered). The response echoes 'as_at' (null when absent) and lists "
+        "under 'not_judged' every active eventual date burden that was not "
+        "judged, with the reason (no clock, no as_at, not measured, invalid "
+        "date). No shipped scenario has a clock or a date deadline."
     ),
 )
-def check_violations_endpoint() -> CheckViolationsResponse:
-    tr = _runtime.check_live_violations()
+def check_violations_endpoint(as_at: Optional[str] = None) -> CheckViolationsResponse:
+    when = _parse_as_at(as_at) if as_at is not None else None
+    try:
+        tr = _runtime.check_live_violations(as_at=when)
+    except ValueError as exc:   # an as_at earlier than the last one; nothing ledgered
+        raise HTTPException(status_code=422, detail=str(exc))
+    not_judged = [
+        NotJudgedEntry(token=token, holder=holder, reason=reason)
+        for token, holder, reason in not_judged_date_burdens(
+            _runtime.current_state(), _runtime._spec, _runtime.clock, when)
+    ]
 
     km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON)
     updated_world = {
@@ -1463,6 +1539,8 @@ def check_violations_endpoint() -> CheckViolationsResponse:
         updated_world=updated_world,
         new_objective_score=round(score, 4),
         objective_reachable=reachable,
+        as_at=when.isoformat() if when is not None else None,
+        not_judged=not_judged,
     )
 
 
@@ -1836,7 +1914,7 @@ def medication_dispense_event(dispense: dict) -> MedicationDispenseEventResponse
 )
 def reset_runtime() -> dict:
     global _runtime
-    _runtime = _SCENARIO_BUILDERS[_active_scenario]()
+    _runtime = _new_runtime(_active_scenario)
     _fhir_provenance_by_token.clear()
     return {
         "status": "reset",
@@ -1907,7 +1985,7 @@ def switch_scenario(scenario_name: str) -> ScenarioSwitchResponse:
             detail=f"Unknown scenario '{scenario_name}'. "
                    f"Available: {list(_SCENARIO_BUILDERS.keys())}",
         )
-    _runtime = _SCENARIO_BUILDERS[scenario_name]()
+    _runtime = _new_runtime(scenario_name)
     _active_scenario = scenario_name
     _active_community = _COMMUNITY_FOR_SCENARIO[scenario_name]
     _fhir_provenance_by_token.clear()
