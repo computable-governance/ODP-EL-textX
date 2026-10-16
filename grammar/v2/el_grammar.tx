@@ -763,9 +763,31 @@ ActorRef    : 'actor'    ':' role_name=ID ;
 ArtefactRef : 'artefact' ':' ref_name=ID ;
 ResourceRef : 'resource' ':' ref_name=ID ('consumable' consumable?='consumable')? ;
 
+/*
+ * PreconditionDecl — shared by Action and Step: a fact the caller reports
+ * as true (description), or, 2.1.0-11, a Comparison. Comparison comes
+ * first: when no CompareOp follows the string, PEG backtracks to
+ * description before any cross-reference is consumed, so every plain
+ * precondition parses as before.
+ */
 PreconditionDecl:
-    'precondition' ':' description=STRING
+    'precondition' ':' (comparison=Comparison | description=STRING)
 ;
+
+/*
+ * Comparison — 2.1.0-11: a reported value compared with a limit:
+ * "<fact>" <op> <operand>. The fact is the key of a value the caller
+ * reports on the act, as text; the operand is a number, percentage or
+ * amount literal, or a Policy at its value. The DSL compares; it does not
+ * compute. CompareOp lists the two-character operators first, so >= is
+ * not read as >. CompareLiteral keeps the 2.1.0-1 literal order: Amount
+ * and Percentage before the plain numbers.
+ */
+Comparison:
+    fact=STRING op=CompareOp (literal=CompareLiteral | policy=[Policy])
+;
+CompareOp: /(>=|<=|>|<)/ ;
+CompareLiteral: Amount | Percentage | DecimalNumber | IntegerNumber ;
 
 /*
  * DeonticRequirement — §6.4.6 conditional action semantics.

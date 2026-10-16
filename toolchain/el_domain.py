@@ -824,8 +824,21 @@ class DeonticEffect(_ELParentable):
 
 @dataclass
 class PreconditionDecl(_ELParentable):
-    """Grammar rule: PreconditionDecl — action/step precondition."""
+    """Grammar rule: PreconditionDecl — action/step precondition.
+    2.1.0-11: either a plain fact (description) or a Comparison."""
     description: str = ""
+    comparison: Optional[object] = None   # Comparison
+
+
+@dataclass
+class Comparison(_ELParentable):
+    """2.1.0-11: a reported value compared with a limit:
+    "<fact>" <op> <literal or policy>. The DSL compares; it does not
+    compute."""
+    fact:    str = ""                     # key of the reported value in the act's facts
+    op:      str = ""                     # CompareOp: >= <= > <
+    literal: Optional[object] = None      # int | Decimal | Percentage | Amount
+    policy:  Optional[object] = None      # → Policy
 
 
 @dataclass
@@ -1380,6 +1393,7 @@ DOMAIN_CLASSES = [
     NormativePolicyEnforcement,  # AM-42
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
     Instant, Date, Percentage, Amount,  # 2.1.0-1
+    Comparison,  # 2.1.0-11
     # E
     Community, EventDecl, SatisfactionCondition, SatisfactionArg, Objective, SubObjective, SubObjectiveRef, Invariant,
     AssignmentPolicy, RequiresCapabilityRule, ExcludesRoleRule,

@@ -241,6 +241,101 @@ compelled while it is pending.
 
 ---
 
+## Comparisons (2.1.0)
+
+An action's precondition may compare a value the caller reports on the act
+with a limit. The DSL compares typed values; it does not compute: there is
+no arithmetic and no expression ("10% of a policy" cannot be written).
+
+**Syntax.**
+
+```
+policy MinimumCover : amount { initial_value: 20000000 AUD }
+
+action assess {
+    actor: assessorRole
+    precondition: "insurance cover" >= MinimumCover
+    precondition: "subcontract share" <= 10%
+}
+```
+
+- `precondition: "<fact>" <op> <limit>`. The fact is the key of a value the
+  caller reports with the act; a plain `precondition: "<fact>"` is read as
+  before.
+- Operators: `>=`, `<=`, `>`, `<` (source standard to be confirmed).
+- The limit is a number (`5`, `2.5`), a percentage (`10%`), an amount
+  (`20000000 AUD`, written without digit grouping), or a Policy of type
+  integer, decimal, number, percentage or amount, at its value (its
+  `initial_value`; policy values are read-only).
+- Only on actions. Step preconditions are not enforced by any engine path,
+  so a comparison in a step is the error `comparison-in-step`.
+
+**The reported value.** The caller passes it in the act's facts, as text,
+in the notation of the 2.1.0 values (source standard to be confirmed):
+
+| Limit | Reported text | Example |
+|---|---|---|
+| number | `-?digits` or `-?digits.digits`, ASCII | `"25000000"`, `"5.50"` |
+| percentage | the number then `%`, no space | `"8.5%"` |
+| amount | the number, one space, three upper-case letters | `"25000000.00 AUD"` |
+
+At most 100 characters. A number limit accepts a decimal report
+(`"5.50" >= 5`). Amounts are compared only within one currency, never
+converted.
+
+**Outcomes.** A comparison that holds lets the act proceed. Otherwise the
+act is refused (outcome `blocked`), never violated:
+
+| Situation | Refusal reason |
+|---|---|
+| The comparison fails | `precondition not satisfied: 'insurance cover' 15000000 AUD >= 20000000 AUD (MinimumCover)` |
+| The fact is missing, null or `"unknown"` | `precondition not established: 'insurance cover' not reported` |
+| The fact is not text | `precondition not established: 'insurance cover' reported a value of type int, not text; send text, e.g. "25000000.00 AUD"` |
+| Wrong kind or notation | `precondition not established: 'insurance cover' reported 25000000: not an amount value` |
+| Another currency | `precondition not established: 'insurance cover' reported 25000000 NZD: currency NZD, not AUD; amounts are compared only within one currency` |
+
+A false precondition is reported before one not established, each in
+declared order. `advance()` and `declare_violation()` share the check.
+
+**The ledger line.** When the act is applied, each comparison that held
+adds a line to the record's effects, before the other effects:
+`precondition satisfied: 'insurance cover' 25000000.00 AUD >= 20000000 AUD (MinimumCover)`.
+Plain preconditions add none.
+
+**The JSON-number trap.** Through the API, facts are JSON. Send the value as
+a string: `{"insurance cover": "25000000.00 AUD"}`. A JSON number
+(`25000000`) is refused as not established, never read, because a JSON
+number can be a binary float.
+
+**Adapter pattern for a share of the contract value.** The DSL never
+computes a share. The adapter that knows the subcontract value and the
+contract value computes it and reports the result as a percentage, for
+example `{"subcontract share": "8.5%"}`; the precondition compares it with
+`10%` or with a percentage policy. The adapter, not the DSL, is
+responsible for the computation and its rounding.
+
+**Plain preconditions.** Unchanged from v2.0.0: a plain precondition holds
+when its fact is truthy in Python, so the strings `"false"`, `"no"` and
+`"0"` pass, and `False`, `0` and `""` do not. Send real booleans.
+
+**Validator.** Errors: `comparison-type` (the limit is a number,
+percentage or amount, an amount code in ISO 4217 form, or a policy of a
+comparable type; `"x" <= 60 day` is refused), `fact-key-clash` (one fact
+read two ways), `comparison-in-step`, `envelope-currency` (an amount
+initial value with envelope amounts in another currency) and
+`envelope-membership` (the initial value inside every envelope rule). The
+warning `[W-strict-precondition]` flags a strict burden whose discharging
+action has a precondition, plain or a comparison.
+
+**Verifier.** The verifier assumes every precondition holds
+(`docs/ENGINE_VERIFIER_PARITY.md`, R11). For a strict burden whose
+discharging action has a precondition, `GET /obligations/{token}/status`
+may report `compelled: true` while the engine refuses the discharge; its
+field `assumes_preconditions` lists the assumed preconditions as
+`<action>: <precondition>`.
+
+---
+
 ## The Reasoner (`el_reasoner.py`)
 
 ### What it does
@@ -625,6 +720,27 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   day"` as 30 days after activation).
 - A deadline with several durations is measured by its first one only, as
   in v2.0.0 (`"2 weeks and 3 days"` is 2 weeks); 2.1.0 warns.
+
+**Comparisons (2.1.0):**
+- Reported values are asserted by the caller and trusted as given; the
+  toolchain records the text it compared, not where it came from. (v2.0.0
+  had no comparison: `precondition: "x" >= 5` did not parse.)
+- The verifier assumes every precondition holds. For a strict burden whose
+  discharging action has a precondition, `compelled` can be true while the
+  engine refuses the discharge. This is so in v2.0.0 for plain
+  preconditions; 2.1.0 states it (`[W-strict-precondition]`,
+  `assumes_preconditions`) and does not close it.
+- Step preconditions are not enforced: in v2.0.0 a step with a failing
+  plain precondition, or with its fact missing, proceeds; 2.1.0 is the
+  same, and refuses a comparison in a step (`comparison-in-step`).
+- A plain precondition passes on any truthy fact, including the strings
+  `"false"`, `"no"` and `"0"`, as in v2.0.0.
+- Envelopes: v2.0.0 accepted an initial value outside its envelope, or of
+  another kind, unchecked; 2.1.0 refuses it (`envelope-membership`).
+  Amounts did not parse in v2.0.0.
+- No equality operators and no date, instant or duration comparisons. A
+  policy limit is its initial value (values are read-only).
+- Facts must be text; a JSON number is refused as not established.
 
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)

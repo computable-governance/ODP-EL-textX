@@ -157,6 +157,25 @@ Rules implemented
   currency-code  2.1.0-2: an Amount's code has the ISO 4217
         alphabetic form, three upper-case letters A-Z (list membership
         not checked).                                 clause to be confirmed
+  comparison-type  2.1.0-13: a comparison's limit is a number,
+        percentage or amount literal (an amount's code in the ISO 4217
+        form), or a Policy of type integer, decimal, number, percentage or
+        amount with such a value.                    clause to be confirmed
+  fact-key-clash  2.1.0-13: one fact key is read two ways: by a plain
+        precondition (truthy) and by a comparison (a typed value), or by
+        comparisons of different kinds or currencies. clause to be confirmed
+  comparison-in-step  2.1.0-13: a comparison in a Step precondition: no
+        engine path enforces Step preconditions, so it would check nothing.
+                                                     clause to be confirmed
+  envelope-currency  2.1.0-13: an amount initial_value and envelope
+        amounts in another currency.                 clause to be confirmed
+  envelope-membership  2.1.0-13: the initial_value lies inside every
+        envelope rule (a listed value, or within a range, ends included).
+                                                     clause to be confirmed
+  W-strict-precondition  2.1.0-14: a strict Burden whose discharging
+        action has a precondition (plain or a comparison): the verifier
+        assumes it holds, so `compelled` may be reported while the engine
+        refuses the discharge. Advisory.            clause to be confirmed
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -285,6 +304,16 @@ def validate_spec(model) -> List[str]:
     errors.extend(_validate_instants(model))
     errors.extend(_validate_range_ends(model))
     errors.extend(_validate_currency_codes(model))
+
+    # 2.1.0-13 — comparisons and envelopes (clause to be confirmed)
+    errors.extend(_validate_comparison_types(model))
+    errors.extend(_validate_fact_key_clash(model))
+    errors.extend(_validate_comparison_in_step(model))
+    errors.extend(_validate_envelope_currency(model))
+    errors.extend(_validate_envelope_membership(model))
+
+    # 2.1.0-14 — strict burden discharged only through a precondition (advisory)
+    errors.extend(_validate_strict_precondition(model))
 
     # V-14 — PolicyRef targets in communities
     for community in all_communities.values():
@@ -1011,6 +1040,265 @@ def _validate_currency_codes(model) -> List[str]:
                             f"whole number of {unit}s")
             errors.append(f"{message}. {_TYPED_CITATION}")
     return errors
+
+
+# ── 2.1.0-13: comparisons and envelopes ───────────────────────────────────────
+
+_COMPARABLE_POLICY_TYPES = ("integer", "decimal", "number", "percentage", "amount")
+
+
+def _precondition_holders(model):
+    """2.1.0-13: (label, preconditions, is_step) for every Action of every
+    role, and every Step (nested ones too) of every process."""
+    def steps(items):
+        for step in items or []:
+            yield step
+            yield from steps(getattr(step, "sub_steps", None))
+
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            for action in getattr(role, "actions", []) or []:
+                yield f"Action '{action.name}'", action.preconditions, False
+        for process in getattr(el, "processes", []) or []:
+            for step in steps(getattr(process, "steps", None)):
+                yield f"Step '{step.name}'", step.preconditions, True
+
+
+def _comparisons(model):
+    for label, preconditions, is_step in _precondition_holders(model):
+        for p in preconditions or []:
+            if not isinstance(p, str):
+                yield label, p, is_step
+
+
+def _comparison_text(cmp) -> str:
+    """A comparison as written: "fact" op limit."""
+    policy = getattr(cmp, "policy", None)
+    limit = policy.name if policy is not None else _value_text(cmp.literal)
+    return f'"{cmp.fact}" {cmp.op} {limit}'
+
+
+def _comparison_limit_kind(cmp) -> Optional[str]:
+    """2.1.0-13: "number", "percentage", "amount in <code>", or None when
+    the limit has no comparable value."""
+    from el_engine import _operand
+    policy = getattr(cmp, "policy", None)
+    typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
+    kind, value = _operand(typed)
+    if kind == "amount":
+        return f"amount in {value[1]}"
+    return kind
+
+
+def _validate_comparison_types(model) -> List[str]:
+    """comparison-type (2.1.0-13): a comparison's limit is a number,
+    percentage or amount literal, or a Policy of a comparable type keyword
+    with a comparable value; an amount's code has the ISO 4217 form (three
+    upper-case letters A-Z), so "60 day" (read as an amount with code
+    'day') is refused."""
+    errors: List[str] = []
+    for label, cmp, _ in _comparisons(model):
+        policy = getattr(cmp, "policy", None)
+        typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
+        problem = None
+        if policy is not None and (getattr(policy, "policy_type", None) or "") not in _COMPARABLE_POLICY_TYPES:
+            problem = (f"limit {policy.name} is a policy of type "
+                       f"'{policy.policy_type}'; a comparison takes a policy of type "
+                       f"integer, decimal, number, percentage or amount")
+        elif _comparison_limit_kind(cmp) is None:
+            problem = f"limit {_value_text(typed) if typed is not None else '?'} is not a number, percentage or amount"
+        elif _value_kind(typed) == "amount" and not re.fullmatch(r"[A-Z]{3}", typed.code):
+            problem = (f"limit {_value_text(typed)} has currency code '{typed.code}', not three "
+                       f"upper-case letters A-Z (ISO 4217 form); a duration cannot be compared")
+        if problem is not None:
+            errors.append(f"[comparison-type] {label}: precondition {_comparison_text(cmp)}: "
+                          f"{problem}. {_TYPED_CITATION}")
+    return errors
+
+
+def _validate_fact_key_clash(model) -> List[str]:
+    """fact-key-clash (2.1.0-13): one fact key read two ways in the
+    specification: by a plain precondition (truthy) and by a comparison, or
+    by comparisons of different kinds or currencies. One reported value
+    cannot satisfy both readings."""
+    uses: Dict[str, Dict[str, List[str]]] = {}
+    for label, preconditions, _ in _precondition_holders(model):
+        for p in preconditions or []:
+            if isinstance(p, str):
+                key, reading = p, "a plain fact"
+            else:
+                kind = _comparison_limit_kind(p)
+                if kind is None:
+                    continue  # comparison-type reports it
+                key, reading = p.fact, f"{'an' if kind.startswith('amount') else 'a'} {kind}"
+            uses.setdefault(key, {}).setdefault(reading, []).append(label)
+    errors: List[str] = []
+    for key, readings in uses.items():
+        if len(readings) < 2:
+            continue
+        shown = "; ".join(f"{reading} in {', '.join(labels)}"
+                          for reading, labels in sorted(readings.items()))
+        errors.append(f"[fact-key-clash] Fact '{key}' is read in more than one way ({shown}); "
+                      f"one reported value cannot satisfy both. Use a different fact key for "
+                      f"each reading. {_TYPED_CITATION}")
+    return errors
+
+
+def _validate_comparison_in_step(model) -> List[str]:
+    """comparison-in-step (2.1.0-13): no engine path enforces a Step's
+    preconditions, so a comparison there would look like a check and do
+    nothing. Put it on the Action instead."""
+    errors: List[str] = []
+    for label, cmp, is_step in _comparisons(model):
+        if is_step:
+            errors.append(f"[comparison-in-step] {label}: precondition {_comparison_text(cmp)} "
+                          f"is never checked: Step preconditions are not enforced. Put the "
+                          f"comparison on the Action. {_TYPED_CITATION}")
+    return errors
+
+
+def _envelope_values(pol):
+    envelope = getattr(pol, "envelope", None)
+    for rule in (getattr(envelope, "envelope_rules", None) or []):
+        if rule.kind == "range":
+            yield rule, rule.lower
+            yield rule, rule.upper
+        else:
+            for v in rule.values:
+                yield rule, v
+
+
+def _validate_envelope_currency(model) -> List[str]:
+    """envelope-currency (2.1.0-13): a Policy whose initial_value is an
+    amount and whose envelope holds an amount in another currency. Amounts
+    are never converted."""
+    errors: List[str] = []
+    for pol in _typed_policies(model):
+        initial = getattr(pol, "initial_value", None)
+        if _value_kind(initial) != "amount":
+            continue
+        others = sorted({v.code for _, v in _envelope_values(pol)
+                         if _value_kind(v) == "amount" and v.code.upper() != initial.code.upper()})
+        if others:
+            errors.append(f"[envelope-currency] {_policy_label(pol)}: initial_value "
+                          f"{_value_text(initial)} is in {initial.code}, but its envelope holds "
+                          f"amounts in {', '.join(others)}; amounts are compared only within "
+                          f"one currency. {_TYPED_CITATION}")
+    return errors
+
+
+def _member_key(v):
+    """2.1.0-13: a value's key for equality with an envelope value: the
+    range key for orderable kinds (numbers by value, durations in steps,
+    dates, instants by moment), an amount with its currency, else the
+    kind and the value."""
+    kind = _value_kind(v)
+    if kind == "amount":
+        return ("amount", v.code.upper(), v.value)
+    if kind == "interval":
+        return ("interval", (v.lower, v.upper))
+    if kind in ("integer", "decimal", "percentage", "duration", "date", "instant"):
+        return _range_key(v)
+    return (kind, v)
+
+
+def _in_range(v, low, high) -> Optional[bool]:
+    """True/False when v can be placed in [low, high], None when not
+    comparable (different kinds or currencies; other rules report those)."""
+    if _value_kind(v) == "interval":
+        return (_in_range(v.lower, low, high) is True
+                and _in_range(v.upper, low, high) is True)
+    key, lo, hi = _member_key(v), _member_key(low), _member_key(high)
+    if not (key[0] == lo[0] == hi[0]):
+        return None
+    if key[0] == "amount":
+        if not (key[1] == lo[1] == hi[1]):
+            return None
+        return lo[2] <= key[2] <= hi[2]
+    return lo[1] <= key[1] <= hi[1]
+
+
+def _validate_envelope_membership(model) -> List[str]:
+    """envelope-membership (2.1.0-13): a Policy's initial_value lies inside
+    every envelope rule: equal to a listed value ('one of', 'set of', 'list
+    of'; numbers by value, so 4.50 equals 4.5) or within a range, ends
+    included. Skipped where another rule already reports the fault: an
+    initial_value or range end that is no calendar date or valid instant,
+    a range whose ends are of different kinds or out of order, an amount
+    in another currency (envelope-currency). A NormativePolicy has no
+    envelope in the grammar, so only Policies are checked in practice."""
+    errors: List[str] = []
+    for pol in _typed_policies(model):
+        initial = getattr(pol, "initial_value", None)
+        envelope = getattr(pol, "envelope", None)
+        if initial is None or envelope is None or _value_form_fault(initial):
+            continue
+        for rule in envelope.envelope_rules:
+            if rule.kind == "range":
+                low, high = rule.lower, rule.upper
+                if _value_form_fault(low) or _value_form_fault(high):
+                    continue
+                lo, hi = _member_key(low), _member_key(high)
+                if lo[0] != hi[0] or (lo[0] == "amount" and lo[1] != hi[1]) \
+                        or lo[1:] > hi[1:]:
+                    continue  # range-ends reports a range that is mixed or out of order
+                inside = _in_range(initial, low, high)
+                if inside is None and _value_kind(initial) == "amount":
+                    continue  # another currency: envelope-currency
+                if inside is None:
+                    inside = False
+                if not inside:
+                    errors.append(
+                        f"[envelope-membership] {_policy_label(pol)}: initial_value "
+                        f"{_value_text(initial)} is not within its envelope range "
+                        f"[{_value_text(low)} to {_value_text(high)}]. {_TYPED_CITATION}")
+            else:
+                if _value_kind(initial) == "amount" and any(
+                        _value_kind(v) == "amount" and v.code.upper() != initial.code.upper()
+                        for v in rule.values):
+                    continue  # envelope-currency
+                key = _member_key(initial)
+                if not any(_member_key(v) == key for v in rule.values):
+                    listed = ", ".join(_value_text(v) for v in rule.values)
+                    errors.append(
+                        f"[envelope-membership] {_policy_label(pol)}: initial_value "
+                        f"{_value_text(initial)} is not one of its envelope '{rule.kind} of' "
+                        f"values [{listed}]. {_TYPED_CITATION}")
+    return errors
+
+
+def _validate_strict_precondition(model) -> List[str]:
+    """[W-strict-precondition] (2.1.0-14): a strict Burden (top-level or
+    role-scoped) whose discharging action (el_engine.discharging_actions())
+    has a precondition, plain or a comparison. The verifier assumes every
+    precondition holds, so for a strict burden it reports `compelled`
+    although the engine refuses the discharge when a precondition is false
+    or not established. GET /obligations/{token}/status lists these under
+    assumes_preconditions. Advisory."""
+    from el_engine import discharging_actions, precondition_text
+
+    burdens = [t for t in _collect(model, "DeonticToken") if getattr(t, "kind", None) == "burden"]
+    for el in model.elements:
+        if _cls(el) in ("Community", "Domain", "Federation"):
+            for role in getattr(el, "roles", []) or []:
+                burdens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                               if _cls(t) == "InlineToken" and getattr(t, "kind", None) == "burden")
+    warnings: List[str] = []
+    for tok in burdens:
+        if getattr(tok, "discharge_mode", None) != "strict":
+            continue
+        for action in discharging_actions(model, tok.name):
+            if not action.preconditions:
+                continue
+            listed = "; ".join(precondition_text(p) for p in action.preconditions)
+            warnings.append(
+                f"[W-strict-precondition] Strict burden '{tok.name}' is discharged by action "
+                f"'{action.name}', which has preconditions ({listed}): the verifier assumes "
+                f"they hold, so the status route may report it compelled while the engine "
+                f"refuses the discharge. {_TYPED_CITATION}")
+    return warnings
 
 
 def _validate_policy_refs(community) -> List[str]:

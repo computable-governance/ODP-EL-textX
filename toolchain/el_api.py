@@ -40,6 +40,7 @@ from el_engine import _embargo_coverage, _embargo_covers  # AM-102
 from el_engine import _role_refusal  # AM-114
 from el_engine import _declaration_action_names  # AM-115
 from el_engine import DeadlineClock, not_judged_date_burdens  # 2.1.0-9
+from el_engine import discharging_actions, precondition_text  # 2.1.0-14
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -553,6 +554,10 @@ class ObligationStatusResponse(BaseModel):
     # (static model of the active scenario's .el file, from its initial state).
     mode: str = "hybrid"
     worlds_checked: int
+    # 2.1.0-14: the preconditions of the burden's discharging actions, as
+    # "<action>: <precondition>". The verifier assumes they all hold; empty
+    # when there are none.
+    assumes_preconditions: List[str] = []
     counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
     witness_path: Optional[List[PathStep]] = None          # present iff detectable
 
@@ -956,7 +961,12 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         "DeonticTokens instead of the runtime's; the response reports the "
         "mode used. 400 for an unknown mode. Only applies "
         "to burden-kind tokens (obligations); 400 for permit/embargo tokens, "
-        "404 for an unknown token name."
+        "404 for an unknown token name. 2.1.0-14: 'assumes_preconditions' "
+        "lists the preconditions of the actions that discharge the burden, "
+        "as '<action>: <precondition>'. The verifier assumes they all hold: "
+        "for a strict burden 'compelled' can be true while the engine "
+        "refuses the discharge because a precondition is false or not "
+        "established. Empty when there are none."
     ),
 )
 def get_obligation_status(
@@ -1001,6 +1011,12 @@ def get_obligation_status(
                                 deadline_scale=deadline_scale)
     af_verdict = km.check_obligation(token_name)
     ef_verdict = km.check_permission(token_name)
+    # 2.1.0-14: what the verdict assumes — the verifier takes every
+    # precondition of the discharging actions to hold.
+    source_spec = _runtime._spec if mode == "hybrid" else spec
+    assumes = [f"{action.name}: {precondition_text(p)}"
+               for action in discharging_actions(source_spec, token_name)
+               for p in action.preconditions]
 
     return ObligationStatusResponse(
         token_name=token_name,
@@ -1015,6 +1031,7 @@ def get_obligation_status(
         deadline_scale=af_verdict.deadline_scale,
         mode=mode,
         worlds_checked=af_verdict.worlds_checked,
+        assumes_preconditions=assumes,
         counterexample_path=_serialize_path(af_verdict.counterexample_path) if not af_verdict.satisfied else None,
         witness_path=_serialize_path(ef_verdict.witness_path) if ef_verdict.satisfied else None,
     )

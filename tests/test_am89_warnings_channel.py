@@ -174,8 +174,13 @@ def test_tracked_reference_scenarios_have_no_warnings():
 def _without_strict_gaps(warnings):
     """All warnings except AM-103's [W-19]/[W-20] and AM-108's [W-24]
     (consent_scenario.el's reportingObligation, deadline "end of session":
-    a known gap in the scenario, never violated — same treatment)."""
-    return [w for w in warnings if not w.startswith(("[W-19]", "[W-20]", "[W-24]"))]
+    a known gap in the scenario, never violated — same treatment), and
+    2.1.0-14's [W-strict-precondition] (referral_scenario.el's
+    referralInitiationBurden: a strict burden whose discharging action has a
+    precondition the verifier assumes holds — a known gap, present since
+    v2.0.0, same treatment)."""
+    return [w for w in warnings
+            if not w.startswith(("[W-19]", "[W-20]", "[W-24]", "[W-strict-precondition]"))]
 
 
 # ── Test 6: el_reasoner.py's CLI prints warnings to stderr, exit status ok ─

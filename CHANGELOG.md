@@ -7,11 +7,12 @@ adheres to _[Semantic Versioning][semver]_.
 
 ## [Unreleased]
 
-Typed policy values and date deadlines. Details per sub-change are in
-[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
-2.1.0-1 to 2.1.0-10); the type table and the deadline rules are in
+Typed policy values, date deadlines and comparisons. Details per
+sub-change are in [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md)
+(entries 2.1.0-1 to 2.1.0-15); the type table, the deadline rules and the
+comparison rules are in
 [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md),
-"Typed policy values (2.1.0)" and "Deadlines (2.1.0)".
+"Typed policy values (2.1.0)", "Deadlines (2.1.0)" and "Comparisons (2.1.0)".
 
 ### Added
 
@@ -43,6 +44,18 @@ Typed policy values and date deadlines. Details per sub-change are in
   `[W-deadline-date-invalid]`, `[W-deadline-several-durations]`.
 - **2.1.0-9 `as_at` on `POST /check-violations`.** The response adds
   `as_at` and `not_judged`.
+- **2.1.0-11 Comparison preconditions.** `precondition: "insurance cover"
+  >= MinimumCover`: a reported value against a number, percentage or
+  amount literal, or a policy; operators `>= <= > <`.
+- **2.1.0-12 Comparison judging.** The reported text is read strictly
+  (`"25000000.00 AUD"`, `"8.5%"`, `"5"`) and compared; a failing or
+  unestablished comparison refuses the act with a reason, and a passed one
+  adds `precondition satisfied: ...` to the act's effects.
+- **2.1.0-13 Comparison and envelope validation.** Errors
+  `comparison-type`, `fact-key-clash`, `comparison-in-step`,
+  `envelope-currency`, `envelope-membership`.
+- **2.1.0-14 Strict precondition guard.** Warning `[W-strict-precondition]`
+  and the `assumes_preconditions` field on `GET /obligations/{token}/status`.
 
 ### Changed
 
@@ -64,6 +77,13 @@ Typed policy values and date deadlines. Details per sub-change are in
   concluded. Now it is judged only against `as_at`, under a clock.
   `check_live_violations()` effects may gain "not judged" lines for date
   burdens.
+- **2.1.0-13** An initial value outside its envelope, of another kind, or
+  in another currency than the envelope is now an error. In v2.0.0
+  envelopes were not checked (`initial_value: 5` with `one of [1, 2, 3]`,
+  or with `one of [1 day, 2 day]`, was accepted).
+- **2.1.0-14** `gp_referral` and `referral` each gain one warning,
+  `[W-strict-precondition]` on `referralInitiationBurden`; the scenarios
+  are unchanged. The warning reports a verifier gap present since v2.0.0.
 - **2.1.0-8** `[W-25]` no longer fires on a deadline containing a date (in
   v2.0.0 `"by 2026-11-30"` drew a "no recognised time unit" warning), and
   `[W-24]` no longer fires on a measured date. A deadline with several
@@ -82,6 +102,11 @@ Typed policy values and date deadlines. Details per sub-change are in
   or holidays. Durations stay on the step clock, dates on `as_at`, in one
   ledger. Strict date burdens are not judged. The verifier does not model
   date deadlines. No shipped scenario has a clock or a date deadline.
+- Reported values in comparisons are trusted as given. The verifier
+  assumes preconditions hold, so a strict burden's `compelled` can be true
+  while the engine refuses its discharge (as in v2.0.0; now stated). Step
+  preconditions are not enforced (as in v2.0.0). A plain precondition
+  passes on any truthy fact, including the string "false" (as in v2.0.0).
 
 ## [2.0.0] - 2026-09-28
 

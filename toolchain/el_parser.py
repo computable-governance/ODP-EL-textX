@@ -147,7 +147,9 @@ def process_action(action):
         elif cls == 'ResourceRef':
             action.resources.append(item)
         elif cls == 'PreconditionDecl':
-            action.preconditions.append(item.description)
+            # 2.1.0-11: a Comparison, or the plain fact string as before
+            action.preconditions.append(
+                item.comparison if item.comparison is not None else item.description)
         elif cls == 'DeonticRequirement':
             action.deontic_requirements.append(item)
         elif cls == 'DeonticEffect':
@@ -194,7 +196,9 @@ def process_step(step):
         elif cls == 'ResourceRef':
             step.resources.append(item)
         elif cls == 'PreconditionDecl':
-            step.preconditions.append(item.description)
+            # 2.1.0-11: a Comparison, or the plain fact string as before
+            step.preconditions.append(
+                item.comparison if item.comparison is not None else item.description)
         elif cls == 'DeonticRequirement':
             step.deontic_requirements.append(item)
         elif cls == 'DeonticEffect':

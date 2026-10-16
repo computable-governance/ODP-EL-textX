@@ -6,7 +6,8 @@ Each row sets a runtime engine rule (Layer 3, `toolchain/el_engine.py`,
 abstracts it or leaves it out. **Update this table in the same commit as
 any change to an engine rule or a Kripke rule**, so that it does not drift
 from the code. Started in 2.1.0-5 with the rows about deadlines, the clock
-and policy values; other parts of the engine are not yet listed.
+and policy values; preconditions added in 2.1.0-12. Other parts of the
+engine are not yet listed.
 
 **Conventions**
 - *Static* is `build_kripke_model()` (before execution). *Hybrid* is
@@ -36,3 +37,5 @@ and policy values; other parts of the engine are not yet listed.
 | R8 | A strict burden is violated only by a declaration (`declare_violation()`, duration deadlines) | No declaration edge; a strict burden blocks the tick | Absent | **Under. `compelled` may be true for a strict burden while a declaration can violate it** |
 | R9 | A deadline with no magnitude and no date, eventual, in an opted-in group, is violated when its episode concludes | T2b | Mirrored | — |
 | R10 | Policy values are seeded read-only into `WorldState.policy_values` | Not read | Not used | — (checked by `tests/test_policy_values_invisible_to_verifier.py`) |
+| R11 | An action's preconditions, plain (the reported fact is truthy) or a comparison (a reported value against a literal or a policy, 2.1.0-12), are checked when the act is performed, by `advance()` and `declare_violation()`; false or not established refuses the act | none: every precondition is assumed to hold (T1 discharges by the holder without naming an action) | Absent | Over (paths the engine refuses). **Unsafe for `compelled` on a strict burden whose discharging action has a precondition**: the model's discharge edge replaces what is a dead end in the engine, so `compelled` may be true while the engine refuses the discharge. The gap exists since v2.0.0 for plain preconditions. Stated, not closed (2.1.0-14): the warning `[W-strict-precondition]` flags such a burden at specification time, and `GET /obligations/{token}/status` lists the assumed preconditions under `assumes_preconditions`. Pinned by `tests/test_strict_precondition_guard.py` |
+| R12 | A comparison reads a policy limit at its value: the policy's typed `initial_value` (policy values are read-only) | Not read | Not used | — (preconditions as a whole are R11) |

@@ -33,7 +33,7 @@ from decimal import Decimal
 from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 
 # ── Runtime types ─────────────────────────────────────────────────────────────
@@ -333,6 +333,133 @@ def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
     )
 
 
+# ── Comparisons (2.1.0-12) ───────────────────────────────────────────────────
+#
+# A Comparison compares a value the caller reports on the act (facts, as
+# text) with a limit: a number, percentage or amount literal, or a Policy at
+# its value (its typed initial_value; policy values are read-only). The DSL
+# compares typed values; it does not compute. Amounts are compared only
+# within one currency, never converted.
+
+_REPORTED_TEXT_MAX = 100
+_NUMBER_TEXT = r"-?[0-9]+(?:\.[0-9]+)?"
+_NUMBER_TEXT_RE = re.compile(_NUMBER_TEXT)
+_PERCENTAGE_TEXT_RE = re.compile(rf"({_NUMBER_TEXT})%")
+_AMOUNT_TEXT_RE = re.compile(rf"({_NUMBER_TEXT}) ([A-Z]{{3}})")
+_KIND_EXAMPLE = {"number": "25000000", "percentage": "8.5%", "amount": "25000000.00 AUD"}
+_KIND_NOUN = {"number": "a number", "percentage": "a percentage", "amount": "an amount"}
+
+
+def _operand(value) -> Tuple[Optional[str], Any]:
+    """2.1.0-12: (kind, comparable) for a comparison limit's typed value:
+    a number as Decimal, a percentage as its number, an amount as
+    (number, code). (None, None) for anything else."""
+    kind = policy_value_kind(value)
+    if kind in ("integer", "decimal"):
+        return "number", Decimal(value)
+    if kind == "percentage":
+        return "percentage", Decimal(value.value)
+    if kind == "amount":
+        return "amount", (Decimal(value.value), value.code)
+    return None, None
+
+
+def read_reported_value(text, kind: str) -> Tuple[Any, Optional[str]]:
+    """2.1.0-12: (value, None) for a reported `text` read strictly as a
+    value of `kind` ("number", "percentage", "amount"), or (None, reason).
+    The whole text must match, in the 2.1.0 notation, ASCII digits, at most
+    100 characters: a number as -?digits(.digits), read as an exact Decimal
+    (so an integer limit accepts 20000000.50); a percentage as that number
+    then '%' with no space; an amount as that number, one space and three
+    upper-case letters."""
+    refused = (None, f"not {_KIND_NOUN[kind]} value")
+    if not isinstance(text, str) or len(text) > _REPORTED_TEXT_MAX:
+        return refused
+    if kind == "number":
+        return (Decimal(text), None) if _NUMBER_TEXT_RE.fullmatch(text) else refused
+    if kind == "percentage":
+        m = _PERCENTAGE_TEXT_RE.fullmatch(text)
+        return (Decimal(m.group(1)), None) if m else refused
+    m = _AMOUNT_TEXT_RE.fullmatch(text)
+    return ((Decimal(m.group(1)), m.group(2)), None) if m else refused
+
+
+def _shown(text: str) -> str:
+    """A reported text as echoed in a reason: at most 40 characters."""
+    return text if len(text) <= 40 else text[:40] + "…"
+
+
+class Judgement(NamedTuple):
+    """2.1.0-12: one judged comparison. value: True holds, False fails,
+    None not established; text: the comparison as written in a reason."""
+    value: Optional[bool]
+    text: str
+
+
+def judge_comparison(cmp, facts: dict) -> Judgement:
+    """2.1.0-12: the value reported for cmp.fact in `facts` against the
+    comparison's limit. Not established (value None), in this order: the
+    fact is absent, null or "unknown"; the limit has no comparable value;
+    the fact is not text; the text does not read in the limit's kind; an
+    amount is in another currency."""
+    fact, op = cmp.fact, cmp.op
+    policy = getattr(cmp, "policy", None)
+    typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
+    kind, limit = _operand(typed)
+    limit_text = policy_value_text(typed) if typed is not None else ""
+    if policy is not None:
+        limit_text = f"{limit_text} ({policy.name})" if typed is not None else policy.name
+    raw = facts.get(fact)
+
+    if raw is None or raw == "unknown":
+        return Judgement(None, f"'{fact}' not reported")
+    if kind is None:
+        return Judgement(None, f"'{fact}': limit {limit_text} has no comparable value")
+    if not isinstance(raw, str):
+        return Judgement(None, f"'{fact}' reported a value of type {type(raw).__name__}, not text; "
+                               f"send text, e.g. \"{_KIND_EXAMPLE[kind]}\"")
+    value, reason = read_reported_value(raw, kind)
+    if value is None:
+        return Judgement(None, f"'{fact}' reported {_shown(raw)}: {reason}")
+    if kind == "amount":
+        (value, code), (limit, limit_code) = value, limit
+        if code != limit_code:
+            return Judgement(None, f"'{fact}' reported {raw}: currency {code}, not "
+                                   f"{limit_code}; amounts are compared only within one currency")
+    holds = {">=": value >= limit, "<=": value <= limit,
+             ">": value > limit, "<": value < limit}[op]
+    return Judgement(holds, f"'{fact}' {raw} {op} {limit_text}")
+
+
+def _precondition_refusal(preconditions, facts: dict) -> Tuple[Optional[str], Tuple[str, ...]]:
+    """Step 4, shared by advance() and declare_violation(): (reason, lines).
+    reason is the refusal reason for `preconditions` under `facts`, or None
+    when every one holds. A plain precondition holds when its fact is
+    truthy. 2.1.0-12: a Comparison is judged (judge_comparison()); a false
+    precondition is reported before one not established, each in declared
+    order. lines: one "precondition satisfied: ..." per comparison that
+    holds, for the act's effects when it is applied; plain preconditions
+    add none."""
+    failed, unknown, lines = [], [], []
+    for precond in preconditions:
+        if isinstance(precond, str):
+            if not facts.get(precond):
+                failed.append(f"'{precond}'")
+            continue
+        judged = judge_comparison(precond, facts)
+        if judged.value is True:
+            lines.append(f"precondition satisfied: {judged.text}")
+        elif judged.value is False:
+            failed.append(judged.text)
+        else:
+            unknown.append(judged.text)
+    if failed:
+        return f"precondition not satisfied: {failed[0]}", ()
+    if unknown:
+        return f"precondition not established: {unknown[0]}", ()
+    return None, tuple(lines)
+
+
 def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int
              ) -> Tuple[WorldState, TransitionRecord]:
     return state, TransitionRecord(
@@ -383,6 +510,52 @@ def _event_bound_tokens(spec) -> set:
                             and getattr(tok, "discharged_by", None) is not None):
                         result.add(tok.name)
     return result
+
+
+def discharging_actions(spec, burden_name: str) -> List[Any]:
+    """2.1.0-14: the declared Actions whose performance discharges the
+    burden in advance(), read from the specification: with discharged_by
+    E, every Action that emits E (AM-113: only its event discharges it);
+    otherwise the Action its for_action names and every Action with a
+    `destroy` effect on it. In declared order, each once."""
+    token = None
+    for el in getattr(spec, "elements", None) or []:
+        if type(el).__name__ == "DeonticToken" and el.name == burden_name:
+            token = el
+        if type(el).__name__ in ("Community", "Domain", "Federation"):
+            for role in getattr(el, "roles", []) or []:
+                for tok in getattr(role, "holds_tokens", []) or []:
+                    if type(tok).__name__ == "InlineToken" and tok.name == burden_name:
+                        token = token or tok
+    if token is None:
+        return []
+    event = getattr(getattr(token, "discharged_by", None), "name", None)
+    found: List[Any] = []
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            for action in getattr(role, "actions", []) or []:
+                if event is not None:
+                    hit = getattr(getattr(action, "emits", None), "name", None) == event
+                else:
+                    hit = (action.name == getattr(token, "for_action", None)
+                           or any(eff.operation == "destroy" and eff.token is not None
+                                  and eff.token.name == burden_name
+                                  for eff in getattr(action, "deontic_effects", []) or []))
+                if hit and action not in found:
+                    found.append(action)
+    return found
+
+
+def precondition_text(precond) -> str:
+    """2.1.0-14: a precondition as written: a plain fact as "fact", a
+    comparison as "fact" op limit (a policy limit by its name)."""
+    if isinstance(precond, str):
+        return f'"{precond}"'
+    policy = getattr(precond, "policy", None)
+    limit = policy.name if policy is not None else policy_value_text(precond.literal)
+    return f'"{precond.fact}" {precond.op} {limit}'
 
 
 def _discharge(spec, tokens: list, keys: Set[Tuple[str, str]],
@@ -788,11 +961,11 @@ def advance(
             return _blocked(state, actor_name, action_name, reason, tick)
 
     # ── Step 4: Preconditions ─────────────────────────────────────────────────
+    precondition_lines: Tuple[str, ...] = ()
     if grammar_action:
-        for precond in grammar_action.preconditions:
-            if not facts.get(precond):
-                return _blocked(state, actor_name, action_name,
-                                f"precondition not satisfied: '{precond}'", tick)
+        reason, precondition_lines = _precondition_refusal(grammar_action.preconditions, facts)
+        if reason is not None:
+            return _blocked(state, actor_name, action_name, reason, tick)
 
     # ── Step 5: Embargo sweep ─────────────────────────────────────────────────
     # AM-102: an active embargo held by the actor blocks the actions it
@@ -819,7 +992,7 @@ def advance(
 
     # ── Step 7: Effect application ────────────────────────────────────────────
     tokens = list(state.tokens)
-    effects_log: list[str] = []
+    effects_log: list[str] = list(precondition_lines)  # 2.1.0-12: satisfied comparisons
 
     # 7a — Discharge identified burdens (transition to 'discharged'), then
     # AM-57 any_discharged sibling supersession (_discharge()).
@@ -2678,12 +2851,11 @@ def declare_violation(
     coverage = _embargo_coverage(spec)
     action = None
     first_reason = None
+    precondition_lines: Tuple[str, ...] = ()
     for candidate in actions:
         reason = _role_refusal(spec, state, declarer, candidate.name)
         if reason is None:
-            missing = [p for p in candidate.preconditions if not facts.get(p)]
-            if missing:
-                reason = f"precondition not satisfied: '{missing[0]}'"
+            reason, precondition_lines = _precondition_refusal(candidate.preconditions, facts)
         if reason is None:
             for tok in state.tokens:
                 if (tok.holder == declarer and tok.kind == "embargo"
@@ -2744,7 +2916,7 @@ def declare_violation(
                         f"steps elapsed at step {at_tick}", tick)
 
     tokens = [_transition(t, "violated") if t in overdue else t for t in state.tokens]
-    effects = tuple(
+    effects = precondition_lines + tuple(   # 2.1.0-12: satisfied comparisons first
         f"declared '{burden_name}' held by '{t.holder}' violated "
         f"(elapsed {at_tick - _activation_tick(t)} >= deadline {deadline_steps} steps "
         f"at step {at_tick})"

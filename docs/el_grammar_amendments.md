@@ -10746,3 +10746,183 @@ v2.0.0 from the state after 2.1.0-1.
 
 **Files changed:** `docs/DSL_TOOLCHAIN_REFERENCE.md`, `CHANGELOG.md`, this
 file.
+
+## 2.1.0-11 — comparison grammar (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_parser.py`)
+
+**Status:** IMPLEMENTED. Type: grammar amendment (new rules `Comparison`,
+`CompareOp`, `CompareLiteral`; `PreconditionDecl` alternative).
+
+**Standard reference:** clause to be confirmed. Operator symbols and the
+reported-value notation: source standard to be confirmed.
+
+**Before (v2.0.0).** A precondition was a quoted fact name only;
+`precondition: "x" >= 5` was a syntax error.
+
+**Now.** `precondition: "<fact>" <op> <limit>`, with `op` one of
+`>= <= > <` and `limit` an Amount, Percentage, decimal or integer literal,
+or a Policy reference. `Comparison` comes first in `PreconditionDecl`, so
+every plain precondition parses as before. The parser keeps a comparison
+as a `Comparison` object in `action.preconditions` / `step.preconditions`,
+in declared order with the plain strings. In this sub-change alone the
+engine refused every comparison as "not established".
+
+**Limits.** No equality operators; no date, instant or duration limit; no
+digit grouping (`20000000`, not `20,000,000`). `"x" >= 60 day` parses as an
+amount with code `day` (refused by `comparison-type` from 2.1.0-13).
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_parser.py`, `toolchain/el_engine.py`; new
+`tests/test_comparison_grammar.py` (including the three-letter keyword
+scan extended to the comparison's position).
+
+**Verification:** full suite 1374 → 1409 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+Verifier parity: none in this sub-change (rows added in 2.1.0-12).
+
+## 2.1.0-12 — comparison judging (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine.
+
+**Now.**
+- `read_reported_value(text, kind)`: the reported text read strictly in
+  the limit's kind: a number (`-?digits(.digits)`, an exact Decimal), a
+  percentage (that number then `%`), an amount (that number, one space,
+  three upper-case letters); ASCII, at most 100 characters.
+- `judge_comparison(cmp, facts)`: holds, fails, or not established (not
+  reported; not text; wrong kind; another currency; a limit with no
+  comparable value).
+- `_precondition_refusal()`, shared by `advance()` (Step 4) and
+  `declare_violation()`: a false precondition is reported before one not
+  established, each in declared order; plain preconditions are read as
+  before.
+- A comparison that held adds `precondition satisfied: <comparison>` to
+  the applied act's effects; plain preconditions add none. The record's
+  shape is unchanged.
+
+**Limits.** Reported values are trusted as given. A policy limit is its
+typed `initial_value`.
+
+**Tests changed:** `tests/test_comparison_grammar.py`: the 2.1.0-11
+placeholder test (every comparison refused) now checks judging.
+
+**Files changed:** `toolchain/el_engine.py`;
+`docs/ENGINE_VERIFIER_PARITY.md`; new `tests/test_comparison_judging.py`.
+
+**Verification:** full suite 1409 → 1463 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+Verifier parity: R11 added (preconditions, plain and comparison): absent,
+over; unsafe for `compelled` on a strict burden whose discharging action
+has a precondition (present since v2.0.0 for plain preconditions). R12
+added (a policy limit read at its typed value): not used.
+
+## 2.1.0-13 — comparison and envelope validation (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: five validator errors. Each message ends
+"(clause to be confirmed)".
+
+**Before (v2.0.0).** Envelopes were not checked: `initial_value: 5` with
+`one of [1, 2, 3]`, with `one of [1 day, 2 day]`, or with undeclared names
+`one of [nosuch, other]` parsed and validated with no error or warning.
+Amounts did not parse. Step preconditions were never enforced (a step with
+a failing plain precondition, or with its fact missing, proceeded).
+
+**Now.**
+- `comparison-type`: the limit is a number, percentage or amount literal
+  (an amount code in the ISO 4217 form, so `60 day` is refused), or a
+  Policy of type integer, decimal, number, percentage or amount.
+- `fact-key-clash`: one fact key read two ways (plain and comparison, or
+  comparisons of different kinds or currencies).
+- `comparison-in-step`: a comparison in a Step precondition, which no
+  engine path enforces.
+- `envelope-currency`: an amount initial value with envelope amounts in
+  another currency.
+- `envelope-membership`: the initial value lies inside every envelope rule
+  (listed values by value; ranges with ends included; durations through
+  the unit table, instants by moment, amounts within one currency). No
+  double report where `range-ends`, `calendar-date`, `instant-valid` or
+  `envelope-currency` already apply. A NormativePolicy has no envelope in
+  the grammar, so it is never reported.
+- The non-text reason reads `reported a value of type int, not text; send
+  text, e.g. "25000000.00 AUD"`.
+- Consumers: only the engine reads preconditions; a comparison spec passes
+  through the validator, both Kripke builders, the reasoner and the API
+  query routes (`tests/test_comparison_consumers.py`).
+
+**Tests changed:** `tests/test_comparison_judging.py` (the non-text
+reason).
+
+**Files changed:** `toolchain/el_validator.py`, `toolchain/el_engine.py`;
+shared examples `tests/examples/comparisons/`; new
+`tests/test_comparison_validator.py`, `tests/test_comparison_examples.py`,
+`tests/test_comparison_consumers.py`.
+
+**Verification:** full suite 1463 → 1545 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+Verifier parity: none (validator only).
+
+## 2.1.0-14 — strict precondition guard (`toolchain/el_validator.py`, `toolchain/el_api.py`, `toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: validator warning, API field. No verifier
+change.
+
+**Before (v2.0.0).** For a strict burden whose discharging action has a
+precondition, the engine refuses the discharge when the precondition is
+false, while both Kripke builders report the burden compelled: the
+verifier assumes preconditions hold. Nothing said so.
+
+**Now.**
+- `el_engine.discharging_actions(spec, burden)`: the Actions that
+  discharge a burden in `advance()` (the emitting Actions for
+  `discharged_by`; otherwise the `for_action` Action and every Action with
+  a `destroy` effect on it). `precondition_text()` writes a precondition
+  as written.
+- `[W-strict-precondition]`: a strict burden (top-level or role-scoped)
+  whose discharging action has a precondition, plain or a comparison.
+- `GET /obligations/{token}/status` adds `assumes_preconditions`:
+  `<action>: <precondition>` for each, in hybrid and spec mode; empty when
+  none.
+- A test pins the gap (engine refuses, model says compelled), so that it
+  is not changed by accident.
+
+**Shipped scenarios.** `gp_referral` and `referral` gain one warning each,
+`[W-strict-precondition]` on `referralInitiationBurden` (gp_referral 4 to
+5 warnings, referral 3 to 4). The scenarios are unchanged; the warning
+reports a gap present since v2.0.0.
+
+**Tests changed:** `tests/test_am89_warnings_channel.py`: its strict-gap
+filter also excludes `[W-strict-precondition]`, as it excludes `[W-19]`,
+`[W-20]` and `[W-24]`.
+
+**Files changed:** `toolchain/el_validator.py`, `toolchain/el_api.py`,
+`toolchain/el_engine.py`; one changed test file; new
+`tests/test_strict_precondition_guard.py`.
+
+**Verification:** full suite 1545 → 1558 collected, 0 failures.
+
+Verifier parity: R11 and R8 unchanged (absent, over; unsafe for
+`compelled` on strict burdens), now stated by the warning and the status
+field and pinned by a test. `el_kripke.py` unchanged.
+
+## 2.1.0-15 — comparison docs and log
+
+**Status:** IMPLEMENTED. Type: documentation.
+
+**Now.** `docs/DSL_TOOLCHAIN_REFERENCE.md`: section "Comparisons (2.1.0)"
+(syntax, reported-value notation, refusal reasons, the ledger line, the
+JSON-number trap, the adapter pattern for a share of the contract value,
+plain preconditions, step preconditions, validator, verifier) and Known
+Limitations lines, each stated as what v2.0.0 does; `CHANGELOG.md`
+[Unreleased]; entries 2.1.0-11 to 2.1.0-15. The v2.0.0 statements were
+checked by running the v2.0.0 code: a comparison precondition does not
+parse; the strict-burden gap with a plain precondition; unchecked
+envelopes; a plain precondition passes on "false", "no" and "0"; step
+preconditions are never enforced.
+
+**Files changed:** `docs/DSL_TOOLCHAIN_REFERENCE.md`, `CHANGELOG.md`,
+`docs/ENGINE_VERIFIER_PARITY.md` (R11), this file.
+
+Verifier parity: R11 text updated to cite `[W-strict-precondition]` and
+`assumes_preconditions`; status and direction unchanged.
