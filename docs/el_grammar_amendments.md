@@ -11193,3 +11193,30 @@ Corrected: "no shipped scenario has a date deadline"
 v2.0.0. No shipped burden has a date deadline.
 
 Verifier parity: none (documentation only).
+
+## 2.1.0 version
+
+**Status:** IMPLEMENTED. Type: release metadata.
+
+**Now.** The API's version (`toolchain/el_api.py`, the FastAPI `version`,
+shown in the OpenAPI document) is `2.1.0` (it was `0.1.0`); `README.md`
+names 2.1 and its additions; the `CHANGELOG.md` heading is `[2.1.0] -
+2026-10-17`, linked as `releases/tag/v2.1.0` like 2.0.0.
+`grammar/v1/__init__.py` keeps its own `__version__` (the frozen v1
+grammar). The repository has no package metadata.
+
+Verifier parity: none.
+
+## 2.1.0 changelog corrections
+
+**Status:** IMPLEMENTED. Type: documentation.
+
+**Now.** `CHANGELOG.md` [2.1.0]: the entry range reads 2.1.0-1 to
+2.1.0-25; the Limits line "Envelope membership is not checked. Policy
+values are read-only, and nothing in the engine or verifier reads them
+yet", stale since 2.1.0-12 and 2.1.0-13, now says the engine reads a
+policy's value as a comparison limit or a standing duty's `ends_at`, the
+verifier does not, and envelopes are checked by the validator only; the
+2.1.0-23 line follows 2.1.0-21.
+
+Verifier parity: none (documentation only).

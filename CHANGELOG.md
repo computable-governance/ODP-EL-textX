@@ -5,12 +5,12 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
-## [Unreleased]
+## [2.1.0] - 2026-10-17
 
 Typed policy values, date deadlines, comparisons and standing duties.
 Details per sub-change are in
 [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
-2.1.0-1 to 2.1.0-22); the rules are in
+2.1.0-1 to 2.1.0-25); the rules are in
 [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md),
 "Typed policy values (2.1.0)", "Deadlines (2.1.0)", "Comparisons (2.1.0)"
 and "Standing duties (2.1.0)".
@@ -67,12 +67,12 @@ and "Standing duties (2.1.0)".
   route answers "standing duty: not modelled" with `standing: true` and null
   `compelled`/`detectable`; the witness route refuses propositions that
   depend on a standing duty; recommendations never discharge one.
+- **2.1.0-21 Facts on `POST /check-violations`.** Optional body `{"facts":
+  {...}}`; the response adds `standing: [{token, holder, verdict, text}]`.
 - **2.1.0-23** The recommended action's Q-values (its route and
   execute-action's `new_q_value`) are computed without the edges that
   discharge a standing duty; with only those edges and the tick, the
   recommendation is `tick`.
-- **2.1.0-21 Facts on `POST /check-violations`.** Optional body `{"facts":
-  {...}}`; the response adds `standing: [{token, holder, verdict, text}]`.
 
 ### Changed
 
@@ -116,8 +116,9 @@ and "Standing duties (2.1.0)".
 - Values are compared, never computed. Amounts are never converted
   between currencies. Durations go down to minutes; a month is 30 days and
   a year 365 for comparison. `60 days` is DSL notation, not ISO 8601.
-- Envelope membership is not checked. Policy values are read-only, and
-  nothing in the engine or verifier reads them yet.
+- Policy values are read-only. The engine reads a policy's value only as
+  a comparison limit or a standing duty's `ends_at`; the verifier does not
+  read policy values. Envelopes are checked by the validator only.
 - `as_at` is asserted by the caller: a future `as_at` violates a date
   burden early and irreversibly. One fixed UTC offset, no daylight saving
   or holidays. Durations stay on the step clock, dates on `as_at`, in one
@@ -200,7 +201,7 @@ notes) is [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
   scope, and the `domain_scope` field on an Authorization is not checked.
 
 
-[Unreleased]: https://github.com/computable-governance/ODP-EL-textX/compare/v2.0.0...HEAD
+[2.1.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.1.0
 [2.0.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.0.0
 
 
