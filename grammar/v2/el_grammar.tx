@@ -143,6 +143,18 @@ PrincipalOf:
  */
 DeonticToken:
     kind=DeonticKind name=ID '{'
+        // 2.1.0-16: a standing duty, kept for its term. `standing` is
+        // mandatory in the group, so `keeps` without it is refused. keeps
+        // takes a Comparison: a value reported at each check against a
+        // limit. The term runs from activation (the grant, or the first
+        // firing of triggered_by) until ends_at (a date or instant, or a
+        // date or instant Policy) or until the ended_by event fires,
+        // whichever comes first.
+        (standing='standing'
+            'keeps'    ':' keeps=Comparison
+            ('ends_at'  ':' (ends_at=TermEnd | ends_at_policy=[Policy]))?
+            ('ended_by' ':' ended_by=[EventDecl])?
+        )?
         // DOC-03: for_action is informational only — plain STRING, not a
         // cross-reference; the parser cannot machine-check this against
         // declared Action names.  See AM-01 for the proposed typed upgrade.
@@ -788,6 +800,13 @@ Comparison:
 ;
 CompareOp: /(>=|<=|>|<)/ ;
 CompareLiteral: Amount | Percentage | DecimalNumber | IntegerNumber ;
+
+/*
+ * TermEnd — 2.1.0-16: where a standing duty's term ends: an instant or a
+ * date (a date alone ends at the end of that day in the clock's offset).
+ * Instant before Date, which it begins with.
+ */
+TermEnd: Instant | Date ;
 
 /*
  * DeonticRequirement — §6.4.6 conditional action semantics.

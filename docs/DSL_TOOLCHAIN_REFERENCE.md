@@ -231,8 +231,11 @@ is refused. A trailing `Z` is accepted. 422 for a value that cannot be
 parsed, has no offset, or is earlier than the last accepted one (nothing is
 ledgered). The response adds `as_at` (echoed, or null) and `not_judged:
 [{token, holder, reason}]`. Each scenario's clock is in
-`el_api._SCENARIO_CLOCK`; no shipped scenario has a clock or a date
-deadline.
+`el_api._SCENARIO_CLOCK`. No shipped scenario has a clock, and no burden
+in a shipped scenario has a date deadline (one permit in
+`scenarios/fhir/generated_governance.el` has `deadline: "by 2026-05-20"`;
+`check_live_violations()` judges burdens only, so it is never judged, as
+in v2.0.0).
 
 **Verifier.** The verifier does not model date deadlines
 (`docs/ENGINE_VERIFIER_PARITY.md`, rows R5 to R7): it never proves anything
@@ -333,6 +336,166 @@ discharging action has a precondition, `GET /obligations/{token}/status`
 may report `compelled: true` while the engine refuses the discharge; its
 field `assumes_preconditions` lists the assumed preconditions as
 `<action>: <precondition>`.
+
+---
+
+## Standing duties (2.1.0)
+
+A standing duty is a burden kept for a term: for example, "the supplier
+keeps insurance cover of at least 20000000 AUD for the life of the
+contract". It is judged against values the caller reports; the DSL
+compares, it does not compute.
+
+**Syntax.** `standing` and `keeps` (a comparison, see "Comparisons
+(2.1.0)") come first in the burden's body, optionally followed by
+`ends_at` and `ended_by`:
+
+```
+enterprise specification CoverForTheTermOk
+
+policy MinimumCover : amount { initial_value: 20000000 AUD }
+policy MaximumShare : percentage { initial_value: 10% }
+policy ContractEnd : instant { initial_value: 2027-06-30T17:00+10:00 }
+
+party Supplier {
+    holds keepCover
+    holds keepShare
+}
+
+burden keepCover {
+    standing
+    keeps: "insurance cover" >= MinimumCover
+    ends_at: ContractEnd
+    ended_by: contractTerminated
+    state: pending
+    triggered_by: contractSigned
+}
+
+burden keepShare {
+    standing
+    keeps: "subcontract share" <= MaximumShare
+    ends_at: ContractEnd
+    ended_by: contractTerminated
+    state: pending
+    triggered_by: contractSigned
+}
+
+community Contract {
+    objective: "the supplier keeps cover and limits subcontracting for the term"
+    event contractSigned
+    event contractTerminated
+    Supplier fills supplierRole
+    role supplierRole {
+        action sign { actor: supplierRole emits: contractSigned }
+        action terminate { actor: supplierRole emits: contractTerminated }
+    }
+}
+```
+
+(This is `tests/examples/standing/ok_cover_for_the_term.el`; it parses and
+validates with no error.)
+
+**The term.** It starts at the duty's activation: its grant, or the first
+firing of `triggered_by`. It ends at `ends_at` (a date or instant, or a
+date or instant Policy shared by several duties) or when the `ended_by`
+event fires, whichever comes first.
+
+- A date alone ends at the end of that day in the clock's offset; an
+  instant at that moment. A term end by date is judged only with a clock
+  (`DeadlineClock`, see "Deadlines (2.1.0)") and an `as_at`.
+- An `ended_by` event ends the term when it fires: an action that emits it,
+  or `fire_event()`.
+- An `ended_by` event that fires while the duty is still pending is not
+  remembered: a duty that starts later is never ended by it.
+
+**Judged only at a check.** `keeps` is judged when the caller runs a
+check, with the time (`as_at`) and the facts the adapter reports:
+
+```python
+from datetime import datetime, timedelta, timezone
+from el_engine import DeadlineClock
+from el_runtime import Runtime
+
+rt = Runtime.build_from_spec(spec, clock=DeadlineClock(utc_offset=timezone(timedelta(hours=10))))
+rt.fire_event("contractSigned")
+record = rt.check_live_violations(
+    as_at=datetime(2027, 1, 15, 9, 0, tzinfo=timezone(timedelta(hours=10))),
+    facts={"insurance cover": "25000000.00 AUD", "subcontract share": "8.5%"},
+)
+```
+
+Through the API: `POST /check-violations?as_at=2027-01-15T09:00%2B10:00`
+with the body `{"facts": {"insurance cover": "25000000.00 AUD",
+"subcontract share": "8.5%"}}`. The response lists each duty under
+`standing` as `{token, holder, verdict, text}`.
+
+**Verdicts.**
+
+| Verdict | When | Effect |
+|---|---|---|
+| kept | the reported value satisfies the comparison | none; the ledger line `kept '<duty>' held by '<holder>': <comparison> at as_at <time>` |
+| breached | the reported value fails the comparison | the duty is violated: once, and final (a later good report does not undo it) |
+| met | `as_at` is at or after `ends_at`, or `ended_by` has fired | the duty is discharged; `keeps` is not judged at or after the end |
+| not judged | nothing reported, not text, wrong kind, another currency, no `as_at`, or a term end that cannot be judged (no clock) | no change; a duty is never "kept" without a value that holds |
+
+Kept means kept at the moments checked: a lapse between two checks is not
+seen, and nothing runs a check on its own.
+
+**Nothing else ends it.** A standing duty is not discharged by an action,
+a `destroy` effect, an event other than its `ended_by`, or
+`discharge_burden()` (refused); a declaration of its breach is refused; no
+deadline or episode conclusion violates it.
+
+**Rules.**
+- `standing-fields` (error): a standing duty is an eventual burden, active
+  or pending, with no `deadline`, `discharged_by` or `for_action`. It cannot
+  be strict: a strict burden blocks the clock while it can be acted on,
+  and the verifier would report it compelled by a discharge the engine
+  never makes.
+- `standing-in-group` (error), `term-end-type` (error); `comparison-type`
+  and `fact-key-clash` also read `keeps`.
+- `[W-standing-no-end]`: neither `ends_at` nor `ended_by`, so it is never
+  met.
+- `[W-standing-shared-fact]`: the facts of one check are global, one value
+  per key, so standing duties of different holders that read the same fact
+  key are all judged by one report. Use one fact key per holder.
+- `[W-standing-not-modelled]`: on every standing duty (see Verifier).
+
+**Verifier.** The verifier does not model standing duties: it treats one
+as an ordinary obligation that its holder could discharge at any step, and
+has no breach or term-end step (`docs/ENGINE_VERIFIER_PARITY.md`, R13 to
+R18). The toolchain withholds its claims about them:
+- `GET /obligations/{token}/status` answers `status: "standing duty: not
+  modelled"`, `standing: true`, `compelled: null`, `detectable: null`, and
+  no path;
+- `GET /kripke/witness` refuses (422) `discharged:<duty>`, `violated:<duty>`
+  and `all_discharged` while the model tracks a standing duty;
+- the recommended action (its route, and the one execute-action returns)
+  never proposes discharging a standing duty, and its Q-values are computed
+  on the model without those discharge edges (2.1.0-23). When the only
+  other edge is the tick, the recommendation is `tick`.
+
+Other routes are unaffected: the objective score and reachability read
+satisfaction groups, which never contain a standing duty; available
+actions list obligations by their `for_action`, which a standing duty
+cannot have. The `updated_world`/`current_world` maps still show a
+standing duty's state in the model (PENDING while active).
+
+**The two rules, with an adapter.**
+- Cover at least 20000000 AUD: `keeps: "insurance cover" >=
+  MinimumCover`. The adapter reports the current cover as text, for
+  example `"25000000.00 AUD"`.
+- Exposure at most 10% of contract value: `keeps: "subcontract share" <=
+  10%` (or a percentage policy). The adapter computes the share from the
+  subcontract and contract values and reports it, for example `"8.5%"`; the
+  DSL never computes it.
+
+Send each value as text: a JSON number is not established, and the reason
+says to send text (`e.g. "25000000.00 AUD"`).
+
+**Not supported.** A term given as a duration; declaring a breach; ending a
+term by community conclusion; currency conversion; arithmetic; proof of
+where a reported value came from.
 
 ---
 
@@ -741,6 +904,20 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - No equality operators and no date, instant or duration comparisons. A
   policy limit is its initial value (values are read-only).
 - Facts must be text; a JSON number is refused as not established.
+
+**Standing duties (2.1.0):**
+- v2.0.0 cannot express a standing duty: `standing keeps: …` is a syntax
+  error. A duty "for the term of the contract" could be written only as a
+  burden with a prose deadline, which the v2.0.0 engine never violates
+  (`[W-24]` warns), which `discharge_burden()` ends, and whose discharge the
+  verifier offers at any step. 2.1.0 adds standing duties, and withholds
+  the verifier's claims about them instead of modelling them.
+- Reported values are asserted by the caller; kept means kept at the
+  moments checked, and nothing runs a check on its own.
+- An `ended_by` event that fires before the duty starts is not remembered.
+- A term end by date needs a clock; one fixed UTC offset.
+- Not supported: a term given as a duration, declaring a breach, ending a
+  term by community conclusion.
 
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)

@@ -176,6 +176,21 @@ Rules implemented
         action has a precondition (plain or a comparison): the verifier
         assumes it holds, so `compelled` may be reported while the engine
         refuses the discharge. Advisory.            clause to be confirmed
+  standing-fields  2.1.0-19: a standing duty is an eventual burden, state
+        active or pending, with no deadline, discharged_by or for_action,
+        and an ended_by other than its triggered_by.  clause to be confirmed
+  standing-in-group  2.1.0-19: a standing duty is no TokenGroup member.
+                                                     clause to be confirmed
+  term-end-type  2.1.0-19: ends_at is a valid date or instant, or a Policy
+        of type date or instant.                     clause to be confirmed
+  W-standing-no-end  2.1.0-19: a standing duty with neither ends_at nor
+        ended_by is never met. Advisory.             clause to be confirmed
+  W-standing-shared-fact  2.1.0-19: standing duties held by different
+        parties read the same keeps fact key. Advisory.
+                                                     clause to be confirmed
+  W-standing-not-modelled  2.1.0-20: every standing duty: the verifier
+        does not model its term end or breach; the status route gives no
+        verdict for it. Advisory.                    clause to be confirmed
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -314,6 +329,14 @@ def validate_spec(model) -> List[str]:
 
     # 2.1.0-14 — strict burden discharged only through a precondition (advisory)
     errors.extend(_validate_strict_precondition(model))
+
+    # 2.1.0-19 — standing duties (clause to be confirmed)
+    errors.extend(_validate_standing_fields(model))
+    errors.extend(_validate_standing_in_group(model))
+    errors.extend(_validate_term_end_type(model))
+    errors.extend(_validate_standing_no_end(model))
+    errors.extend(_validate_standing_shared_fact(model))
+    errors.extend(_validate_standing_not_modelled(model))   # 2.1.0-20
 
     # V-14 — PolicyRef targets in communities
     for community in all_communities.values():
@@ -1064,6 +1087,16 @@ def _precondition_holders(model):
         for process in getattr(el, "processes", []) or []:
             for step in steps(getattr(process, "steps", None)):
                 yield f"Step '{step.name}'", step.preconditions, True
+    # 2.1.0-19: a standing duty's keeps is a comparison too (comparison-type
+    # and fact-key-clash read it; it is never a step)
+    for el in _standing_duties(model):
+        if el.keeps is not None:
+            yield f"Standing duty '{el.name}'", [el.keeps], False
+
+
+def _standing_duties(model) -> List[Any]:
+    return [el for el in model.elements
+            if _cls(el) == "DeonticToken" and getattr(el, "standing", False)]
 
 
 def _comparisons(model):
@@ -1113,7 +1146,8 @@ def _validate_comparison_types(model) -> List[str]:
             problem = (f"limit {_value_text(typed)} has currency code '{typed.code}', not three "
                        f"upper-case letters A-Z (ISO 4217 form); a duration cannot be compared")
         if problem is not None:
-            errors.append(f"[comparison-type] {label}: precondition {_comparison_text(cmp)}: "
+            where = "keeps" if label.startswith("Standing duty") else "precondition"
+            errors.append(f"[comparison-type] {label}: {where} {_comparison_text(cmp)}: "
                           f"{problem}. {_TYPED_CITATION}")
     return errors
 
@@ -1299,6 +1333,147 @@ def _validate_strict_precondition(model) -> List[str]:
                 f"they hold, so the status route may report it compelled while the engine "
                 f"refuses the discharge. {_TYPED_CITATION}")
     return warnings
+
+
+def _validate_standing_fields(model) -> List[str]:
+    """standing-fields (2.1.0-19): a standing duty is a burden, eventual
+    (a strict one would block the clock, and the verifier would report it
+    compelled by a discharge the engine never makes), in state active or
+    pending, with no deadline (its term is its time), no discharged_by and
+    no for_action (nothing but its term end ends it), and an ended_by other
+    than its triggered_by (one event cannot start and end the term). The
+    discharge mode is read after defaults, so no form escapes the check."""
+    errors: List[str] = []
+    for el in _standing_duties(model):
+        problems = []
+        if el.kind != "burden":
+            article = "an" if el.kind[:1] in "aeiou" else "a"
+            problems.append(f"it is {article} {el.kind}; only a burden can be a standing duty")
+        if (getattr(el, "discharge_mode", None) or "eventual") != "eventual":
+            problems.append("it is strict; a standing duty must be eventual")
+        if el.state not in ("active", "pending"):
+            problems.append(f"its state is '{el.state}'; it must be active or pending")
+        if getattr(el, "deadline", None):
+            problems.append("it has a deadline; its term is set by ends_at or ended_by")
+        if getattr(el, "discharged_by", None) is not None:
+            problems.append("it has discharged_by; only its term end ends it")
+        if getattr(el, "for_action", None):
+            problems.append("it has a for_action; no action ends it")
+        ended = getattr(getattr(el, "ended_by", None), "name", None)
+        if ended is not None and ended == getattr(getattr(el, "triggered_by", None), "name", None):
+            problems.append(f"'{ended}' both starts and ends its term")
+        for problem in problems:
+            errors.append(f"[standing-fields] Standing duty '{el.name}': {problem}. "
+                          f"{_TYPED_CITATION}")
+    return errors
+
+
+def _validate_standing_in_group(model) -> List[str]:
+    """standing-in-group (2.1.0-19): a standing duty is not a TokenGroup
+    member: it is never discharged by an action, so it would block a group,
+    and the verifier would count it as discharged."""
+    names = {el.name for el in _standing_duties(model)}
+    errors: List[str] = []
+    for group in _collect(model, "TokenGroup"):
+        for tok in getattr(group, "tokens", []) or []:
+            if _obj_name(tok) in names:
+                errors.append(f"[standing-in-group] Standing duty '{_obj_name(tok)}' is a member "
+                              f"of token group '{group.name}'; a standing duty is never a group "
+                              f"member. {_TYPED_CITATION}")
+    return errors
+
+
+def _validate_term_end_type(model) -> List[str]:
+    """term-end-type (2.1.0-19): ends_at is a calendar date or a valid
+    instant (the 2.1.0 checks), or a Policy of type date or instant."""
+    errors: List[str] = []
+    for el in _standing_duties(model):
+        policy = getattr(el, "ends_at_policy", None)
+        end = getattr(el, "ends_at", None)
+        problem = None
+        if policy is not None:
+            ptype = getattr(policy, "policy_type", "") or ""
+            if ptype not in ("date", "instant"):
+                problem = (f"ends_at {policy.name} is a policy of type '{ptype}'; it must be "
+                           f"of type date or instant")
+            else:
+                end = getattr(policy, "initial_value", None)
+        if problem is None and end is not None:
+            kind = _value_kind(end)
+            if kind not in ("date", "instant"):
+                problem = f"ends_at {_value_text(end)} is not a date or instant"
+            elif _calendar_date(end.value[:10]) is None:
+                problem = f"ends_at {end.value} is not a calendar date"
+            elif kind == "instant" and _instant_problem(end.value) is not None:
+                problem = f"ends_at {end.value} is not an instant: {_instant_problem(end.value)}"
+        if problem is not None:
+            errors.append(f"[term-end-type] Standing duty '{el.name}': {problem}. "
+                          f"{_TYPED_CITATION}")
+    return errors
+
+
+def _validate_standing_no_end(model) -> List[str]:
+    """[W-standing-no-end] (2.1.0-19): a standing duty with neither ends_at
+    nor ended_by: its term never ends, so it is never met, only kept or
+    breached. Advisory."""
+    return [f"[W-standing-no-end] Standing duty '{el.name}' has neither ends_at nor "
+            f"ended_by: its term never ends, so it is never met, only kept or breached. "
+            f"{_TYPED_CITATION}"
+            for el in _standing_duties(model)
+            if getattr(el, "ends_at", None) is None
+            and getattr(el, "ends_at_policy", None) is None
+            and getattr(el, "ended_by", None) is None]
+
+
+def _static_holders(model, token_name: str) -> Set[str]:
+    """2.1.0-19: who holds a token according to the specification: an
+    object's holds, a Commitment's actor, a Delegation's delegate."""
+    holders: Set[str] = set()
+    for el in model.elements:
+        cls = _cls(el)
+        if cls == "EnterpriseObject" and any(
+                _obj_name(t) == token_name for t in getattr(el, "holds_tokens", []) or []):
+            holders.add(el.name)
+        elif cls == "Commitment" and _obj_name(getattr(el, "burden", None)) == token_name:
+            holders.add(_obj_name(el.actor))
+        elif cls == "Delegation" and _obj_name(getattr(el, "burden", None)) == token_name:
+            holders.add(_obj_name(el.delegate))
+    return holders
+
+
+def _validate_standing_shared_fact(model) -> List[str]:
+    """[W-standing-shared-fact] (2.1.0-19): standing duties held by
+    different parties read the same keeps fact key. The facts of one check
+    carry one value per key, not one per party, so a single report would
+    judge every holder's duty. Advisory."""
+    by_fact: Dict[str, List[Tuple[str, Set[str]]]] = {}
+    for el in _standing_duties(model):
+        if el.keeps is not None:
+            by_fact.setdefault(el.keeps.fact, []).append((el.name, _static_holders(model, el.name)))
+    warnings: List[str] = []
+    for fact, duties in sorted(by_fact.items()):
+        holders = set().union(*(h for _, h in duties))
+        if len(duties) < 2 or len(holders) < 2:
+            continue
+        shown = "; ".join(f"'{name}' held by {', '.join(sorted(h)) or 'nobody declared'}"
+                          for name, h in duties)
+        warnings.append(f"[W-standing-shared-fact] Fact '{fact}' is read by standing duties of "
+                        f"different holders ({shown}): one reported value judges all of them. "
+                        f"Use one fact key per holder. {_TYPED_CITATION}")
+    return warnings
+
+
+def _validate_standing_not_modelled(model) -> List[str]:
+    """[W-standing-not-modelled] (2.1.0-20): the verifier treats a standing
+    duty as an ordinary obligation its holder can discharge at any step; it
+    does not model its term end or breach. GET /obligations/{token}/status
+    reports it as "standing duty: not modelled" with no verdict, the witness
+    route refuses propositions that depend on it, and the recommended
+    action leaves out its discharge. Advisory."""
+    return [f"[W-standing-not-modelled] Standing duty '{el.name}': the verifier does not "
+            f"model its term end or breach; the status route gives no verdict for it and "
+            f"the recommended action never discharges it. {_TYPED_CITATION}"
+            for el in _standing_duties(model)]
 
 
 def _validate_policy_refs(community) -> List[str]:
@@ -2253,6 +2428,8 @@ def _validate_unviolatable_eventual_burden(model) -> List[str]:
             continue
         if (getattr(tok, "discharge_mode", None) or "eventual") != "eventual":
             continue
+        if getattr(tok, "standing", False):
+            continue  # 2.1.0-19: a standing duty is breached at a check, met at its term end
         deadline = getattr(tok, "deadline", None) or None
         if _has_deadline_magnitude(deadline) or tok.name in concludable:
             continue

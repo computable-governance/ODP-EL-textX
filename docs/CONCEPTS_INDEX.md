@@ -20,7 +20,7 @@ maturity status).
 | Federation (community type) | Partly implemented |
 | CommunityObject | Implemented (AM-26); 2026-07-28 correction on record — community object, not community, is the role filler; MemberRef emphasis open question |
 | Objective rules | Implemented |
-| Policy / policy envelope | Grammar exists — deliberately excluded from reference scenarios |
+| Policy / policy envelope | Typed values (2.1.0); read by the engine in comparisons and standing duties; envelope checked by the validator only; still excluded from reference scenarios |
 | NormativePolicy scope | Implemented (AM-28); widened to any Community (AM-41, 2026-07-22); enforcement-mode field landed (AM-42); optional url field landed (AM-43, 2026-07-28) |
 | Establishing behaviour | Implemented (AM-33) — demonstrated in `referral_scenario.el` |
 | Creation-style / episodic community | Settled 2026-07-07: created COMMUNITY, not federation (corrected from a 2026-07-06 conclusion) — demonstrated in `referral_scenario.el` |
@@ -37,6 +37,11 @@ maturity status).
 | Process / Step (behaviour structuring) | Grammar exists, zero usage — deliberate architectural alternative, not an oversight |
 | Community/Domain/Federation grammar sharing | Not implemented — consciously deferred structural refactor |
 | Scenario maturity language | Proposed |
+| Typed policy values (2.1.0) | Implemented (2.1.0-1 to 2.1.0-4) |
+| Date deadlines, the clock and `as_at` (2.1.0) | Implemented in the engine (2.1.0-6 to 2.1.0-9); not modelled by the verifier |
+| Comparisons in preconditions (2.1.0) | Implemented in the engine (2.1.0-11 to 2.1.0-14); assumed true by the verifier |
+| Standing duties (2.1.0) | Implemented in the engine (2.1.0-16 to 2.1.0-23); not modelled by the verifier, claims withheld |
+| Engine and verifier parity matrix (2.1.0) | Started (2.1.0-5); partial: rows from 2.1.0 only |
 
 ---
 
@@ -785,6 +790,18 @@ objective achievable.
 
 **Toolchain status:** Grammar support exists (`SettingBehaviour`, AM-27).
 **Deliberately excluded from board/clinical reference scenarios.**
+
+**2.1.0 update:** policy values are typed (see "Typed policy values
+(2.1.0)") and seeded read-only into `WorldState.policy_values`. The engine
+reads a policy's `initial_value` as a comparison limit and as a standing
+duty's `ends_at`; the verifier does not read policy values
+(`docs/ENGINE_VERIFIER_PARITY.md`, R10 and R12). Envelopes are checked by
+the validator only (`envelope-membership`, `envelope-currency`, and the
+value types of `range of [a to b]` through `range-ends`); no
+policy-setting behaviour is enforced. Shipped scenarios declare only
+`string` and `duration` policies (`gp_referral` and the two
+terms-of-engagement scenarios); none is read by a comparison or a
+standing duty.
 
 **Demonstrated in:** no reference scenario.
 
@@ -4944,6 +4961,13 @@ itself, and not done in this pass.
 
 ## `el_api.py` does not expose `Action.preconditions` on any response model — precondition checkboxes in the coordination UI are necessarily hardcoded per action, not generic — OPEN FINDING (2026-09-08)
 
+**2.1.0 update:** `Action.preconditions` is no longer `List[str]` only: an
+entry is a plain fact name (a string) or a `Comparison` (2.1.0-11). Since
+2.1.0-14 `GET /obligations/{token}/status` lists the preconditions of the
+actions that discharge the burden, as text, in `assumes_preconditions`
+(`"<action>: <precondition>"`). The available-actions response still
+carries none, so the finding stays open for that route.
+
 **Found while landing AM-78** (`docs/el_grammar_amendments.md`), which
 added a second `precondition:` string to `conductAIExamination` in
 `scenarios/referral/referral_scenario.el` (Part B of that amendment,
@@ -7238,6 +7262,13 @@ over the ledger. Not scheduled.
 
 ## No watchdog yet; where epoch and step duration live — OPEN FINDING (2026-09-27)
 
+**2.1.0 update:** the epoch now has a home: `el_engine.DeadlineClock(
+utc_offset=..., epoch=None)`, passed to `Runtime(clock=...)` /
+`Runtime.build_from_spec(spec, clock=...)` (2.1.0-7). Nothing reads
+`epoch` yet. The clock's offset is used for date deadlines, which are
+judged against a caller's `as_at`, not against the tick. There is still
+no watchdog.
+
 **OPEN FINDING** — recorded in AM-115. `declare_violation()` takes the
 watchdog's step, `at_tick = ceil((now − epoch) / step duration)`; nothing
 computes it yet. Proposed: the step duration stays
@@ -7268,3 +7299,106 @@ to every actor filling the role, while the obligation descriptor (and so
 both builders) takes the first `fills` statement's object as its single
 holder. Compare the AM-105 finding on a burden created by several
 responses. Each role has one filler today.
+
+---
+
+## Typed policy values (2.1.0)
+
+**Definition:** a Policy's `initial_value`, its envelope values and the
+ends of a `range of [a to b]` rule are typed literals.
+
+**Standard:** §6.5, §7.9; the source standards of the value types are to
+be confirmed (`docs/DSL_TOOLCHAIN_REFERENCE.md`, "Typed policy values").
+
+**Toolchain status:** implemented (2.1.0-1 to 2.1.0-4). Types `integer`
+(an `int`; in 2.0.0 every number parsed as a float), `decimal`/`number`
+(an exact `Decimal`), `percentage`, `amount` (number and ISO 4217-form
+code), `date`, `instant` (UTC offset required), `string`, `boolean`,
+`duration`. Errors `policy-value-type`, `calendar-date`, `instant-valid`,
+`range-ends`, `currency-code`. Recorded deviation: a duration is written
+`60 days`, not ISO 8601 `P60D` (refused), so that 2.0.0 specifications
+still parse.
+
+**Demonstrated in:** `tests/examples/typed_values/`. Shipped scenarios use
+only `string` and `duration` policies.
+
+---
+
+## Date deadlines, the clock and `as_at` (2.1.0)
+
+**Definition:** a burden deadline that is a date or instant, a fixed
+moment rather than a duration from activation.
+
+**Standard:** clause to be confirmed.
+
+**Toolchain status:** implemented in the engine (2.1.0-6 to 2.1.0-9). A
+duration deadline is counted in steps (one minute each) from activation,
+as in 2.0.0. A date deadline is judged only against a caller's `as_at`
+and only under a `DeadlineClock(utc_offset=...)`; otherwise it is "not
+judged" and never violated. `POST /check-violations?as_at=...`. Warnings
+`[W-deadline-date-not-measured]`, `[W-deadline-date-invalid]`,
+`[W-deadline-several-durations]`. Not modelled by the verifier (parity
+rows R5 to R7).
+
+**Demonstrated in:** tests only. No shipped scenario has a clock, and no
+burden in one has a date deadline (a permit in
+`scenarios/fhir/generated_governance.el` has `"by 2026-05-20"`; permits
+are not judged by deadline).
+
+---
+
+## Comparisons in preconditions (2.1.0)
+
+**Definition:** `precondition: "<fact>" <op> <limit>` compares a value
+reported with the act against a number, percentage, amount or policy
+limit (`>=`, `<=`, `>`, `<`). No arithmetic.
+
+**Standard:** clause to be confirmed.
+
+**Toolchain status:** implemented in the engine (2.1.0-11 to 2.1.0-14).
+The value is reported as text; a missing value, a JSON number or another
+currency is "not established" and the act is refused, never violated.
+Errors `comparison-type`, `fact-key-clash`, `comparison-in-step`,
+`envelope-currency`, `envelope-membership`; warning
+`[W-strict-precondition]`, which `gp_referral` and `referral` each draw
+once. The verifier assumes every precondition holds (parity row R11).
+
+**Demonstrated in:** tests only.
+
+---
+
+## Standing duties (2.1.0)
+
+**Definition:** a burden kept for a term (`standing keeps: <comparison>`,
+`ends_at`, `ended_by`), judged at each check rather than discharged by an
+act.
+
+**Standard:** clause to be confirmed.
+
+**Toolchain status:** implemented in the engine (2.1.0-16 to 2.1.0-23).
+`check_live_violations(as_at, facts)` judges each active duty kept,
+breached, met (term ended) or not judged; `POST /check-violations` takes
+`{"facts": {...}}` and returns a `standing` list. Errors
+`standing-fields`, `standing-in-group`, `term-end-type`; warnings
+`[W-standing-no-end]`, `[W-standing-shared-fact]`,
+`[W-standing-not-modelled]`. The verifier does not model them (parity
+rows R13 to R18): the status route answers "standing duty: not
+modelled", the witness route refuses, and the recommended action never
+discharges one.
+
+**Demonstrated in:** `tests/examples/standing/`; no shipped scenario.
+
+---
+
+## Engine and verifier parity matrix (2.1.0)
+
+**Definition:** `docs/ENGINE_VERIFIER_PARITY.md` sets each engine rule
+beside the Kripke rule that models it and says whether the verifier
+mirrors, abstracts or leaves it out, and in which direction (over or
+under).
+
+**Toolchain status:** started in 2.1.0-5. **Partial:** it lists only the
+rows added in 2.1.0 (R1 to R18: deadlines, the clock, policy values,
+preconditions, standing duties); the rest of the engine is not yet
+listed. Updated in the same commit as any engine or Kripke rule it
+describes.

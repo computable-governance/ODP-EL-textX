@@ -343,6 +343,12 @@ class DeonticToken(_ELParentable):
     """
     kind:                 str            = ""      # DeonticKind
     name:                 str            = ""
+    # 2.1.0-16: a standing duty (P1 turns the keyword into True/False)
+    standing:             object         = False
+    keeps:                Optional[object] = None  # Comparison
+    ends_at:              Optional[object] = None  # Instant | Date
+    ends_at_policy:       Optional[object] = None  # → Policy (date or instant)
+    ended_by:             Optional[object] = None  # → EventDecl ref
     for_action:           Optional[str] = None
     state:                str            = ""      # TokenState
     deadline:             Optional[str] = None

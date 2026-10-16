@@ -45,7 +45,8 @@ Layer 1 — FHIR R4 (domain-specific data layer)
 
 Layer 2 — DSL-EL specification and accountability reasoning
           grammar/v2/el_grammar.tx → parsed by textX → domain objects
-          toolchain/el_validator.py (15 rules, ISO-clause traced;
+          toolchain/el_validator.py (errors and [W-] warnings, ISO-clause
+            traced; the 2.1.0 rules end "(clause to be confirmed)";
             AM-18 class-name bug fixed 2026-06-14; Federation/Domain
             community-type coverage added 2026-06-14)
           toolchain/el_reasoner.py (ultimate_accountability, can_perform,
@@ -135,7 +136,7 @@ ODP-EL-textX/
 │
 ├── toolchain/
 │   ├── el_parser.py            textX metamodel construction and parsing
-│   ├── el_validator.py         15-rule semantic validator (ISO-clause traced)
+│   ├── el_validator.py         Semantic validator: errors and [W-] warnings
 │   ├── el_reasoner.py          Accountability chain reasoner (Layer 2)
 │   ├── el_kripke.py            Kripke verifier + Bellman planner (Layer 4)
 │   ├── fhir_mapper.py          FHIR R4 → DSL-EL mapping, 22 rules (Layer 1)
@@ -268,10 +269,12 @@ verifier:
 - `DOC-xx` — documentation note
 
 Consult before proposing grammar changes. Do not create duplicate amendments.
-Most-recent confirmed amendments: AM-18 (Decl suffix removal), AM-19
+Early confirmed amendments: AM-18 (Decl suffix removal), AM-19
 (JoinLeaveEffect kind capture), AM-21 (contract dissolution), AM-22 (EventDecl),
 AM-23 (typed PolicyValue), AM-24 (InlineToken), AM-25 (Federation/Domain as
 community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition).
+The last AM entry is AM-115 (section 5.8). The 2.1.0 changes follow it,
+numbered 2.1.0-1 to 2.1.0-25 (section 7.4).
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -396,12 +399,17 @@ Discovered during V-16a implementation (commit 3aae4be).
 
 ### 7.3 Known issues to be aware of
 1. **Precondition guard** — An action's preconditions are looked up in a
-   facts dictionary, with no `eval()`. A precondition is not met when its
-   fact is missing or empty (`None`, `False`, `0`, an empty string or an
-   empty list), and the same rule applies when a violation is declared. Any
-   other value counts as met. Values are not checked for type or meaning, so
-   the text "false" or "no" satisfies a precondition. Scenarios that take
-   facts from external input should supply real booleans.
+   facts dictionary, with no `eval()`, and the same check applies when a
+   violation is declared. A plain precondition (`precondition: "<fact>"`)
+   is not met when its fact is missing or empty (`None`, `False`, `0`, an
+   empty string or an empty list). Any other value counts as met: values
+   are not checked for type or meaning, so the text "false" or "no"
+   satisfies it. Scenarios that take facts from external input should
+   supply real booleans. A comparison precondition (2.1.0,
+   `precondition: "<fact>" >= <limit>`) is judged by value: the fact must
+   be reported as text in the 2.1.0 notation (`"25000000.00 AUD"`, `"8.5%"`,
+   `"5.50"`); a missing value, a JSON number or another currency is "not
+   established" and the act is refused (`blocked`), never violated.
 2. **No persistence** — WorldState in memory only.
 3. **Federation scope** — Federation specifications parse and validate, and
    `build_from_federation()` enrols Domain members only. `member: C fills R`
@@ -420,8 +428,59 @@ effect limits: `effect destroy` does nothing on a permit or embargo and
 `effect create` always creates the token active (see Known Limitations in
 `docs/DSL_TOOLCHAIN_REFERENCE.md`).
 
-Parsed and validated, with no engine or Kripke effect: Policy (read by the
-validator and the static reasoner only), PolicyEnvelope (read by nothing).
+Policy values are typed and read by the engine (2.1.0, below): a
+comparison's policy limit and a standing duty's `ends_at` policy, at the
+policy's `initial_value` (read-only; seeded into `WorldState.policy_values`).
+The verifier does not read them. PolicyEnvelope is checked by the validator
+only (`envelope-membership`, `envelope-currency`); no engine or Kripke
+effect.
+
+**2.1.0 additions** (entries 2.1.0-1 to 2.1.0-25 in
+`docs/el_grammar_amendments.md`; full text in
+`docs/DSL_TOOLCHAIN_REFERENCE.md`, sections "Typed policy values",
+"Deadlines", "Comparisons" and "Standing duties"):
+- **Typed policy values.** `integer` (an `int`; in 2.0.0 every number was a
+  float), `decimal`/`number` (an exact `Decimal`), `percentage` (`4.25%`),
+  `amount` (`250.00 AUD`, compared only within one currency), `date`
+  (`2026-11-30`), `instant` (`2026-11-30T17:00+10:00`, a UTC offset
+  required), `string`, `boolean`, `duration`. Recorded deviation: a
+  duration is written `60 days`, not ISO 8601 `P60D` (which is refused),
+  so that 2.0.0 specifications still parse. The source standards of the
+  value types are "to be confirmed".
+- **Date deadlines, the clock and `as_at`.** A duration deadline (`"21
+  days"`) is counted in steps from activation, as in 2.0.0 (one step is
+  one minute; units second to year). A deadline that is a date or instant
+  (`"by 2026-11-30"`) is judged only against a wall-clock `as_at` the
+  caller supplies, and only when the runtime has a
+  `DeadlineClock(utc_offset=...)`; otherwise it is "not judged" and never
+  violated. `POST /check-violations?as_at=...` takes it; a naive `as_at`
+  is refused.
+- **Comparisons in preconditions.** `precondition: "<fact>" <op> <limit>`
+  with `>=`, `<=`, `>`, `<` and a number, percentage, amount or policy
+  limit (section 7.3 item 1). No arithmetic: an adapter computes a share
+  and reports it as a percentage.
+- **Standing duties.** `burden X { standing keeps: <comparison> ends_at:
+  <date, instant or policy> ended_by: <event> ... }`: kept for a term,
+  judged at each `check_live_violations(as_at, facts)` (kept, breached,
+  met, not judged); no action discharges one. `POST /check-violations`
+  takes `{"facts": {...}}` and returns a `standing` list. The verifier
+  does not model them: the status route answers "standing duty: not
+  modelled", the witness route refuses, and the recommendation never
+  discharges one.
+- **New validator errors:** `policy-value-type`, `calendar-date`,
+  `instant-valid`, `range-ends`, `currency-code`, `comparison-type`,
+  `fact-key-clash`, `comparison-in-step`, `envelope-currency`,
+  `envelope-membership`, `standing-fields`, `standing-in-group`,
+  `term-end-type`. **New warnings:** `[W-deadline-date-not-measured]`,
+  `[W-deadline-date-invalid]`, `[W-deadline-several-durations]`,
+  `[W-strict-precondition]`, `[W-standing-no-end]`,
+  `[W-standing-shared-fact]`, `[W-standing-not-modelled]`. Each message
+  ends "(clause to be confirmed)". `gp_referral` and `referral` each gain
+  one `[W-strict-precondition]`.
+- **Engine and verifier parity.** `docs/ENGINE_VERIFIER_PARITY.md` sets
+  each engine rule beside the Kripke rule that models it. It is partial:
+  it lists only the rows added in 2.1.0 (R1 to R18: deadlines, the clock,
+  policy values, preconditions, standing duties).
 
 Partly implemented: Federation (specifications parse and validate; the
 loader covers Domain members only, see section 7.3 item 3).
@@ -473,6 +532,8 @@ domain-independent. Never let clinical or FHIR concepts leak into
 
 2. **Every validator rule must cite an ISO clause.** Format:
    `# §X.Y: description`. Do not add rules without a standard reference.
+   The 2.1.0 rules (section 7.4) are not yet traced: each message ends
+   "(clause to be confirmed)".
 
 3. **Every grammar amendment must be logged in `docs/el_grammar_amendments.md`**
    with type (AM/V-NEW/DOC), rationale, and confirmed/tentative status.

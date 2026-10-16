@@ -334,7 +334,9 @@ class Runtime:
         self._ledger.append(record)
         return record
 
-    def check_live_violations(self, as_at: Optional[datetime] = None) -> TransitionRecord:
+    def check_live_violations(self, as_at: Optional[datetime] = None,
+                              facts: Optional[dict] = None,
+                              report: Optional[list] = None) -> TransitionRecord:
         """Sweep active, discharge_mode: eventual Burdens for elapsed deadlines,
         transitioning any past due to 'violated'; append the event to the
         ledger. discharge_mode: strict Burdens are never touched here — see
@@ -348,10 +350,15 @@ class Runtime:
         2.1.0-7: date-deadline Burdens are judged against `as_at`
         (timezone-aware) under the runtime's clock. An as_at earlier than
         last_as_at raises ValueError, with nothing ledgered; an accepted one
-        becomes last_as_at, whether or not anything was violated."""
+        becomes last_as_at, whether or not anything was violated.
+
+        2.1.0-18: `facts` are the values reported for the standing duties'
+        keeps conditions at this check; they are passed through, not
+        stored."""
         self._check_as_at(as_at)
         new_state, record = _engine_check_live_violations(
-            self._state, self._spec, self._clock, as_at)
+            self._state, self._spec, self._clock, as_at, facts,   # 2.1.0-18: facts not stored
+            report)                                                # 2.1.0-21: per-duty verdicts
         self._state = new_state
         self._ledger.append(record)
         if as_at is not None:

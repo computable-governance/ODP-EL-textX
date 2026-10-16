@@ -10926,3 +10926,270 @@ preconditions are never enforced.
 
 Verifier parity: R11 text updated to cite `[W-strict-precondition]` and
 `assumes_preconditions`; status and direction unchanged.
+
+## 2.1.0-16 — standing duty grammar (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_parser.py`)
+
+**Status:** IMPLEMENTED. Type: grammar amendment. Transitional on its own:
+a standing duty is an ordinary burden until 2.1.0-17, so 2.1.0-16 is never
+released alone.
+
+**Standard reference:** clause to be confirmed.
+
+**Before (v2.0.0).** `burden k { standing keeps: "cover" >= 5 state:
+active }` is a syntax error. A duty "for the term of the contract" can be
+written only as a burden with a prose deadline: the engine never violates
+it ([W-24] warns), `discharge_burden()` discharges it, and the verifier
+offers `discharge:<burden> by <holder>` at any step.
+
+**Now.** First in a burden's body, an optional group:
+`standing keeps: <Comparison> [ends_at: <date | instant | date or instant
+Policy>] [ended_by: <Event>]`. `standing` is mandatory in the group, so
+`keeps` without it is refused; `keeps` takes a Comparison only. New rule
+`TermEnd: Instant | Date`. Every existing token parses as before.
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_parser.py`; new `tests/test_standing_grammar.py`.
+
+**Verification:** full suite 1558 → 1592 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+Verifier parity: none (grammar only).
+
+## 2.1.0-17 — standing duty exclusions (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine.
+
+**Now.** A standing duty ends only at its term end. It is never discharged
+by its `for_action`, a `destroy` effect, a `discharged_by` event (from an
+action or `fire_event()`) or an any_discharged sibling; `discharge_burden()`
+refuses it and `declare_violation()` refuses it ("declaring its breach is
+not supported"); no deadline, date or episode conclusion violates it (the
+2.1.0 principle that a duty measured by time or reports is not ended by a
+group concluding). A line records a standing duty an action would have
+discharged.
+
+**Files changed:** `toolchain/el_engine.py`; `docs/ENGINE_VERIFIER_PARITY.md`
+(R13); new `tests/test_standing_exclusions.py`.
+
+**Verification:** full suite 1592 → 1603 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+Verifier parity: R13 added: absent, over (the verifier's T1 still
+discharges a standing duty); safe for `compelled` because a standing duty
+cannot be strict (2.1.0-19). Pinned by a test.
+
+## 2.1.0-18 — standing duty judging (`toolchain/el_engine.py`, `toolchain/el_runtime.py`)
+
+**Status:** IMPLEMENTED. Type: engine and runtime.
+
+**Now.** `check_live_violations(state, spec, clock, as_at, facts)` and
+`Runtime.check_live_violations(as_at=..., facts=...)` judge each active
+standing duty:
+- its term end by `ends_at`, only with a clock and an `as_at`: at or after
+  the end (a date alone: the end of that day in the clock's offset) it is
+  met (discharged), with `term ended … (ends_at …; as_at …); no breach
+  recorded`, and its `keeps` is not judged; an end that cannot be judged
+  leaves the duty not judged;
+- otherwise its `keeps` comparison against the reported facts, only with an
+  `as_at`: `kept …`, `breached …` (violated, once, final) or `not judged …`
+  (never "kept" without a value that holds).
+
+Its `ended_by` event ends the term when it fires (`advance()` with an
+emitting action, or `fire_event()`). A pending duty is not judged. Facts
+are passed through, never stored. The tick advances only when a duty is
+met or breached. `judge_comparison()` is unchanged.
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_runtime.py`;
+`docs/ENGINE_VERIFIER_PARITY.md` (R14 to R17); new
+`tests/test_standing_judging.py`.
+
+**Verification:** full suite 1603 → 1636 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+Verifier parity: R14 (breach) absent, under; R15 (end by date or instant)
+absent, under; R16 (end by event) absent, under; R17 (not judged) not
+applicable. None is unsafe for `compelled`.
+
+## 2.1.0-19 — standing duty validation (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator. Each message ends "(clause to be
+confirmed)".
+
+**Now.**
+- Errors: `standing-fields` (an eventual burden, active or pending, with no
+  deadline, `discharged_by` or `for_action`, and an `ended_by` other than
+  its `triggered_by`; read after defaults, so a strict standing duty is
+  refused whatever form it takes), `standing-in-group`, `term-end-type`.
+- `comparison-type` and `fact-key-clash` also read a standing duty's
+  `keeps`.
+- Warnings: `[W-standing-no-end]` (never met), `[W-standing-shared-fact]`
+  (standing duties of different holders read the same fact key; holders
+  from an object's `holds`, a Commitment's actor or a Delegation's
+  delegate). `[W-24]` no longer reports a standing duty.
+- Shared examples `tests/examples/standing/`.
+
+**Files changed:** `toolchain/el_validator.py`;
+`docs/ENGINE_VERIFIER_PARITY.md` (R18); `tests/examples/standing/`; new
+`tests/test_standing_validator.py`, `tests/test_standing_examples.py`.
+
+**Verification:** full suite 1636 → 1687 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+Verifier parity: R18 added: mirrored (by exclusion). R13's safety for
+`compelled` now rests on `standing-fields`.
+
+## 2.1.0-20 — standing duty guard (`toolchain/el_validator.py`, `toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED. Type: validator warning and API (claim side only).
+No verifier change.
+
+**Before (2.1.0-19).** The verifier treats a standing duty as an ordinary
+obligation its holder can discharge at any step (R13), with no breach or
+term-end step: the status route gave `compelled`/`detectable` verdicts for
+it, the witness route showed its discharge, and the recommended action
+could propose discharging it.
+
+**Now.**
+- `[W-standing-not-modelled]`, one per standing duty.
+- `GET /obligations/{token}/status` for a standing duty, in hybrid and spec
+  mode: `status: "standing duty: not modelled"`, new field `standing: true`,
+  `compelled` and `detectable` null (the model now allows null; no code in
+  this repository reads them, and they are null only for standing duties),
+  no counterexample or witness path.
+- `GET /kripke/witness`: 422 for `discharged:<duty>`, `violated:<duty>`, and
+  `all_discharged` while the model tracks a standing duty.
+- The recommended action (its route, and execute-action's
+  `new_recommended_action`) leaves out alternatives that discharge a
+  standing duty.
+- The other verifier-backed routes need no guard: objective score and
+  reachability read satisfaction groups (never a standing duty, R18);
+  available actions read `for_action` (never on a standing duty);
+  governance makes no verifier claim.
+
+**Shipped scenarios.** None gains a warning (none has a standing duty). For
+a specification without standing duties every route gives the same
+response with the guard on or off (tested); the status response carries
+the new `standing: false` field.
+
+**Tests changed:** `tests/test_standing_examples.py` and
+`tests/test_standing_validator.py`: a valid standing duty now carries
+`[W-standing-not-modelled]`.
+
+**Files changed:** `toolchain/el_validator.py`, `toolchain/el_api.py`;
+`docs/ENGINE_VERIFIER_PARITY.md` (R13); two changed test files; new
+`tests/test_standing_guard.py`.
+
+**Verification:** full suite 1687 → 1715 collected, 0 failures.
+
+Verifier parity: R13 text updated to cite the warning and the guard;
+status absent and direction over unchanged. `el_kripke.py` unchanged.
+
+## 2.1.0-21 — facts on `POST /check-violations` (`toolchain/el_api.py`, `toolchain/el_engine.py`, `toolchain/el_runtime.py`)
+
+**Status:** IMPLEMENTED. Type: API, with a minimal engine addition.
+
+**Now.**
+- `POST /check-violations` takes an optional JSON body `{"facts": {...}}`,
+  passed to the sweep (not stored). Without a body, or with no facts, the
+  route behaves as before; a naive `as_at` is still a 422.
+- The response adds `standing: [{token, holder, verdict, text}]`, verdict
+  `kept`, `breached`, `met` or `not judged`.
+- To build it from structured data, `check_live_violations()` (engine and
+  `Runtime`) takes an optional `report` list and appends one `(token,
+  holder, verdict, text)` tuple per standing duty judged. Its return value
+  and the record are unchanged.
+- A JSON number fact is not established; the reason says to send text
+  (`e.g. "25000000.00 AUD"`).
+
+**Files changed:** `toolchain/el_api.py`, `toolchain/el_engine.py`,
+`toolchain/el_runtime.py`; new `tests/test_check_violations_facts.py`.
+
+**Verification:** full suite 1715 → 1727 collected, 0 failures.
+
+Verifier parity: none (no engine rule or Kripke rule changed).
+
+## 2.1.0-22 — standing duty docs and log
+
+**Status:** IMPLEMENTED. Type: documentation.
+
+**Now.** `docs/DSL_TOOLCHAIN_REFERENCE.md`: section "Standing duties
+(2.1.0)" (syntax, the term, judging at a check, verdicts, what does not end
+a duty, rules, the verifier and the guard, the two rules with an adapter,
+what is not supported) and Known Limitations lines stated against v2.0.0;
+`CHANGELOG.md` [Unreleased]; entries 2.1.0-20 to 2.1.0-22. The spec block in
+the new section is `tests/examples/standing/ok_cover_for_the_term.el` and
+was parsed as written; the Python example was run; the v2.0.0 statements
+were run on the v2.0.0 code (`standing keeps:` is a syntax error; a prose
+"for the term" deadline is never violated by the engine, draws `[W-24]`,
+is ended by `discharge_burden()`, and the verifier offers its discharge).
+
+**Files changed:** `docs/DSL_TOOLCHAIN_REFERENCE.md`, `CHANGELOG.md`, this
+file.
+
+Verifier parity: none (documentation only).
+
+## 2.1.0-23 — recommendation with standing duties (`toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED. Type: API (claim side only). No verifier change.
+
+**Before (2.1.0-22).** The recommended action left out the edges that
+discharge a standing duty, but its Q-values came from value iteration on
+the whole model, which counts those discharges at later steps. On a
+specification whose only discharge edges are a standing duty's (two active
+standing duties, no other burden), the route recommended `tick` with a
+Q-value of 4.7065 where the discharges that never happen are left out:
+2.0586.
+
+**Now.** Both the recommended-action route and execute-action's
+`new_recommended_action`/`new_q_value` run value iteration on a view of
+the model without the standing-discharge edges (`_without_standing_discharges`;
+the model itself is unchanged, and with no standing duty it is the model
+itself, so no other response changes). A world whose only edges are
+standing discharges (at the horizon) is terminal in that view. Neither
+route crashes on such a specification; the recommendation is `tick`, or
+the action that starts the term (`fire:contractSigned via sign` in
+`tests/examples/standing/ok_cover_for_the_term.el`).
+
+**Files changed:** `toolchain/el_api.py`, `docs/DSL_TOOLCHAIN_REFERENCE.md`,
+`docs/ENGINE_VERIFIER_PARITY.md` (R13), `CHANGELOG.md`; new
+`tests/test_standing_recommendation.py`.
+
+**Verification:** full suite 1727 → 1734 collected, 0 failures.
+
+Verifier parity: R13 text updated (Q-values computed without the discharge
+edges); status absent and direction over unchanged. `el_kripke.py`
+unchanged.
+
+## 2.1.0-24 — wording
+
+**Status:** IMPLEMENTED. Type: documentation and comments.
+
+**Now.** Internal notes removed from a grammar comment
+(`grammar/v2/el_grammar.tx`, the standing duty rule), `CHANGELOG.md` and
+the entries 2.1.0-16, 2.1.0-19 and 2.1.0-22 of this log; one test section
+heading in `tests/test_standing_grammar.py` reworded. No behaviour change;
+no message text changed.
+
+Verifier parity: none (documentation only).
+
+## 2.1.0-25 — docs sweep
+
+**Status:** IMPLEMENTED. Type: documentation.
+
+**Now.** `CLAUDE.md` (sections 2, 4, 5.6, 7.3 item 1, 7.4 and invariant 2),
+`docs/CONCEPTS_INDEX.md` (directory rows, 2.1.0 updates to the policy,
+precondition-exposure and watchdog entries, five new entries) and
+`grammar/v2/README.md` (a 2.1.0 section; the Known Gaps paragraph) describe
+2.1.0: typed policy values, date deadlines with the clock and `as_at`,
+comparisons in preconditions, standing duties, the new errors and
+warnings, and the partial parity document. The duration notation `60 days`
+is stated as a recorded deviation from ISO 8601 (`P60D`), and clause
+references as to be confirmed.
+
+Corrected: "no shipped scenario has a date deadline"
+(`docs/DSL_TOOLCHAIN_REFERENCE.md`, `CHANGELOG.md`). A permit in
+`scenarios/fhir/generated_governance.el` has `deadline: "by 2026-05-20"`;
+`check_live_violations()` judges burdens only, so it is never judged, as in
+v2.0.0. No shipped burden has a date deadline.
+
+Verifier parity: none (documentation only).

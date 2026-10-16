@@ -24,13 +24,39 @@ Version 2 provides greatly extended coverage of ISO/IEC 15414 concepts
 - Policy envelope and policy value integrated into the unified grammar
 - Cross-reference resolution across all construct types
 
+## 2.1.0 additions
+
+Full text in `docs/DSL_TOOLCHAIN_REFERENCE.md`; each change is logged as
+2.1.0-1 to 2.1.0-25 in `docs/el_grammar_amendments.md`.
+
+- **Typed policy values.** `integer`, `decimal` (`number` is an alias),
+  `percentage` (`4.25%`), `amount` (`250.00 AUD`), `date` (`2026-11-30`),
+  `instant` (`2026-11-30T17:00+10:00`, a UTC offset required), `string`,
+  `boolean` and `duration`. An integer literal is an integer and a decimal
+  is exact (in 2.0.0 every number was a float); `1e3`, `+5`, `5.` and `.5`
+  are syntax errors.
+- **Durations.** Written as a whole number and a unit, `60 days`, as in
+  2.0.0. This is a recorded deviation: ISO 8601 writes `P60D`, which is
+  not accepted.
+- **Date deadlines.** A `deadline` string that is a date or an instant
+  (`"by 2026-11-30"`, `"2026-11-30T17:00+10:00"`) is judged against a
+  wall-clock time supplied at check time, under a clock; a duration
+  deadline (`"21 days"`) is counted from activation, as in 2.0.0.
+- **Comparisons in preconditions.** `precondition: "<fact>" >= <limit>`
+  (also `<=`, `>`, `<`), the limit a number, percentage, amount or
+  policy. There is no arithmetic.
+- **Standing duties.** `burden X { standing keeps: <comparison>
+  ends_at: <date, instant or policy> ended_by: <event> ... }`: a burden
+  kept for a term and judged at each check.
+
+The source standards and ISO/IEC 15414 clauses of these additions are to
+be confirmed; each new validator message ends "(clause to be confirmed)".
+
 ## Known Gaps
 
 The remaining gaps are semantic precision items rather than missing
-concepts — see `docs/el_grammar_amendments.md` for the full list of
-15 pending amendments (AM-01 through AM-15). The most significant
-outstanding item is `ViolationResponseDecl` (AM-15), which captures
-the declarative response to a deontic constraint violation.
+concepts; see `docs/el_grammar_amendments.md` and the Known Limitations
+in `docs/DSL_TOOLCHAIN_REFERENCE.md`.
 
 ## Reference
 

@@ -19,6 +19,7 @@ Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, Annex C
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -41,6 +42,7 @@ from el_engine import _role_refusal  # AM-114
 from el_engine import _declaration_action_names  # AM-115
 from el_engine import DeadlineClock, not_judged_date_burdens  # 2.1.0-9
 from el_engine import discharging_actions, precondition_text  # 2.1.0-14
+from el_engine import _standing_names  # 2.1.0-20
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -534,8 +536,9 @@ class ObligationStatusResponse(BaseModel):
     holder: str
     chain: List[str]
     obligation_text: str
-    compelled: bool               # AF satisfied — architecturally guaranteed
-    detectable: bool              # EF satisfied — possible on at least one path
+    # 2.1.0-20: null for a standing duty (the verifier does not model it)
+    compelled: Optional[bool]     # AF satisfied — architecturally guaranteed
+    detectable: Optional[bool]    # EF satisfied — possible on at least one path
     # AM-104: which property `compelled` reports — "AF" from w0, or
     # "AG(pending→AF)" (bounded response, AM-99a) for a triggered_by burden.
     modal_operator: str
@@ -558,6 +561,10 @@ class ObligationStatusResponse(BaseModel):
     # "<action>: <precondition>". The verifier assumes they all hold; empty
     # when there are none.
     assumes_preconditions: List[str] = []
+    # 2.1.0-20: true for a standing duty: its term end and breach are not in
+    # the model, so status says "standing duty: not modelled" and no verdict
+    # or path is given.
+    standing: bool = False
     counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
     witness_path: Optional[List[PathStep]] = None          # present iff detectable
 
@@ -658,6 +665,21 @@ class ReinstateAuthorizationResponse(BaseModel):
     objective_reachable: bool
 
 
+class CheckViolationsRequest(BaseModel):
+    """2.1.0-21: optional body of POST /check-violations: the values the
+    adapter reports for the standing duties' keeps conditions, as text
+    ("25000000.00 AUD", "8.5%"). Not stored."""
+    facts: dict = {}
+
+
+class StandingVerdict(BaseModel):
+    """2.1.0-21: one standing duty judged at this check."""
+    token: str
+    holder: str
+    verdict: str     # kept | breached | met | not judged
+    text: str        # the comparison, the end, or why it was not judged
+
+
 class NotJudgedEntry(BaseModel):
     """2.1.0-9: an active eventual burden whose date deadline was not judged."""
     token: str
@@ -675,6 +697,7 @@ class CheckViolationsResponse(BaseModel):
     objective_reachable: bool
     as_at: Optional[str] = None    # 2.1.0-9: the as_at used, ISO 8601, or null
     not_judged: List[NotJudgedEntry] = []   # 2.1.0-9: date deadlines not judged
+    standing: List[StandingVerdict] = []    # 2.1.0-21: standing duties judged
 
 
 class FireViolationResponsesResponse(BaseModel):
@@ -1017,6 +1040,25 @@ def get_obligation_status(
     assumes = [f"{action.name}: {precondition_text(p)}"
                for action in discharging_actions(source_spec, token_name)
                for p in action.preconditions]
+    if token_name in _standing_names(source_spec):
+        # 2.1.0-20: the verifier does not model a standing duty's term end or
+        # breach (its T1 would discharge it at any step), so no verdict.
+        return ObligationStatusResponse(
+            token_name=token_name,
+            holder=af_verdict.holder,
+            chain=af_verdict.chain,
+            obligation_text=af_verdict.obligation_text,
+            compelled=None,
+            detectable=None,
+            modal_operator=af_verdict.modal_operator,
+            status=STANDING_NOT_MODELLED,
+            horizon=_KRIPKE_HORIZON,
+            deadline_scale=af_verdict.deadline_scale,
+            mode=mode,
+            worlds_checked=af_verdict.worlds_checked,
+            assumes_preconditions=assumes,
+            standing=True,
+        )
 
     return ObligationStatusResponse(
         token_name=token_name,
@@ -1178,7 +1220,9 @@ def get_objective_score(community_name: str) -> ObjectiveScoreResponse:
         "(§C.4, Level 3). Returns the greedy-optimal first action from the current "
         "world, its Q-value, and all alternative first actions ranked by Q-value. "
         "recommended_action='' means no actions are available from the current world "
-        "(terminal state). gamma is the discount factor applied per decision step. "
+        "(terminal state). An edge that discharges a standing duty is never offered, "
+        "and Q-values are computed without such edges (the engine never takes them). "
+        "gamma is the discount factor applied per decision step. "
         "404 for an unknown community name."
     ),
 )
@@ -1211,11 +1255,14 @@ def get_recommended_action(
         },
     }
 
-    V = km.bellman_values(gamma=gamma)
+    standing = _standing_names(_runtime._spec)   # 2.1.0-20
+    V = _without_standing_discharges(km, standing).bellman_values(gamma=gamma)  # 2.1.0-23
 
     candidates = []
     for succ in km.ordered_successors(km.initial):  # AM-107
         label = km.labels.get((km.initial, succ), "→")
+        if _standing_discharge_label(label, standing):
+            continue   # the engine never discharges a standing duty by an act
         imm = km.utility(succ)
         v_s = V.get(succ, 0.0)
         candidates.append((label, imm + gamma * v_s, imm, v_s))
@@ -1290,10 +1337,13 @@ def execute_action(
         },
     }
 
-    V = km.bellman_values(gamma=0.9)
+    standing = _standing_names(_runtime._spec)   # 2.1.0-20
+    V = _without_standing_discharges(km, standing).bellman_values(gamma=0.9)  # 2.1.0-23
     candidates = []
     for succ in km.ordered_successors(km.initial):  # AM-107
         label = km.labels.get((km.initial, succ), "→")
+        if _standing_discharge_label(label, standing):
+            continue   # the engine never discharges a standing duty by an act
         imm = km.utility(succ)
         v_s = V.get(succ, 0.0)
         candidates.append((label, imm + 0.9 * v_s, imm, v_s))
@@ -1462,6 +1512,29 @@ def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthor
     )
 
 
+STANDING_NOT_MODELLED = "standing duty: not modelled"
+
+
+def _standing_discharge_label(label: str, standing: set) -> bool:
+    """2.1.0-20: an edge label that discharges a standing duty in the model
+    ("discharge:<duty> by <holder>"); the engine never makes that step."""
+    head = label.split(" ", 1)[0]
+    return head.startswith("discharge:") and head[len("discharge:"):] in standing
+
+
+def _without_standing_discharges(km, standing: set):
+    """2.1.0-23: the model without its edges that discharge a standing duty,
+    for value iteration, so a Q-value never counts a step the engine never
+    takes. The model itself is not changed; with no standing duty it is
+    returned as it is."""
+    if not standing:
+        return km
+    edges = {w: {s for s in succs
+                 if not _standing_discharge_label(km.labels.get((w, s), ""), standing)}
+             for w, succs in km.edges.items()}
+    return dataclasses.replace(km, edges=edges)
+
+
 def _parse_as_at(text: str) -> datetime:
     """2.1.0-9: an ISO 8601 date and time with a UTC offset; a trailing Z is
     read as +00:00 on every Python version. 422 for anything else,
@@ -1519,13 +1592,22 @@ def _parse_as_at(text: str) -> datetime:
         "ledgered). The response echoes 'as_at' (null when absent) and lists "
         "under 'not_judged' every active eventual date burden that was not "
         "judged, with the reason (no clock, no as_at, not measured, invalid "
-        "date). No shipped scenario has a clock or a date deadline."
+        "date). No shipped scenario has a clock or a date deadline. 2.1.0-21: "
+        "an optional JSON body {\"facts\": {...}} carries the values the "
+        "adapter reports for standing duties' keeps conditions, as text "
+        "(\"25000000.00 AUD\", \"8.5%\"; a JSON number is not established). "
+        "The response lists each standing duty judged under 'standing' with "
+        "its verdict: kept, breached, met or not judged."
     ),
 )
-def check_violations_endpoint(as_at: Optional[str] = None) -> CheckViolationsResponse:
+def check_violations_endpoint(as_at: Optional[str] = None,
+                              body: Optional[CheckViolationsRequest] = None,
+                              ) -> CheckViolationsResponse:
     when = _parse_as_at(as_at) if as_at is not None else None
+    facts = body.facts if body is not None else {}
+    report: list = []
     try:
-        tr = _runtime.check_live_violations(as_at=when)
+        tr = _runtime.check_live_violations(as_at=when, facts=facts, report=report)
     except ValueError as exc:   # an as_at earlier than the last one; nothing ledgered
         raise HTTPException(status_code=422, detail=str(exc))
     not_judged = [
@@ -1558,6 +1640,8 @@ def check_violations_endpoint(as_at: Optional[str] = None) -> CheckViolationsRes
         objective_reachable=reachable,
         as_at=when.isoformat() if when is not None else None,
         not_judged=not_judged,
+        standing=[StandingVerdict(token=t, holder=h, verdict=v, text=x)
+                  for t, h, v, x in report],
     )
 
 
@@ -2050,12 +2134,27 @@ def get_witness_path(
     if mode == "hybrid":
         km = build_kripke_from_runtime(_runtime, horizon=_KRIPKE_HORIZON,
                                        deadline_scale=deadline_scale)
+        source_spec = _runtime._spec
     else:
         result = parse(_SCENARIO_PATHS[_active_scenario], validate=False)
         if not result.ok:
             raise RuntimeError(f"{_active_scenario} parse failed: {result.errors}")
         km = build_kripke_model(result.model, horizon=_KRIPKE_HORIZON,
                                 deadline_scale=deadline_scale)
+        source_spec = result.model
+
+    # 2.1.0-20: no witness for a proposition that names a standing duty, or
+    # for all_discharged when the model tracks one: the verifier does not
+    # model a standing duty's term end or breach.
+    tracked = _standing_names(source_spec) & set(km.obligation_descriptors)
+    kind, _, name = proposition.partition(":")
+    if (kind in ("discharged", "violated") and name in tracked) or \
+            (proposition == "all_discharged" and tracked):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{STANDING_NOT_MODELLED}: '{proposition}' depends on "
+                   f"{', '.join(sorted(tracked)) if not name else repr(name)}, whose term end "
+                   f"and breach the verifier does not model (clause to be confirmed)")
 
     return {
         "scenario_name": _active_scenario,

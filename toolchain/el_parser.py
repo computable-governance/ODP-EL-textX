@@ -94,8 +94,11 @@ def _inject_token_defaults(token):
 
 
 def process_deontic_token(token):
-    """P1: inject discharge_mode and priority defaults when absent."""
+    """P1: inject discharge_mode and priority defaults when absent.
+    2.1.0-16: `standing` becomes a bool (the grammar matches the keyword)."""
     _inject_token_defaults(token)
+    token.standing = token.standing == 'standing'
+
 
 
 def process_inline_token(token):

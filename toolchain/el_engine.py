@@ -558,16 +558,75 @@ def precondition_text(precond) -> str:
     return f'"{precond.fact}" {precond.op} {limit}'
 
 
+def _standing_names(spec) -> Set[str]:
+    """2.1.0-17: names of the standing duties declared in `spec` (top-level
+    burdens marked `standing`). A standing duty ends only at its term end:
+    no action, destroy effect, event (other than its ended_by) or
+    discharge_burden() discharges it, and no deadline or episode conclusion
+    violates it."""
+    return {el.name for el in getattr(spec, "elements", None) or []
+            if type(el).__name__ == "DeonticToken" and getattr(el, "standing", False)}
+
+
+def _standing_elements(spec) -> Dict[str, Any]:
+    """2.1.0-18: name -> declaration of each standing duty in `spec`."""
+    return {el.name: el for el in getattr(spec, "elements", None) or []
+            if type(el).__name__ == "DeonticToken" and getattr(el, "standing", False)}
+
+
+def _end_standing_by_event(spec, tokens: list, event_name: str,
+                           effects_log: list) -> List[str]:
+    """2.1.0-18: the term of every active standing duty whose ended_by names
+    `event_name` ends: it is met (discharged), and a line says so. A pending
+    duty (not yet in its term) is left as it is. Shared by advance() (an
+    emitted event) and fire_event(). Returns the names met."""
+    met: List[str] = []
+    for name, el in _standing_elements(spec).items():
+        if getattr(getattr(el, "ended_by", None), "name", None) != event_name:
+            continue
+        for i, t in enumerate(tokens):
+            if t.token_name == name and t.kind == "burden" and t.state == "active":
+                tokens[i] = _transition(t, "discharged")
+                effects_log.append(f"term ended '{name}' held by '{t.holder}' "
+                                   f"(event {event_name}); no breach recorded")
+                if name not in met:
+                    met.append(name)
+    return met
+
+
+def _term_end_text(el) -> Tuple[bool, Optional[str]]:
+    """2.1.0-18: (declared, text) for a standing duty's ends_at: whether it
+    has one, and the date or instant as written (a literal, or the value of
+    its date or instant Policy); text is None when the value is not a date
+    or instant (judged as an invalid term end)."""
+    end = getattr(el, "ends_at", None)
+    policy = getattr(el, "ends_at_policy", None)
+    if end is None and policy is not None:
+        end = getattr(policy, "initial_value", None)
+    if end is None and policy is None:
+        return False, None
+    kind = policy_value_kind(end) if end is not None else None
+    return True, (end.value if kind in ("date", "instant") else None)
+
+
 def _discharge(spec, tokens: list, keys: Set[Tuple[str, str]],
                effects_log: list) -> Tuple[list, List[str]]:
     """Transition every active burden instance in `keys` ((token_name,
     holder) pairs) to 'discharged', then supersede its active
     any_discharged siblings (AM-57). Returns (tokens, discharged names in
     first-seen order). Shared by advance() Step 7a and fire_event()
-    (AM-113)."""
+    (AM-113). 2.1.0-17: a standing duty is never discharged or superseded
+    here (it ends only at its term end); a line records that it was left
+    active."""
+    standing = _standing_names(spec)
     names: List[str] = []
     for i, t in enumerate(tokens):
         if (t.token_name, t.holder) in keys and t.kind == "burden" and t.state == "active":
+            if t.token_name in standing:
+                effects_log.append(
+                    f"standing duty '{t.token_name}' held by '{t.holder}' not discharged: "
+                    f"it ends only at its term end")
+                continue
             tokens[i] = _transition(t, "discharged")
             if t.token_name not in names:
                 names.append(t.token_name)
@@ -596,7 +655,7 @@ def _discharge(spec, tokens: list, keys: Set[Tuple[str, str]],
                 if discharged_name not in members:
                     continue
                 for sibling_name in members:
-                    if sibling_name == discharged_name:
+                    if sibling_name == discharged_name or sibling_name in standing:
                         continue
                     for i, t in enumerate(tokens):
                         if t.token_name == sibling_name and t.state == "active":
@@ -1176,8 +1235,11 @@ def advance(
                         effects_log.append(f"cloned '{tok_ref.name}' to '{actor_name}'")
                         break
 
-    # 7c — AM-22: event-triggered token activation
+    # 7c — AM-22: event-triggered token activation. 2.1.0-18: first, the
+    # event ends the term of the standing duties it names in ended_by.
     if grammar_action and grammar_action.emits:
+        discharged_names = list(discharged_names) + _end_standing_by_event(
+            spec, tokens, grammar_action.emits.name, effects_log)
         tokens, triggered_log = _activate_triggered_tokens(
             spec, tokens, grammar_action.emits.name, tick
         )
@@ -1685,8 +1747,9 @@ def not_judged_date_burdens(state: WorldState, spec,
     """
     _require_aware(as_at)
     out: List[Tuple[str, str, str]] = []
+    standing = _standing_names(spec)
     for tok in state.tokens:
-        if not _swept_by_deadline(tok):
+        if not _swept_by_deadline(tok) or tok.token_name in standing:
             continue
         deadline = _spec_deadline(spec, tok.token_name)
         if not _has_date_shape(deadline):
@@ -2682,6 +2745,11 @@ def discharge_burden(
         )
 
     tick = state.tick
+    if getattr(token_el, "standing", False):   # 2.1.0-17
+        holders = [t.holder for t in state.tokens if t.token_name == burden_name]
+        return _blocked(state, holders[0] if holders else "system", f"discharge:{burden_name}",
+                        f"'{burden_name}' is a standing duty: it ends only at its term "
+                        f"end, not by discharge_burden() (clause to be confirmed)", tick)
     effects_log: list[str] = []
     discharged_names: list[str] = []
 
@@ -2751,6 +2819,8 @@ def fire_event(
 
     effects_log: list[str] = []
     tokens, discharged_names = _discharge(spec, list(state.tokens), discharge_keys, effects_log)
+    discharged_names = discharged_names + _end_standing_by_event(   # 2.1.0-18
+        spec, tokens, event_name, effects_log)
     tokens, triggered_log = _activate_triggered_tokens(spec, tokens, event_name, tick)
     effects_log.extend(triggered_log)
 
@@ -2836,6 +2906,11 @@ def declare_violation(
         )
 
     tick = state.tick
+    if getattr(token_el, "standing", False):   # 2.1.0-17
+        return _blocked(state, declarer, f"declare_violation:{burden_name}",
+                        f"'{burden_name}' is a standing duty: declaring its breach is not "
+                        f"supported; a check that finds its keeps condition false breaches "
+                        f"it (clause to be confirmed)", tick)
     label = f"declare_violation:{burden_name}"
 
     # Step 2 — the declarer
@@ -2940,10 +3015,22 @@ def check_live_violations(
     spec,
     clock: Optional[DeadlineClock] = None,
     as_at: Optional[datetime] = None,
+    facts: Optional[dict] = None,
+    report: Optional[list] = None,
 ) -> Tuple[WorldState, TransitionRecord]:
     """
     Sweep every live, active, discharge_mode: eventual Burden for an elapsed
     deadline and transition it to 'violated'.
+
+    2.1.0-18: and judge every active standing duty, in its own pass
+    (_judge_standing()): its term end against `as_at` under the clock, then
+    its keeps comparison against `facts`, the values the caller reports
+    with this check (not stored). Met duties are listed in the record's
+    discharged; breached ones in its violations. 2.1.0-21: when `report` is
+    a list, one (token, holder, verdict, text) tuple per judged standing duty
+    is appended to it (verdict: "kept", "breached", "met" or "not judged";
+    text: the comparison, the reason, or the end), so callers need not read
+    the effect lines. The return value is unchanged.
 
     2.1.0-7: a Burden whose deadline contains a calendar date is a date
     burden. It is judged only against `as_at` (timezone-aware, ValueError
@@ -3042,6 +3129,9 @@ def check_live_violations(
     """
     _require_aware(as_at)  # 2.1.0-7
     tick = state.tick
+    standing = _standing_names(spec)
+    standing_els = _standing_elements(spec)
+    met_names: List[str] = []
     spec_descriptors = _build_obligation_descriptors(spec)
     satisfaction_conditions = _build_satisfaction_conditions(spec)
     concludes_by_element = {
@@ -3057,6 +3147,19 @@ def check_live_violations(
         # AM-57: superseded burdens are already excluded here (state != "active"
         # required above) — no change needed for sibling-supersession parity.
         if not _swept_by_deadline(tok):  # 2.1.0-7: shared selection
+            continue
+        if tok.token_name in standing:   # 2.1.0-17: no deadline, date or conclusion path
+            # 2.1.0-18: judged by its term end and keeps condition instead
+            verdict, detail = _judge_standing(standing_els[tok.token_name], tok, clock,
+                                              as_at, facts or {}, effects_log)
+            if report is not None:
+                report.append((tok.token_name, tok.holder, verdict, detail))
+            if verdict == "met":
+                tokens[i] = _transition(tok, "discharged")
+                met_names.append(tok.token_name)
+            elif verdict == "breached":
+                tokens[i] = _transition(tok, "violated")
+                violated_names.append(tok.token_name)
             continue
 
         raw_deadline = _spec_deadline(spec, tok.token_name)
@@ -3114,18 +3217,69 @@ def check_live_violations(
     # Tick only advances when something actually happened — deliberate
     # departure from reinstate_authorization()'s "always advance, even on
     # a no-op" precedent; see docstring above.
-    new_tick = tick + 1 if violated_names else tick
+    new_tick = tick + 1 if (violated_names or met_names) else tick   # 2.1.0-18: or met
     new_state = state.with_tokens(tokens).with_tick(new_tick)
     record = TransitionRecord(
         tick=tick,
         actor_name="system",
         action_name="check_live_violations",
         outcome="violation" if violated_names else "ok",
-        discharged=(),
+        discharged=tuple(met_names),
         effects=tuple(effects_log),
         violations=tuple(violated_names),
     )
     return new_state, record
+
+
+def _judge_standing(el, tok: TokenInstance, clock: Optional[DeadlineClock],
+                    as_at: Optional[datetime], facts: dict, effects_log: list) -> Tuple[str, str]:
+    """2.1.0-18: judge one active standing duty at a check. Returns (verdict,
+    detail): verdict "met", "breached", "kept" or "not judged"; detail the
+    end, the comparison or the reason (2.1.0-21). Adds one line to
+    effects_log.
+
+    1. Term end by date or instant (ends_at): judged only with a clock and
+       an as_at; at or after the end the duty is met, and its keeps is not
+       judged (the observation is outside the term). A duty with an ends_at
+       that cannot be judged is not judged at all.
+    2. Otherwise keeps is judged with judge_comparison() against `facts`,
+       and only with an as_at (the verdict records when it was observed):
+       true kept, false breached, not established not judged. Never "kept"
+       without a value that holds."""
+    name, holder = tok.token_name, tok.holder
+    has_end, end_text = _term_end_text(el)
+    if has_end:
+        reason = None
+        if clock is None:
+            reason = "term end, no clock"
+        elif as_at is None:
+            reason = "term end, no as_at"
+        else:
+            end = _due_instant(end_text, clock) if end_text is not None else None
+            if end is None:
+                reason = "term end, invalid date"
+            elif as_at >= end:
+                shown = end.astimezone(clock.utc_offset).isoformat()   # in the clock's offset
+                effects_log.append(f"term ended '{name}' held by '{holder}' (ends_at "
+                                   f"{shown}; as_at {as_at.isoformat()}); no breach recorded")
+                return "met", f"ends_at {shown}"
+        if reason is not None:
+            effects_log.append(f"not judged '{name}' held by '{holder}': {reason}")
+            return "not judged", reason
+    if as_at is None:
+        effects_log.append(f"not judged '{name}' held by '{holder}': no as_at")
+        return "not judged", "no as_at"
+    judged = judge_comparison(el.keeps, facts)
+    if judged.value is True:
+        effects_log.append(f"kept '{name}' held by '{holder}': {judged.text} at as_at "
+                           f"{as_at.isoformat()}")
+        return "kept", judged.text
+    if judged.value is False:
+        effects_log.append(f"breached '{name}' held by '{holder}': {judged.text} at as_at "
+                           f"{as_at.isoformat()}")
+        return "breached", judged.text
+    effects_log.append(f"not judged '{name}' held by '{holder}': {judged.text}")
+    return "not judged", judged.text
 
 
 def _violator_chain(spec, holder: str) -> Set[str]:

@@ -7,12 +7,13 @@ adheres to _[Semantic Versioning][semver]_.
 
 ## [Unreleased]
 
-Typed policy values, date deadlines and comparisons. Details per
-sub-change are in [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md)
-(entries 2.1.0-1 to 2.1.0-15); the type table, the deadline rules and the
-comparison rules are in
+Typed policy values, date deadlines, comparisons and standing duties.
+Details per sub-change are in
+[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
+2.1.0-1 to 2.1.0-22); the rules are in
 [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md),
-"Typed policy values (2.1.0)", "Deadlines (2.1.0)" and "Comparisons (2.1.0)".
+"Typed policy values (2.1.0)", "Deadlines (2.1.0)", "Comparisons (2.1.0)"
+and "Standing duties (2.1.0)".
 
 ### Added
 
@@ -56,6 +57,22 @@ comparison rules are in
   `envelope-currency`, `envelope-membership`.
 - **2.1.0-14 Strict precondition guard.** Warning `[W-strict-precondition]`
   and the `assumes_preconditions` field on `GET /obligations/{token}/status`.
+- **2.1.0-16 to 2.1.0-19 Standing duties.** `standing keeps: <comparison>
+  [ends_at: …] [ended_by: …]`: a burden kept for a term, judged at each
+  check against the reported facts (kept, breached, met, not judged); its
+  term ends at a date or instant, or when an event fires. Errors
+  `standing-fields`, `standing-in-group`, `term-end-type`; warnings
+  `[W-standing-no-end]`, `[W-standing-shared-fact]`.
+- **2.1.0-20 Standing duty guard.** `[W-standing-not-modelled]`; the status
+  route answers "standing duty: not modelled" with `standing: true` and null
+  `compelled`/`detectable`; the witness route refuses propositions that
+  depend on a standing duty; recommendations never discharge one.
+- **2.1.0-23** The recommended action's Q-values (its route and
+  execute-action's `new_q_value`) are computed without the edges that
+  discharge a standing duty; with only those edges and the tick, the
+  recommendation is `tick`.
+- **2.1.0-21 Facts on `POST /check-violations`.** Optional body `{"facts":
+  {...}}`; the response adds `standing: [{token, holder, verdict, text}]`.
 
 ### Changed
 
@@ -84,6 +101,10 @@ comparison rules are in
 - **2.1.0-14** `gp_referral` and `referral` each gain one warning,
   `[W-strict-precondition]` on `referralInitiationBurden`; the scenarios
   are unchanged. The warning reports a verifier gap present since v2.0.0.
+- **2.1.0-19** `[W-24]` no longer reports a standing duty.
+- **2.1.0-20** `GET /obligations/{token}/status`: `compelled` and
+  `detectable` may be null (only for a standing duty), and the response
+  has a new field `standing` (false for every other burden).
 - **2.1.0-8** `[W-25]` no longer fires on a deadline containing a date (in
   v2.0.0 `"by 2026-11-30"` drew a "no recognised time unit" warning), and
   `[W-24]` no longer fires on a measured date. A deadline with several
@@ -101,12 +122,18 @@ comparison rules are in
   burden early and irreversibly. One fixed UTC offset, no daylight saving
   or holidays. Durations stay on the step clock, dates on `as_at`, in one
   ledger. Strict date burdens are not judged. The verifier does not model
-  date deadlines. No shipped scenario has a clock or a date deadline.
+  date deadlines. No shipped scenario has a clock, and no shipped burden
+  has a date deadline.
 - Reported values in comparisons are trusted as given. The verifier
   assumes preconditions hold, so a strict burden's `compelled` can be true
   while the engine refuses its discharge (as in v2.0.0; now stated). Step
   preconditions are not enforced (as in v2.0.0). A plain precondition
   passes on any truthy fact, including the string "false" (as in v2.0.0).
+- Standing duties are judged only at checks the caller runs, against
+  values the caller reports; the verifier does not model them (its claims
+  are withheld). In v2.0.0 a standing duty could not be written:
+  `standing keeps:` is a syntax error, and a prose "for the term" deadline
+  is never violated.
 
 ## [2.0.0] - 2026-09-28
 
