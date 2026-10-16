@@ -711,8 +711,17 @@ for academic claims, standards submissions, and future standard revisions.
 
 ### 5.2 Constructs in the standard that V2 currently implements incompletely
 
-`PolicySettingBehaviour`, `community_object` and federation roles are in the
-grammar and are no longer open.
+Status at v2.0.0 of the three constructs once listed here as pending:
+
+- `SettingBehaviour` (carried by plain `policy`; `normative_policy` has only
+  a free-text `policy_setting_behaviour` field) is in the grammar and is
+  parsed only. Nothing reads it.
+- `community_object` is in the grammar. The validator checks that the
+  community it `abstracts` is declared. Nothing else reads it, and
+  `represented_by` is not read.
+- A federation `role` and a role filler (`X fills R`) are in the grammar and
+  take effect: enrolment, the role guard and the static verifier use them.
+  `member: C fills R` has no effect.
 
 ---
 
@@ -759,9 +768,11 @@ preserving semantic correctness.
 
 ---
 
-### 5.5 Proposed extension: NormativePolicy (AM-28, planned)
+### 5.5 NormativePolicy (AM-28)
 
-**Status:** Designed, not yet implemented.
+**Status:** In the grammar at v2.0.0. The parser reads it, `el_kripke.py` has
+a lookup of the normative policies that apply to a token, and the API's token
+governance endpoint reports it. The engine does not read it.
 
 **Standard grounding:** Specialises §6.5 Policy. All §6.5 attributes apply
 — value, envelope, setting behaviour — but setting behaviour refers to an
@@ -774,12 +785,14 @@ reference external instruments — legislation, standards, guidelines — as
 the grounding authority for policy values. NormativePolicy makes this
 explicit and machine-traceable.
 
-**Placement rule:** Valid only in Domain and Federation body items. Individual
-communities do not originate legislation — they recognise it. Domain hierarchy
-normative authority flows down via §7.9.2 policy inheritance.
+**Placement:** Intended for Domain and Federation body items: individual
+communities do not originate legislation, they recognise it, and normative
+authority flows down the domain hierarchy via §7.9.2 policy inheritance. At
+v2.0.0 the grammar also accepts a normative policy reference in a plain
+Community body, and the validator does not enforce the placement.
 
 **Key additional attributes:**
-- normative_source: STRING — citation of the grounding instrument
+- source: STRING — citation of the grounding instrument
 - kind: legislation | regulation | standard | guideline | contractual
 - review_cycle: Duration — external authority review cadence
 
@@ -824,20 +837,18 @@ contract in the ODP §11.2.1 sense."
 |-----------|--------|-------------------|
 | Core community/domain/federation/role/action/token/speech-act | Standard | ISO/IEC 15414 directly |
 | `token_group` | Standard | §6.4.2 |
-| `community_object` | Standard (grammar gap — AM-26) | §6.2.2, §7.8.3 |
-| `policy` (core) | Standard (incomplete — AM-27) | §6.5, §7.9 |
+| `community_object` | Standard (parsed and validated; no runtime effect) | §6.2.2, §7.8.3 |
+| `policy` (core) | Standard (read by the validator and the static reasoner; its setting behaviour is parsed only) | §6.5, §7.9 |
 | `discharge_mode` | Extension | Annex C Kripke semantics |
 | `priority` on token | Extension | Bellman planner (Annex C) |
 | `triggered_by`/`discharged_by` | Extension | ODP Part 2 §8.4 |
 | `ViolationResponse` | Extension | §6.3.8, §7.8.6 (operationalised) |
 | `CorrespondenceDecl` | Extension | ODP five-viewpoint (not in 15414) |
 | `InlineToken` | Usability addition | No standard basis |
-| `NormativePolicy` (planned) | Extension IS-A Policy | §6.5 specialisation |
+| `NormativePolicy` | Extension IS-A Policy | §6.5 specialisation |
 
 ---
-_Section added 2026-06-25._
-_See AM-26 (CommunityObject + federation roles), AM-27 (PolicySettingBehaviour restore),_
-_AM-28 (NormativePolicy) for planned implementations._
+_Section added 2026-06-25; status cells updated for v2.0.0._
 
 ---
 

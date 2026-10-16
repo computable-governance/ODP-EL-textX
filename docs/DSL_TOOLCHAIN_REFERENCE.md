@@ -263,7 +263,7 @@ futures. Three transition rules expand the model from the initial world:
 - **T3 TICK**      — time passes (suppressed if any strict obligation is pending
                      and its holder is active)
 
-An optional **hybrid mode** (not yet implemented) allows the Layer 3
+An optional **hybrid mode** (implemented as `build_kripke_from_runtime` in `el_kripke.py`) allows the Layer 3
 ledger to anchor the initial world and prune unreachable branches.
 
 ### Modal operators (§C.2)
@@ -405,6 +405,11 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   r` the `for r` part is parsed and stored but never checked. An
   undeclared role name is accepted without warning, and behaviour is
   identical
+- `setting_behaviour` and `community_object` (2.0.0): both are parsed, and
+  `community_object` is validated (its `abstracts` community must be
+  declared), but nothing reads either at runtime or in the verifier.
+  `member: C fills R` and `represented_by` have no effect. A federation
+  `role` with `X fills R` does take effect
 
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)
