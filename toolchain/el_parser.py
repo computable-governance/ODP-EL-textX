@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -364,6 +365,10 @@ def _build_metamodel():
         'Community':          process_community,           # P11 (AM-41)
         'Evaluation':         process_evaluation,          # P12 (AM-60)
         'ViolationResponse':  process_violation_response,  # P13 (AM-115)
+        # 2.1.0-1: match-rule converters. A decimal is held as written
+        # (Decimal('4.50'), never a binary float); an integer as int.
+        'DecimalNumber':      Decimal,
+        'IntegerNumber':      int,
     })
     return mm
 

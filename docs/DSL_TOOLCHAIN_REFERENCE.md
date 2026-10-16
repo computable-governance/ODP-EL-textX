@@ -73,6 +73,86 @@ else:
 
 ---
 
+## Typed policy values (2.1.0)
+
+A Policy's `initial_value`, its envelope values and the ends of a
+`range of [a to b]` envelope rule are typed literals. A NormativePolicy's
+`initial_value` uses the same literals.
+
+The value types are adopted from existing standards rather than invented
+here. Where the source has not yet been checked against the standard's
+text, the table says so.
+
+| Type keyword | Literal form | Example | Held as | Source standard |
+|---|---|---|---|---|
+| `integer` | ASCII digits, optional leading `-` | `3`, `-5` | `int` | source standard to be confirmed |
+| `decimal` | digits `.` digits, optional leading `-` | `0.75`, `4.50` | `decimal.Decimal`, as written | source standard to be confirmed |
+| `number` | alias of `decimal` | `4`, `4.5` | as `decimal` | source standard to be confirmed |
+| `percentage` | a number followed by `%` | `4.25%`, `6%` | `Percentage`; the number as written (4.25, not 0.0425) | source standard to be confirmed |
+| `amount` | a number, then a three-letter currency code | `250.00 AUD` | `Amount` (number and code as written) | currency code: ISO 4217 alphabetic code form (edition to be confirmed); number: as `decimal` |
+| `string` | a quoted string | `"standard"` | `str` | — |
+| `boolean` | `true` or `false` | `true` | `bool` | — |
+| `duration` | a whole number and a unit (unchanged from 2.0.0) | `60 days`, `1 year` | `Duration` | none: DSL notation (recorded deviation, see below) |
+| `date` | `YYYY-MM-DD` | `2026-11-30` | `Date`, as written | ISO 8601 extended calendar date (part and edition to be confirmed) |
+| `instant` | `YYYY-MM-DDTHH:MM[:SS]` then `Z` or `±HH:MM` | `2026-11-30T17:00+10:00`, `2026-11-30T07:00Z` | `Instant`, as written | ISO 8601 extended date and time with a UTC offset (part and edition to be confirmed); strict profile |
+
+Other value forms: an integer interval `7..10` (accepted for `integer`,
+`decimal` and `number`), and a bare name (an option of a user-defined
+type such as `policy Tier : TierOptions`).
+
+**Principles.**
+- The DSL compares typed values. It does not compute with them: there is
+  no arithmetic and there are no expressions.
+- Amounts are compared only within one currency. They are never converted.
+- Durations go down to minutes (the units are minute, hour, day, week,
+  month and year, singular or plural). For comparison a month is 30 days
+  and a year is 365 days, the engine's existing deadline unit table, in
+  which one step is one minute.
+- Instants are compared by the moment they denote: `17:00+10:00` equals
+  `07:00Z`. An instant needs a UTC offset. Seconds may only be `:00`.
+  Fractional seconds and zone names are not accepted.
+- The duration notation `60 days` is not ISO 8601 (which writes `P60D`).
+  This is a recorded deviation from the principle of adopted notations,
+  kept so that 2.0.0 specifications still parse.
+
+**Number forms.** Digits are ASCII only. A plain number has no leading
+`+`, no exponent (`1e3`), no `5.` or `.5` form and no digit grouping
+(`1,000`). `-0` and `-0.0` are accepted.
+
+**What 2.1.0 tightens in 2.0.0.**
+- An integer literal now parses as an integer. In 2.0.0 `5` became the
+  float `5.0`.
+- A decimal literal is an exact `Decimal`, not a binary float.
+- The number forms are stricter. `1e3`, `+5`, `5.`, `.5` and non-ASCII
+  digits parsed in 2.0.0 and are now syntax errors. Write `1000`, `5`,
+  `5.0` and `0.5`.
+- `0` and `1` are integers, not booleans. A `boolean` policy needs `true`
+  or `false`.
+- `decimal`, `percentage`, `amount`, `date` and `instant` are new reserved
+  type words. They are matched as whole words, so a user-defined type may
+  begin with one (`integerCodes`, `dateWindows`).
+
+**Validator rules.** Each message ends "(clause to be confirmed)".
+
+| Rule | What it checks |
+|---|---|
+| `policy-value-type` | A value matches its policy's type keyword. An integer is accepted for `decimal`/`number`, an interval for `integer`/`decimal`/`number`. A user-defined (ID) type is not checked. |
+| `calendar-date` | A date, or an instant's date part, is a real calendar date. |
+| `instant-valid` | An instant's hour is at most 23, minute at most 59, seconds only `00`; its offset hours at most 23 and minutes at most 59; `-00:00` is refused. |
+| `range-ends` | A range's ends are of one kind (number, percentage, amount, duration, date or instant), amounts are in one currency, and the low end is not above the high end. An end already reported by `calendar-date` or `instant-valid` is not reported again. |
+| `currency-code` | An amount's code is three upper-case letters A–Z (the ISO 4217 form; membership in the code list is not checked). A code that abbreviates a duration unit (`5 min`, `5 hrs`) is told how to write the duration. |
+
+**Runtime.** `WorldState.policy_values` holds each top-level Policy's value
+as plain text, `(name, text)` pairs sorted by name (decimals never in
+exponent form). It is seeded read-only by `initial_state(spec)`,
+`Runtime.build_from_spec`, `Runtime.build_from_federation` and the API's
+scenario builders. `state.policy_value(name)` reads one value.
+
+Shared examples, one valid file and one invalid file per rule, are in
+`tests/examples/typed_values/`.
+
+---
+
 ## The Reasoner (`el_reasoner.py`)
 
 ### What it does
@@ -410,6 +490,25 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   declared), but nothing reads either at runtime or in the verifier.
   `member: C fills R` and `represented_by` have no effect. A federation
   `role` with `X fills R` does take effect
+
+**Typed policy values (2.1.0):**
+- `-0` reads as the integer `0` (the sign is lost); `-0.0` keeps its sign
+- Leading zeros are accepted (`007` is `7`)
+- Durations and integer intervals still accept a leading `+` (`+5 days`,
+  `+1..3`); plain numbers do not
+- Envelope membership is not checked: an `initial_value` outside its
+  envelope is accepted. Nor is currency consistency between the
+  `initial_value` and the envelope (`250 AUD` with `one of [5 NZD]`)
+- `5 sec` gets no "if you meant a duration" hint: there is no seconds
+  unit to suggest
+- Policy values are seeded read-only into `WorldState.policy_values`.
+  Nothing sets them, and nothing in the engine or the verifier reads them
+  yet. The superseded gp_referral API builder does not seed them
+- A NormativePolicy's value is checked but not seeded
+- Currency codes are not looked up in the ISO 4217 list; options of a
+  user-defined type are not checked
+- A quoted string and a bare name both read as text and cannot be told
+  apart
 
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)

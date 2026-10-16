@@ -182,7 +182,7 @@ def _build_ereferral_runtime() -> Runtime:
         raise RuntimeError(f"eReferral parse failed: {result.errors}")
 
     spec = result.model
-    state = initial_state()
+    state = initial_state(spec)   # 2.1.0-4: seeds policy_values
 
     state = enroll(state, "GPPractice")
     state = enroll(state, "GPClinician",         role_name="referringClinicianRole")
@@ -270,7 +270,7 @@ def _build_referral_runtime(encounter_context: Optional[EncounterContext] = None
         raise RuntimeError(f"Referral scenario parse failed: {result.errors}")
 
     spec = result.model
-    state = initial_state()
+    state = initial_state(spec)   # 2.1.0-4: seeds policy_values
 
     referring_practitioner = (
         encounter_context.referring_practitioner if encounter_context
@@ -326,7 +326,7 @@ def _build_erequesting_claiming_runtime() -> Runtime:
         raise RuntimeError(f"erequesting_claiming parse failed: {result.errors}")
 
     spec = result.model
-    state = initial_state()
+    state = initial_state(spec)   # 2.1.0-4: seeds policy_values
 
     state = enroll(state, "DiagnosticProviderA", role_name="eligibleProviderA")
     state = enroll(state, "DiagnosticProviderB", role_name="eligibleProviderB")
@@ -375,7 +375,7 @@ def _terms_of_engagement_runtime(path, spec, actors, grants) -> Runtime:
         if not result.ok:
             raise RuntimeError(f"{path.name} parse failed: {result.errors}")
         spec = result.model
-    state = initial_state()
+    state = initial_state(spec)   # 2.1.0-4: seeds policy_values
     for actor in actors:
         state = enroll(state, actor)
     state, _ = enroll_role_fillers(state, spec)

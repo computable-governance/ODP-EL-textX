@@ -10406,3 +10406,155 @@ several fillers. `docs/KRIPKE_TRANSITION_RULES.md` (T5), CLAUDE.md §5.8.
 terms-of-engagement scenarios; five existing test files; four new test
 files; `docs/CONCEPTS_INDEX.md`, `docs/KRIPKE_TRANSITION_RULES.md`,
 `CLAUDE.md`; this file.
+
+## 2.1.0-1 — typed policy literals: dates, instants, amounts, percentages, plain numbers (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_parser.py`)
+
+**Status:** IMPLEMENTED. Type: grammar amendment (new literal rules
+`Instant`, `Date`, `Percentage`, `Amount`, `DecimalNumber`,
+`IntegerNumber`, `PlainNumber`, `RangeBound`; `PolicyValue` reordered;
+`PolicyType` keywords; `range of [a to b]` envelope rule).
+
+**Standard reference:** the clauses the Policy rules already cite (§6.5,
+§7.9, Figure A.4); clause wording to be confirmed. Value notations adopted from ISO 8601 (dates and instants,
+extended format; part and edition to be confirmed) and ISO 4217 (currency
+code form; edition to be confirmed). The plain numbers' source standard is
+to be confirmed.
+
+**Before.** `PolicyValue` was `Duration | NumberInterval | FLOAT | INT |
+STRING | BOOL | ID`. textX's `FLOAT` also matches `5`, so `INT` was never
+reached and every number was a Python float. `FLOAT` accepted exponents,
+`5.`, `.5`, a leading `+` and non-ASCII digits. A date did not parse, and
+`policy_type: integerCodes` failed because `'integer'` matched its prefix.
+
+**Now.**
+- `PolicyValue` is `Instant | Date | Duration | Amount | Percentage |
+  NumberInterval | DecimalNumber | IntegerNumber | STRING | BOOL | ID`, in
+  that order so that a date is not read as a number, `5 day` stays a
+  duration, `4.5%` is not read as `4.5` and `7..10` is not read as `7`.
+- Plain numbers: ASCII digits, an optional leading minus only, no
+  exponent, no `5.` or `.5`, no grouping. The parser holds an integer as
+  `int` and a decimal as `decimal.Decimal`, as written.
+- `Amount` is a number then a three-letter code in any case; upper case is
+  the validator's check (2.1.0-2).
+- `Instant` requires a UTC offset; no fractional seconds, no zone names.
+- `PolicyType` adds `decimal`, `percentage`, `amount`, `date`, `instant`,
+  matched as whole words.
+- `EnvelopeRule` adds `range of [a to b]`; the ends are held in
+  `lower`/`upper` and may be an instant, date, duration, amount,
+  percentage or number.
+
+**Limits.** `Duration` and `NumberInterval` still accept a leading `+`.
+`-0` reads as `0`. Leading zeros are accepted.
+
+**Files changed:** `grammar/v2/el_grammar.tx`; `toolchain/el_domain.py`,
+`toolchain/el_parser.py`; new `tests/test_typed_literals_grammar.py`,
+`tests/test_typed_literals_migration.py`.
+
+**Verification:** full suite 991 → 1088 collected, 0 failures. Every
+shipped scenario parses as before.
+
+## 2.1.0-2 — typed value checks: five validator rules (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: five new validator errors,
+`[policy-value-type]`, `[calendar-date]`, `[instant-valid]`,
+`[range-ends]`, `[currency-code]`.
+
+**Standard reference:** clause to be confirmed (each message ends
+"(clause to be confirmed)"); notations from ISO 8601 and ISO 4217 as in
+2.1.0-1.
+
+**Before.** Any policy value was accepted. `2026-02-30`, `T25:00`,
+`250 aud`, `4.5` for an integer policy and a range written high-to-low
+all passed.
+
+**Now.** Each rule runs over every Policy and NormativePolicy value: the
+`initial_value`, each list-envelope value and each range end.
+- `policy-value-type`: the value matches the policy's type keyword. An
+  integer is accepted for `decimal`/`number`, an interval for
+  `integer`/`decimal`/`number`. A user-defined (ID) type is not checked.
+- `calendar-date`: a date, or an instant's date part, is a real calendar
+  date.
+- `instant-valid`: hour ≤ 23, minute ≤ 59, seconds only `00`; offset hours
+  ≤ 23 and minutes ≤ 59; `-00:00` refused.
+- `range-ends`: the ends are of one kind and in order. Amounts are compared
+  only within one currency and never converted. Durations compare through
+  the engine's unit table (one step is one minute, a month 30 days, a year
+  365). Instants compare by moment. An end already reported by
+  `calendar-date` or `instant-valid` is not reported again.
+- `currency-code`: three upper-case letters A–Z. A code that abbreviates a
+  duration unit (`5 min`, `5 hrs`) gets "if you meant a duration, write it
+  as 5 minutes".
+
+**Limits.** Envelope membership is not checked. Currency codes are not
+looked up in the ISO 4217 list.
+
+**Files changed:** `toolchain/el_validator.py`; new
+`tests/test_typed_values_validator.py` (including a scan of the grammar
+showing that no three-letter keyword can follow a policy value).
+
+**Verification:** full suite 1088 → 1182 collected, 0 failures. Every
+shipped scenario parses and validates as before.
+
+## 2.1.0-3 — read-only policy value seeding (`toolchain/el_engine.py`, `toolchain/el_runtime.py`)
+
+**Status:** IMPLEMENTED. Type: runtime state field, no grammar change.
+
+**Standard reference:** clause to be confirmed.
+
+**Before.** `WorldState` held no policy values. Its builders rebuilt the
+state field by field, so any new field would have been dropped silently.
+
+**Now.**
+- `WorldState.policy_values`: `(policy name, value text)` pairs sorted by
+  name, and `WorldState.policy_value(name)`. There is no setter.
+- `with_tokens`, `with_tick`, `with_responded` and `enroll` use
+  `dataclasses.replace`, so every state change keeps the values.
+- `initial_state(spec)` seeds from each top-level Policy's
+  `initial_value`; `initial_state()` with no spec is empty, as before.
+  `Runtime.build_from_spec` and `build_from_federation` pass the spec.
+- `policy_value_text()` writes a value as plain text (a decimal never in
+  exponent form; `4.50` keeps its scale) and `policy_value_kind()` names
+  its kind.
+
+**Limits.** Nothing sets the values, and nothing in the engine or verifier
+reads them. A NormativePolicy is not seeded.
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_runtime.py`;
+new `tests/test_policy_values_seeding.py`.
+
+**Verification:** full suite 1182 → 1226 collected, 0 failures. Kripke
+world counts unchanged (policy values are the same in every world).
+
+## 2.1.0-4 — typed values: docs, shared examples, API seeding (`toolchain/el_api.py`, `toolchain/el_validator.py`, docs)
+
+**Status:** IMPLEMENTED. Type: documentation, examples and two small code
+follow-ups.
+
+**Now.**
+- The API scenario builders for ereferral, referral, erequesting_claiming
+  and both terms-of-engagement scenarios pass the spec to
+  `initial_state(spec)`. Only the terms-of-engagement scenarios declare
+  Policies, so only they gain values; the others declare NormativePolicies
+  only, which are not seeded. The gp_referral builder is unchanged, since
+  its scenario is superseded and kept for record only
+  (`scenarios/README.md`).
+- The validator's value kinds come from the engine's
+  `policy_value_kind()`, so the validator and the seeded values agree.
+- `docs/DSL_TOOLCHAIN_REFERENCE.md`, "Typed policy values (2.1.0)": the
+  type table with literal forms and source standards, the principles, the
+  validator rules and the carry-forward limits.
+- `tests/examples/typed_values/`: one valid example and one invalid
+  example per rule; each file's first line names the expected outcome.
+- CLAUDE.md §13.5: `POST /reset` resets the active scenario (default
+  `referral`).
+
+**Recorded deviation.** The duration notation `60 days` is not ISO 8601
+(`P60D`). It is kept unchanged so that 2.0.0 specifications still parse.
+
+**Files changed:** `toolchain/el_api.py`, `toolchain/el_validator.py`;
+`tests/test_policy_values_seeding.py`; new
+`tests/test_typed_values_examples.py` and `tests/examples/typed_values/`;
+`docs/DSL_TOOLCHAIN_REFERENCE.md`, `CHANGELOG.md`, `CLAUDE.md`; this file.
+
+**Verification:** full suite 1226 → 1235 collected, 0 failures. Every
+shipped scenario parses and validates as before.

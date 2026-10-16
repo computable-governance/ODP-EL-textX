@@ -215,18 +215,90 @@ Policy:
     '}'
 ;
 
+/*
+ * PolicyType — 2.1.0-1: the keyword types end at a word boundary, so a
+ * user-defined type may begin with one (e.g. 'integerCodes' is an ID).
+ * 'number' is an alias of 'decimal'.
+ */
 PolicyType:
-    'integer' | 'number' | 'string' | 'boolean' | 'duration' | ID
+    /(integer|decimal|number|percentage|amount|string|boolean|duration|date|instant)\b/ | ID
 ;
 
 /*
+ * Value types are adopted from existing standards, not invented here.
+ * Instant and Date follow ISO 8601 (a strict profile: the extended
+ * format only, as specified on Instant and Date below; part and edition
+ * to be confirmed). An Amount's currency code has the ISO 4217
+ * alphabetic code form (edition to be confirmed). The plain numbers'
+ * source standard is to be confirmed. The DSL compares typed values;
+ * it does not compute with them.
+ *
  * PolicyValue — ISO 15414 Figure A.4
- * Ordered: Duration and NumberInterval before INT/FLOAT to avoid
- * the PEG parser consuming the leading integer prematurely.
+ * 2.1.0-1 literal order: Instant before Date, which it begins with;
+ * Date before every number, so 2026-11-30 is not read as 2026;
+ * Duration before Amount, so 5 day stays a duration; Amount and
+ * Percentage before the bare numbers, so 4.5% is not read as 4.5;
+ * NumberInterval before the numbers, so 7..10 is not read as 7;
+ * DecimalNumber before IntegerNumber.
+ * textX's FLOAT is not used: it also matches '5' (so INT was never
+ * reached and every integer was a float), accepts exponents, '5.', '.5'
+ * and a leading '+', and reads non-ASCII digits (\d).
  */
 PolicyValue:
-    Duration | NumberInterval | FLOAT | INT | STRING | BOOL | ID
+    Instant | Date | Duration | Amount | Percentage | NumberInterval
+    | DecimalNumber | IntegerNumber | STRING | BOOL | ID
 ;
+
+/*
+ * Instant — 2.1.0-1, ISO 8601 extended date and time of day with a fixed
+ * UTC offset (2026-11-30T17:00+10:00, 2026-11-30T07:00:00Z). The offset
+ * is required: without one the text is no PolicyValue. Only the shape is
+ * checked here: hour, minute, seconds (only 00) and offset ranges and the
+ * calendar date are checked by the validator. No fraction of a second, no
+ * zone name. ASCII digits only.
+ */
+Instant:
+    value=/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2})?(?:Z|[+-][0-9]{2}:[0-9]{2})(?![\w:.])/
+;
+
+/*
+ * Date — 2.1.0-1, ISO 8601 extended calendar date (2026-11-30). A time
+ * or a following digit is not part of a Date. The month and day are not
+ * range-checked here. ASCII digits only.
+ */
+Date:
+    value=/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9T:])/
+;
+
+/*
+ * Percentage — 2.1.0-1: a number followed by '%' (4.25%, 6%). The value
+ * is the number as written (4.25), not a fraction (0.0425).
+ */
+Percentage:
+    value=PlainNumber '%'
+;
+
+/*
+ * Amount — 2.1.0-1: a number followed by a currency code (250.00 AUD).
+ * The code is three ASCII letters in either case here; the ISO 4217 form
+ * (upper case A-Z) is checked by the validator. No keyword that can
+ * follow a value is three letters long, so the code never takes one.
+ * Amounts are never converted between currencies.
+ */
+Amount:
+    value=PlainNumber code=/[A-Za-z]{3}(?![A-Za-z0-9_])/
+;
+
+/*
+ * DecimalNumber, IntegerNumber — 2.1.0-1: plain numbers. ASCII digits,
+ * an optional leading minus only (no '+'), no exponent, no '5.' or '.5',
+ * no digit grouping. The parser holds a decimal as decimal.Decimal, as
+ * written (4.50 keeps its scale), and an integer as int. -0 and -0.0 are
+ * accepted.
+ */
+DecimalNumber: /-?[0-9]+\.[0-9]+(?![0-9A-Za-z_.])/ ;
+IntegerNumber: /-?[0-9]+(?![0-9A-Za-z_.])/ ;
+PlainNumber:   DecimalNumber | IntegerNumber ;
 
 Duration:
     value=INT unit=DurationUnit
@@ -253,11 +325,27 @@ PolicyEnvelope:
     '}'
 ;
 
+/*
+ * 2.1.0-1: 'range of [a to b]' — inclusive ends, held in lower/upper
+ * (values stays empty). 'to', not '..': NumberInterval would read
+ * 60..90 as one value. The list forms keep values (lower/upper None).
+ */
 EnvelopeRule:
-    kind=EnvelopeRuleKind 'of' '[' values+=PolicyValue[','] ']'
+    (kind='range' 'of' '[' lower=RangeBound 'to' upper=RangeBound ']')
+    | (kind=EnvelopeRuleKind 'of' '[' values+=PolicyValue[','] ']')
 ;
 
 EnvelopeRuleKind: 'one' | 'set' | 'list' ;
+
+/*
+ * RangeBound — 2.1.0-1: one end of a range: an instant, date, duration,
+ * amount, percentage or number, in PolicyValue's order. No interval,
+ * string, boolean or option name. Mixed kinds ([60 days to 6%]) parse;
+ * the validator checks them.
+ */
+RangeBound:
+    Instant | Date | Duration | Amount | Percentage | DecimalNumber | IntegerNumber
+;
 
 /*
  * PolicyRule maps directly to §6.6.2–6.6.4, §7.8.8:

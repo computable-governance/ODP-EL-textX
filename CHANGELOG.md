@@ -7,6 +7,47 @@ adheres to _[Semantic Versioning][semver]_.
 
 ## [Unreleased]
 
+Typed policy values. Details per sub-change are in
+[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
+2.1.0-1 to 2.1.0-4); the type table is in
+[docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md),
+"Typed policy values (2.1.0)".
+
+### Added
+
+- **2.1.0-1 Typed policy literals.** Policy values may be dates
+  (`2026-11-30`), instants (`2026-11-30T17:00+10:00`), percentages
+  (`4.25%`), amounts (`250.00 AUD`), integers and exact decimals. New type
+  words `decimal`, `percentage`, `amount`, `date`, `instant`. An envelope
+  may state a range: `range of [a to b]`.
+- **2.1.0-2 Typed value checks.** Five validator rules:
+  `policy-value-type`, `calendar-date`, `instant-valid`, `range-ends`,
+  `currency-code`.
+- **2.1.0-3 Read-only policy value seeding.** `WorldState.policy_values`
+  and `WorldState.policy_value(name)`, seeded from each Policy's
+  `initial_value` by `initial_state(spec)` and the Runtime builders.
+- **2.1.0-4 Docs and examples.** The type table, shared examples in
+  `tests/examples/typed_values/`, and seeding in the API scenario builders
+  (except the superseded gp_referral).
+
+### Changed
+
+- **2.1.0-1** An integer literal parses as `int` (in 2.0.0 it was a float)
+  and a decimal as an exact `decimal.Decimal`. `1e3`, `+5`, `5.`, `.5` and
+  non-ASCII digits are now syntax errors; durations and intervals are
+  unchanged. A type name beginning with a type word (`integerCodes`) now
+  parses.
+- **2.1.0-2** A policy whose value does not match its type keyword is now
+  an error.
+
+### Limits
+
+- Values are compared, never computed. Amounts are never converted
+  between currencies. Durations go down to minutes; a month is 30 days and
+  a year 365 for comparison. `60 days` is DSL notation, not ISO 8601.
+- Envelope membership is not checked. Policy values are read-only, and
+  nothing in the engine or verifier reads them yet.
+
 ## [2.0.0] - 2026-09-28
 
 First reference release of the ODP Enterprise Language (ISO/IEC 15414:2015,

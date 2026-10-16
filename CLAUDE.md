@@ -607,7 +607,8 @@ Two additional endpoints added (commit 7dcefcf):
   world state, new recommended action, new objective score, and EF
   reachability. Uses `utility_for_objective` consistent with endpoint 3.
   Blocked outcome returns reason string (fail-safe precondition guard, §7.3).
-- `POST /reset` — reloads `_build_gp_referral_runtime()` from scratch,
+- `POST /reset` — rebuilds the runtime from the active scenario's builder
+  (`_SCENARIO_BUILDERS[_active_scenario]`; the default is `referral`),
   resetting all token states to initial PENDING.
 
 **Next action:** Coordination UI widget in computable-governance-ui

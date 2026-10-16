@@ -106,7 +106,7 @@ class Runtime:
         enrolled once per role through join_role(), so on_join grants apply;
         every other object is enrolled with no role, and fills none.
         """
-        state = initial_state()
+        state = initial_state(spec)   # 2.1.0-3: seeds policy_values
 
         fillers = {actor for actor, _ in role_fillers(spec)}
         for el in spec.elements:
@@ -154,7 +154,7 @@ class Runtime:
           4. For each Commitment, find the terminal delegate in its
              Delegation chain and grant the committed burden token to them.
         """
-        state = initial_state()
+        state = initial_state(spec)   # 2.1.0-3: seeds policy_values
 
         # Step 1–3: enroll actors from domain members
         for el in spec.elements:

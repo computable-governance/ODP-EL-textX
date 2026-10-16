@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import re
+from decimal import Decimal
 from fractions import Fraction
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
@@ -89,18 +90,25 @@ class WorldState:
     # entry per ViolationResponse fired, keyed per violated token instance —
     # fire_violation_responses()'s once-only marker. See that function.
     responded: FrozenSet[Tuple[str, str, str, int]] = frozenset()
+    # 2.1.0-3: each top-level Policy's value, (policy name, value text)
+    # sorted by name (policy_value_text()). Seeded read-only from
+    # initial_value by initial_state(spec) and Runtime; nothing sets it and
+    # nothing in the engine or verifier reads it yet.
+    policy_values: Tuple[Tuple[str, str], ...] = ()
 
+    # 2.1.0-3: replace() carries every other field, policy_values included.
     def with_tokens(self, tokens) -> "WorldState":
-        return WorldState(tokens=tuple(tokens), actors=self.actors, tick=self.tick,
-                          responded=self.responded)
+        return replace(self, tokens=tuple(tokens))
 
     def with_tick(self, tick: int) -> "WorldState":
-        return WorldState(tokens=self.tokens, actors=self.actors, tick=tick,
-                          responded=self.responded)
+        return replace(self, tick=tick)
 
     def with_responded(self, responded) -> "WorldState":
-        return WorldState(tokens=self.tokens, actors=self.actors, tick=self.tick,
-                          responded=frozenset(responded))
+        return replace(self, responded=frozenset(responded))
+
+    def policy_value(self, name: str) -> Optional[str]:
+        """2.1.0-3: the policy's value text, or None."""
+        return dict(self.policy_values).get(name)
 
 
 @dataclass(frozen=True)
@@ -1016,9 +1024,73 @@ def advance(
 
 # ── WorldState construction helpers ──────────────────────────────────────────
 
-def initial_state() -> WorldState:
-    """Return an empty WorldState at tick 0."""
-    return WorldState(tokens=(), actors=(), tick=0)
+def policy_value_kind(v) -> Optional[str]:
+    """2.1.0-3: the kind of a parsed PolicyValue or RangeBound. A STRING
+    and an option name (ID) both arrive as str, so both are 'name'."""
+    cls = type(v).__name__
+    if cls in ("Instant", "Date", "Duration", "Percentage", "Amount"):
+        return cls.lower()
+    if cls == "NumberInterval":
+        return "interval"
+    if isinstance(v, bool):          # before int: bool is an int subclass
+        return "boolean"
+    if isinstance(v, int):
+        return "integer"
+    if isinstance(v, Decimal):
+        return "decimal"
+    if isinstance(v, str):
+        return "name"
+    return None
+
+
+def _plain_number_text(n) -> str:
+    """2.1.0-3: a Decimal as written, in plain notation, never with an
+    exponent (str(Decimal("0.0000001")) is "1E-7"); an int as str()."""
+    return format(n, "f") if isinstance(n, Decimal) else str(n)
+
+
+def policy_value_text(v) -> str:
+    """2.1.0-3: a policy value as plain text, the text held in
+    WorldState.policy_values: an int or a Decimal as written (4.50 keeps its
+    scale), a percentage as "4.25%", an amount as "250.00 AUD" (code as
+    written), a date or instant as written (offset kept, not converted), a
+    duration as "<n> <unit>", an interval as "a..b", a boolean as
+    "true"/"false", a string as its content, a name as itself."""
+    kind = policy_value_kind(v)
+    if kind in ("instant", "date"):
+        return v.value
+    if kind == "duration":
+        return f"{v.value} {v.unit}"
+    if kind == "percentage":
+        return f"{_plain_number_text(v.value)}%"
+    if kind == "amount":
+        return f"{_plain_number_text(v.value)} {v.code}"
+    if kind == "interval":
+        return f"{v.lower}..{v.upper}"
+    if kind == "boolean":
+        return "true" if v else "false"
+    return _plain_number_text(v)
+
+
+def _initial_policy_values(spec: Any) -> Tuple[Tuple[str, str], ...]:
+    """2.1.0-3: (name, value text) for each top-level Policy with an
+    initial_value, sorted by name. A NormativePolicy is not seeded."""
+    values = {
+        el.name: policy_value_text(el.initial_value)
+        for el in getattr(spec, "elements", None) or []
+        if type(el).__name__ == "Policy"
+        and getattr(el, "initial_value", None) is not None
+    }
+    return tuple(sorted(values.items()))
+
+
+def initial_state(spec: Any = None) -> WorldState:
+    """Return a WorldState at tick 0 with no tokens or actors.
+
+    2.1.0-3: with a spec, policy_values is seeded from each Policy's
+    initial_value (read-only); with none it is empty, as before."""
+    policy_values = _initial_policy_values(spec) if spec is not None else ()
+    return WorldState(tokens=(), actors=(), tick=0, policy_values=policy_values)
 
 
 def enroll(state: WorldState, actor_name: str, role_name: Optional[str] = None,
@@ -1031,8 +1103,7 @@ def enroll(state: WorldState, actor_name: str, role_name: Optional[str] = None,
     new_actors = list(state.actors) + [
         ActorState(actor_name=actor_name, role_name=role_name, community_tag=community_tag)
     ]
-    return WorldState(tokens=state.tokens, actors=tuple(new_actors), tick=state.tick,
-                      responded=state.responded)
+    return replace(state, actors=tuple(new_actors))   # 2.1.0-3: keeps policy_values
 
 
 def join_role(state: WorldState, spec: Any, actor_name: str, role_name: str,

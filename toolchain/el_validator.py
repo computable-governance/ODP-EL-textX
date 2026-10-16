@@ -127,6 +127,22 @@ Rules implemented
         (obligated to do the one thing that is prohibited).
         Single-domain-scoped: see docs/CONCEPTS_INDEX.md,
         "Permit/Embargo missing domain scope".               §6.4.3, §6.4.4
+  policy-value-type  2.1.0-2: a policy value (initial_value, list
+        envelope value, range end) matches its policy's keyword type.
+        An integer is accepted for decimal/number, an interval for
+        integer/decimal. An ID type is not checked.  clause to be confirmed
+  calendar-date  2.1.0-2: a Date, or an Instant's date part, is a real
+        calendar date (ISO 8601).                     clause to be confirmed
+  instant-valid  2.1.0-2: an Instant's time of day and UTC offset are
+        in range: hour <= 23, minute <= 59, seconds only 00, offset
+        hours <= 23 and minutes <= 59, no -00:00.     clause to be confirmed
+  range-ends  2.1.0-2: a 'range of [a to b]' has ends of one kind
+        (number, percentage, amount in one currency, duration, date,
+        instant) and its low end is not above its high end.
+                                                     clause to be confirmed
+  currency-code  2.1.0-2: an Amount's code has the ISO 4217
+        alphabetic form, three upper-case letters A-Z (list membership
+        not checked).                                 clause to be confirmed
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -145,6 +161,9 @@ Usage
 
 from __future__ import annotations
 
+import re
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
@@ -241,6 +260,14 @@ def validate_spec(model) -> List[str]:
     # V-13 — pessimistic enforcement mechanism
     for pol in all_policies.values():
         errors.extend(_validate_policy(pol))
+
+    # 2.1.0-2 — typed policy values: type, calendar date, instant,
+    # range ends, currency code (clause to be confirmed)
+    errors.extend(_validate_policy_value_types(model))
+    errors.extend(_validate_calendar_dates(model))
+    errors.extend(_validate_instants(model))
+    errors.extend(_validate_range_ends(model))
+    errors.extend(_validate_currency_codes(model))
 
     # V-14 — PolicyRef targets in communities
     for community in all_communities.values():
@@ -726,6 +753,296 @@ def _validate_policy(pol) -> List[str]:
                 f"[V-13] Policy '{pol.name}': pessimistic enforcement requires "
                 f"a 'mechanism' description. (§7.9.4)"
             )
+    return errors
+
+
+# ── 2.1.0-2: typed policy values ──────────────────────────────────────────────
+#
+# Five checks over every Policy and NormativePolicy value: its initial_value,
+# each value of a list envelope rule ('one of', 'set of', 'list of') and each
+# end of a 'range of [a to b]' rule. The DSL compares typed values; it does
+# not compute with them. Envelope membership is not checked here.
+
+_TYPED_CITATION = "(clause to be confirmed)"
+
+# Policy type keyword -> value kinds it accepts. 'number' is an alias of
+# 'decimal'. A type that is not a keyword (an ID) is not checked.
+_TYPE_ACCEPTS = {
+    "integer":    {"integer", "interval"},
+    "decimal":    {"decimal", "integer", "interval"},
+    "number":     {"decimal", "integer", "interval"},
+    "percentage": {"percentage"},
+    "amount":     {"amount"},
+    "string":     {"name"},
+    "boolean":    {"boolean"},
+    "duration":   {"duration"},
+    "date":       {"date"},
+    "instant":    {"instant"},
+}
+
+# ISO 8601 extended date and time with a fixed UTC offset; the grammar's
+# Instant rule matches the same shape. ASCII digits only.
+_INSTANT_RE = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?"
+    r"(?:Z|([+-])([0-9]{2}):([0-9]{2}))"
+)
+
+# Three-letter abbreviations of a duration unit, read by currency-code to
+# suggest the duration an author probably meant ("5 min", "5 hrs").
+_DURATION_ABBREVIATIONS = {
+    "min": "minute", "hrs": "hour", "dys": "day", "wks": "week",
+    "mth": "month", "mos": "month", "mon": "month", "yrs": "year",
+}
+
+
+def _value_kind(v) -> Optional[str]:
+    """2.1.0-2: the kind of a parsed policy value or range end.
+    2.1.0-4: the engine's policy_value_kind(), so the validator and the
+    seeded WorldState.policy_values agree on kinds."""
+    from el_engine import policy_value_kind
+    return policy_value_kind(v)
+
+
+def _number_text(n) -> str:
+    # A Decimal in plain notation, never an exponent (str(Decimal) may be 1E-7).
+    return format(n, "f") if isinstance(n, Decimal) else str(n)
+
+
+def _value_text(v) -> str:
+    """2.1.0-2: a policy value as written, for messages."""
+    kind = _value_kind(v)
+    if kind in ("instant", "date"):
+        return v.value
+    if kind == "duration":
+        return f"{v.value} {v.unit}"
+    if kind == "percentage":
+        return f"{_number_text(v.value)}%"
+    if kind == "amount":
+        return f"{_number_text(v.value)} {v.code}"
+    if kind == "interval":
+        return f"{v.lower}..{v.upper}"
+    if kind == "boolean":
+        return "true" if v else "false"
+    if kind == "decimal":
+        return _number_text(v)
+    if kind == "name":
+        return f'"{v}"'
+    return str(v)
+
+
+def _calendar_date(text: str) -> Optional[date]:
+    """2.1.0-2: the date of 'YYYY-MM-DD', or None when it is no calendar date."""
+    try:
+        return date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+    except ValueError:
+        return None
+
+
+def _instant_problem(text: str) -> Optional[str]:
+    """2.1.0-2: why an instant's time of day or UTC offset is out of
+    range, or None. Its date part is calendar-date's check."""
+    m = _INSTANT_RE.fullmatch(text)
+    if m is None:
+        return "not a date and time with a UTC offset"
+    _, _, _, hour, minute, second, sign, off_h, off_m = m.groups()
+    if int(hour) > 23 or int(minute) > 59:
+        return "not a time of day"
+    if second is not None and second != "00":
+        return "not a whole minute"
+    if sign is not None:
+        if int(off_h) > 23 or int(off_m) > 59:
+            return "not a UTC offset"
+        if sign == "-" and off_h == "00" and off_m == "00":
+            return "-00:00 is not a UTC offset"
+    return None
+
+
+def _instant_moment(text: str) -> Optional[datetime]:
+    """2.1.0-2: an instant as an aware UTC datetime, or None when its date,
+    time or offset is out of range. Ordering by moment is a comparison,
+    not arithmetic: 17:00+10:00 equals 07:00Z."""
+    if _calendar_date(text[:10]) is None or _instant_problem(text) is not None:
+        return None
+    year, month, day, hour, minute, _, sign, off_h, off_m = \
+        _INSTANT_RE.fullmatch(text).groups()
+    tz = timezone.utc
+    if sign is not None:
+        offset = timedelta(hours=int(off_h), minutes=int(off_m))
+        tz = timezone(-offset if sign == "-" else offset)
+    try:
+        return datetime(int(year), int(month), int(day), int(hour),
+                        int(minute), tzinfo=tz).astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _value_form_fault(v) -> bool:
+    """2.1.0-2: True when calendar-date or instant-valid reports v;
+    range-ends then skips the range, so one fault gives one error."""
+    kind = _value_kind(v)
+    if kind == "date":
+        return _calendar_date(v.value) is None
+    if kind == "instant":
+        return _instant_moment(v.value) is None
+    return False
+
+
+def _typed_policies(model) -> List[Any]:
+    return [e for e in model.elements if _cls(e) in ("Policy", "NormativePolicy")]
+
+
+def _policy_values(pol):
+    """2.1.0-2: (where, value) for each value of a policy: initial_value,
+    list envelope values and range ends."""
+    if getattr(pol, "initial_value", None) is not None:
+        yield "initial_value", pol.initial_value
+    envelope = getattr(pol, "envelope", None)
+    for rule in (getattr(envelope, "envelope_rules", None) or []):
+        if rule.kind == "range":
+            yield "envelope range low end", rule.lower
+            yield "envelope range high end", rule.upper
+        else:
+            for v in rule.values:
+                yield f"envelope '{rule.kind} of' value", v
+
+
+def _policy_label(pol) -> str:
+    return f"{_cls(pol)} '{pol.name}'"
+
+
+def _validate_policy_value_types(model) -> List[str]:
+    """policy-value-type (2.1.0-2): each value matches its policy's keyword
+    type. An ID type (an options set) is not checked."""
+    errors: List[str] = []
+    for pol in _typed_policies(model):
+        accepts = _TYPE_ACCEPTS.get(getattr(pol, "policy_type", None) or "")
+        if accepts is None:
+            continue
+        article = "an" if pol.policy_type[0] in "aeiou" else "a"
+        for where, v in _policy_values(pol):
+            if _value_kind(v) not in accepts:
+                errors.append(
+                    f"[policy-value-type] {_policy_label(pol)}: {where} "
+                    f"{_value_text(v)} is not {article} {pol.policy_type} value. "
+                    f"{_TYPED_CITATION}"
+                )
+    return errors
+
+
+def _validate_calendar_dates(model) -> List[str]:
+    """calendar-date (2.1.0-2): a Date, or an Instant's date part, is a
+    real calendar date."""
+    errors: List[str] = []
+    for pol in _typed_policies(model):
+        for where, v in _policy_values(pol):
+            if _value_kind(v) in ("date", "instant") and \
+                    _calendar_date(v.value[:10]) is None:
+                errors.append(
+                    f"[calendar-date] {_policy_label(pol)}: {where} "
+                    f"{v.value} is not a calendar date. {_TYPED_CITATION}"
+                )
+    return errors
+
+
+def _validate_instants(model) -> List[str]:
+    """instant-valid (2.1.0-2): an Instant's time of day and UTC offset are
+    in range. The grammar requires the offset."""
+    errors: List[str] = []
+    for pol in _typed_policies(model):
+        for where, v in _policy_values(pol):
+            if _value_kind(v) != "instant":
+                continue
+            problem = _instant_problem(v.value)
+            if problem is not None:
+                errors.append(
+                    f"[instant-valid] {_policy_label(pol)}: {where} {v.value} "
+                    f"is not an instant: {problem}. {_TYPED_CITATION}"
+                )
+    return errors
+
+
+def _range_key(v):
+    """2.1.0-2: (family, comparable) for a range end. Integers and decimals
+    share the family 'number'. A duration compares in steps through the
+    engine's unit table (one step is one minute, a 30-day month, a 365-day
+    year). Amounts are compared only within one currency, never converted
+    (range-ends checks the currency first)."""
+    from el_engine import _DEADLINE_UNIT_SECONDS, _STEP_SECONDS
+    kind = _value_kind(v)
+    if kind in ("integer", "decimal"):
+        return ("number", v)
+    if kind in ("percentage", "amount"):
+        return (kind, v.value)
+    if kind == "duration":
+        seconds = v.value * _DEADLINE_UNIT_SECONDS[v.unit.rstrip("s")]
+        return ("duration", seconds // _STEP_SECONDS)
+    if kind == "date":
+        return ("date", _calendar_date(v.value))
+    if kind == "instant":
+        return ("instant", _instant_moment(v.value))
+    return (kind, None)
+
+
+def _validate_range_ends(model) -> List[str]:
+    """range-ends (2.1.0-2): a range's ends are of one kind (amounts in
+    one currency) and its low end is not above its high end. A range with
+    an end that calendar-date or instant-valid reports is skipped."""
+    errors: List[str] = []
+    for pol in _typed_policies(model):
+        envelope = getattr(pol, "envelope", None)
+        for rule in (getattr(envelope, "envelope_rules", None) or []):
+            if rule.kind != "range":
+                continue
+            low, high = rule.lower, rule.upper
+            if _value_form_fault(low) or _value_form_fault(high):
+                continue
+            prefix = (f"[range-ends] {_policy_label(pol)}: range "
+                      f"[{_value_text(low)} to {_value_text(high)}]")
+            (low_family, low_key), (high_family, high_key) = \
+                _range_key(low), _range_key(high)
+            if low_family != high_family:
+                errors.append(
+                    f"{prefix} has ends of different kinds ({_value_kind(low)} "
+                    f"and {_value_kind(high)}). {_TYPED_CITATION}"
+                )
+            elif low_family == "amount" and low.code.upper() != high.code.upper():
+                errors.append(
+                    f"{prefix} has ends in different currencies ({low.code} "
+                    f"and {high.code}); amounts are compared only within one "
+                    f"currency. {_TYPED_CITATION}"
+                )
+            elif low_key > high_key:
+                errors.append(
+                    f"{prefix} has its low end above its high end. "
+                    f"{_TYPED_CITATION}"
+                )
+    return errors
+
+
+def _validate_currency_codes(model) -> List[str]:
+    """currency-code (2.1.0-2): an Amount's code is three upper-case ASCII
+    letters A-Z, the ISO 4217 alphabetic code form. Membership in the code
+    list is not checked. A code that abbreviates a duration unit ("5 min",
+    "5 hrs") is told how to write the duration it probably meant."""
+    errors: List[str] = []
+    for pol in _typed_policies(model):
+        for where, v in _policy_values(pol):
+            if _value_kind(v) != "amount" or re.fullmatch(r"[A-Z]{3}", v.code):
+                continue
+            message = (
+                f"[currency-code] {_policy_label(pol)}: {where} {_value_text(v)} "
+                f"has currency code '{v.code}', not three upper-case letters "
+                f"A-Z (ISO 4217 form)"
+            )
+            unit = _DURATION_ABBREVIATIONS.get(v.code.lower())
+            if unit is not None and isinstance(v.value, int):
+                plural = "" if v.value == 1 else "s"
+                message += (f"; if you meant a duration, write it as "
+                            f"{v.value} {unit}{plural}")
+            elif unit is not None:
+                message += (f"; if you meant a duration, write it as a "
+                            f"whole number of {unit}s")
+            errors.append(f"{message}. {_TYPED_CITATION}")
     return errors
 
 

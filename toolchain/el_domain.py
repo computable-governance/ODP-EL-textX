@@ -199,10 +199,11 @@ class DurationUnit(str, Enum):
 
 
 class EnvelopeRuleKind(str, Enum):
-    """AM-23: policy envelope constraint type."""
-    one  = "one"
-    set  = "set"
-    list = "list"
+    """AM-23: policy envelope constraint type. 2.1.0-1: range."""
+    one   = "one"
+    set   = "set"
+    list  = "list"
+    range = "range"
 
 
 # ---------------------------------------------------------------------------
@@ -468,10 +469,44 @@ class NumberInterval(_ELParentable):
 
 
 @dataclass
+class Instant(_ELParentable):
+    """2.1.0-1: a date and time of day with a UTC offset, as written
+    (2026-11-30T17:00+10:00). ISO 8601 extended format. Not converted."""
+    value: str = ""
+
+
+@dataclass
+class Date(_ELParentable):
+    """2.1.0-1: a calendar date, as written (2026-11-30). ISO 8601
+    extended format. Not converted."""
+    value: str = ""
+
+
+@dataclass
+class Percentage(_ELParentable):
+    """2.1.0-1: a percentage. value is the number as written (4.25 for
+    4.25%), a Decimal or an int, not a fraction."""
+    value: Optional[object] = None   # Decimal | int
+
+
+@dataclass
+class Amount(_ELParentable):
+    """2.1.0-1: a number with a currency code (250.00 AUD). value is a
+    Decimal or an int, as written; code is as written (ISO 4217 form
+    checked by the validator). Never converted between currencies."""
+    value: Optional[object] = None   # Decimal | int
+    code:  str = ""
+
+
+@dataclass
 class EnvelopeRule(_ELParentable):
-    """AM-23: single constraint inside a PolicyEnvelope."""
+    """AM-23: single constraint inside a PolicyEnvelope.
+    2.1.0-1: a range rule holds its inclusive ends in lower/upper and
+    leaves values empty; the list rules leave lower/upper None."""
     kind:   str  = ""    # EnvelopeRuleKind
     values: List = field(default_factory=list)  # List[PolicyValue]
+    lower:  Optional[object] = None  # RangeBound
+    upper:  Optional[object] = None  # RangeBound
 
 
 @dataclass
@@ -489,7 +524,7 @@ class Policy(_ELParentable):
     name:              str            = ""
     policy_type:       str            = ""      # AM-23: PolicyType keyword or user-defined ID
     description:       Optional[str] = None
-    initial_value:     Optional[object] = None  # AM-23: PolicyValue (typed)
+    initial_value:     Optional[object] = None  # typed PolicyValue: int, Decimal, Percentage, Amount, Date, Instant, Duration, NumberInterval, str, bool
     envelope:          Optional[PolicyEnvelope] = None  # AM-23: replaces plain str
     rules:             List           = field(default_factory=list)  # List[PolicyRule]
     affected_elements: List           = field(default_factory=list)  # List[AffectedElement]
@@ -1344,6 +1379,7 @@ DOMAIN_CLASSES = [
     NormativePolicy, NormativePolicyRef,  # AM-28
     NormativePolicyEnforcement,  # AM-42
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
+    Instant, Date, Percentage, Amount,  # 2.1.0-1
     # E
     Community, EventDecl, SatisfactionCondition, SatisfactionArg, Objective, SubObjective, SubObjectiveRef, Invariant,
     AssignmentPolicy, RequiresCapabilityRule, ExcludesRoleRule,
