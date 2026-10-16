@@ -12,7 +12,7 @@ ComputableGovernance stack. Intended as project context for future sessions.
 ```
 el_grammar.tx     — textX grammar defining the DSL syntax
 el_parser.py      — loads grammar, parses .el files, invokes validator
-el_validator.py   — 15 semantic rules checked at specification time
+el_validator.py   — 68 rules (42 errors, 26 warnings) checked at specification time
 el_reasoner.py    — governance queries over the static model
 el_kripke.py      — Layer 4 Kripke semantics (modal obligation verification)
 example.el        — payment processing scenario exercising all constructs
@@ -25,14 +25,19 @@ example.el        — payment processing scenario exercising all constructs
 ### What it does
 
 Runs at **specification time**, before any execution. Takes a parsed DSL-EL
-model and checks 15 structural rules, each traced to a specific clause of
-ISO/IEC 15414:2015. Analogous to a compiler's semantic phase — the grammar
+model and checks it against 68 rules: 42 errors and 26 warnings (tags
+beginning `[W-`). Each rule in the table below is traced to a clause of
+ISO/IEC 15414:2015; the rules added in 2.1.0 end "(clause to be
+confirmed)". Analogous to a compiler's semantic phase — the grammar
 checks syntax, the validator checks meaning.
 
-Returns a list of error strings. Empty list = structurally sound specification.
+`validate_spec()` returns one list of messages; `parse()` splits it into
+`errors` and `warnings`, and a specification with no errors is `ok`.
 Does not execute anything; reasons over the static model only.
 
-### The 15 rules
+### Rules
+
+The original 15 rules:
 
 | Rule | Clause | What it checks |
 |------|--------|----------------|
@@ -51,6 +56,29 @@ Does not execute anything; reasons over the static model only.
 | V-13 | §7.9.4 | Pessimistic enforcement must declare a mechanism |
 | V-14 | §7.9.1 | PolicyRef target exists in community scope |
 | V-15 | §7.10.1| Delegation obligation traces back to a CommitmentDecl |
+
+Added before v2.0.0 (33; v2.0.0 has 48 rules in all):
+- Errors: `V-17` (a burden whose action an embargo prohibits);
+  `V-NEW-10`, `V-NEW-19`, `V-NEW-21` to `V-NEW-25`; five Authorization
+  checks (the authority is a party; a revocable authorization names an
+  `on_revocation` embargo; exactly one of `to_agent` and `to_role`;
+  `grants_permit` names a permit; `on_revocation` names a declared
+  embargo); `E-16a` (a token-group member with no backing commitment or
+  delegation).
+- Warnings: `[W-16b]` to `[W-16h]`, `[W-18]` to `[W-29]`.
+
+Added in 2.1.0 (20):
+- Errors: `policy-value-type`, `calendar-date`, `instant-valid`,
+  `range-ends`, `currency-code` (see "Typed policy values");
+  `comparison-type`, `fact-key-clash`, `comparison-in-step`,
+  `envelope-currency`, `envelope-membership` (see "Comparisons");
+  `standing-fields`, `standing-in-group`, `term-end-type` (see "Standing
+  duties").
+- Warnings: `[W-deadline-date-not-measured]`, `[W-deadline-date-invalid]`,
+  `[W-deadline-several-durations]` (see "Deadlines");
+  `[W-strict-precondition]` (see "Comparisons"); `[W-standing-no-end]`,
+  `[W-standing-shared-fact]`, `[W-standing-not-modelled]` (see "Standing
+  duties").
 
 ### Usage
 
@@ -74,6 +102,47 @@ else:
 ---
 
 ## Typed policy values (2.1.0)
+
+### Scope of values
+
+- The DSL types the values a specification states (policy values) and the
+  values a comparison reads. It is not a general type system or an
+  expression language.
+- Value kinds: string, boolean, integer, exact decimal (`number` is an
+  alias of `decimal`), percentage, amount (a number and a currency code),
+  date, instant (a date and time with a UTC offset), and duration (written
+  as in 2.0.0). A policy value may also be an integer interval (`7..10`)
+  or an option of a user-defined type.
+- A comparison has one reported fact, one of `>=`, `<=`, `>`, `<`, and one
+  limit: a number, percentage or amount literal, or a policy of type
+  integer, decimal, number, percentage or amount. There is no equality or
+  inequality test, no `and` or `or`, no arithmetic and no functions
+  (`==`, `and` and `+` are syntax errors), and a date, instant or duration
+  cannot be a limit. An action may carry several preconditions: all must
+  hold, and a refused act gives the reason of the first one that fails (a
+  false comparison is reported before one not established). A standing
+  duty's `keeps` is one comparison.
+- Types are checked where a value meets a limit. At specification time, a
+  policy value is checked against its type keyword (`policy-value-type`)
+  and its envelope (`envelope-membership`, `envelope-currency`), and a
+  comparison's limit against the comparable kinds (`comparison-type`). At
+  run time, a reported value is checked against the kind of its limit:
+  another kind, another currency or another notation is not established.
+  A fact's name is free text and the specification declares no type for
+  it; reading one fact in two ways is an error (`fact-key-clash`).
+- Amounts are compared only within one currency and are never converted.
+  A share, ratio or total is computed by the adapter and reported as a
+  percentage or an amount.
+- Notation follows existing standards where one exists: ISO 8601 for dates
+  and instants, and the ISO 4217 three-letter form for currency codes (the
+  code list itself is not checked); the source clauses are to be
+  confirmed. Durations are written `60 days`, not ISO 8601 `P60D`, which
+  is refused.
+- Anything richer, such as computed values, structured data or rule
+  languages, belongs outside the DSL, behind the adapter that reports the
+  facts.
+
+### Types and literals
 
 A Policy's `initial_value`, its envelope values and the ends of a
 `range of [a to b]` envelope rule are typed literals. A NormativePolicy's
@@ -627,9 +696,9 @@ if conflicts:
 Specification (.el file)
         │
         ▼
-   el_parser.py  ──► el_validator.py (15 structural rules)
+   el_parser.py  ──► el_validator.py (68 rules)
         │                    │
-        │            errors or clean
+        │            errors and warnings
         │
         ▼
    parsed model
@@ -841,14 +910,17 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - Leading zeros are accepted (`007` is `7`)
 - Durations and integer intervals still accept a leading `+` (`+5 days`,
   `+1..3`); plain numbers do not
-- Envelope membership is not checked: an `initial_value` outside its
-  envelope is accepted. Nor is currency consistency between the
-  `initial_value` and the envelope (`250 AUD` with `one of [5 NZD]`)
+- Envelopes are checked by the validator only: an `initial_value` outside
+  its envelope is an error (`envelope-membership`), and so is an amount in
+  another currency than the envelope's (`envelope-currency`). No engine or
+  verifier rule reads an envelope
 - `5 sec` gets no "if you meant a duration" hint: there is no seconds
   unit to suggest
-- Policy values are seeded read-only into `WorldState.policy_values`.
-  Nothing sets them, and nothing in the engine or the verifier reads them
-  yet. The superseded gp_referral API builder does not seed them
+- Policy values are read-only. The engine reads a policy's typed
+  `initial_value` from the specification as a comparison limit and as a
+  standing duty's `ends_at`; the verifier does not read policy values.
+  The text copy seeded into `WorldState.policy_values` is read by nothing
+  in the toolchain. The superseded gp_referral API builder does not seed it
 - A NormativePolicy's value is checked but not seeded
 - Currency codes are not looked up in the ISO 4217 list; options of a
   user-defined type are not checked

@@ -18,7 +18,7 @@ DSL implementation of these constructs, together with a four-layer
 toolchain for governance validation and verification.
 
 ## Project status
-ODP-EL-textX 2.1 is a stable reference implementation of the ODP-EL v2 language and toolchain: grammar, validator, runtime engine, verifier and planner, with worked examples including the terms-of-engagement scenario. Release 2.1.0 adds typed policy values, date deadlines, comparisons in preconditions and standing duties; see [CHANGELOG.md](CHANGELOG.md). Release v2.0.0 is tagged so that results in our published work (SoEA4EE 2026, EDOC 2026 Forum, arXiv) remain reproducible.
+ODP-EL-textX 2.1 is a stable reference implementation of the ODP-EL v2 language and toolchain: grammar, validator, runtime engine, verifier and planner, with worked examples including the terms-of-engagement scenario. Release 2.1.0 adds typed policy values, date deadlines, comparisons in preconditions and standing duties; see [CHANGELOG.md](CHANGELOG.md). What the DSL types, compares and leaves to the adapter is set out in "Scope of values" in [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md). Release v2.0.0 is tagged so that results in our published work (SoEA4EE 2026, EDOC 2026 Forum, arXiv) remain reproducible.
 
 The repository remains open under the MIT licence and maintained, with a focus on the language, validator and core semantics. Issues, questions and contributions are welcome; please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
