@@ -291,6 +291,11 @@ declarative/atomic path (§5.0, §5.4) only.
 
 ### 5.1 Acceptance as an extended `Evaluation`
 
+Status at v2.0.0: an accept Evaluation made by the holder gates the claim.
+The burden moves from claimable to active when the holder performs its
+action or calls `claim()`. On its own the accept changes nothing. A reject
+is a no-op: no re-offer, and the burden stays claimable.
+
 Resolved (per review): **evaluation-based**, not a new bare `rejected`
 state as the primary mechanism. Grounding is §2. Proposed grammar
 extension (illustrative — exact syntax to be settled at implementation):
@@ -323,6 +328,9 @@ inert:
   delegate; pool re-offer applies (§5.2).
 
 ### 5.2 The interim "claimable" state — the one genuinely new state
+
+Status at v2.0.0: the engine and the static builder implement claimable and
+lapsed. The hybrid builder maps claimable to pending.
 
 A burden that has been delegated to a pool but not yet claimed is neither
 `active` (nobody holds it as a live obligation) nor `pending` in the

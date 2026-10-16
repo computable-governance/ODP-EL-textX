@@ -17,7 +17,7 @@ maturity status).
 |---|---|
 | Community | Implemented |
 | Domain (community type) | Settled 2026-07-06: retired for organizational structure; reserved for cross-cutting characterizing relationships |
-| Federation (community type) | Implemented |
+| Federation (community type) | Partly implemented |
 | CommunityObject | Implemented (AM-26); 2026-07-28 correction on record — community object, not community, is the role filler; MemberRef emphasis open question |
 | Objective rules | Implemented |
 | Policy / policy envelope | Grammar exists — deliberately excluded from reference scenarios |
@@ -216,6 +216,8 @@ all — no `Establishing`, no `Terminating`. Its only lifecycle-adjacent
 item, `WithdrawalBehaviour`, is a free-text description string, weaker
 even than Community's already-partial `Terminating` (which at least has a
 structured `on_objective_achieved` trigger).
+
+Status at v2.0.0: `FedBodyItem` also includes `Lifecycle` and `RoleFiller`.
 
 **Demonstrated in:** `federation_consent_scenario.el` (probe, 2026-06-06),
 `ereferral_model.el`, `gp_referral_scenario.el` (all as standing
@@ -5104,6 +5106,8 @@ question, not a new transition rule.
 
 ## AM-88 — multi-parent authority join: recon findings and fixes (AM-88a, AM-88b, AM-88c)
 
+Status at v2.0.0: `el_reasoner.py` is imported by `el_validator.py` as well as by tests.
+
 **AM-88a RESOLVED (2026-09-19); AM-88b (GuardProbe trust) RESOLVED
 (2026-09-19); AM-88c (chain-extension root choice) RESOLVED for
 Commitment-rooted tokens (2026-09-19); the no-Commitment case is RESOLVED
@@ -5590,6 +5594,8 @@ an inline multi-permit case.
 ---
 
 ## `ConditionalAction.requires_permits` is set by the parser and read by nothing — OPEN FINDING (2026-09-20)
+
+Status at v2.0.0: nothing reads any part of a `conditional_action` (see `el_engine.py` line 1145, `el_kripke.py` line 1882, `el_parser.py` line 171).
 
 **Found:** 2026-09-20, during AM-94 recon. Logged, not fixed.
 

@@ -605,17 +605,15 @@ The pattern is consistent across all processors:
 
 ### 4.4 Bottom-up execution guarantee
 
-textX calls processors **bottom-up** through the object graph. For a
-`ConditionalAction` nested inside an `Action` inside a `Role`, the
-execution order is:
+textX calls processors **bottom-up** through the object graph. A
+`ConditionalAction` sits in a `Role` beside its `Action`s, not inside one.
+For a Role holding an Action and a ConditionalAction the execution order
+is:
 
-P5 (ConditionalAction) → P4 (Action) → P3 (Role)
+P4 (Action) → P5 (ConditionalAction) → P3 (Role)
 
-This means:
-- When P4 runs on an `Action`, P5 has already populated `ca.favoured_by`
-  on all nested `ConditionalAction` objects
-- When P3 runs on a `Role`, P4 has already populated `action.favoured_by`
-  on all nested `Action` objects
+This means that when P3 runs on a `Role`, its Actions and
+ConditionalActions have already been processed.
 
 Application code can always depend on child processors having run before
 parent processors. This makes the pipeline reliable for multi-level
@@ -686,7 +684,7 @@ for academic claims, standards submissions, and future standard revisions.
 | `role` | §6.3.5, §7.8.2 | Abstract position filled by active EO |
 | `interface role` | §6.3.5, §7.8.3 | Cross-community interaction behaviour |
 | `action` | §6.3.1, §7.8.4 | Atomic enterprise behaviour |
-| `conditional_action` | §6.4.6 | Action conditioned on deontic token state |
+| `conditional_action` | §6.4.6 | Action conditioned on deontic token state (parsed; no effect at 2.0.0) |
 | `process` | §6.3.6, §7.8.5 | Ordered collection of steps |
 | `step` | §6.3.7 | Abstraction of an action within a process |
 | `burden` | §6.4.1, §6.4.3 | Deontic token: obligation |
@@ -704,32 +702,17 @@ for academic claims, standards submissions, and future standard revisions.
 | `invariant` | §7.8.1 NOTE 4 | Constraint holding throughout community lifetime |
 | `assignment_policy` | §7.8.2 | Rules governing object assignment to roles |
 | `community_object` | §6.2.2, §7.8.3 | Active EO abstracting a community; fills roles in other communities |
-| `violation` | §6.3.8, §7.8.6 | Behaviour contrary to a rule |
+| `violation_response` | §6.3.8, §7.8.6 | Behaviour contrary to a rule |
 | `party` | §6.6.1 | Enterprise object with legal/normative standing |
 | `agent` | §6.6.8 | Object acting on behalf of a principal |
-| `principal` | §6.6.7 | Party accountable for an agent's actions |
+| `principal_of` | §6.6.7 | Party accountable for an agent's actions |
 
 ---
 
 ### 5.2 Constructs in the standard that V2 currently implements incompletely
 
-**`policy` — missing `PolicySettingBehaviour` (AM-27 pending)**
-ISO/IEC 15414 §6.5 defines policy as including "behaviour for changing the
-policy" as a mandatory component. V2 AM-23 restored typed values and envelopes
-but dropped `PolicySettingBehaviour`. V1 odppolicy.tx had `policy setting by
-<role>` — this needs restoring. Without it, policies are statically valued
-rather than genuinely parameterisable. See AM-27.
-
-**`community_object` — not yet in grammar (AM-26 pending)**
-§6.2.2 defines CommunityObject as an active EO abstracting a community.
-§7.8.3 uses it as the mechanism for cross-community interaction in federations.
-Currently absent from grammar and domain classes. Required for correct
-federation modelling. See AM-26.
-
-**`federation roles` — FederationDecl has no roles (AM-26 pending)**
-§7.5.2 and Linington et al. (2011) are explicit: partner communities fill
-roles in the federation community via their CommunityObjects. The current
-FederationDecl has no roles body item. See AM-26.
+`PolicySettingBehaviour`, `community_object` and federation roles are in the
+grammar and are no longer open.
 
 ---
 

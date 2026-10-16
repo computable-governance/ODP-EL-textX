@@ -388,6 +388,23 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   is created active and the trigger is ignored, so its deadline counts
   from creation, not from the trigger. A token that must wait for an
   event has to be held by its party from the start of the run
+- Claiming (2.0.0): a burden offered to a pool is claimable, and the
+  holder who made the accept Evaluation claims it by performing its action
+  or calling `claim()`; an accept alone changes nothing and a reject is a
+  no-op. The engine enforces this. The static verifier does so only for
+  members of an `any_discharged` group that has a structured Evaluation; a
+  burden declared `state: claimable` outside such a group starts pending
+  and is discharged without a claim. The hybrid verifier has no claim
+  step: it treats claimable as pending, so it can discharge a burden
+  nobody claimed
+- `conditional_action` (2.0.0): parsed, and the token names inside it are
+  resolved, but nothing reads its contents. It has no effect in the
+  engine, validator, Kripke model or reasoner. It sits in a role beside
+  actions, not inside one
+- `for <role>` on a deontic requirement (2.0.0): in `requires_permit p for
+  r` the `for r` part is parsed and stored but never checked. An
+  undeclared role name is accepted without warning, and behaviour is
+  identical
 
 **Grammar (known textX/arpeggio issues):**
 - FederationDecl uses per-line `member:` declarations (not comma list)

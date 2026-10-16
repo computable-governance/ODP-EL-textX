@@ -362,7 +362,7 @@ Discovered during V-16a implementation (commit 3aae4be).
 | 4 | ✓ | Implement object processors P1–P10 in `el_parser.py` |
 | 5 | ✓ | Adapt engine to run over grammar-derived domain classes (`el_engine.py`) |
 | 6 | ✓ | Kripke hybrid mode: anchor initial Kripke world to current WorldState |
-| 7 | ✓ | Federation extension: cross-community interactions, multi-party delegation |
+| 7 | ✓ | Federation extension: federation specifications and multi-hop delegation chains (cross-community interactions are parsed, no effect) |
 | 8 | ✓ | Federation scenario, community_tag actor state, build_from_federation |
 
 **Post-step-8 work (2026-06-13/14):**
@@ -395,23 +395,40 @@ Discovered during V-16a implementation (commit 3aae4be).
   independent UML translation
 
 ### 7.3 Known issues to be aware of
-1. **Fail-open guard** — `eval()` against a facts dict; missing fact silently
-   passes. Serious correctness gap for governance-critical scenarios.
+1. **Precondition guard** — An action's preconditions are looked up in a
+   facts dictionary, with no `eval()`. A precondition is not met when its
+   fact is missing or empty (`None`, `False`, `0`, an empty string or an
+   empty list), and the same rule applies when a violation is declared. Any
+   other value counts as met. Values are not checked for type or meaning, so
+   the text "false" or "no" satisfies a precondition. Scenarios that take
+   facts from external input should supply real booleans.
 2. **No persistence** — WorldState in memory only.
-3. **Single-community scope** — no federation, no cross-community delegation.
-4. **Thin speech act layer** — Authorization, Declaration not typed runtime
-   constructs.
+3. **Federation scope** — Federation specifications parse and validate, and
+   `build_from_federation()` enrols Domain members only. `member: C fills R`
+   statements and community tags have no effect at runtime. Cross-community
+   interactions are parsed with no effect.
+4. **Thin speech act layer** — Authorization (revoke and reinstate, with API
+   routes) and violation declaration (`declare_violation`, engine only) are
+   runtime acts. The top-level `declaration` element is read by nothing, and
+   `prescription` is checked by the validator only.
 
 ### 7.4 ODP-EL subset operationalized
-Fully active: DeonticToken lifecycle, Burden/Permit/Embargo, ActionTemplate,
-Policy/PolicyEnvelope, Rule (preconditions/effects), Violation materialisation,
-two-party delegation. Rule (preconditions/effects) is active except for two
+Fully active: DeonticToken lifecycle, Burden/Permit/Embargo, Rule
+(preconditions/effects), Violation materialisation, delegation (including
+multi-hop chains). Rule (preconditions/effects) is active except for two
 effect limits: `effect destroy` does nothing on a permit or embargo and
 `effect create` always creates the token active (see Known Limitations in
 `docs/DSL_TOOLCHAIN_REFERENCE.md`).
 
-Not implemented: Federation, naming contexts, cross-community interactions,
-multi-party authorization chains, full speech act taxonomy, Calendar EO.
+Parsed and validated, with no engine or Kripke effect: Policy (read by the
+validator and the static reasoner only), PolicyEnvelope (read by nothing).
+
+Partly implemented: Federation (specifications parse and validate; the
+loader covers Domain members only, see section 7.3 item 3).
+
+Not implemented: ActionTemplate, naming contexts, cross-community
+interactions (parsed, no effect), multi-party authorization chains, full
+speech act taxonomy, Calendar EO.
 
 ---
 

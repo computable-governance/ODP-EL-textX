@@ -50,7 +50,7 @@ statement stays unrestricted").
 
 | Rule | Name | What it does | Status |
 |---|---|---|---|
-| **C1** | Claim | For each `CLAIMABLE` obligation held by an `ACTIVE` actor, if a structured Evaluation (accept/reject) unlocks it, add an edge transitioning it to `PENDING` — and mark sibling `CLAIMABLE` obligations in the same group as `LAPSED`. | Implemented, AM-61 — see `DN_003` |
+| **C1** | Claim | For each `CLAIMABLE` obligation whose holder is `ACTIVE` and permitted to perform its action, if the holder has made a structured accept Evaluation of it, add an edge to `PENDING` and mark sibling `CLAIMABLE` obligations in the same group `LAPSED`. A reject never unlocks a claim. Only members of an `any_discharged` group with at least one structured Evaluation start `CLAIMABLE`. Static builder only. | Implemented (static builder), AM-61 — see `DN_003` |
 
 ## Related, not a transition rule itself
 
