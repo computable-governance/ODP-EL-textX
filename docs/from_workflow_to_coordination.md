@@ -62,7 +62,7 @@ process diagram would draw this as a fixed sequence — step 1, then step
 2, then step 3, and so on, each one blocking the next. That is not how
 this is actually modelled:
 
-![Workflow view versus coordination view of the same referral task](diagram_workflow_vs_coordination.svg)
+![Workflow view versus coordination view of the same referral task](../diagram_workflow_vs_coordination.svg)
 
 In the left-hand picture, if step 3 stalls, the diagram has nothing
 further to say. In the right-hand picture, all four obligations simply
@@ -330,4 +330,4 @@ carefully designed version later, once a richer scenario is built
 specifically to demonstrate organisational structure to an architect
 audience.*
 
-![Internal: accountability structure of the GP referral scenario, as currently implemented](diagram_accountability_structure.svg)
+![Internal: accountability structure of the GP referral scenario, as currently implemented](../diagram_accountability_structure.svg)
