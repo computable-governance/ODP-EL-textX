@@ -27,7 +27,7 @@ and policy values; preconditions added in 2.1.0-12, standing duties in
 
 | # | Engine rule | Verifier | Status | Direction |
 |---|---|---|---|---|
-| R1 | A duration deadline is violated when the tick minus the activation tick reaches its steps (eventual burdens; `check_live_violations()`) | T2 from activation, both builders | Mirrored | — |
+| R1 | A duration deadline is violated when the tick minus the activation tick reaches its steps (eventual burdens; `check_live_violations()`). The duration is a literal or, 2.2.0-7, a duration policy's declared value (`deadline: <Policy>`, read through `deadline_text()`) | T2 from activation, both builders, for a literal. A policy-fed deadline: the shared descriptors carry its steps, but neither builder counts it enforceable (until 2.2.0-8) | Mirrored for a literal; a policy-fed deadline absent | Under for a policy-fed deadline (no T2 violation path); safe for `compelled` |
 | R2 | Activation by a `triggered_by` event (its first firing starts the deadline) | Hybrid: events activate every waiting token; static: obligations only | Hybrid mirrored; static abstracted | Under (static: event-activated permits and embargoes) |
 | R3 | Activation by an `activate` effect | none | Absent | Under (an obligation activated by an effect never activates in the model) |
 | R4 | Every applied act advances the tick by one; the model's acts take no time | Only the tick rule (T3) advances a step | Abstracted | Over (discharge before a deadline is easier in the model) and under (while a strict burden blocks the tick, the model cannot step) |

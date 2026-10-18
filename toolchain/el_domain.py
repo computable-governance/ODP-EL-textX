@@ -352,6 +352,7 @@ class DeonticToken(_ELParentable):
     for_action:           Optional[str] = None
     state:                str            = ""      # TokenState
     deadline:             Optional[str] = None
+    deadline_policy:      Optional[object] = None  # 2.2.0-7: → Policy (duration)
     triggered_by:         Optional[object] = None  # AM-22: → EventDecl ref
     discharged_by:        Optional[object] = None  # AM-22: → EventDecl ref
     discharge_mode:       str            = "eventual"  # DischargeMode; P1 default
@@ -614,6 +615,7 @@ class InlineToken(_ELParentable):
     for_action:    Optional[str] = None
     state:         str            = ""      # TokenState
     deadline:      Optional[str] = None
+    deadline_policy: Optional[object] = None  # 2.2.0-7: → Policy (duration)
     triggered_by:  Optional[object] = None  # AM-22: → EventDecl ref
     discharged_by: Optional[object] = None  # AM-22: → EventDecl ref
     discharge_mode: str           = "eventual"   # DischargeMode; P1 default

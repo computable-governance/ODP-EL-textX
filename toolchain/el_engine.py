@@ -1141,7 +1141,7 @@ def advance(
                         discharge_mode=tok_ref.discharge_mode or "eventual",
                         priority=tok_ref.priority or "normal",
                         granted_at_tick=tick,
-                        deadline=getattr(tok_ref, "deadline", None),
+                        deadline=deadline_text(tok_ref),   # 2.2.0-7
                         for_action=getattr(tok_ref, "for_action", None),
                     )
                     tokens.append(new_tok)
@@ -1727,13 +1727,72 @@ def _has_date_shape(deadline: Optional[str]) -> bool:
     return bool(deadline) and bool(_DATE_SHAPE_RE.search(deadline))
 
 
-def _spec_deadline(spec, token_name: str) -> Optional[str]:
-    spec_tok = next(
+# ── Policy-fed deadlines (2.2.0-7) ─────────────────────────────────────────
+#
+# `deadline: NoticePeriod` names a Policy instead of quoting a duration. The
+# deadline is the policy's declared duration value, read-only: the engine
+# and both verifier builders read the same declared value, so they agree
+# while policy values cannot change. Every site that judges, models or
+# copies a token's deadline reads it through deadline_text().
+
+# A policy value usable as a deadline: "<n> <unit>", as policy_value_text()
+# writes a Duration (a non-negative whole number of a known unit).
+_POLICY_DURATION_RE = re.compile(
+    r"(\d+) (?:" + "|".join(_DEADLINE_UNIT_SECONDS) + r")s?"
+)
+
+
+def _deadline_policy(token_el: Any, policy_values=None) -> Optional[Tuple[str, str]]:
+    """2.2.0-7: (policy name, duration text) feeding token_el's deadline,
+    or None: no policy in its deadline slot, a policy not of type duration
+    (the validator error deadline-policy-type), or no usable duration value.
+    The value is the policy's declared initial_value. `policy_values`
+    (name -> text, a mapping or pairs) is for future setting acts: an entry
+    there would take precedence. Nothing passes it in 2.2.0, so the engine
+    and the verifier never read WorldState.policy_values for a deadline."""
+    pol = getattr(token_el, "deadline_policy", None)
+    if pol is None or getattr(pol, "policy_type", None) != "duration":
+        return None
+    values = dict(policy_values or ())
+    if pol.name in values:
+        value = values[pol.name]
+    else:
+        init = getattr(pol, "initial_value", None)
+        value = policy_value_text(init) if policy_value_kind(init) == "duration" else None
+    if not isinstance(value, str) or not _POLICY_DURATION_RE.fullmatch(value):
+        return None
+    return pol.name, value
+
+
+def deadline_text(token_el: Any, policy_values=None) -> Optional[str]:
+    """2.2.0-7: a spec token's deadline as the deadline readers take it. A
+    literal (`deadline: "24 hours"`) comes back unchanged; a policy-fed one
+    (`deadline: NoticePeriod`) is the policy's declared duration as text
+    ("24 hours"); an unusable policy gives None, no measurable deadline, as
+    a token with no deadline. None for no token."""
+    if getattr(token_el, "deadline_policy", None) is None:
+        return getattr(token_el, "deadline", None)
+    resolved = _deadline_policy(token_el, policy_values)
+    return resolved[1] if resolved is not None else None
+
+
+def _policy_deadline_note(token_el: Any) -> str:
+    """2.2.0-7: " (policy <name> = <value>)" for a policy-fed deadline, ""
+    otherwise; appended to violation lines."""
+    resolved = _deadline_policy(token_el)
+    return f" (policy {resolved[0]} = {resolved[1]})" if resolved is not None else ""
+
+
+def _spec_token(spec, token_name: str) -> Optional[Any]:
+    return next(
         (e for e in spec.elements
          if type(e).__name__ == "DeonticToken" and e.name == token_name),
         None,
     )
-    return getattr(spec_tok, "deadline", None)
+
+
+def _spec_deadline(spec, token_name: str) -> Optional[str]:
+    return deadline_text(_spec_token(spec, token_name))   # 2.2.0-7: through the resolver
 
 
 def not_judged_date_burdens(state: WorldState, spec,
@@ -2073,7 +2132,7 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
         if burden is None:
             return
 
-        deadline_str        = getattr(burden, "deadline", None)
+        deadline_str        = deadline_text(burden)   # 2.2.0-7
         chain, sda, rev     = walk_chain(actor_name, obl_text, burden_name)
         holder              = chain[-1]
 
@@ -2178,7 +2237,7 @@ def _build_obligation_descriptors(model: Any) -> Dict[str, ObligationDescriptor]
             for_action = getattr(burden, "for_action", None) or None
             if for_action is None:
                 for_action = _find_action_for_burden(model, burden_name)
-            deadline_str = getattr(burden, "deadline", None)
+            deadline_str = deadline_text(burden)   # 2.2.0-7
             descriptors[burden_name] = ObligationDescriptor(
                 obligation_id=burden_name,
                 obligation_text=burden_name,
@@ -2213,7 +2272,7 @@ def token_from_spec(spec, token_name: str, holder: str, granted_at_tick: int) ->
                 discharge_mode=el.discharge_mode or "eventual",
                 priority=el.priority or "normal",
                 granted_at_tick=granted_at_tick,
-                deadline=getattr(el, "deadline", None),
+                deadline=deadline_text(el),   # 2.2.0-7: the resolved text
                 for_action=(
                     getattr(el, "for_action", None)
                     or _find_action_for_burden(spec, el.name)
@@ -2977,7 +3036,7 @@ def declare_violation(
                         f"(check_live_violations())", tick)
 
     # Prohibition: not before the deadline.
-    raw_deadline = getattr(token_el, "deadline", None)
+    raw_deadline = deadline_text(token_el)   # 2.2.0-7
     if not _has_deadline_magnitude(raw_deadline):
         return _blocked(state, declarer, label,
                         f"'{burden_name}' has no deadline with an elapsed-time magnitude "
@@ -2996,7 +3055,7 @@ def declare_violation(
     effects = precondition_lines + tuple(   # 2.1.0-12: satisfied comparisons first
         f"declared '{burden_name}' held by '{t.holder}' violated "
         f"(elapsed {at_tick - _activation_tick(t)} >= deadline {deadline_steps} steps "
-        f"at step {at_tick})"
+        f"at step {at_tick})" + _policy_deadline_note(token_el)   # 2.2.0-7
         for t in overdue
     )
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
@@ -3164,7 +3223,8 @@ def check_live_violations(
                 violated_names.append(tok.token_name)
             continue
 
-        raw_deadline = _spec_deadline(spec, tok.token_name)
+        spec_tok = _spec_token(spec, tok.token_name)
+        raw_deadline = deadline_text(spec_tok)   # 2.2.0-7: through the resolver
         if _has_date_shape(raw_deadline):
             # 2.1.0-7: a date burden is judged only against as_at, never the
             # tick, and never takes the episode-conclusion path below.
@@ -3214,6 +3274,7 @@ def check_live_violations(
             effects_log.append(
                 f"violated '{tok.token_name}' held by '{tok.holder}' "
                 f"(elapsed {elapsed} >= deadline {deadline_steps} steps)"
+                + _policy_deadline_note(spec_tok)   # 2.2.0-7
             )
 
     # Tick only advances when something actually happened — deliberate

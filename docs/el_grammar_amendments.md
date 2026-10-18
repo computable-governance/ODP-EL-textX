@@ -11280,3 +11280,49 @@ duty's `keeps` with `==`, kept and breached.
 (2.2.0-1) passes unchanged.
 
 Verifier parity: none (tests only).
+
+## 2.2.0-7 — `deadline: <Policy>`: grammar and engine (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: grammar amendment (`DeonticToken` and
+`InlineToken` deadline alternative) and engine.
+
+**Standard reference:** clause to be confirmed.
+
+**Before (2.1.0).** A deadline was a quoted string only; `deadline:
+NoticePeriod` was a syntax error (`Expected STRING`).
+
+**Now.**
+- `('deadline' ':' (deadline=STRING | deadline_policy=[Policy]))?` on
+  `DeonticToken` and `InlineToken`. An undeclared name is a reference
+  error at parse time.
+- One resolver, `el_engine.deadline_text(token_el, policy_values=None)`:
+  a literal comes back unchanged; a policy of type duration gives its
+  declared `initial_value` as text (`"24 hours"`); anything else (another
+  type, a negative or unusable value) gives None, no measurable deadline.
+  `policy_values` is accepted for future setting acts and passed by
+  nothing in 2.2.0, so `WorldState.policy_values` is never read for a
+  deadline.
+- Every engine deadline read goes through it: the obligation descriptors
+  (both roots), `token_from_spec()`, the `create` effect,
+  `check_live_violations()` (and `not_judged_date_burdens()`), and
+  `declare_violation()`.
+- `TokenInstance.deadline` carries the resolved text.
+- Violation lines name the policy: `violated 'notice' held by 'Supplier'
+  (elapsed 1440 >= deadline 1440 steps) (policy NoticePeriod = 24
+  hours)`, and the same suffix on a declared violation.
+
+**Limits.** Read-only: the declared value only. In this sub-change alone
+the verifier builders do not count a policy-fed deadline enforceable
+(2.2.0-8) and the validator's deadline warnings read the literal only
+(2.2.0-9), so W-24 is raised for a policy-fed deadline.
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_engine.py`, `docs/ENGINE_VERIFIER_PARITY.md`; new
+`tests/test_policy_deadline.py`.
+
+**Verification:** full suite 1762 → 1779 collected, 1776 passed, 0 failures. The published-specs golden test
+(2.2.0-1) passes unchanged.
+
+Verifier parity: R1 reworded (the deadline is a literal or a duration
+policy's declared value); a policy-fed deadline is absent from the
+verifier until 2.2.0-8.
