@@ -1,0 +1,580 @@
+{
+  "files": {
+    "scenarios/consent/consent_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-19",
+          "Strict burden 'seekConsentObligation' has deadline 'clinical session', which carries no elapsed-time magnitude (a number with a unit). Its violation can only be declared against a deadline; the verifier falls back to 5 steps and the engine cannot measure it. Add a deadline such as \"15 minutes\". (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'seekConsentObligation' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-24",
+          "Eventual burden 'reportingObligation' has no enforceable deadline ('end of session') and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ]
+      ],
+      "policy_values": []
+    },
+    "scenarios/consent/federation_consent_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-16e",
+          "Agent 'SpecialistParty' has 2 standing principal_of parents: GPParty, SpecialistPracticeParty. For a token with no Commitment of its own, chain-based views name one of them (the first alphabetically); the choice is stable but arbitrary. Which parent's authority applies is application-defined. See el_reasoner.standing_parents_of(model, 'SpecialistParty')."
+        ],
+        [
+          "W-19",
+          "Strict burden 'seekConsentObligation' has no deadline. Its violation can only be declared against a deadline; the verifier falls back to 5 steps and the engine cannot measure it. Add a deadline such as \"15 minutes\". (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'seekConsentObligation' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ]
+      ],
+      "policy_values": []
+    },
+    "scenarios/ecommerce/ecommerce_scenario.el": {
+      "parsed": false,
+      "errors": [
+        [
+          "SYNTAX",
+          "scenarios/ecommerce/ecommerce_scenario.el:69:9: Expected 'delegated_from' or 'principal_of' or '}' => '\"         *sub_delega'"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": null
+    },
+    "scenarios/ereferral/ereferral_model.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-19",
+          "Strict burden 'referralBurden' has no deadline. Its violation can only be declared against a deadline; the verifier falls back to 5 steps and the engine cannot measure it. Add a deadline such as \"15 minutes\". (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'referralBurden' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-22",
+          "Escalate response 'examinationViolation' has no creates_burden: it fires as a ledger entry only; nobody becomes obligated. (§6.3.8, §7.8.6 NOTE 2)"
+        ],
+        [
+          "W-22",
+          "Escalate response 'acknowledgementViolation' has no creates_burden: it fires as a ledger entry only; nobody becomes obligated. (§6.3.8, §7.8.6 NOTE 2)"
+        ],
+        [
+          "W-24",
+          "Eventual burden 'acknowledgementBurden' has no enforceable deadline (none) and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ]
+      ],
+      "policy_values": []
+    },
+    "scenarios/erequesting_claiming/erequesting_claiming_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [],
+      "policy_values": []
+    },
+    "scenarios/fhir/generated_governance.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-19",
+          "Strict burden 'ReferralSr001Obligation' has no deadline. Its violation can only be declared against a deadline; the verifier falls back to 5 steps and the engine cannot measure it. Add a deadline such as \"15 minutes\". (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'ReferralSr001Obligation' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ]
+      ],
+      "policy_values": []
+    },
+    "scenarios/gp_referral/gp_referral_scenario.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "V-NEW-10",
+          "Delegation 'gpToSpecialistDelegation' declares both 'transfers_burden' and 'transfers_token_group' — these are mutually exclusive."
+        ]
+      ],
+      "warnings": [
+        [
+          "W-strict-precondition",
+          "Strict burden 'referralInitiationBurden' is discharged by action 'initiateReferral', which has preconditions (\"Patient must have an active episode of care and clinical indication for referral\"): the verifier assumes they hold, so the status route may report it compelled while the engine refuses the discharge. (clause to be confirmed)"
+        ],
+        [
+          "W-16g",
+          "Agent 'SpecialistClinician' has 2 declared parents across all channels: GPPracticeParty (gpToSpecialistDelegation), SpecialistParty (standing principal_of). Principals are collectively responsible (§7.10.1); delegated_from is itself a self-sufficient static declaration (§6.6.8 NOTE 3) and is counted here even with no backing Delegation. How these authorities combine is application-defined; the toolchain does not compose them. See el_reasoner.all_declared_parents_of(model, 'SpecialistClinician')."
+        ],
+        [
+          "W-20",
+          "Strict burden 'referralInitiationBurden' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'escalationNoticeBurden' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-24",
+          "Eventual burden 'clinicalHandoverBurden' has no enforceable deadline ('referral episode') and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ]
+      ],
+      "policy_values": [
+        [
+          "referralTimelinessPolicy",
+          "5 day"
+        ]
+      ]
+    },
+    "scenarios/probes/transfer_probe.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-19",
+          "Strict burden 'strictBurden' has no deadline. Its violation can only be declared against a deadline; the verifier falls back to 5 steps and the engine cannot measure it. Add a deadline such as \"15 minutes\". (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'strictBurden' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-24",
+          "Eventual burden 'probeBurden' has no enforceable deadline (none) and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-24",
+          "Eventual burden 'noFromRoleBurden' has no enforceable deadline (none) and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-24",
+          "Eventual burden 'ambiguousFromBurden' has no enforceable deadline (none) and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-24",
+          "Eventual burden 'unfilledToBurden' has no enforceable deadline (none) and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ]
+      ],
+      "policy_values": []
+    },
+    "scenarios/referral/referral_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-strict-precondition",
+          "Strict burden 'referralInitiationBurden' is discharged by action 'initiateReferral', which has preconditions (\"Patient must have an active episode of care and clinical indication for referral\"): the verifier assumes they hold, so the status route may report it compelled while the engine refuses the discharge. (clause to be confirmed)"
+        ],
+        [
+          "W-16g",
+          "Agent 'SpecialistClinician' has 2 declared parents across all channels: GPClinician (gpToSpecialistDelegation, delegated_from), SpecialistPractice (standing principal_of). Principals are collectively responsible (§7.10.1); delegated_from is itself a self-sufficient static declaration (§6.6.8 NOTE 3) and is counted here even with no backing Delegation. How these authorities combine is application-defined; the toolchain does not compose them. See el_reasoner.all_declared_parents_of(model, 'SpecialistClinician')."
+        ],
+        [
+          "W-20",
+          "Strict burden 'referralInitiationBurden' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'escalationNoticeBurden' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ]
+      ],
+      "policy_values": []
+    },
+    "scenarios/specialist_pool/specialist_pool_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [],
+      "policy_values": []
+    },
+    "scenarios/terms_of_engagement/external_agent_access_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [],
+      "policy_values": [
+        [
+          "AuditLogPolicy",
+          "hash-chained, provider-held, append-only"
+        ],
+        [
+          "RefusalQuarantinePolicy",
+          "24 hours"
+        ],
+        [
+          "RefusalReviewPolicy",
+          "1 day"
+        ],
+        [
+          "TokenScopePolicy",
+          "SMART Backend Services: system/ServiceRequest.c system/Patient.r"
+        ],
+        [
+          "WorkloadIdentityPolicy",
+          "mTLS with provider-issued client certificate"
+        ]
+      ]
+    },
+    "scenarios/terms_of_engagement/public_data_portal_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [],
+      "policy_values": [
+        [
+          "AgentIdentityPolicy",
+          "signed requests or mTLS with an agency-registered agent key"
+        ],
+        [
+          "AuditLogPolicy",
+          "hash-chained, agency-held, append-only"
+        ],
+        [
+          "RefusalQuarantinePolicy",
+          "24 hours"
+        ],
+        [
+          "RefusalReviewPolicy",
+          "1 day"
+        ],
+        [
+          "TokenScopePolicy",
+          "scopes: datasets.read-published, statistics.query-aggregate"
+        ]
+      ]
+    },
+    "scenarios/vendor/ai_vendor_probe.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [],
+      "policy_values": []
+    },
+    "tests/examples/comparisons/invalid_comparison_in_step.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "comparison-in-step",
+          "Step 'assess': precondition \"insurance cover\" >= 20000000 AUD is never checked: Step preconditions are not enforced. Put the comparison on the Action. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": []
+    },
+    "tests/examples/comparisons/invalid_comparison_type.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "comparison-type",
+          "Action 'assess': precondition \"response time\" <= 60 day: limit 60 day has currency code 'day', not three upper-case letters A-Z (ISO 4217 form); a duration cannot be compared. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": []
+    },
+    "tests/examples/comparisons/invalid_envelope_currency.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "envelope-currency",
+          "Policy 'MinimumCover': initial_value 20000000 AUD is in AUD, but its envelope holds amounts in NZD; amounts are compared only within one currency. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": [
+        [
+          "MinimumCover",
+          "20000000 AUD"
+        ]
+      ]
+    },
+    "tests/examples/comparisons/invalid_envelope_membership.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "envelope-membership",
+          "Policy 'MaximumShare': initial_value 12% is not one of its envelope 'one of' values [5%, 10%, 15%]. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": [
+        [
+          "MaximumShare",
+          "12%"
+        ]
+      ]
+    },
+    "tests/examples/comparisons/invalid_fact_key_clash.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "fact-key-clash",
+          "Fact 'insurance cover' is read in more than one way (a plain fact in Action 'renew'; an amount in AUD in Action 'assess'); one reported value cannot satisfy both. Use a different fact key for each reading. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": []
+    },
+    "tests/examples/comparisons/ok_cover_check.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [],
+      "policy_values": [
+        [
+          "MaximumShare",
+          "10%"
+        ],
+        [
+          "MinimumCover",
+          "20000000 AUD"
+        ]
+      ]
+    },
+    "tests/examples/standing/invalid_standing_fields.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "standing-fields",
+          "Standing duty 'keepCover': it is strict; a standing duty must be eventual. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [
+        [
+          "W-standing-not-modelled",
+          "Standing duty 'keepCover': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+        ],
+        [
+          "W-19",
+          "Strict burden 'keepCover' has no deadline. Its violation can only be declared against a deadline; the verifier falls back to 5 steps and the engine cannot measure it. Add a deadline such as \"15 minutes\". (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-20",
+          "Strict burden 'keepCover' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ]
+      ],
+      "policy_values": [
+        [
+          "ContractEnd",
+          "2027-06-30T17:00+10:00"
+        ]
+      ]
+    },
+    "tests/examples/standing/invalid_standing_in_group.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "standing-in-group",
+          "Standing duty 'keepCover' is a member of token group 'obligations'; a standing duty is never a group member. (clause to be confirmed)"
+        ],
+        [
+          "E-16a",
+          "TokenGroup 'obligations' member 'keepCover' has no backing Commitment or Delegation — obligation descriptor will be missing at runtime"
+        ],
+        [
+          "E-16a",
+          "TokenGroup 'obligations' member 'fileReport' has no backing Commitment or Delegation — obligation descriptor will be missing at runtime"
+        ]
+      ],
+      "warnings": [
+        [
+          "W-standing-not-modelled",
+          "Standing duty 'keepCover': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+        ]
+      ],
+      "policy_values": [
+        [
+          "ContractEnd",
+          "2027-06-30T17:00+10:00"
+        ]
+      ]
+    },
+    "tests/examples/standing/invalid_term_end_type.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "term-end-type",
+          "Standing duty 'keepCover': ends_at ContractLength is a policy of type 'duration'; it must be of type date or instant. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [
+        [
+          "W-standing-not-modelled",
+          "Standing duty 'keepCover': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+        ]
+      ],
+      "policy_values": [
+        [
+          "ContractLength",
+          "365 days"
+        ]
+      ]
+    },
+    "tests/examples/standing/ok_cover_for_the_term.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-standing-not-modelled",
+          "Standing duty 'keepCover': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+        ],
+        [
+          "W-standing-not-modelled",
+          "Standing duty 'keepShare': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+        ]
+      ],
+      "policy_values": [
+        [
+          "ContractEnd",
+          "2027-06-30T17:00+10:00"
+        ],
+        [
+          "MaximumShare",
+          "10%"
+        ],
+        [
+          "MinimumCover",
+          "20000000 AUD"
+        ]
+      ]
+    },
+    "tests/examples/typed_values/invalid_calendar_date.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "calendar-date",
+          "Policy 'Cutoff': initial_value 2026-02-30 is not a calendar date. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": [
+        [
+          "Cutoff",
+          "2026-02-30"
+        ]
+      ]
+    },
+    "tests/examples/typed_values/invalid_currency_code.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "currency-code",
+          "Policy 'ReferralFee': initial_value 250.00 aud has currency code 'aud', not three upper-case letters A-Z (ISO 4217 form). (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": [
+        [
+          "ReferralFee",
+          "250.00 aud"
+        ]
+      ]
+    },
+    "tests/examples/typed_values/invalid_instant_valid.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "instant-valid",
+          "Policy 'Opens': initial_value 2026-11-30T17:00+24:00 is not an instant: not a UTC offset. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": [
+        [
+          "Opens",
+          "2026-11-30T17:00+24:00"
+        ]
+      ]
+    },
+    "tests/examples/typed_values/invalid_policy_value_type.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "policy-value-type",
+          "Policy 'MaxRetries': initial_value 4.5 is not an integer value. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": [
+        [
+          "MaxRetries",
+          "4.5"
+        ]
+      ]
+    },
+    "tests/examples/typed_values/invalid_range_ends.el": {
+      "parsed": true,
+      "errors": [
+        [
+          "range-ends",
+          "Policy 'ReferralFee': range [10.00 AUD to 500.00 NZD] has ends in different currencies (AUD and NZD); amounts are compared only within one currency. (clause to be confirmed)"
+        ],
+        [
+          "envelope-currency",
+          "Policy 'ReferralFee': initial_value 250.00 AUD is in AUD, but its envelope holds amounts in NZD; amounts are compared only within one currency. (clause to be confirmed)"
+        ]
+      ],
+      "warnings": [],
+      "policy_values": [
+        [
+          "ReferralFee",
+          "250.00 AUD"
+        ]
+      ]
+    },
+    "tests/examples/typed_values/ok_typed_values.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [],
+      "policy_values": [
+        [
+          "AuditEnabled",
+          "true"
+        ],
+        [
+          "Cutoff",
+          "2026-11-30"
+        ],
+        [
+          "InterestRate",
+          "4.25%"
+        ],
+        [
+          "MaxRetries",
+          "3"
+        ],
+        [
+          "Opens",
+          "2026-11-30T17:00+10:00"
+        ],
+        [
+          "Ratio",
+          "0.75"
+        ],
+        [
+          "ReferralFee",
+          "250.00 AUD"
+        ],
+        [
+          "RetentionWindow",
+          "60 days"
+        ],
+        [
+          "Score",
+          "4"
+        ],
+        [
+          "ServiceLabel",
+          "standard"
+        ],
+        [
+          "ServiceTier",
+          "gold"
+        ]
+      ]
+    }
+  }
+}
