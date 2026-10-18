@@ -40,6 +40,7 @@ community C {{
 }}
 permit declarePermit {{ state: active }}
 burden notice {{ for_action: "giveNotice" state: active deadline: {deadline} {mode} }}
+commitment noticeCommitment {{ by: Supplier obligation: "give notice" creates_burden: notice }}
 """
 
 
@@ -155,3 +156,53 @@ def test_declare_violation_reads_the_policy():
     assert record.effects == (
         "declared 'notice' held by 'Supplier' violated (elapsed 1440 >= deadline 1440 steps "
         "at step 1440) (policy NoticePeriod = 24 hours)",)
+
+
+# ── Verifier (2.2.0-8) ───────────────────────────────────────────────────
+
+from el_kripke import _build_enforceable_deadlines, build_kripke_from_runtime, build_kripke_model  # noqa: E402
+
+_HORIZON = 10
+
+
+def _summary(km, burdens=("notice",)):
+    verdicts = {}
+    for name in burdens:
+        af, ef = km.check_obligation(name), km.check_permission(name)
+        verdicts[name] = (af.satisfied, af.status, ef.satisfied)
+    return km.worlds, km.edges, km.labels, verdicts
+
+
+def _static(deadline, value="5 minutes"):
+    return _quiet(build_kripke_model, _model(deadline=deadline, value=value), horizon=_HORIZON)
+
+
+def _hybrid(deadline, value="5 minutes"):
+    return _quiet(build_kripke_from_runtime, _runtime(deadline=deadline, value=value),
+                  horizon=_HORIZON)
+
+
+def test_enforceable_in_both_builders():
+    assert "notice" in _build_enforceable_deadlines(_model())
+    assert "notice" not in _build_enforceable_deadlines(_model(ptype="date", value="2027-06-30"))
+
+
+@pytest.mark.parametrize("build", [_static, _hybrid], ids=["static", "hybrid"])
+def test_model_identical_to_the_literal(build):
+    policy, literal = build("NoticePeriod"), build('"5 minutes"')
+    assert _summary(policy) == _summary(literal)
+    # Not vacuous: within the horizon the deadline adds a violation path.
+    assert any(label.startswith("violate:notice") for label in policy.labels.values())
+    assert _summary(policy) != _summary(build('"referral episode"'))
+
+
+def test_hybrid_reads_the_declared_value_not_policy_values():
+    """R10: the verifier never reads WorldState.policy_values, even for a
+    deadline; a changed runtime copy does not change the model."""
+    import dataclasses
+    runtime = _runtime(value="5 minutes")
+    before = _summary(_quiet(build_kripke_from_runtime, runtime, horizon=_HORIZON))
+    runtime._state = dataclasses.replace(runtime.current_state(),
+                                         policy_values=(("NoticePeriod", "1 minute"),))
+    after = _summary(_quiet(build_kripke_from_runtime, runtime, horizon=_HORIZON))
+    assert before == after

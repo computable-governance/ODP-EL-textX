@@ -103,6 +103,7 @@ from el_engine import (
     _find_spec_tokens_for_event,
     role_fillers,
     _parse_deadline_steps,
+    deadline_text,   # 2.2.0-8
 )
 
 
@@ -2396,6 +2397,10 @@ def _build_enforceable_deadlines(model: Any) -> FrozenSet[str]:
     engine never enforces; before AM-108 both builders violated such a
     burden at 5 steps. A live burden with no spec token has no deadline and
     is not in the set, as in the engine.
+
+    2.2.0-8: the deadline is read through el_engine.deadline_text(), so a
+    policy-fed deadline (`deadline: <Policy>`) is the policy's declared
+    duration, as in the engine; WorldState.policy_values is not read.
     """
     from el_engine import _has_deadline_magnitude
 
@@ -2408,7 +2413,7 @@ def _build_enforceable_deadlines(model: Any) -> FrozenSet[str]:
     return frozenset(
         t.name for t in tokens
         if getattr(t, "kind", None) == "burden"
-        and _has_deadline_magnitude(getattr(t, "deadline", None) or None)
+        and _has_deadline_magnitude(deadline_text(t) or None)   # 2.2.0-8
     )
 
 
@@ -3956,7 +3961,7 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
                 # does for the static builder. Previously int(dl) first, so a
                 # bare number "10" gave 10 steps here but 5 (the default) in
                 # static.
-                steps = _parse_deadline_steps(getattr(spec_tok, "deadline", None))
+                steps = _parse_deadline_steps(deadline_text(spec_tok))   # 2.2.0-8
                 discharge_mode = tok.discharge_mode or "eventual"
                 priority_weight = _priority_weight(tok.priority)
                 revocable = False

@@ -11326,3 +11326,36 @@ the verifier builders do not count a policy-fed deadline enforceable
 Verifier parity: R1 reworded (the deadline is a literal or a duration
 policy's declared value); a policy-fed deadline is absent from the
 verifier until 2.2.0-8.
+
+## 2.2.0-8 — `deadline: <Policy>`: verifier (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED. Type: verifier.
+
+**Now.** Both verifier builders read a token's deadline through
+`el_engine.deadline_text()`, the engine's resolver, so a policy-fed
+deadline is the policy's declared duration in the engine and in the
+models:
+- `_build_enforceable_deadlines()` (used by `build_kripke_model()` and
+  `build_kripke_from_runtime()`): a burden whose policy-fed deadline has a
+  magnitude is enforceable, so T2 violates it as for a literal;
+- `build_kripke_from_runtime()`'s fallback for a live burden with no
+  descriptor: its steps are parsed from the resolved text.
+The descriptors' steps already came from the resolver (2.2.0-7). A spec
+with `deadline: NoticePeriod` (5 minutes) gives a static and a hybrid
+model identical to the same spec with `deadline: "5 minutes"`: worlds,
+edges, labels and AF/EF verdicts. The verifier reads the specification,
+never `WorldState.policy_values`: changing the runtime copy changes no
+model.
+
+**Files changed:** `toolchain/el_kripke.py`,
+`docs/ENGINE_VERIFIER_PARITY.md`, `tests/test_policy_deadline.py`.
+
+**Verification:** full suite 1779 → 1783 collected, 1780 passed, 0 failures. The published-specs golden test
+(2.2.0-1) passes unchanged; static models of the 29 published files and
+hybrid models of the six API scenarios: the same world and edge counts and
+AF/EF verdicts as before.
+
+Verifier parity: R19 added, Mirrored; R1 back to Mirrored (the
+policy-fed deadline is no longer absent) and R10 reworded (a policy-fed
+deadline is read from the specification, never from
+`WorldState.policy_values`).
