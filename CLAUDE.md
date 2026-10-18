@@ -46,7 +46,8 @@ Layer 1 — FHIR R4 (domain-specific data layer)
 Layer 2 — DSL-EL specification and accountability reasoning
           grammar/v2/el_grammar.tx → parsed by textX → domain objects
           toolchain/el_validator.py (errors and [W-] warnings, ISO-clause
-            traced; the 2.1.0 rules end "(clause to be confirmed)";
+            traced; the 2.1.0 and 2.2.0 rules end "(clause to be
+            confirmed)";
             AM-18 class-name bug fixed 2026-06-14; Federation/Domain
             community-type coverage added 2026-06-14)
           toolchain/el_reasoner.py (ultimate_accountability, can_perform,
@@ -274,7 +275,8 @@ Early confirmed amendments: AM-18 (Decl suffix removal), AM-19
 AM-23 (typed PolicyValue), AM-24 (InlineToken), AM-25 (Federation/Domain as
 community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition).
 The last AM entry is AM-115 (section 5.8). The 2.1.0 changes follow it,
-numbered 2.1.0-1 to 2.1.0-25 (section 7.4).
+numbered 2.1.0-1 to 2.1.0-25, then the 2.2.0 changes, 2.2.0-1 to 2.2.0-13
+(section 7.4).
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -406,9 +408,12 @@ Discovered during V-16a implementation (commit 3aae4be).
    are not checked for type or meaning, so the text "false" or "no"
    satisfies it. Scenarios that take facts from external input should
    supply real booleans. A comparison precondition (2.1.0,
-   `precondition: "<fact>" >= <limit>`) is judged by value: the fact must
+   `precondition: "<fact>" >= <limit>`; 2.2.0 adds `==`, `!=` and date,
+   instant, duration and options limits) is judged by value: the fact must
    be reported as text in the 2.1.0 notation (`"25000000.00 AUD"`, `"8.5%"`,
-   `"5.50"`); a missing value, a JSON number or another currency is "not
+   `"5.50"`, and for 2.2.0 limits `"2027-07-01"`,
+   `"2027-06-30T09:00+10:00"`, `"12 hours"` or one of the options); a
+   missing value, a JSON number, another currency or another kind is "not
    established" and the act is refused (`blocked`), never violated.
 2. **No persistence** — WorldState in memory only.
 3. **Federation scope** — Federation specifications parse and validate, and
@@ -429,11 +434,14 @@ effect limits: `effect destroy` does nothing on a permit or embargo and
 `docs/DSL_TOOLCHAIN_REFERENCE.md`).
 
 Policy values are typed and read by the engine (2.1.0, below): a
-comparison's policy limit and a standing duty's `ends_at` policy, at the
-policy's `initial_value` (read-only; seeded into `WorldState.policy_values`).
-The verifier does not read them. PolicyEnvelope is checked by the validator
-only (`envelope-membership`, `envelope-currency`); no engine or Kripke
-effect.
+comparison's policy limit, a standing duty's `ends_at` policy and (2.2.0)
+a policy-fed deadline, at the policy's `initial_value` (read-only; seeded
+into `WorldState.policy_values`). The verifier reads a policy only as a
+policy-fed deadline, at its declared value from the specification, and
+never reads `WorldState.policy_values` (parity row R19; a test fails if a
+caller passes policy values to `el_engine.deadline_text()`).
+PolicyEnvelope is checked by the validator only (`envelope-membership`,
+`envelope-currency`); no engine or Kripke effect.
 
 **2.1.0 additions** (entries 2.1.0-1 to 2.1.0-25 in
 `docs/el_grammar_amendments.md`; full text in
@@ -479,8 +487,43 @@ effect.
   one `[W-strict-precondition]`.
 - **Engine and verifier parity.** `docs/ENGINE_VERIFIER_PARITY.md` sets
   each engine rule beside the Kripke rule that models it. It is partial:
-  it lists only the rows added in 2.1.0 (R1 to R18: deadlines, the clock,
-  policy values, preconditions, standing duties).
+  it lists only the rows added in 2.1.0 and 2.2.0 (R1 to R18: deadlines,
+  the clock, policy values, preconditions, standing duties; R19:
+  policy-fed deadlines).
+
+**2.2.0 additions** (entries 2.2.0-1 to 2.2.0-13 in
+`docs/el_grammar_amendments.md`; full text in the same sections of
+`docs/DSL_TOOLCHAIN_REFERENCE.md`). No 2.1.0 verdict or reason text
+changed; the 29 published specifications are pinned by
+`tests/test_published_specs_unchanged.py` (golden file
+`tests/published_specs_golden.json`, regenerated only by hand for an
+intended change):
+- **`==` and `!=`** in comparisons and in a standing duty's `keeps`:
+  `precondition: "approvals" == 2`. Exact equality of the values (`"2.0"
+  == 2` holds). `=>` stays a syntax error.
+- **Date, instant and duration limits:** `precondition: "certificate
+  expiry" >= 2027-06-30`, `"notified at" <= 2027-06-30T17:00+10:00`,
+  `"notice given within" <= 24 hours`, or a policy of type date, instant
+  or duration. A date is never compared with an instant; a duration limit
+  is never signed (`+60 days` is a syntax error in a comparison).
+- **`deadline: <Policy>`:** `deadline: NoticePeriod` names a Policy of
+  type duration; the deadline is its declared value, read through one
+  resolver, `el_engine.deadline_text()`, by the engine, both verifier
+  builders and the validator. Violation lines end `(policy NoticePeriod =
+  24 hours)`. A policy of another type or a negative duration is the
+  error `deadline-policy-type`. A standing duty takes no deadline.
+- **Options sets:** `options ApprovalStates [pending, approved,
+  rejected]` (top-level). A policy whose type names a declared options
+  set takes one of its options (`policy-value-type`); a type that names
+  no options set stays unchecked and silent. A comparison against a
+  policy of an options type uses `==` and `!=` only (`precondition:
+  "approval" == RequiredState`); there is no option literal. `options` is
+  a keyword only at the start of a top-level element; it is not reserved
+  as a name.
+- **New validator errors:** `deadline-policy-type`, `option-duplicate`,
+  `option-set-name`. The validator has 71 rules: 45 errors and 26
+  warnings. Reworded `comparison-type` messages (invalid specifications
+  only; see `CHANGELOG.md`).
 
 Partly implemented: Federation (specifications parse and validate; the
 loader covers Domain members only, see section 7.3 item 3).
@@ -532,8 +575,8 @@ domain-independent. Never let clinical or FHIR concepts leak into
 
 2. **Every validator rule must cite an ISO clause.** Format:
    `# §X.Y: description`. Do not add rules without a standard reference.
-   The 2.1.0 rules (section 7.4) are not yet traced: each message ends
-   "(clause to be confirmed)".
+   The 2.1.0 and 2.2.0 rules (section 7.4) are not yet traced: each
+   message ends "(clause to be confirmed)".
 
 3. **Every grammar amendment must be logged in `docs/el_grammar_amendments.md`**
    with type (AM/V-NEW/DOC), rationale, and confirmed/tentative status.

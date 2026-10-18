@@ -20,7 +20,7 @@ maturity status).
 | Federation (community type) | Partly implemented |
 | CommunityObject | Implemented (AM-26); 2026-07-28 correction on record — community object, not community, is the role filler; MemberRef emphasis open question |
 | Objective rules | Implemented |
-| Policy / policy envelope | Typed values (2.1.0); read by the engine in comparisons and standing duties; envelope checked by the validator only; still excluded from reference scenarios |
+| Policy / policy envelope | Typed values (2.1.0) and options sets (2.2.0); read by the engine in comparisons, standing duties and (2.2.0) policy-fed deadlines; envelope checked by the validator only; still excluded from reference scenarios |
 | NormativePolicy scope | Implemented (AM-28); widened to any Community (AM-41, 2026-07-22); enforcement-mode field landed (AM-42); optional url field landed (AM-43, 2026-07-28) |
 | Establishing behaviour | Implemented (AM-33) — demonstrated in `referral_scenario.el` |
 | Creation-style / episodic community | Settled 2026-07-07: created COMMUNITY, not federation (corrected from a 2026-07-06 conclusion) — demonstrated in `referral_scenario.el` |
@@ -39,9 +39,11 @@ maturity status).
 | Scenario maturity language | Proposed |
 | Typed policy values (2.1.0) | Implemented (2.1.0-1 to 2.1.0-4) |
 | Date deadlines, the clock and `as_at` (2.1.0) | Implemented in the engine (2.1.0-6 to 2.1.0-9); not modelled by the verifier |
-| Comparisons in preconditions (2.1.0) | Implemented in the engine (2.1.0-11 to 2.1.0-14); assumed true by the verifier |
+| Comparisons in preconditions (2.1.0) | Implemented in the engine (2.1.0-11 to 2.1.0-14; `==`, `!=`, date, instant, duration and options limits 2.2.0-2 to 2.2.0-6 and 2.2.0-12); assumed true by the verifier |
+| Policy-fed deadlines (2.2.0) | Implemented (2.2.0-7 to 2.2.0-9); engine and both verifier builders, the policy's declared value |
+| Options sets (2.2.0) | Implemented (2.2.0-10 to 2.2.0-12); validator and comparisons |
 | Standing duties (2.1.0) | Implemented in the engine (2.1.0-16 to 2.1.0-23); not modelled by the verifier, claims withheld |
-| Engine and verifier parity matrix (2.1.0) | Started (2.1.0-5); partial: rows from 2.1.0 only |
+| Engine and verifier parity matrix (2.1.0) | Started (2.1.0-5); partial: rows from 2.1.0 and 2.2.0 only (R1 to R19) |
 
 ---
 
@@ -795,7 +797,10 @@ objective achievable.
 (2.1.0)") and seeded read-only into `WorldState.policy_values`. The engine
 reads a policy's `initial_value` as a comparison limit and as a standing
 duty's `ends_at`; the verifier does not read policy values
-(`docs/ENGINE_VERIFIER_PARITY.md`, R10 and R12). Envelopes are checked by
+(`docs/ENGINE_VERIFIER_PARITY.md`, R10 and R12). **2.2.0:** a token's
+deadline may name a duration policy (see "Policy-fed deadlines (2.2.0)");
+the engine and the verifier read that policy's declared value from the
+specification, never `WorldState.policy_values` (R19). Envelopes are checked by
 the validator only (`envelope-membership`, `envelope-currency`, and the
 value types of `range of [a to b]` through `range-ends`); no
 policy-setting behaviour is enforced. Shipped scenarios declare only
@@ -7443,7 +7448,7 @@ mirrors, abstracts or leaves it out, and in which direction (over or
 under).
 
 **Toolchain status:** started in 2.1.0-5. **Partial:** it lists only the
-rows added in 2.1.0 (R1 to R18: deadlines, the clock, policy values,
-preconditions, standing duties); the rest of the engine is not yet
-listed. Updated in the same commit as any engine or Kripke rule it
+rows added in 2.1.0 and 2.2.0 (R1 to R18: deadlines, the clock, policy
+values, preconditions, standing duties; R19, 2.2.0: policy-fed deadlines);
+the rest of the engine is not yet listed. Updated in the same commit as any engine or Kripke rule it
 describes.

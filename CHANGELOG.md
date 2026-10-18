@@ -5,15 +5,30 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
-## [Unreleased]
+## [2.2.0] - 2026-10-18
+
+Equality in comparisons, date, instant and duration limits, deadlines that
+name a duration policy, and options sets. Details per sub-change are in
+[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
+2.2.0-1 to 2.2.0-13); the rules are in
+[docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md),
+"Typed policy values (2.1.0)" (options sets), "Deadlines (2.1.0)" (a
+duration policy) and "Comparisons (2.1.0)".
+
+No 2.1.0 judging text changed: for what 2.1.0 accepts, the engine gives
+the same verdicts, reasons and ledger lines. The 29 published specifications (the
+13 shipped scenarios and the 16 examples in `tests/examples/`) give the
+same parse results, errors, warnings and seeded policy values as in 2.1.0,
+except one reworded message on one example (below, under "Changed").
+Kripke world and edge counts and AF/EF verdicts are unchanged.
 
 ### Added
 
-- **2.2.0-2 `==` and `!=` in comparisons.** `precondition: "approvals"
-  == 2`, `precondition: "insurance cover" != MinimumCover`, and the same
-  in a standing duty's `keeps`. Exact equality of the values (`"2.0" ==
-  2` holds); an amount in another currency is not established. `=>`
-  stays a syntax error. No 2.1.0 specification changes meaning.
+- **2.2.0-2, 2.2.0-3 `==` and `!=` in comparisons.** `precondition:
+  "approvals" == 2`, `precondition: "insurance cover" != MinimumCover`, and
+  the same in a standing duty's `keeps`. Exact equality of the values
+  (`"2.0" == 2` holds); an amount in another currency is not established.
+  `=>` stays a syntax error.
 - **2.2.0-4 to 2.2.0-6 Date, instant and duration limits in comparisons.**
   `precondition: "certificate expiry" >= 2027-06-30`, `"notified at" <=
   2027-06-30T17:00+10:00`, `"notice given within" <= 24 hours`, or a policy
@@ -22,13 +37,6 @@ adheres to _[Semantic Versioning][semver]_.
   A duration limit is never signed (`+60 days` is a syntax error in a
   comparison; policy values still accept it). Invalid date or instant
   limits are reported by `calendar-date` and `instant-valid`.
-- **Changed texts, on invalid specifications only (2.2.0-4, 2.2.0-6).**
-  `comparison-type` messages: an amount code not in ISO 4217 form now ends
-  "a duration's unit is minute, hour, day, week, month or year" (was "a
-  duration cannot be compared"); the type lists add date, instant and
-  duration. The published example
-  `tests/examples/comparisons/invalid_comparison_type.el` uses `60 sec`
-  instead of `60 day`, which is now a valid duration.
 - **2.2.0-7 to 2.2.0-9 `deadline: <Policy>`.** A token's deadline may name
   a Policy of type duration (`deadline: NoticePeriod`): the deadline is
   the policy's declared value, read-only, through one resolver
@@ -45,6 +53,51 @@ adheres to _[Semantic Versioning][semver]_.
   comparison may use a policy of an options type as its limit, with `==`
   and `!=` only (`precondition: "approval" == RequiredState`); an ordering
   operator is a `comparison-type` error. Parity rows R12 and R17 reworded.
+- **2.2.0-1 Golden test.** `tests/test_published_specs_unchanged.py` pins
+  what the toolchain reports for the 29 published specifications.
+- **2.2.0-13** The API reports version 2.2.0.
+
+### Changed
+
+- **Reworded `comparison-type` messages (2.2.0-4, 2.2.0-6), on invalid
+  specifications only.**
+  - An amount limit whose code is not in ISO 4217 form now ends "; a
+    duration's unit is minute, hour, day, week, month or year" (was "; a
+    duration cannot be compared").
+  - A limit of another kind: "is not a number, percentage, amount, date,
+    instant or duration" (was "is not a number, percentage or amount").
+  - A policy limit of another type: "a comparison takes a policy of type
+    integer, decimal, number, percentage, amount, date, instant or
+    duration" (was "integer, decimal, number, percentage or amount").
+  - The published example
+    `tests/examples/comparisons/invalid_comparison_type.el` uses `60 sec`
+    instead of `60 day`, which is now a valid duration; its message is the
+    one reworded message among the published specifications.
+- **New error `deadline-policy-type` (2.2.0-9).** A deadline that names a
+  policy not of type duration, or a duration policy whose value is
+  negative (`initial_value: -5 days`), is an error: `deadline NoticePeriod
+  has value -5 days, not a usable duration (a whole number of a unit, not
+  negative)`. Such a deadline is never measured, as for a token with no
+  deadline. In 2.1.0 a deadline could not name a policy at all.
+- **New keyword `options` (2.2.0-10)**, at the start of a top-level
+  element. It is not reserved: a party, policy, role, option or
+  specification named `options`, and references to it, parse as in 2.1.0.
+  A syntax error at the position of a top-level element now lists
+  `'options'` among the expected words.
+
+### Limits
+
+- Options are compared with `==` and `!=` only; they have no order. A
+  comparison names a policy of the options type as its limit; there is no
+  option literal (`"approval" == approved` names a Policy `approved`).
+  Options sets are top-level; a second set with the same name is ignored,
+  with no message. No string or boolean limits.
+- A policy-fed deadline is the policy's declared `initial_value`; policy
+  values stay read-only, and the verifier never reads
+  `WorldState.policy_values`. A standing duty takes no deadline, and its
+  term cannot be given as a duration (`term-end-type`).
+- Values are compared, never computed: no arithmetic and no "date plus 30
+  days". A month is 30 days and a year 365 for comparison.
 
 ## [2.1.0] - 2026-10-17
 
@@ -242,6 +295,7 @@ notes) is [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
   scope, and the `domain_scope` field on an Authorization is not checked.
 
 
+[2.2.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.2.0
 [2.1.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.1.0
 [2.0.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.0.0
 

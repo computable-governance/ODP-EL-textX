@@ -11221,6 +11221,36 @@ verifier does not, and envelopes are checked by the validator only; the
 
 Verifier parity: none (documentation only).
 
+## 2.2.0-1 — golden test of the published specifications (`tests/test_published_specs_unchanged.py`, `tests/published_specs_golden.json`)
+
+**Status:** IMPLEMENTED. Type: tests.
+
+**Now.** `tests/test_published_specs_unchanged.py` pins, for each of the
+29 published specifications (the 13 shipped scenarios,
+`scenarios/**/*.el`, and the 16 examples, `tests/examples/**/*.el`):
+whether it parses; the validator's errors and warnings, in order, as (tag,
+text); and the policy values seeded by `el_engine.initial_state()`. The
+expected results are in `tests/published_specs_golden.json`, generated
+before 2.2.0 and identical to what 2.1.0 gives. The test fails if a
+published file, the set of published files, or what the toolchain reports
+for one changes. Syntax error messages have the checkout's path removed,
+so the result does not depend on where the checkout lives.
+
+The golden file is regenerated only for an intended change, by hand
+(`python tests/test_published_specs_unchanged.py --write`, from the
+repository root), and its diff is reviewed. `--root <checkout>` generates
+against another checkout. In 2.2.0 it changed once, in 2.2.0-4 (one
+reworded message on `tests/examples/comparisons/invalid_comparison_type.el`).
+
+**Limits.** Kripke world counts and AF/EF verdicts are not pinned here;
+the scenario tests cover them.
+
+**Verification:** full suite 1733 → 1734 collected, 1730 → 1731 passed,
+0 failures. Generating under three `PYTHONHASHSEED` values gave
+byte-identical output.
+
+Verifier parity: none (tests only).
+
 ## 2.2.0-2 — `==` and `!=` in comparisons (`grammar/v2/el_grammar.tx`, `toolchain/el_engine.py`)
 
 **Status:** IMPLEMENTED. Type: grammar amendment (`CompareOp` extended)
@@ -11698,3 +11728,38 @@ scenarios: the same world and edge counts and AF/EF verdicts as before.
 Verifier parity: R12 and R17 reworded (a policy limit of an options type,
 `==` and `!=` only; not one of the options, or an ordering operator, is
 not established); no status change.
+
+## 2.2.0-13 — version, changelog, docs (`toolchain/el_api.py`, `tests/test_policy_deadline.py`, docs)
+
+**Status:** IMPLEMENTED. Type: release metadata, documentation and one
+test.
+
+**Now.**
+- The API's version (`toolchain/el_api.py`, the FastAPI `version`) is
+  `2.2.0`; `README.md` names 2.2 and its additions; the `CHANGELOG.md`
+  heading is `[2.2.0] - 2026-10-18`, linked as `releases/tag/v2.2.0`.
+  `grammar/v1/__init__.py` keeps its own `__version__`.
+- New test `test_no_toolchain_caller_passes_policy_values` in
+  `tests/test_policy_deadline.py`: it fails if any call of
+  `deadline_text()` in `toolchain/` passes more than the token (a second
+  argument or a keyword), or if `deadline_text` is used other than in a
+  call or imported under another name, so a deadline is always the
+  policy's declared value and no reader passes `WorldState.policy_values`
+  (R19).
+- Stale text corrected: the rule count in the component diagram of
+  `docs/DSL_TOOLCHAIN_REFERENCE.md` (71 rules: 45 errors, 26 warnings,
+  counted in `el_validator.py`); its Known Limitations line "no equality
+  operators and no date, instant or duration comparisons"; its
+  "Deadlines" opening (a deadline may name a policy); the parity matrix
+  described as rows R1 to R18 only (`docs/CONCEPTS_INDEX.md`; it has
+  R19); the policy-values status in `docs/CONCEPTS_INDEX.md` (the
+  verifier reads a duration policy's declared value for a deadline);
+  `grammar/v2/README.md`'s heading; `CLAUDE.md` (the 2.2.0 forms, the log
+  range, the clause note).
+
+**Verification:** full suite 1901 → 1902 collected, 1898 → 1899 passed,
+0 failures. The published-specs golden test (2.2.0-1) passes unchanged; static models of the 29 published files and hybrid models of
+the six API scenarios: the same world and edge counts and AF/EF verdicts
+as at 2.2.0-12.
+
+Verifier parity: none (no engine or verifier rule changed).

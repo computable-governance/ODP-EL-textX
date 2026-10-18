@@ -116,6 +116,39 @@ def test_policy_values_take_precedence_when_passed():
     assert deadline_text(tok, {"NoticePeriod": "soon"}) is None
 
 
+def test_no_toolchain_caller_passes_policy_values():
+    """The verifier must never read policy_values for a deadline (parity
+    R19): every call of deadline_text() in toolchain/ passes the token
+    only, so the deadline is the policy's declared value. A reference that
+    is not a call (an alias) fails too, since it could hide such a call."""
+    import ast
+    from pathlib import Path
+    toolchain = Path(__file__).resolve().parent.parent / "toolchain"
+    bad, calls = [], 0
+    for path in sorted(toolchain.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                f = node.func
+                name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", None)
+                if name == "deadline_text":
+                    called.add(id(f))
+                    calls += 1
+                    if len(node.args) != 1 or node.keywords:
+                        bad.append(f"{path.name}:{node.lineno}")
+        for node in ast.walk(tree):
+            name = (node.id if isinstance(node, ast.Name)
+                    else node.attr if isinstance(node, ast.Attribute) else None)
+            if name == "deadline_text" and id(node) not in called:
+                bad.append(f"{path.name}:{node.lineno} (not a call)")
+            if isinstance(node, ast.ImportFrom) and any(
+                    a.name == "deadline_text" and a.asname for a in node.names):
+                bad.append(f"{path.name}:{node.lineno} (imported under another name)")
+    assert calls >= 10
+    assert bad == []
+
+
 # ── Engine ───────────────────────────────────────────────────────────────
 
 def test_token_instance_carries_the_resolved_text():

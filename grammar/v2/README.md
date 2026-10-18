@@ -24,10 +24,11 @@ Version 2 provides greatly extended coverage of ISO/IEC 15414 concepts
 - Policy envelope and policy value integrated into the unified grammar
 - Cross-reference resolution across all construct types
 
-## 2.1.0 additions
+## 2.1.0 and 2.2.0 additions
 
 Full text in `docs/DSL_TOOLCHAIN_REFERENCE.md`; each change is logged as
-2.1.0-1 to 2.1.0-25 in `docs/el_grammar_amendments.md`.
+2.1.0-1 to 2.1.0-25 and 2.2.0-1 to 2.2.0-13 in
+`docs/el_grammar_amendments.md`. Items without a version are 2.1.0.
 
 - **Typed policy values.** `integer`, `decimal` (`number` is an alias),
   `percentage` (`4.25%`), `amount` (`250.00 AUD`), `date` (`2026-11-30`),

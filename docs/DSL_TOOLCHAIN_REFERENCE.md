@@ -272,8 +272,9 @@ Shared examples, one valid file and one invalid file per rule, are in
 
 ## Deadlines (2.1.0)
 
-A burden's `deadline` is a string. 2.1.0 reads it in one of two ways, on
-two different clocks.
+A burden's `deadline` is a string or, from 2.2.0, the name of a duration
+policy (below). A string is read in one of two ways, on two different
+clocks.
 
 **A duration from activation.** `deadline: "21 days"` is one duration
 counted from the burden's activation: the first firing of its
@@ -853,7 +854,7 @@ if conflicts:
 Specification (.el file)
         │
         ▼
-   el_parser.py  ──► el_validator.py (69 rules)
+   el_parser.py  ──► el_validator.py (71 rules)
         │                    │
         │            errors and warnings
         │
@@ -1133,8 +1134,11 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - Envelopes: v2.0.0 accepted an initial value outside its envelope, or of
   another kind, unchecked; 2.1.0 refuses it (`envelope-membership`).
   Amounts did not parse in v2.0.0.
-- No equality operators and no date, instant or duration comparisons. A
-  policy limit is its initial value (values are read-only).
+- 2.2.0 adds `==` and `!=`, and date, instant and duration limits (2.1.0
+  had neither). A policy limit is its initial value (values are
+  read-only). Options have no order: a policy of an options type is
+  compared with `==` and `!=` only, and there is no option literal. There
+  are no string or boolean limits.
 - Facts must be text; a JSON number is refused as not established.
 
 **Standing duties (2.1.0):**
@@ -1157,7 +1161,8 @@ as small specifications and played through the Runtime on v2.0.0 and on
 2.1.0. Each code block below is an excerpt from a specification that
 parsed and validated with its scaffolding (parties, role fillers, the
 community); it is not a complete specification. Where a result is the
-same on both versions, it says so.
+same on both versions, it says so. Re-run on 2.2.0, every clause gives the
+same results as on 2.1.0.
 
 - **`effect destroy` acts on burdens only.** v2.0.0 and 2.1.0, the same:
   aimed at a permit or an embargo, the action returns ok, the token stays
