@@ -87,3 +87,103 @@ def test_policy_duration_keeps_its_sign():
     src = _SPEC.format(pre='"x"').replace("initial_value: 24 hours", "initial_value: +5 days")
     result = _quiet(parse_string, src, validate=False)
     assert result.model is not None, result.errors
+
+
+# ── Judging (2.2.0-5) ────────────────────────────────────────────────────
+
+from el_engine import read_reported_value  # noqa: E402
+from el_runtime import Runtime  # noqa: E402
+
+
+def _act(pre, reported):
+    result = _parse(pre)
+    assert result.model is not None, result.errors
+    fact = pre.split('"')[1]
+    return _quiet(_quiet(Runtime.build_from_spec, result.model).advance,
+                  "assess", "Assessor", {fact: reported})
+
+
+@pytest.mark.parametrize("pre, reported, holds", [
+    ('"expiry" >= 2027-06-30', "2027-06-30", True),
+    ('"expiry" >= 2027-06-30', "2027-06-29", False),
+    ('"expiry" == Cutoff', "2027-06-30", True),
+    ('"notified at" <= 2027-06-30T17:00+10:00', "2027-06-30T07:00Z", True),     # same moment
+    ('"notified at" <= 2027-06-30T17:00+10:00', "2027-06-30T17:01+10:00", False),
+    ('"notified at" < Closes', "2027-06-30T06:59Z", True),
+    ('"within" <= 24 hours', "1 day", True),
+    ('"within" <= 24 hours', "1440 minutes", True),
+    ('"within" <= 24 hours', "25 hours", False),
+    ('"within" <= 24 hours', "1 month", False),                                # a 30-day month
+    ('"within" == NoticePeriod', "1 day", True),
+    ('"within" != 1 year', "365 days", False),                                 # a 365-day year
+    ('"within" >= 0 minutes', "0 minutes", True),
+])
+def test_holds_or_fails(pre, reported, holds):
+    record = _act(pre, reported)
+    fact = pre.split('"')[1]
+    if holds:
+        assert record.outcome == "ok"
+        assert record.effects[0].startswith(f"precondition satisfied: '{fact}' {reported} ")
+    else:
+        assert record.outcome == "blocked"
+        assert record.reason.startswith(f"precondition not satisfied: '{fact}' {reported} ")
+
+
+def test_reason_names_a_policy_limit():
+    assert _act('"within" <= NoticePeriod', "25 hours").reason == \
+        "precondition not satisfied: 'within' 25 hours <= 24 hours (NoticePeriod)"
+
+
+@pytest.mark.parametrize("pre, reported, noun", [
+    ('"expiry" >= 2027-06-30', "2027-06-30T10:00+10:00", "a date"),            # an instant
+    ('"expiry" >= 2027-06-30', "30 June 2027", "a date"),
+    ('"expiry" >= 2027-06-30', "2027-02-30", "a date"),
+    ('"expiry" >= 2027-06-30', "2027-6-30", "a date"),
+    ('"notified at" <= Closes', "2027-06-30", "an instant"),                   # a date
+    ('"notified at" <= Closes', "2027-06-30T17:00", "an instant"),             # no offset
+    ('"notified at" <= Closes', "2027-06-30T17:00+24:00", "an instant"),
+    ('"within" <= 24 hours', "24h", "a duration"),
+    ('"within" <= 24 hours', "-1 day", "a duration"),
+    ('"within" <= 24 hours', "1.5 days", "a duration"),
+    ('"within" <= 24 hours', "24", "a duration"),
+])
+def test_not_established(pre, reported, noun):
+    record = _act(pre, reported)
+    fact = pre.split('"')[1]
+    assert record.outcome == "blocked"
+    assert record.reason == (f"precondition not established: '{fact}' reported {reported}: "
+                             f"not {noun} value")
+
+
+def test_not_text_names_an_example():
+    assert _act('"within" <= 24 hours', 24).reason == (
+        "precondition not established: 'within' reported a value of type int, not text; "
+        "send text, e.g. \"24 hours\"")
+
+
+@pytest.mark.parametrize("text, kind, value", [
+    ("2027-06-30", "date", "2027-06-30"),
+    ("2027-06-30T17:00+10:00", "instant", "2027-06-30 07:00:00+00:00"),
+    ("2 weeks", "duration", 20160),
+    ("1 year", "duration", 525600),
+])
+def test_read_reported_value(text, kind, value):
+    read, reason = read_reported_value(text, kind)
+    assert reason is None and str(read) == str(value)
+
+
+def test_keeps_with_a_date_limit():
+    from datetime import datetime, timedelta, timezone
+    from el_engine import DeadlineClock
+    src = _SPEC.format(pre='"x"') + (
+        'party Supplier { holds duty }\n'
+        'burden duty { standing keeps: "certificate expiry" >= Cutoff state: active }\n')
+    result = _quiet(parse_string, src, validate=False)
+    assert result.model is not None, result.errors
+    rt = _quiet(Runtime.build_from_spec, result.model,
+                clock=DeadlineClock(utc_offset=timezone(timedelta(hours=10))))
+    record = rt.check_live_violations(as_at=datetime.fromisoformat("2027-01-01T09:00+10:00"),
+                                      facts={"certificate expiry": "2027-05-31"})
+    assert record.effects == (
+        "breached 'duty' held by 'Supplier': 'certificate expiry' 2027-05-31 >= 2027-06-30 "
+        "(Cutoff) at as_at 2027-01-01T09:00:00+10:00",)

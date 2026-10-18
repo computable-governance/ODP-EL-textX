@@ -11339,6 +11339,49 @@ with the one changed message above, and no other change.
 Verifier parity: none (grammar; the verifier does not read comparisons,
 R11).
 
+## 2.2.0-5 — date, instant and duration comparisons: judging (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine.
+
+**Now.**
+- `_operand()` reads a date limit as a calendar date, an instant as its
+  UTC moment, and a duration in minutes through the deadline unit table (a
+  30-day month, a 365-day year). An invalid date or instant limit has no
+  comparable value (the validator reports it, 2.2.0-6).
+- `read_reported_value()` reads three more kinds, strictly, ASCII, at most
+  100 characters: a date as `YYYY-MM-DD`, a calendar date; an instant in
+  the 2.1.0 Instant notation, with a UTC offset, valid; a duration as a
+  whole number, one space and a unit (`24 hours`, `1440 minutes`), never
+  negative. Otherwise "not a date value", "not an instant value", "not a
+  duration value": not established.
+- A date is never compared with an instant: a date limit reads an instant
+  text as not a date value, and the reverse.
+- Policy limits of type date, instant and duration are judged at their
+  declared value, as the other policy limits.
+- The same judging serves a standing duty's `keeps`.
+- Verdicts: `2027-06-29 >= 2027-06-30` fails; `2027-06-30T07:00Z <=
+  2027-06-30T17:00+10:00` holds; `1 day <= 24 hours` and `1440 minutes <=
+  24 hours` hold; `24h` is not established; `1 month <= 24 hours` fails.
+  The reason format is the 2.1.0 one (`'within' 25 hours <= 24 hours
+  (NoticePeriod)`).
+
+**Limits.** No arithmetic (no "date plus 30 days"). Every unit is a whole
+number of minutes, so durations compare exactly; months and years are
+approximations (30 and 365 days). In this sub-change alone the validator
+still refuses a date, instant or duration policy as a limit (2.2.0-6).
+
+**Tests changed:** `tests/test_comparison_judging.py` (docstring).
+
+**Files changed:** `toolchain/el_engine.py`,
+`docs/ENGINE_VERIFIER_PARITY.md`, `tests/test_time_comparisons.py`,
+`tests/test_comparison_judging.py`.
+
+**Verification:** full suite 1803 → 1834 collected, 1831 passed, 0 failures. The published-specs golden test passes
+unchanged from 2.2.0-4.
+
+Verifier parity: R11, R12, R14, R17 reworded (the limit kinds and the new
+not-established reasons); no status change.
+
 ## 2.2.0-7 — `deadline: <Policy>`: grammar and engine (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_engine.py`)
 
 **Status:** IMPLEMENTED. Type: grammar amendment (`DeonticToken` and

@@ -3,7 +3,8 @@
 
 The caller reports a value on the act, as text in the 2.1.0 notation
 (facts: {"insurance cover": "25000000.00 AUD"}). The engine reads it
-strictly in the kind of the limit (number, percentage or amount) and
+strictly in the kind of the limit (number, percentage or amount; 2.2.0-5
+also date, instant or duration, tests/test_time_comparisons.py) and
 compares; it does not compute. Amounts are compared only within one
 currency, never converted.
 

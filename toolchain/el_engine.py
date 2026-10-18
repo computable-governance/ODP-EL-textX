@@ -339,22 +339,51 @@ def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
 # text) with a limit: a number, percentage or amount literal, or a Policy at
 # its value (its typed initial_value; policy values are read-only). The DSL
 # compares typed values; it does not compute. Amounts are compared only
-# within one currency, never converted.
+# within one currency, never converted. 2.2.0-5: a date, instant or
+# duration limit too: dates by calendar day, instants by moment, durations
+# in minutes (the deadline unit table: a 30-day month, a 365-day year). A
+# date is never compared with an instant.
 
 _REPORTED_TEXT_MAX = 100
 _NUMBER_TEXT = r"-?[0-9]+(?:\.[0-9]+)?"
 _NUMBER_TEXT_RE = re.compile(_NUMBER_TEXT)
 _PERCENTAGE_TEXT_RE = re.compile(rf"({_NUMBER_TEXT})%")
 _AMOUNT_TEXT_RE = re.compile(rf"({_NUMBER_TEXT}) ([A-Z]{{3}})")
-_KIND_EXAMPLE = {"number": "25000000", "percentage": "8.5%", "amount": "25000000.00 AUD"}
-_KIND_NOUN = {"number": "a number", "percentage": "a percentage", "amount": "an amount"}
+# 2.2.0-5: a date as YYYY-MM-DD; a duration as a whole number, one space and
+# a DurationUnit of the grammar (never negative).
+_DATE_TEXT_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_DURATION_TEXT_RE = re.compile(
+    r"([0-9]+) (minutes|minute|hours|hour|days|day|weeks|week|months|month|years|year)")
+_KIND_EXAMPLE = {"number": "25000000", "percentage": "8.5%", "amount": "25000000.00 AUD",
+                 "date": "2027-06-30", "instant": "2027-06-30T17:00+10:00",
+                 "duration": "24 hours"}
+_KIND_NOUN = {"number": "a number", "percentage": "a percentage", "amount": "an amount",
+              "date": "a date", "instant": "an instant", "duration": "a duration"}
+
+
+def _duration_minutes(count: int, unit: str) -> int:
+    """2.2.0-5: a duration in minutes, the engine's step, through the
+    deadline unit table (a 30-day month, a 365-day year). Every grammar unit
+    is a whole number of minutes."""
+    return count * _DEADLINE_UNIT_SECONDS[unit.rstrip("s")] // _STEP_SECONDS
 
 
 def _operand(value) -> Tuple[Optional[str], Any]:
     """2.1.0-12: (kind, comparable) for a comparison limit's typed value:
     a number as Decimal, a percentage as its number, an amount as
-    (number, code). (None, None) for anything else."""
+    (number, code). 2.2.0-5: a date as a datetime.date, an instant as its
+    UTC moment, a duration in minutes; (None, None) for an invalid date or
+    instant (the validator's calendar-date and instant-valid report it).
+    (None, None) for anything else."""
     kind = policy_value_kind(value)
+    if kind == "date":
+        d = _calendar_date(value.value)
+        return ("date", d) if d is not None else (None, None)
+    if kind == "instant":
+        moment = _instant_moment(value.value)
+        return ("instant", moment) if moment is not None else (None, None)
+    if kind == "duration":
+        return "duration", _duration_minutes(value.value, value.unit)
     if kind in ("integer", "decimal"):
         return "number", Decimal(value)
     if kind == "percentage":
@@ -371,7 +400,9 @@ def read_reported_value(text, kind: str) -> Tuple[Any, Optional[str]]:
     100 characters: a number as -?digits(.digits), read as an exact Decimal
     (so an integer limit accepts 20000000.50); a percentage as that number
     then '%' with no space; an amount as that number, one space and three
-    upper-case letters."""
+    upper-case letters. 2.2.0-5: a date as YYYY-MM-DD, a calendar date; an
+    instant as the 2.1.0 Instant notation, with a UTC offset, valid (its UTC
+    moment); a duration as a whole number, one space and a unit (minutes)."""
     refused = (None, f"not {_KIND_NOUN[kind]} value")
     if not isinstance(text, str) or len(text) > _REPORTED_TEXT_MAX:
         return refused
@@ -380,6 +411,15 @@ def read_reported_value(text, kind: str) -> Tuple[Any, Optional[str]]:
     if kind == "percentage":
         m = _PERCENTAGE_TEXT_RE.fullmatch(text)
         return (Decimal(m.group(1)), None) if m else refused
+    if kind == "date":   # 2.2.0-5
+        d = _calendar_date(text) if _DATE_TEXT_RE.fullmatch(text) else None
+        return (d, None) if d is not None else refused
+    if kind == "instant":
+        moment = _instant_moment(text) if _INSTANT_RE.fullmatch(text) else None
+        return (moment, None) if moment is not None else refused
+    if kind == "duration":
+        m = _DURATION_TEXT_RE.fullmatch(text)
+        return (_duration_minutes(int(m.group(1)), m.group(2)), None) if m else refused
     m = _AMOUNT_TEXT_RE.fullmatch(text)
     return ((Decimal(m.group(1)), m.group(2)), None) if m else refused
 
