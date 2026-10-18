@@ -11545,3 +11545,43 @@ or when one policy feeds several tokens.
 (2.2.0-1) passes unchanged.
 
 Verifier parity: none (validator and documentation only).
+
+## 2.2.0-10 — options sets: grammar and domain (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`)
+
+**Status:** IMPLEMENTED. Type: grammar amendment (new rule `OptionSet`,
+a new `SpecElement` alternative).
+
+**Standard reference:** clause to be confirmed.
+
+**Before (2.1.0).** A Policy's type could be any name (`policy Tier :
+TierOptions`), parsed and not checked; there was no way to declare the
+options it names. `options ApprovalStates [...]` was a syntax error.
+
+**Now.**
+- `OptionSet: 'options' name=ID '[' options+=ID[','] ']'`, a top-level
+  element placed before `Policy` in `SpecElement`: `options
+  ApprovalStates [pending, approved, rejected]`. At least one option;
+  options are plain names (not strings, not numbers), comma-separated.
+- The options are plain names, not cross-references: the comma list is
+  the same pattern as an envelope's `one of [...]`, so the
+  cross-reference list rule (CLAUDE.md invariant 4) does not apply.
+- `el_domain.OptionSet` (`name`, `options`), registered in
+  `DOMAIN_CLASSES`.
+- Nothing reads an options set yet: the validator checks it from
+  2.2.0-11, comparisons from 2.2.0-12. The engine and the verifier pass
+  over it; a Policy of an options type is seeded into
+  `WorldState.policy_values` by its option name, as in 2.1.0.
+
+**Limits.** Options sets are top-level only. A type that names no options
+set is still unchecked and silent (`ok_typed_values.el`'s `ServiceTier :
+TierOptions` validates as in 2.1.0).
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`;
+new `tests/test_option_sets.py`.
+
+**Verification:** full suite 1846 → 1859 collected, 1856 passed, 0
+failures. The published-specs golden test (2.2.0-1) passes unchanged;
+static models of the 29 published files and hybrid models of the six API
+scenarios: the same world and edge counts and AF/EF verdicts as before.
+
+Verifier parity: none (grammar; nothing reads an options set yet).

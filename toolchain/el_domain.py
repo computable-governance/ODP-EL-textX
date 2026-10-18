@@ -512,6 +512,17 @@ class Amount(_ELParentable):
 
 
 @dataclass
+class OptionSet(_ELParentable):
+    """2.2.0-10: a named set of options a policy value may take.
+
+    Grammar rule: OptionSet
+    'options' name=ID '[' options+=ID[','] ']'
+    """
+    name:    str  = ""
+    options: List = field(default_factory=list)  # List[str]
+
+
+@dataclass
 class EnvelopeRule(_ELParentable):
     """AM-23: single constraint inside a PolicyEnvelope.
     2.1.0-1: a range rule holds its inclusive ends in lower/upper and
@@ -1407,6 +1418,7 @@ DOMAIN_CLASSES = [
     NormativePolicyEnforcement,  # AM-42
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
     CompareDuration,  # 2.2.0-4
+    OptionSet,  # 2.2.0-10
     Instant, Date, Percentage, Amount,  # 2.1.0-1
     Comparison,  # 2.1.0-11
     # E

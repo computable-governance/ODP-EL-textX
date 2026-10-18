@@ -62,6 +62,7 @@ SpecElement:
     | EnterpriseObject
     | DeonticToken
     | TokenGroup
+    | OptionSet       // 2.2.0-10
     | Policy
     | NormativePolicy
     | Commitment
@@ -240,6 +241,17 @@ Policy:
  */
 PolicyType:
     /(integer|decimal|number|percentage|amount|string|boolean|duration|date|instant)\b/ | ID
+;
+
+/*
+ * OptionSet — 2.2.0-10: a named set of options a policy value may take
+ * (options ApprovalStates [pending, approved, rejected]). A Policy whose
+ * type is the set's name takes one of its options; the validator checks
+ * it (2.2.0-11). A type that names no options set is not checked, as in
+ * 2.1.0. The options are plain names, not cross-references.
+ */
+OptionSet:
+    'options' name=ID '[' options+=ID[','] ']'
 ;
 
 /*
