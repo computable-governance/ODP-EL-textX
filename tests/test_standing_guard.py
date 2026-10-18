@@ -188,7 +188,9 @@ _REPO = Path(__file__).resolve().parent.parent
 
 
 @pytest.mark.parametrize("path", sorted(
-    p for p in (_REPO / "scenarios").rglob("*.el") if p.name != "ecommerce_scenario.el"
+    p for p in (_REPO / "scenarios").rglob("*.el")
+    # procurement_tender has standing duties by design; tests/published_specs_golden.json covers it.
+    if p.name not in ("ecommerce_scenario.el", "procurement_tender_scenario.el")
 ), ids=lambda p: p.name)
 def test_shipped_scenarios_gain_no_warning(path):
     result = _quiet(parse, path)
