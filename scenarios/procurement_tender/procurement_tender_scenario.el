@@ -270,22 +270,22 @@ contract community TenderCommunity
     invariant oneAward: "At most one bidder is awarded the contract"
     invariant awardAfterSignOff: "The contract is not awarded before the panel signs off its evaluation"
 
-    on_join principalRole transfer awardMadeEmbargo
-    BuyerAgency fills principalRole
+    on_join buyerRole transfer awardMadeEmbargo
+    BuyerAgency fills buyerRole
     PanelChair fills evaluationPanelRole
     ProbityOfficer fills probityRole
     SupplierA fills bidderARole
     SupplierB fills bidderBRole
 
-    role principalRole
+    role buyerRole
         description: "The buyer agency"
     {
         action closeTender {
-            actor: principalRole
+            actor: buyerRole
             emits: tenderClosed
         }
         action awardToSupplierA {
-            actor: principalRole
+            actor: buyerRole
             precondition: "Supplier A public liability cover at submission" >= minPublicLiability
             requires_permit awardPermit
             inhibited_by_embargo awardMadeEmbargo
@@ -294,7 +294,7 @@ contract community TenderCommunity
             emits: awardedToA
         }
         action awardToSupplierB {
-            actor: principalRole
+            actor: buyerRole
             precondition: "Supplier B public liability cover at submission" >= minPublicLiability
             requires_permit awardPermit
             inhibited_by_embargo awardMadeEmbargo
@@ -303,15 +303,15 @@ contract community TenderCommunity
             emits: awardedToB
         }
         action reconvenePanel {
-            actor: principalRole
+            actor: buyerRole
             favoured_by_burden reconvenePanelBurden
         }
         action reviewLateNotification {
-            actor: principalRole
+            actor: buyerRole
             favoured_by_burden incidentFollowUpBurden
         }
         action reviewCoverLapse {
-            actor: principalRole
+            actor: buyerRole
             favoured_by_burden coverLapseReviewBurden
         }
     }
@@ -323,7 +323,7 @@ contract community TenderCommunity
             actor: evaluationPanelRole
             favoured_by_burden panelSignOffBurden
             emits: evaluationSignedOff
-            effect create awardPermit to principalRole
+            effect create awardPermit to buyerRole
         }
     }
 
@@ -493,7 +493,7 @@ violation_response overdueSignOff {
     obligates: BuyerAgency
     response_kind: escalate
     creates_burden: reconvenePanelBurden
-    creates_burden_for_role: principalRole
+    creates_burden_for_role: buyerRole
     description: "An overdue panel sign-off, once declared, obliges the principal to reconvene or replace the panel"
 }
 
@@ -502,7 +502,7 @@ violation_response lateIncidentNotificationA {
     obligates: BuyerAgency
     response_kind: escalate
     creates_burden: incidentFollowUpBurden
-    creates_burden_for_role: principalRole
+    creates_burden_for_role: buyerRole
     description: "A late incident notification is escalated for review by the principal"
 }
 
@@ -511,7 +511,7 @@ violation_response lateIncidentNotificationB {
     obligates: BuyerAgency
     response_kind: escalate
     creates_burden: incidentFollowUpBurden
-    creates_burden_for_role: principalRole
+    creates_burden_for_role: buyerRole
     description: "A late incident notification is escalated for review by the principal"
 }
 
@@ -520,7 +520,7 @@ violation_response coverLapseA {
     obligates: BuyerAgency
     response_kind: remediate
     creates_burden: coverLapseReviewBurden
-    creates_burden_for_role: principalRole
+    creates_burden_for_role: buyerRole
     description: "A reported lapse in Supplier A's cover obliges the principal to require it restored"
 }
 
@@ -529,6 +529,6 @@ violation_response coverLapseB {
     obligates: BuyerAgency
     response_kind: remediate
     creates_burden: coverLapseReviewBurden
-    creates_burden_for_role: principalRole
+    creates_burden_for_role: buyerRole
     description: "A reported lapse in Supplier B's cover obliges the principal to require it restored"
 }
