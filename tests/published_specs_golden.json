@@ -270,7 +270,7 @@
       "errors": [
         [
           "comparison-type",
-          "Action 'assess': precondition \"response time\" <= 60 day: limit 60 day has currency code 'day', not three upper-case letters A-Z (ISO 4217 form); a duration cannot be compared. (clause to be confirmed)"
+          "Action 'assess': precondition \"response time\" <= 60 sec: limit 60 sec has currency code 'sec', not three upper-case letters A-Z (ISO 4217 form); a duration's unit is minute, hour, day, week, month or year. (clause to be confirmed)"
         ]
       ],
       "warnings": [],

@@ -794,14 +794,30 @@ PreconditionDecl:
  * reports on the act, as text; the operand is a number, percentage or
  * amount literal, or a Policy at its value. The DSL compares; it does not
  * compute. CompareOp lists the two-character operators first, so >= is
- * not read as >; 2.2.0-2 adds == and != (=> stays refused). CompareLiteral keeps the 2.1.0-1 literal order: Amount
- * and Percentage before the plain numbers.
+ * not read as >; 2.2.0-2 adds == and != (=> stays refused).
+ * CompareLiteral keeps the 2.1.0-1 literal order: Amount and Percentage
+ * before the plain numbers. 2.2.0-4: an instant, a date or a duration
+ * literal too, in the PolicyValue order (Instant before Date, which it
+ * begins with); CompareDuration before Amount, or "60 day" would be an
+ * amount with code 'day'. "60 sec" is still an amount (sec is no duration
+ * unit).
  */
 Comparison:
     fact=STRING op=CompareOp (literal=CompareLiteral | policy=[Policy])
 ;
 CompareOp: /(>=|<=|!=|==|>|<)/ ;
-CompareLiteral: Amount | Percentage | DecimalNumber | IntegerNumber ;
+CompareLiteral: Instant | Date | CompareDuration | Amount | Percentage | DecimalNumber | IntegerNumber ;
+
+/*
+ * CompareDuration — 2.2.0-4: a duration limit in a comparison: a whole
+ * number, never signed (+60 days and -60 days are refused, as +5 and 1e3
+ * are for numbers), then a DurationUnit. A Policy's Duration keeps textX
+ * INT, which accepts a sign (2.1.0, unchanged).
+ */
+CompareDuration:
+    value=DurationCount unit=DurationUnit
+;
+DurationCount: /[0-9]+(?![0-9.])/ ;
 
 /*
  * TermEnd — 2.1.0-16: where a standing duty's term ends: an instant or a

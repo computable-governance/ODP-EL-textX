@@ -467,6 +467,12 @@ class Duration(_ELParentable):
 
 
 @dataclass
+class CompareDuration(Duration):
+    """2.2.0-4: a duration limit in a comparison (60 days); never signed.
+    The same value and unit as a Duration, and the same kind."""
+
+
+@dataclass
 class NumberInterval(_ELParentable):
     """AM-23: integer range value (e.g. 7..10). ISO 15414 Figure A.4.
     Grammar attrs: lower=INT '..' upper=INT (renamed from from/to — Python keyword conflict).
@@ -1400,6 +1406,7 @@ DOMAIN_CLASSES = [
     NormativePolicy, NormativePolicyRef,  # AM-28
     NormativePolicyEnforcement,  # AM-42
     Duration, NumberInterval, EnvelopeRule, PolicyEnvelope,  # AM-23
+    CompareDuration,  # 2.2.0-4
     Instant, Date, Percentage, Amount,  # 2.1.0-1
     Comparison,  # 2.1.0-11
     # E

@@ -144,8 +144,9 @@ def test_invalid_term_ends(end, problem):
 # ── keeps through comparison-type and fact-key-clash ────────────────────
 
 @pytest.mark.parametrize("keeps, problem", [
-    ('"x" <= 60 day', "limit 60 day has currency code 'day', not three upper-case letters "
-                      "A-Z (ISO 4217 form); a duration cannot be compared"),
+    ('"x" <= 60 sec', "limit 60 sec has currency code 'sec', not three upper-case letters "
+                      "A-Z (ISO 4217 form); a duration's unit is minute, hour, day, week, "
+                      "month or year"),
     ('"x" >= Label', "limit Label is a policy of type 'string'; a comparison takes a policy "
                      "of type integer, decimal, number, percentage or amount"),
 ])

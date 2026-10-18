@@ -1135,8 +1135,8 @@ def _validate_comparison_types(model) -> List[str]:
     """comparison-type (2.1.0-13): a comparison's limit is a number,
     percentage or amount literal, or a Policy of a comparable type keyword
     with a comparable value; an amount's code has the ISO 4217 form (three
-    upper-case letters A-Z), so "60 day" (read as an amount with code
-    'day') is refused."""
+    upper-case letters A-Z), so "60 sec" (read as an amount with code
+    'sec'; 2.2.0-4: "60 day" is a duration) is refused."""
     errors: List[str] = []
     for label, cmp, _ in _comparisons(model):
         policy = getattr(cmp, "policy", None)
@@ -1150,7 +1150,8 @@ def _validate_comparison_types(model) -> List[str]:
             problem = f"limit {_value_text(typed) if typed is not None else '?'} is not a number, percentage or amount"
         elif _value_kind(typed) == "amount" and not re.fullmatch(r"[A-Z]{3}", typed.code):
             problem = (f"limit {_value_text(typed)} has currency code '{typed.code}', not three "
-                       f"upper-case letters A-Z (ISO 4217 form); a duration cannot be compared")
+                       f"upper-case letters A-Z (ISO 4217 form); a duration's unit is "
+                       f"minute, hour, day, week, month or year")   # 2.2.0-4
         if problem is not None:
             where = "keeps" if label.startswith("Standing duty") else "precondition"
             errors.append(f"[comparison-type] {label}: {where} {_comparison_text(cmp)}: "

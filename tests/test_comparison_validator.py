@@ -98,11 +98,12 @@ def test_policy_of_another_type_refused(limit, policy_type):
         f"decimal, number, percentage or amount. {_CITATION}"]
 
 
-def test_sixty_day_refused():
-    assert _errors(_actions(("a", ['"x" <= 60 day']))) == [
-        "[comparison-type] Action 'a': precondition \"x\" <= 60 day: limit 60 day has "
-        "currency code 'day', not three upper-case letters A-Z (ISO 4217 form); a "
-        f"duration cannot be compared. {_CITATION}"]
+def test_sixty_sec_refused():
+    # 2.2.0-4: "60 day" is a duration; "60 sec" is still an amount.
+    assert _errors(_actions(("a", ['"x" <= 60 sec']))) == [
+        "[comparison-type] Action 'a': precondition \"x\" <= 60 sec: limit 60 sec has "
+        "currency code 'sec', not three upper-case letters A-Z (ISO 4217 form); a "
+        f"duration's unit is minute, hour, day, week, month or year. {_CITATION}"]
 
 
 @pytest.mark.parametrize("limit", ["5 aud", "5 Aud", "LowerCover"])

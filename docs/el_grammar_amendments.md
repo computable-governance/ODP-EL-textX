@@ -11281,6 +11281,64 @@ duty's `keeps` with `==`, kept and breached.
 
 Verifier parity: none (tests only).
 
+## 2.2.0-4 — date, instant and duration literals in comparisons: grammar and fixture (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_parser.py`)
+
+**Status:** IMPLEMENTED. Type: grammar amendment (`CompareLiteral`
+extended; new rules `CompareDuration`, `DurationCount`), one validator
+message reworded, one published fixture changed.
+
+**Standard reference:** clause to be confirmed. Literal notation: as the
+2.1.0 Date, Instant and Duration policy values (source standard to be
+confirmed).
+
+**Before (2.1.0).** A comparison's literal was an amount, percentage,
+decimal or integer. `"x" >= 2026-11-30` and `"x" <= 24 hours` were syntax
+errors, and `"x" <= 60 day` parsed as an amount with currency code `day`.
+
+**Now.**
+- `CompareLiteral: Instant | Date | CompareDuration | Amount | Percentage
+  | DecimalNumber | IntegerNumber`: Instant before Date (which it begins
+  with), CompareDuration before Amount.
+- `CompareDuration: value=DurationCount unit=DurationUnit`, with
+  `DurationCount: /[0-9]+(?![0-9.])/` (converted to int, as
+  `IntegerNumber`). Never signed: `+60 days`, `-60 days` and `60.5 days`
+  are syntax errors in a comparison, as `+5` and `1e3` are for numbers. A
+  Policy's `Duration` keeps textX `INT`, so `initial_value: +5 days` is
+  accepted as in 2.1.0.
+- `CompareDuration` is a subclass of `Duration` in `el_domain`;
+  `policy_value_kind()` reads it as `duration`.
+- `"60 day"` is now a duration. `"60 sec"` is still an amount with code
+  `sec` (sec is not a duration unit).
+- The `comparison-type` message for an amount code not in ISO 4217 form
+  ends "; a duration's unit is minute, hour, day, week, month or year"
+  instead of "; a duration cannot be compared", which is no longer true.
+- The published fixture `tests/examples/comparisons/invalid_comparison_type.el`
+  uses `<= 60 sec` instead of `<= 60 day` (still the `comparison-type`
+  error; its header comment says why). Its message in the published-specs
+  golden file (2.2.0-1) changes accordingly, and only it:
+  `... <= 60 sec: limit 60 sec has currency code 'sec', not three
+  upper-case letters A-Z (ISO 4217 form); a duration's unit is minute,
+  hour, day, week, month or year. (clause to be confirmed)`.
+
+**Limits.** In this sub-change alone a date, instant or duration limit is
+refused by `comparison-type` ("is not a number, percentage or amount") and
+judged not established by the engine; 2.2.0-5 judges them.
+
+**Tests changed:** `tests/test_comparison_grammar.py` (`test_refused` drops
+the date, instant and `60 days` entries and adds signed and fractional
+durations; `test_lower_case_unit_parses_as_an_amount_code` uses `60 sec`
+and checks `60 day` is a duration), `tests/test_comparison_validator.py`
+(`test_sixty_day_refused` becomes `test_sixty_sec_refused`, new tail),
+`tests/test_standing_validator.py` and `tests/test_equality_comparisons.py`
+(the same message); `tests/published_specs_golden.json` (the fixture's
+message). New `tests/test_time_comparisons.py`.
+
+**Verification:** full suite 1790 → 1803 collected, 1800 passed, 0 failures. The published-specs golden test passes
+with the one changed message above, and no other change.
+
+Verifier parity: none (grammar; the verifier does not read comparisons,
+R11).
+
 ## 2.2.0-7 — `deadline: <Policy>`: grammar and engine (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_engine.py`)
 
 **Status:** IMPLEMENTED. Type: grammar amendment (`DeonticToken` and

@@ -131,8 +131,8 @@ def test_step_precondition_may_compare():
 
 @pytest.mark.parametrize("pre", [
     '"x" => 5', '"x" = 5', '"x" =< 5',                   # typos (== and != parse from 2.2.0-2)
-    '"x" >= 2026-11-30', '"x" >= 2026-11-30T17:00Z',     # no date or instant operand
-    '"x" >= 60 days',                                     # no duration operand
+    '"x" >= +60 days', '"x" >= -60 days',                 # 2.2.0-4: no signed duration
+    '"x" >= 60.5 days',                                   # a whole number of a unit
     '"x" >= 20,000,000 AUD',                              # no digit grouping
     '"x" >= +5', '"x" >= 1e3', '"x" >= .5',               # 2.1.0 number forms
     '"x" >= "five"', '"x" >= true',                       # no string or boolean literal
@@ -148,11 +148,14 @@ def test_unknown_policy_operand_refused():
 
 
 def test_lower_case_unit_parses_as_an_amount_code():
-    # "60 day" reads as an amount with code 'day' (there is no duration
-    # operand). It can never match a reported amount, whose code must be
-    # three upper-case letters.
+    # "60 sec" reads as an amount with code 'sec' (sec is no duration
+    # unit). It can never match a reported amount, whose code must be
+    # three upper-case letters. 2.2.0-4: "60 day" is a duration.
+    (cmp,) = _preconditions('"x" >= 60 sec')
+    assert isinstance(cmp.literal, Amount) and cmp.literal.code == "sec"
     (cmp,) = _preconditions('"x" >= 60 day')
-    assert isinstance(cmp.literal, Amount) and cmp.literal.code == "day"
+    assert type(cmp.literal).__name__ == "CompareDuration"
+    assert (cmp.literal.value, cmp.literal.unit) == (60, "day")
 
 
 # ── A comparison precondition reaches the engine (judged from 2.1.0-12) ─

@@ -1268,6 +1268,8 @@ def policy_value_kind(v) -> Optional[str]:
     cls = type(v).__name__
     if cls in ("Instant", "Date", "Duration", "Percentage", "Amount"):
         return cls.lower()
+    if cls == "CompareDuration":     # 2.2.0-4: a comparison's duration limit
+        return "duration"
     if cls == "NumberInterval":
         return "interval"
     if isinstance(v, bool):          # before int: bool is an int subclass

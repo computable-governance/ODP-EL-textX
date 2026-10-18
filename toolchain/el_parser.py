@@ -376,6 +376,7 @@ def _build_metamodel():
         # (Decimal('4.50'), never a binary float); an integer as int.
         'DecimalNumber':      Decimal,
         'IntegerNumber':      int,
+        'DurationCount':      int,   # 2.2.0-4: a comparison's duration count
     })
     return mm
 

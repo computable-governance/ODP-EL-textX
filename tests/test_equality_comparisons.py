@@ -75,12 +75,12 @@ def test_typos_stay_refused(pre):
 
 
 def test_comparison_type_text_unchanged():
-    """The 2.1.0 comparison-type message is the same with an equality operator."""
-    errors = _parse('"response time" == 60 day', validate=True).errors
+    """The comparison-type message (2.2.0-4 wording) is the same with an equality operator."""
+    errors = _parse('"response time" == 60 sec', validate=True).errors
     assert errors == [
-        "[comparison-type] Action 'assess': precondition \"response time\" == 60 day: limit "
-        "60 day has currency code 'day', not three upper-case letters A-Z (ISO 4217 form); "
-        "a duration cannot be compared. (clause to be confirmed)"]
+        "[comparison-type] Action 'assess': precondition \"response time\" == 60 sec: limit "
+        "60 sec has currency code 'sec', not three upper-case letters A-Z (ISO 4217 form); "
+        "a duration's unit is minute, hour, day, week, month or year. (clause to be confirmed)"]
 
 
 # ── Judging ──────────────────────────────────────────────────────────────
