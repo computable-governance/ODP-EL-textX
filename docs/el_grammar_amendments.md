@@ -11220,3 +11220,45 @@ verifier does not, and envelopes are checked by the validator only; the
 2.1.0-23 line follows 2.1.0-21.
 
 Verifier parity: none (documentation only).
+
+## 2.2.0-2 — `==` and `!=` in comparisons (`grammar/v2/el_grammar.tx`, `toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: grammar amendment (`CompareOp` extended)
+and engine.
+
+**Standard reference:** clause to be confirmed. Operator symbols: source
+standard to be confirmed.
+
+**Before (2.1.0).** `CompareOp` was `>= <= > <`; `precondition: "x" ==
+5`, `"x" != 5` and `standing keeps: "x" == 5` were syntax errors.
+
+**Now.**
+- `CompareOp: /(>=|<=|!=|==|>|<)/`, the two-character operators first;
+  `=>`, `=<` and `=` stay syntax errors.
+- `judge_comparison()` judges `==` and `!=` as exact (Decimal) equality
+  of the reported value and the limit: `"2.0" == 2` and `"20000000.00
+  AUD" == 20000000 AUD` hold, `"10.00%" != 10%` fails. The reason format
+  is the 2.1.0 one (`'approvals' 3 == 2`).
+- Not established exactly as for the ordering operators: not reported,
+  not text, wrong kind, an amount in another currency.
+- A standing duty's `keeps` uses the same `Comparison`, so `==` and `!=`
+  are judged there too.
+- No new validator rule; `comparison-type` is unchanged.
+
+**Limits.** No string, boolean or option limits; no date, instant or
+duration limits (unchanged from 2.1.0).
+
+**Tests changed:** `tests/test_comparison_grammar.py::test_refused` and
+`tests/test_standing_grammar.py::test_refused` no longer list `==` and
+`!=` (the comparison list adds the typos `=` and `=<`).
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_engine.py`,
+`toolchain/el_domain.py` (comment); `docs/ENGINE_VERIFIER_PARITY.md`,
+`docs/DSL_TOOLCHAIN_REFERENCE.md`, `docs/CONCEPTS_INDEX.md`,
+`grammar/v2/README.md`, `CHANGELOG.md`.
+
+**Verification:** full suite 1734 → 1733 collected (the standing refused list loses its `==` case), 1730 passed, 0 failures. The published-specs golden test
+(2.2.0-1) passes unchanged. The documentation example was parsed and
+judged before it was written.
+
+Verifier parity: R11 and R14 reworded (the operators); no status change.

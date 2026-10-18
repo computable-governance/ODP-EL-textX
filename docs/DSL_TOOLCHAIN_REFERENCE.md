@@ -113,11 +113,11 @@ else:
   date, instant (a date and time with a UTC offset), and duration (written
   as in 2.0.0). A policy value may also be an integer interval (`7..10`)
   or an option of a user-defined type.
-- A comparison has one reported fact, one of `>=`, `<=`, `>`, `<`, and one
-  limit: a number, percentage or amount literal, or a policy of type
-  integer, decimal, number, percentage or amount. There is no equality or
-  inequality test, no `and` or `or`, no arithmetic and no functions
-  (`==`, `and` and `+` are syntax errors), and a date, instant or duration
+- A comparison has one reported fact, one of `>=`, `<=`, `>`, `<`, `==`,
+  `!=` (`==` and `!=` from 2.2.0), and one limit: a number, percentage or
+  amount literal, or a policy of type integer, decimal, number, percentage
+  or amount. There is no `and` or `or`, no arithmetic and no functions
+  (`and` and `+` are syntax errors), and a date, instant or duration
   cannot be a limit. An action may carry several preconditions: all must
   hold, and a refused act gives the reason of the first one that fails (a
   false comparison is reported before one not established). A standing
@@ -341,13 +341,29 @@ action assess {
 - `precondition: "<fact>" <op> <limit>`. The fact is the key of a value the
   caller reports with the act; a plain `precondition: "<fact>"` is read as
   before.
-- Operators: `>=`, `<=`, `>`, `<` (source standard to be confirmed).
+- Operators: `>=`, `<=`, `>`, `<`, and from 2.2.0 `==`, `!=` (source
+  standard to be confirmed). `==` and `!=` are exact equality of the
+  values, not of the text: `"2.0" == 2` and `"20000000.00 AUD" ==
+  20000000 AUD` hold, and `"10.00%" != 10%` fails. An amount in another
+  currency is not established, as for the other operators.
 - The limit is a number (`5`, `2.5`), a percentage (`10%`), an amount
   (`20000000 AUD`, written without digit grouping), or a Policy of type
   integer, decimal, number, percentage or amount, at its value (its
   `initial_value`; policy values are read-only).
 - Only on actions. Step preconditions are not enforced by any engine path,
   so a comparison in a step is the error `comparison-in-step`.
+
+```
+action countersign {
+    actor: assessorRole
+    precondition: "approvals" == 2
+    precondition: "insurance cover" != MinimumCover
+}
+```
+
+With `{"approvals": "3", ...}` the act is refused with `precondition not
+satisfied: 'approvals' 3 == 2`; with `{"approvals": "2", "insurance
+cover": "25000000.00 AUD"}` both hold.
 
 **The reported value.** The caller passes it in the act's facts, as text,
 in the notation of the 2.1.0 values (source standard to be confirmed):

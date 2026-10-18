@@ -131,7 +131,6 @@ def test_end_keyword_after_a_number_is_not_a_currency_code():
     'burden b { keeps: "x" >= 5 state: active }',                        # keeps without standing
     'burden b { standing state: active }',                               # standing without keeps
     'burden b { standing keeps: "x" state: active }',                    # no comparison
-    'burden b { standing keeps: "x" == 5 state: active }',
     'burden b { standing keeps: "x" >= 5 ends_at: 60 days state: active }',   # no duration term
     'burden b { standing keeps: "x" >= 5 ends_at: "2027-06-30" state: active }',
     'burden b { standing keeps: "x" >= 5 ended_by: 2027-06-30 state: active }',

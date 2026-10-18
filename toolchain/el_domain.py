@@ -842,7 +842,7 @@ class Comparison(_ELParentable):
     "<fact>" <op> <literal or policy>. The DSL compares; it does not
     compute."""
     fact:    str = ""                     # key of the reported value in the act's facts
-    op:      str = ""                     # CompareOp: >= <= > <
+    op:      str = ""                     # CompareOp: >= <= > < == != (2.2.0-2)
     literal: Optional[object] = None      # int | Decimal | Percentage | Amount
     policy:  Optional[object] = None      # → Policy
 

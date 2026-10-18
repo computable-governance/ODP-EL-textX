@@ -4,7 +4,8 @@
 A precondition may compare a value the caller reports on the act with a
 limit: `precondition: "insurance cover" >= 20000000 AUD`, or with a policy
 at its value: `precondition: "insurance cover" >= MinimumCover`. Operators
->= <= > <; operands a number, percentage or amount literal, or a Policy.
+>= <= > < (2.2.0-2: also == !=); operands a number, percentage or amount
+literal, or a Policy.
 The DSL compares; it does not compute. Plain preconditions parse as
 before. (In 2.1.0-11 alone the engine refused every comparison as "not
 established"; 2.1.0-12 judges them.)
@@ -129,7 +130,7 @@ def test_step_precondition_may_compare():
 # ── Refused forms ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("pre", [
-    '"x" == 5', '"x" != 5', '"x" => 5',                  # equality and typos not in 2.1.0
+    '"x" => 5', '"x" = 5', '"x" =< 5',                   # typos (== and != parse from 2.2.0-2)
     '"x" >= 2026-11-30', '"x" >= 2026-11-30T17:00Z',     # no date or instant operand
     '"x" >= 60 days',                                     # no duration operand
     '"x" >= 20,000,000 AUD',                              # no digit grouping

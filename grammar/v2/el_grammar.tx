@@ -792,13 +792,13 @@ PreconditionDecl:
  * reports on the act, as text; the operand is a number, percentage or
  * amount literal, or a Policy at its value. The DSL compares; it does not
  * compute. CompareOp lists the two-character operators first, so >= is
- * not read as >. CompareLiteral keeps the 2.1.0-1 literal order: Amount
+ * not read as >; 2.2.0-2 adds == and != (=> stays refused). CompareLiteral keeps the 2.1.0-1 literal order: Amount
  * and Percentage before the plain numbers.
  */
 Comparison:
     fact=STRING op=CompareOp (literal=CompareLiteral | policy=[Policy])
 ;
-CompareOp: /(>=|<=|>|<)/ ;
+CompareOp: /(>=|<=|!=|==|>|<)/ ;
 CompareLiteral: Amount | Percentage | DecimalNumber | IntegerNumber ;
 
 /*

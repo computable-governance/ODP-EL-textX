@@ -5,6 +5,16 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
+## [Unreleased]
+
+### Added
+
+- **2.2.0-2 `==` and `!=` in comparisons.** `precondition: "approvals"
+  == 2`, `precondition: "insurance cover" != MinimumCover`, and the same
+  in a standing duty's `keeps`. Exact equality of the values (`"2.0" ==
+  2` holds); an amount in another currency is not established. `=>`
+  stays a syntax error. No 2.1.0 specification changes meaning.
+
 ## [2.1.0] - 2026-10-17
 
 Typed policy values, date deadlines, comparisons and standing duties.

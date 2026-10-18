@@ -401,7 +401,8 @@ def judge_comparison(cmp, facts: dict) -> Judgement:
     comparison's limit. Not established (value None), in this order: the
     fact is absent, null or "unknown"; the limit has no comparable value;
     the fact is not text; the text does not read in the limit's kind; an
-    amount is in another currency."""
+    amount is in another currency. 2.2.0-2: == and != are exact (Decimal)
+    equality, so 5.0 == 5 holds and 10.00% != 10% fails."""
     fact, op = cmp.fact, cmp.op
     policy = getattr(cmp, "policy", None)
     typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
@@ -427,7 +428,8 @@ def judge_comparison(cmp, facts: dict) -> Judgement:
             return Judgement(None, f"'{fact}' reported {raw}: currency {code}, not "
                                    f"{limit_code}; amounts are compared only within one currency")
     holds = {">=": value >= limit, "<=": value <= limit,
-             ">": value > limit, "<": value < limit}[op]
+             ">": value > limit, "<": value < limit,
+             "==": value == limit, "!=": value != limit}[op]
     return Judgement(holds, f"'{fact}' {raw} {op} {limit_text}")
 
 

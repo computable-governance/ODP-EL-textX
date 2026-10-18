@@ -7351,7 +7351,7 @@ are not judged by deadline).
 
 **Definition:** `precondition: "<fact>" <op> <limit>` compares a value
 reported with the act against a number, percentage, amount or policy
-limit (`>=`, `<=`, `>`, `<`). No arithmetic.
+limit (`>=`, `<=`, `>`, `<`; 2.2.0 adds `==`, `!=`). No arithmetic.
 
 **Standard:** clause to be confirmed.
 
