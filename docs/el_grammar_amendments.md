@@ -11262,3 +11262,21 @@ duration limits (unchanged from 2.1.0).
 judged before it was written.
 
 Verifier parity: R11 and R14 reworded (the operators); no status change.
+
+## 2.2.0-3 — `==` and `!=` tests (`tests/test_equality_comparisons.py`)
+
+**Status:** IMPLEMENTED. Type: tests.
+
+**Now.** New `tests/test_equality_comparisons.py` (29 tests): `==` and
+`!=` parse and validate with no message; the typos `=>`, `=`, `=<`,
+`===`, `!==` stay syntax errors; the `comparison-type` text is the 2.1.0
+one with an equality operator; judging holds and fails by value, not text
+(`"2.0" == 2`, `"10.00%" != 10%`), with policy and literal limits; the
+reason format; not established (not reported, not text, wrong kind,
+another currency) for both operators; `precondition_text()`; a standing
+duty's `keeps` with `==`, kept and breached.
+
+**Verification:** full suite 1733 → 1762 collected, 1759 passed, 0 failures. The published-specs golden test
+(2.2.0-1) passes unchanged.
+
+Verifier parity: none (tests only).
