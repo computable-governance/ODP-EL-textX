@@ -193,3 +193,161 @@ def test_keyword_type_policy_unaffected_by_a_keyword_named_set():
     result = _parse(_HEAD + "options date [early]\npolicy P : date { initial_value: 2026-11-30 }\n",
                     validate=True)
     assert [m.split("]")[0] for m in result.errors] == ["[option-set-name"]
+
+
+# ── Comparisons (2.2.0-12) ───────────────────────────────────────────────
+
+from el_engine import judge_comparison, read_reported_value  # noqa: E402
+from el_runtime import Runtime  # noqa: E402
+
+_CMP_SPEC = """enterprise specification OptionsCompare
+options ApprovalStates [pending, approved, rejected]
+policy Required : ApprovalStates {{ initial_value: approved }}
+party Clerk
+community C {{
+    objective: "probe"
+    Clerk fills clerk
+    role clerk {{
+        action release {{
+            actor: clerk
+            precondition: {pre}
+        }}
+    }}
+}}
+"""
+
+
+def _cmp_parse(pre, validate=False):
+    return _parse(_CMP_SPEC.format(pre=pre), validate=validate)
+
+
+def _release(pre, facts):
+    result = _cmp_parse(pre)
+    assert result.model is not None, result.errors
+    return _quiet(_quiet(Runtime.build_from_spec, result.model).advance, "release", "Clerk", facts)
+
+
+@pytest.mark.parametrize("pre, reported, outcome, reason", [
+    ('"approval" == Required', "approved", "ok", None),
+    ('"approval" == Required', "pending",  "blocked",
+     "precondition not satisfied: 'approval' pending == approved (Required)"),
+    ('"approval" != Required', "pending",  "ok", None),
+    ('"approval" != Required', "approved", "blocked",
+     "precondition not satisfied: 'approval' approved != approved (Required)"),
+    ('"approval" == Required', "maybe",    "blocked",
+     "precondition not established: 'approval' reported maybe: not one of the options "
+     "[pending, approved, rejected]"),
+    ('"approval" == Required', "Approved", "blocked",          # names match exactly
+     "precondition not established: 'approval' reported Approved: not one of the options "
+     "[pending, approved, rejected]"),
+])
+def test_judged(pre, reported, outcome, reason):
+    record = _release(pre, {"approval": reported})
+    assert (record.outcome, record.reason) == (outcome, reason)
+
+
+def test_satisfied_line():
+    record = _release('"approval" == Required', {"approval": "approved"})
+    assert record.effects[0] == "precondition satisfied: 'approval' approved == approved (Required)"
+
+
+@pytest.mark.parametrize("facts, reason", [
+    ({}, "precondition not established: 'approval' not reported"),
+    ({"approval": "unknown"}, "precondition not established: 'approval' not reported"),
+    ({"approval": True}, "precondition not established: 'approval' reported a value of type "
+                         "bool, not text; send text, e.g. \"approved\""),
+])
+def test_not_established(facts, reason):
+    assert _release('"approval" == Required', facts).reason == reason
+
+
+@pytest.mark.parametrize("op", [">=", "<=", ">", "<"])
+def test_ordering_not_established(op):
+    result = _cmp_parse(f'"approval" {op} Required')
+    cmp = next(e for e in result.model.elements
+               if type(e).__name__ == "Community").roles[0].actions[0].preconditions[0]
+    judged = judge_comparison(cmp, {"approval": "approved"})
+    assert judged == (None, "'approval': limit approved (Required) is an option; options are "
+                            "compared with == and != only")
+
+
+def test_policy_value_not_an_option_not_established():
+    text = _CMP_SPEC.replace("initial_value: approved", "initial_value: maybe")
+    result = _parse(text.format(pre='"approval" == Required'))
+    record = _quiet(_quiet(Runtime.build_from_spec, result.model).advance,
+                    "release", "Clerk", {"approval": "maybe"})
+    assert record.reason == ("precondition not established: 'approval': limit maybe (Required) "
+                             "has no comparable value")
+
+
+def test_read_reported_value_option():
+    options = ("pending", "approved")
+    assert read_reported_value("approved", "option", options) == ("approved", None)
+    assert read_reported_value(" approved", "option", options) == \
+        (None, "not one of the options [pending, approved]")
+    assert read_reported_value("x" * 101, "option", ("x" * 101,))[0] is None
+
+
+def test_validator_accepts_equality():
+    for op in ("==", "!="):
+        result = _cmp_parse(f'"approval" {op} Required', validate=True)
+        assert result.errors == [] and result.warnings == []
+
+
+@pytest.mark.parametrize("op", [">=", "<=", ">", "<"])
+def test_validator_refuses_ordering(op):
+    result = _cmp_parse(f'"approval" {op} Required', validate=True)
+    assert result.errors == [
+        f"[comparison-type] Action 'release': precondition \"approval\" {op} Required: limit "
+        f"Required is a policy of options type 'ApprovalStates'; options are compared with == "
+        f"and != only. (clause to be confirmed)"]
+
+
+def test_value_not_an_option_reported_once():
+    text = _CMP_SPEC.replace("initial_value: approved", "initial_value: maybe")
+    result = _parse(text.format(pre='"approval" == Required'), validate=True)
+    assert [m.split("]")[0] for m in result.errors] == ["[policy-value-type"]
+
+
+def test_undeclared_type_limit_message_unchanged():
+    # A policy whose type names no options set is refused as in 2.2.0-6.
+    text = _CMP_SPEC.replace("options ApprovalStates [pending, approved, rejected]\n", "")
+    result = _parse(text.format(pre='"approval" == Required'), validate=True)
+    assert result.errors == [
+        "[comparison-type] Action 'release': precondition \"approval\" == Required: limit "
+        "Required is a policy of type 'ApprovalStates'; a comparison takes a policy of type "
+        "integer, decimal, number, percentage, amount, date, instant or duration. "
+        "(clause to be confirmed)"]
+
+
+def test_fact_key_clash_names_the_option_reading():
+    text = _CMP_SPEC.format(pre='"approval" == Required').replace(
+        "            precondition: \"approval\" == Required\n",
+        "            precondition: \"approval\" == Required\n"
+        "            precondition: \"approval\"\n")
+    result = _parse(text, validate=True)
+    assert result.errors == [
+        "[fact-key-clash] Fact 'approval' is read in more than one way (a plain fact in Action "
+        "'release'; an option of 'ApprovalStates' in Action 'release'); one reported value cannot "
+        "satisfy both. Use a different fact key for each reading. (clause to be confirmed)"]
+
+
+def test_keeps_with_an_option_limit():
+    text = """enterprise specification OptionsKeeps
+options Ratings [green, amber, red]
+policy Target : Ratings { initial_value: green }
+party Supplier { holds rated }
+burden rated {
+    standing
+    keeps: "rating" == Target
+    ends_at: 2027-06-30
+    state: active
+}
+"""
+    result = _parse(text, validate=True)
+    assert result.model is not None, result.errors
+    assert [m.split("]")[0] for m in result.errors] == []
+    keeps = result.model.elements[-1].keeps
+    assert judge_comparison(keeps, {"rating": "green"}).value is True
+    assert judge_comparison(keeps, {"rating": "red"}).value is False
+    assert judge_comparison(keeps, {"rating": "blue"}).value is None

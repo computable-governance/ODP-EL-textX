@@ -36,6 +36,15 @@ adheres to _[Semantic Versioning][semver]_.
   the validator's deadline warnings. Violation lines name the policy
   (`(policy NoticePeriod = 24 hours)`). New error `deadline-policy-type`.
   Parity row R19 added.
+- **2.2.0-10 to 2.2.0-12 Options sets.** `options ApprovalStates [pending,
+  approved, rejected]` declares the options of a user-defined policy type.
+  A policy whose type names a declared options set takes one of its
+  options (`policy-value-type` checks its initial value and envelope
+  values); a type that names no options set stays unchecked and silent, as
+  in 2.1.0. New errors `option-duplicate` and `option-set-name`. A
+  comparison may use a policy of an options type as its limit, with `==`
+  and `!=` only (`precondition: "approval" == RequiredState`); an ordering
+  operator is a `comparison-type` error. Parity rows R12 and R17 reworded.
 
 ## [2.1.0] - 2026-10-17
 

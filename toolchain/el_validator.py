@@ -171,7 +171,8 @@ Rules implemented
         percentage or amount literal (an amount's code in the ISO 4217
         form), or a Policy of type integer, decimal, number, percentage or
         amount with such a value; 2.2.0-6: or a date, instant or duration
-        literal or Policy.                           clause to be confirmed
+        literal or Policy; 2.2.0-12: or a Policy of an options type, with
+        == and != only.                              clause to be confirmed
   fact-key-clash  2.1.0-13: one fact key is read two ways: by a plain
         precondition (truthy) and by a comparison (a typed value), or by
         comparisons of different kinds or currencies. clause to be confirmed
@@ -1212,10 +1213,16 @@ def _comparison_text(cmp) -> str:
 def _comparison_limit_kind(cmp) -> Optional[str]:
     """2.1.0-13: "number", "percentage", "amount in <code>", or None when
     the limit has no comparable value. 2.2.0-6: also "date", "instant" or
-    "duration"."""
-    from el_engine import _operand
+    "duration". 2.2.0-12: "option of '<type>'" for a Policy of an options
+    type compared with == or != whose value is one of its options."""
+    from el_engine import _operand, policy_options
     policy = getattr(cmp, "policy", None)
     typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
+    options = policy_options(policy) if policy is not None else None
+    if options is not None:   # 2.2.0-12: an option, with == and != only
+        if cmp.op in ("==", "!=") and _value_kind(typed) == "name" and typed in options:
+            return f"option of '{policy.policy_type}'"
+        return None
     kind, value = _operand(typed)
     if kind == "amount":
         return f"amount in {value[1]}"
@@ -1229,13 +1236,23 @@ def _validate_comparison_types(model) -> List[str]:
     upper-case letters A-Z), so "60 sec" (read as an amount with code
     'sec'; 2.2.0-4: "60 day" is a duration) is refused. 2.2.0-6: a date,
     instant or duration literal or Policy is accepted too; an invalid date
-    or instant is calendar-date's or instant-valid's, not reported here."""
+    or instant is calendar-date's or instant-valid's, not reported here.
+    2.2.0-12: a Policy of an options type is accepted with == and != and
+    refused with an ordering operator; a value that is not one of its
+    options is policy-value-type's, not reported here."""
+    from el_engine import policy_options
     errors: List[str] = []
     for label, cmp, _ in _comparisons(model):
         policy = getattr(cmp, "policy", None)
         typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
         problem = None
-        if policy is not None and (getattr(policy, "policy_type", None) or "") not in _COMPARABLE_POLICY_TYPES:
+        options = policy_options(policy) if policy is not None else None
+        if options is not None:   # 2.2.0-12
+            if cmp.op not in ("==", "!="):
+                problem = (f"limit {policy.name} is a policy of options type "
+                           f"'{policy.policy_type}'; options are compared with == and != only")
+            # a value that is not one of the options: policy-value-type reports it
+        elif policy is not None and (getattr(policy, "policy_type", None) or "") not in _COMPARABLE_POLICY_TYPES:
             problem = (f"limit {policy.name} is a policy of type "
                        f"'{policy.policy_type}'; a comparison takes a policy of type "
                        f"integer, decimal, number, percentage, amount, date, instant or "
@@ -1270,7 +1287,7 @@ def _validate_fact_key_clash(model) -> List[str]:
                 kind = _comparison_limit_kind(p)
                 if kind is None:
                     continue  # comparison-type reports it
-                article = "an" if kind.startswith(("amount", "instant")) else "a"
+                article = "an" if kind.startswith(("amount", "instant", "option")) else "a"
                 key, reading = p.fact, f"{article} {kind}"
             uses.setdefault(key, {}).setdefault(reading, []).append(label)
     errors: List[str] = []

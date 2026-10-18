@@ -12,7 +12,7 @@ ComputableGovernance stack. Intended as project context for future sessions.
 ```
 el_grammar.tx     — textX grammar defining the DSL syntax
 el_parser.py      — loads grammar, parses .el files, invokes validator
-el_validator.py   — 69 rules (43 errors, 26 warnings) checked at specification time
+el_validator.py   — 71 rules (45 errors, 26 warnings) checked at specification time
 el_reasoner.py    — governance queries over the static model
 el_kripke.py      — Layer 4 Kripke semantics (modal obligation verification)
 example.el        — payment processing scenario exercising all constructs
@@ -25,7 +25,7 @@ example.el        — payment processing scenario exercising all constructs
 ### What it does
 
 Runs at **specification time**, before any execution. Takes a parsed DSL-EL
-model and checks it against 69 rules: 43 errors and 26 warnings (tags
+model and checks it against 71 rules: 45 errors and 26 warnings (tags
 beginning `[W-`). Each rule in the table below is traced to a clause of
 ISO/IEC 15414:2015; the rules added in 2.1.0 and 2.2.0 end "(clause to be
 confirmed)". Analogous to a compiler's semantic phase — the grammar
@@ -80,8 +80,9 @@ Added in 2.1.0 (20):
   `[W-standing-shared-fact]`, `[W-standing-not-modelled]` (see "Standing
   duties").
 
-Added in 2.2.0 (1):
-- Error: `deadline-policy-type` (see "Deadlines").
+Added in 2.2.0 (3):
+- Errors: `deadline-policy-type` (see "Deadlines"); `option-duplicate`,
+  `option-set-name` (see "Typed policy values", options sets).
 
 ### Usage
 
@@ -115,11 +116,13 @@ else:
   alias of `decimal`), percentage, amount (a number and a currency code),
   date, instant (a date and time with a UTC offset), and duration (written
   as in 2.0.0). A policy value may also be an integer interval (`7..10`)
-  or an option of a user-defined type.
+  or an option of a user-defined type; from 2.2.0 an `options` set
+  declares the options a type allows.
 - A comparison has one reported fact, one of `>=`, `<=`, `>`, `<`, `==`,
   `!=` (`==` and `!=` from 2.2.0), and one limit: a number, percentage,
   amount, date, instant or duration literal, or a policy of one of those
-  types (date, instant and duration from 2.2.0). There is no `and` or `or`,
+  types (date, instant and duration from 2.2.0), or, from 2.2.0, a policy
+  of an options type with `==` and `!=` only. There is no `and` or `or`,
   no arithmetic and no functions (`and` and `+` are syntax errors; no
   "date plus 30 days"), and a date is never compared with an instant. An
   action may carry several preconditions: all must
@@ -127,8 +130,8 @@ else:
   false comparison is reported before one not established). A standing
   duty's `keeps` is one comparison.
 - Types are checked where a value meets a limit. At specification time, a
-  policy value is checked against its type keyword (`policy-value-type`)
-  and its envelope (`envelope-membership`, `envelope-currency`), and a
+  policy value is checked against its type keyword or, from 2.2.0, its
+  declared options set (`policy-value-type`) and its envelope (`envelope-membership`, `envelope-currency`), and a
   comparison's limit against the comparable kinds (`comparison-type`). At
   run time, a reported value is checked against the kind of its limit:
   another kind, another currency or another notation is not established.
@@ -180,6 +183,38 @@ Other value forms: an integer interval `7..10` (accepted for `integer`,
 `decimal` and `number`), and a bare name (an option of a user-defined
 type such as `policy Tier : TierOptions`).
 
+**Options sets (2.2.0).** `options <Name> [<option>, ...]` declares the
+options a user-defined type allows (source standard to be confirmed):
+
+```
+options ApprovalStates [pending, approved, rejected]
+
+policy RequiredState : ApprovalStates {
+    initial_value: approved
+    envelope { one of [approved, rejected] }
+}
+```
+
+- An options set is a top-level element. Its options are plain names,
+  comma-separated, at least one; they are not cross-references.
+- A policy whose type names a declared options set takes one of its
+  options: its `initial_value`, envelope values and range ends are checked
+  (`policy-value-type`). A quoted string and a bare name both read as
+  text, so `"approved"` is the option `approved`.
+- A type that names no options set is not checked, as in 2.1.0:
+  `policy Tier : TierOptions { initial_value: gold }` with no `options
+  TierOptions` validates with no message.
+- An option listed twice is the error `option-duplicate`. An options set
+  named like a type keyword (`options date [...]`) is the error
+  `option-set-name`: `policy P : date` is a date policy and never takes
+  the options. A name that only begins with a keyword (`dateWindows`) is
+  accepted.
+- `true` and `false` parse as booleans, so an option with either name is
+  never matched by a value. If two options sets share a name, the first
+  declared is read.
+- A comparison may use a policy of an options type as its limit, with
+  `==` and `!=` only (see "Comparisons").
+
 **Principles.**
 - The DSL compares typed values. It does not compute with them: there is
   no arithmetic and there are no expressions.
@@ -216,11 +251,13 @@ type such as `policy Tier : TierOptions`).
 
 | Rule | What it checks |
 |---|---|
-| `policy-value-type` | A value matches its policy's type keyword. An integer is accepted for `decimal`/`number`, an interval for `integer`/`decimal`/`number`. A user-defined (ID) type is not checked. |
+| `policy-value-type` | A value matches its policy's type keyword. An integer is accepted for `decimal`/`number`, an interval for `integer`/`decimal`/`number`. A user-defined (ID) type is not checked, unless (2.2.0) it names a declared options set: then each value is one of its options. |
 | `calendar-date` | A date, or an instant's date part, is a real calendar date. |
 | `instant-valid` | An instant's hour is at most 23, minute at most 59, seconds only `00`; its offset hours at most 23 and minutes at most 59; `-00:00` is refused. |
 | `range-ends` | A range's ends are of one kind (number, percentage, amount, duration, date or instant), amounts are in one currency, and the low end is not above the high end. An end already reported by `calendar-date` or `instant-valid` is not reported again. |
 | `currency-code` | An amount's code is three upper-case letters A–Z (the ISO 4217 form; membership in the code list is not checked). A code that abbreviates a duration unit (`5 min`, `5 hrs`) is told how to write the duration. |
+| `option-duplicate` (2.2.0) | An options set lists each option once. |
+| `option-set-name` (2.2.0) | An options set is not named like a policy type keyword. |
 
 **Runtime.** `WorldState.policy_values` holds each top-level Policy's value
 as plain text, `(name, text)` pairs sorted by name (decimals never in
@@ -397,6 +434,27 @@ action assess {
   comparison; a policy's duration value still accepts `+5 days`, as in
   2.1.0). `60 sec` is not a duration (sec is not a unit): it reads as an
   amount and is refused by `comparison-type`.
+- From 2.2.0 the limit may also be a Policy of an options type (see
+  "Typed policy values", options sets), with `==` and `!=` only. The
+  reported text must be one of the options, exactly; it equals the limit
+  when it is the policy's option. An ordering operator (`>=`, `<=`, `>`,
+  `<`) is refused by `comparison-type` and, if judged, not established:
+  options have no order.
+
+```
+options ApprovalStates [pending, approved, rejected]
+policy RequiredState : ApprovalStates { initial_value: approved }
+
+action release {
+    actor: clerkRole
+    precondition: "approval" == RequiredState
+}
+```
+
+With `{"approval": "pending"}` the act is refused: `precondition not
+satisfied: 'approval' pending == approved (RequiredState)`. With
+`{"approval": "maybe"}`: `precondition not established: 'approval'
+reported maybe: not one of the options [pending, approved, rejected]`.
 
 ```
 policy NoticePeriod : duration { initial_value: 24 hours }
@@ -441,6 +499,7 @@ in the notation of the 2.1.0 values (source standard to be confirmed):
 | date (2.2.0) | `YYYY-MM-DD`, a calendar date | `"2027-06-30"` |
 | instant (2.2.0) | the 2.1.0 Instant notation, with a UTC offset | `"2027-06-30T17:00+10:00"`, `"2027-06-30T07:00Z"` |
 | duration (2.2.0) | a whole number, one space, a unit (minute to year, singular or plural) | `"24 hours"`, `"1440 minutes"` |
+| an options type (2.2.0) | one of the options, exactly | `"approved"` |
 
 At most 100 characters. A number limit accepts a decimal report
 (`"5.50" >= 5`). Amounts are compared only within one currency, never
@@ -456,6 +515,8 @@ act is refused (outcome `blocked`), never violated:
 | The fact is not text | `precondition not established: 'insurance cover' reported a value of type int, not text; send text, e.g. "25000000.00 AUD"` |
 | Wrong kind or notation | `precondition not established: 'insurance cover' reported 25000000: not an amount value` |
 | Another currency | `precondition not established: 'insurance cover' reported 25000000 NZD: currency NZD, not AUD; amounts are compared only within one currency` |
+| Not one of the options (2.2.0) | `precondition not established: 'approval' reported maybe: not one of the options [pending, approved, rejected]` |
+| An ordering operator with an options limit (2.2.0) | `precondition not established: 'approval': limit approved (RequiredState) is an option; options are compared with == and != only` |
 
 A false precondition is reported before one not established, each in
 declared order. `advance()` and `declare_violation()` share the check.
@@ -485,7 +546,9 @@ when its fact is truthy in Python, so the strings `"false"`, `"no"` and
 percentage, amount, date, instant or duration, an amount code in ISO 4217
 form, or a policy of a comparable type; `"x" <= 60 sec` is refused, with
 "a duration's unit is minute, hour, day, week, month or year"; from 2.2.0
-`"x" <= 60 day` is a duration), `calendar-date` and `instant-valid` (from
+`"x" <= 60 day` is a duration; from 2.2.0 a policy of an options type
+with `==` or `!=`, and an ordering operator against one is refused),
+`calendar-date` and `instant-valid` (from
 2.2.0 also on a comparison's date or instant limit), `fact-key-clash` (one fact
 read two ways), `comparison-in-step`, `envelope-currency` (an amount
 initial value with envelope amounts in another currency) and
@@ -1020,7 +1083,8 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   in the toolchain. The superseded gp_referral API builder does not seed it
 - A NormativePolicy's value is checked but not seeded
 - Currency codes are not looked up in the ISO 4217 list; options of a
-  user-defined type are not checked
+  user-defined type are not checked unless (2.2.0) the type names a
+  declared options set
 - A quoted string and a bare name both read as text and cannot be told
   apart
 

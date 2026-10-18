@@ -45,7 +45,12 @@ Full text in `docs/DSL_TOOLCHAIN_REFERENCE.md`; each change is logged as
 - **Comparisons in preconditions.** `precondition: "<fact>" >= <limit>`
   (also `<=`, `>`, `<`, and from 2.2.0 `==`, `!=`), the limit a number,
   percentage, amount or policy, and from 2.2.0 a date, instant or duration
-  literal or policy. There is no arithmetic.
+  literal or policy, or a policy of an options type (`==` and `!=` only).
+  There is no arithmetic.
+- **Options sets (2.2.0).** `options ApprovalStates [pending, approved,
+  rejected]` declares the options a user-defined policy type allows; a
+  policy of that type takes one of them. A type that names no options set
+  is not checked, as in 2.1.0.
 - **Policy-fed deadlines (2.2.0).** `deadline: NoticePeriod` names a
   Policy of type duration instead of quoting the duration; the deadline
   is the policy's declared value, read-only, counted as the same literal

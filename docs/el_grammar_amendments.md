@@ -11633,3 +11633,68 @@ failures. The published-specs golden test (2.2.0-1) passes unchanged;
 static and hybrid Kripke models as before.
 
 Verifier parity: none (validator only).
+
+## 2.2.0-12 — options sets: comparisons and docs (`toolchain/el_engine.py`, `toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: engine, validator and documentation.
+
+**Standard reference:** clause to be confirmed.
+
+**Before (2.2.0-11).** A comparison whose limit was a Policy of an
+options type was refused by `comparison-type` ("a comparison takes a
+policy of type integer, ... or duration") and judged not established
+("limit ... has no comparable value").
+
+**Now.**
+- A comparison's limit may be a Policy of an options type, with `==` and
+  `!=` only: `precondition: "approval" == RequiredState`. The reported
+  text must be one of the options, exactly (case and spaces count); it is
+  compared by name with the policy's option.
+- `judge_comparison()` judges such a limit with `_judge_option()`. Not
+  established, in this order after "not reported": the policy's value is
+  not one of its options ("limit maybe (Required) has no comparable
+  value", the 2.1.0 text); an ordering operator ("limit approved
+  (Required) is an option; options are compared with == and != only");
+  not text (`send text, e.g. "approved"`, the policy's option); not one of
+  the options (`reported maybe: not one of the options [pending,
+  approved, rejected]`). The reason format is the 2.1.0 one (`'approval'
+  pending == approved (Required)`).
+- `read_reported_value()` takes an optional `options` and reads the kind
+  `"option"`; the other kinds are unchanged.
+- Verdicts against `Required` (`approved`): `approved` holds, `pending`
+  fails, `maybe` is not established.
+- `comparison-type` accepts a Policy of an options type with `==` or `!=`
+  and refuses an ordering operator: `[comparison-type] Action 'release':
+  precondition "approval" >= Required: limit Required is a policy of
+  options type 'ApprovalStates'; options are compared with == and !=
+  only. (clause to be confirmed)`. A value that is not one of the options
+  is `policy-value-type`'s and is not reported again. A Policy whose type
+  names no options set gets the 2.2.0-6 message, unchanged.
+- `fact-key-clash` names the reading "an option of '<type>'".
+- A standing duty's `keeps` uses the same judging.
+- Docs: DSL_TOOLCHAIN_REFERENCE "Typed policy values" (options sets, with
+  an example parsed and validated before it was written; the
+  `policy-value-type` row and the two new rules; "Scope of values"; the
+  rule counts, 71 rules, 45 errors and 26 warnings), "Comparisons" (the
+  options limit, an example parsed and judged before it was written, the
+  reported-text and outcome tables, the validator), the policy-values
+  limitation; grammar README; CONCEPTS_INDEX "Options sets (2.2.0)" and
+  "Comparisons in preconditions"; CHANGELOG.
+
+**Limits.** No ordering of options. No option literal in a comparison
+(`"approval" == approved` names a Policy `approved`, a reference error):
+the limit is a policy. No string or boolean limits (unchanged).
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_validator.py`,
+`docs/ENGINE_VERIFIER_PARITY.md`, `tests/test_option_sets.py`,
+`docs/DSL_TOOLCHAIN_REFERENCE.md`, `docs/CONCEPTS_INDEX.md`,
+`grammar/v2/README.md`, `CHANGELOG.md`.
+
+**Verification:** full suite 1876 → 1901 collected, 1898 passed, 0
+failures. The published-specs golden test (2.2.0-1) passes unchanged;
+static models of the 29 published files and hybrid models of the six API
+scenarios: the same world and edge counts and AF/EF verdicts as before.
+
+Verifier parity: R12 and R17 reworded (a policy limit of an options type,
+`==` and `!=` only; not one of the options, or an ordering operator, is
+not established); no status change.

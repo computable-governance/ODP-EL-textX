@@ -342,7 +342,9 @@ def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
 # within one currency, never converted. 2.2.0-5: a date, instant or
 # duration limit too: dates by calendar day, instants by moment, durations
 # in minutes (the deadline unit table: a 30-day month, a 365-day year). A
-# date is never compared with an instant.
+# date is never compared with an instant. 2.2.0-12: a Policy of an options
+# type as the limit, with == and != only: the reported text is one of the
+# options, compared by name.
 
 _REPORTED_TEXT_MAX = 100
 _NUMBER_TEXT = r"-?[0-9]+(?:\.[0-9]+)?"
@@ -393,7 +395,7 @@ def _operand(value) -> Tuple[Optional[str], Any]:
     return None, None
 
 
-def read_reported_value(text, kind: str) -> Tuple[Any, Optional[str]]:
+def read_reported_value(text, kind: str, options=None) -> Tuple[Any, Optional[str]]:
     """2.1.0-12: (value, None) for a reported `text` read strictly as a
     value of `kind` ("number", "percentage", "amount"), or (None, reason).
     The whole text must match, in the 2.1.0 notation, ASCII digits, at most
@@ -402,7 +404,13 @@ def read_reported_value(text, kind: str) -> Tuple[Any, Optional[str]]:
     then '%' with no space; an amount as that number, one space and three
     upper-case letters. 2.2.0-5: a date as YYYY-MM-DD, a calendar date; an
     instant as the 2.1.0 Instant notation, with a UTC offset, valid (its UTC
-    moment); a duration as a whole number, one space and a unit (minutes)."""
+    moment); a duration as a whole number, one space and a unit (minutes).
+    2.2.0-12: kind "option" reads the text as one of `options`, exactly
+    (case and spaces count)."""
+    if kind == "option":
+        if isinstance(text, str) and len(text) <= _REPORTED_TEXT_MAX and text in options:
+            return text, None
+        return None, f"not one of the options [{', '.join(options)}]"
     refused = (None, f"not {_KIND_NOUN[kind]} value")
     if not isinstance(text, str) or len(text) > _REPORTED_TEXT_MAX:
         return refused
@@ -442,7 +450,8 @@ def judge_comparison(cmp, facts: dict) -> Judgement:
     fact is absent, null or "unknown"; the limit has no comparable value;
     the fact is not text; the text does not read in the limit's kind; an
     amount is in another currency. 2.2.0-2: == and != are exact (Decimal)
-    equality, so 5.0 == 5 holds and 10.00% != 10% fails."""
+    equality, so 5.0 == 5 holds and 10.00% != 10% fails. 2.2.0-12: a Policy
+    limit of an options type is judged by _judge_option()."""
     fact, op = cmp.fact, cmp.op
     policy = getattr(cmp, "policy", None)
     typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
@@ -454,6 +463,9 @@ def judge_comparison(cmp, facts: dict) -> Judgement:
 
     if raw is None or raw == "unknown":
         return Judgement(None, f"'{fact}' not reported")
+    options = policy_options(policy) if policy is not None else None
+    if options is not None:   # 2.2.0-12
+        return _judge_option(cmp, typed, options, raw, limit_text)
     if kind is None:
         return Judgement(None, f"'{fact}': limit {limit_text} has no comparable value")
     if not isinstance(raw, str):
@@ -470,6 +482,27 @@ def judge_comparison(cmp, facts: dict) -> Judgement:
     holds = {">=": value >= limit, "<=": value <= limit,
              ">": value > limit, "<": value < limit,
              "==": value == limit, "!=": value != limit}[op]
+    return Judgement(holds, f"'{fact}' {raw} {op} {limit_text}")
+
+
+def _judge_option(cmp, typed, options, raw, limit_text: str) -> Judgement:
+    """2.2.0-12: judge_comparison() for a Policy limit of an options type.
+    Not established, in this order: the policy's value is not one of its
+    options; the operator orders (options are compared with == and !=
+    only); the fact is not text; the text is not one of the options."""
+    fact, op = cmp.fact, cmp.op
+    if not (policy_value_kind(typed) == "name" and typed in options):
+        return Judgement(None, f"'{fact}': limit {limit_text} has no comparable value")
+    if op not in ("==", "!="):
+        return Judgement(None, f"'{fact}': limit {limit_text} is an option; options are "
+                               f"compared with == and != only")
+    if not isinstance(raw, str):
+        return Judgement(None, f"'{fact}' reported a value of type {type(raw).__name__}, not text; "
+                               f"send text, e.g. \"{typed}\"")
+    value, reason = read_reported_value(raw, "option", options)
+    if value is None:
+        return Judgement(None, f"'{fact}' reported {_shown(raw)}: {reason}")
+    holds = (value == typed) if op == "==" else (value != typed)
     return Judgement(holds, f"'{fact}' {raw} {op} {limit_text}")
 
 

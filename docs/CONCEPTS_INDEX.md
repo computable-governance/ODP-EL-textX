@@ -7367,12 +7367,36 @@ shipped scenario or published example uses it.
 
 ---
 
+## Options sets (2.2.0)
+
+**Definition:** `options <Name> [<option>, ...]` declares the options a
+user-defined policy type allows; a policy whose type is that name takes
+one of them.
+
+**Standard:** clause to be confirmed.
+
+**Toolchain status:** implemented (2.2.0-10 to 2.2.0-12). `policy-value-type`
+checks a policy whose type names a declared options set; a type that
+names no options set stays unchecked and silent, as in 2.1.0
+(`tests/examples/typed_values/ok_typed_values.el`, `ServiceTier :
+TierOptions`, unchanged). Errors `option-duplicate`, `option-set-name`.
+A comparison against a policy of an options type uses `==` and `!=` only
+(an ordering operator is a `comparison-type` error and, if judged, not
+established). The verifier does not read comparisons (parity rows R11,
+R12, R17).
+
+**Demonstrated in:** tests only (`tests/test_option_sets.py`). No shipped
+scenario or published example uses it.
+
+---
+
 ## Comparisons in preconditions (2.1.0)
 
 **Definition:** `precondition: "<fact>" <op> <limit>` compares a value
 reported with the act against a number, percentage, amount or policy
-limit (`>=`, `<=`, `>`, `<`; 2.2.0 adds `==`, `!=`, and date, instant and
-duration limits). No arithmetic.
+limit (`>=`, `<=`, `>`, `<`; 2.2.0 adds `==`, `!=`, date, instant and
+duration limits, and a policy of an options type with `==` and `!=`). No
+arithmetic.
 
 **Standard:** clause to be confirmed.
 
