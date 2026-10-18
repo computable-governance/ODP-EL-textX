@@ -1323,6 +1323,28 @@ def policy_value_kind(v) -> Optional[str]:
     return None
 
 
+# 2.2.0-11: the policy type keywords (grammar PolicyType); any other type
+# is a name, which may name an options set.
+POLICY_TYPE_KEYWORDS = frozenset((
+    "integer", "decimal", "number", "percentage", "amount", "string",
+    "boolean", "duration", "date", "instant"))
+
+
+def policy_options(pol) -> Optional[Tuple[str, ...]]:
+    """2.2.0-11: the options of the options set a policy's type names (the
+    first declared), or None when its type is a keyword or names no options
+    set (then the type is not checked, as in 2.1.0). Options sets are
+    top-level elements of the policy's specification (its parent)."""
+    ptype = getattr(pol, "policy_type", None) or ""
+    if not ptype or ptype in POLICY_TYPE_KEYWORDS:
+        return None
+    spec = getattr(pol, "parent", None)
+    for el in getattr(spec, "elements", None) or []:
+        if type(el).__name__ == "OptionSet" and el.name == ptype:
+            return tuple(el.options or ())
+    return None
+
+
 def _plain_number_text(n) -> str:
     """2.1.0-3: a Decimal as written, in plain notation, never with an
     exponent (str(Decimal("0.0000001")) is "1E-7"); an int as str()."""

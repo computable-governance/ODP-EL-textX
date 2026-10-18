@@ -144,7 +144,15 @@ Rules implemented
   policy-value-type  2.1.0-2: a policy value (initial_value, list
         envelope value, range end) matches its policy's keyword type.
         An integer is accepted for decimal/number, an interval for
-        integer/decimal. An ID type is not checked.  clause to be confirmed
+        integer/decimal. An ID type is not checked. 2.2.0-11: an ID type
+        that names a declared options set is checked: each value is one
+        of its options; an ID type naming none stays unchecked.
+                                                     clause to be confirmed
+  option-duplicate  2.2.0-11: an options set lists each option once.
+                                                     clause to be confirmed
+  option-set-name  2.2.0-11: an options set is not named like a policy type
+        keyword (a policy of that type takes the keyword's values, never
+        the options).                                clause to be confirmed
   calendar-date  2.1.0-2: a Date, or an Instant's date part, is a real
         calendar date (ISO 8601); 2.2.0-6: in a comparison's limit too.
                                                      clause to be confirmed
@@ -325,6 +333,10 @@ def validate_spec(model) -> List[str]:
     errors.extend(_validate_instants(model))
     errors.extend(_validate_range_ends(model))
     errors.extend(_validate_currency_codes(model))
+
+    # 2.2.0-11 — options sets (clause to be confirmed)
+    errors.extend(_validate_option_duplicates(model))
+    errors.extend(_validate_option_set_names(model))
 
     # 2.1.0-13 — comparisons and envelopes (clause to be confirmed)
     errors.extend(_validate_comparison_types(model))
@@ -940,11 +952,14 @@ def _policy_label(pol) -> str:
 
 def _validate_policy_value_types(model) -> List[str]:
     """policy-value-type (2.1.0-2): each value matches its policy's keyword
-    type. An ID type (an options set) is not checked."""
+    type. An ID type (an options set) is not checked. 2.2.0-11: an ID type
+    that names a declared options set is checked (_option_value_errors());
+    one that names none stays unchecked and silent, as in 2.1.0."""
     errors: List[str] = []
     for pol in _typed_policies(model):
         accepts = _TYPE_ACCEPTS.get(getattr(pol, "policy_type", None) or "")
         if accepts is None:
+            errors.extend(_option_value_errors(pol))   # 2.2.0-11
             continue
         article = "an" if pol.policy_type[0] in "aeiou" else "a"
         for where, v in _policy_values(pol):
@@ -955,6 +970,58 @@ def _validate_policy_value_types(model) -> List[str]:
                     f"{_TYPED_CITATION}"
                 )
     return errors
+
+
+def _option_value_errors(pol) -> List[str]:
+    """policy-value-type (2.2.0-11) for a policy whose type names a declared
+    options set: each value (initial_value, envelope values, range ends) is
+    one of its options. A quoted string and a bare name both read as text,
+    so "approved" is accepted as the option approved."""
+    from el_engine import policy_options
+    options = policy_options(pol)
+    if options is None:
+        return []
+    return [
+        f"[policy-value-type] {_policy_label(pol)}: {where} {_value_text(v)} "
+        f"is not one of the options of '{pol.policy_type}' [{', '.join(options)}]. "
+        f"{_TYPED_CITATION}"
+        for where, v in _policy_values(pol)
+        if not (_value_kind(v) == "name" and v in options)
+    ]
+
+
+def _option_sets(model) -> List[Any]:
+    return [e for e in model.elements if _cls(e) == "OptionSet"]
+
+
+def _validate_option_duplicates(model) -> List[str]:
+    """option-duplicate (2.2.0-11): an options set lists each option once.
+    One message per repeated option. The options are plain names, so the
+    grammar keeps the repeat."""
+    errors: List[str] = []
+    for oset in _option_sets(model):
+        seen: Set[str] = set()
+        repeated: List[str] = []
+        for opt in oset.options or []:
+            if opt in seen and opt not in repeated:
+                repeated.append(opt)
+            seen.add(opt)
+        errors.extend(f"[option-duplicate] Options '{oset.name}': option '{opt}' is "
+                      f"listed more than once. {_TYPED_CITATION}" for opt in repeated)
+    return errors
+
+
+def _validate_option_set_names(model) -> List[str]:
+    """option-set-name (2.2.0-11): an options set named like a policy type
+    keyword can never be used: `policy P : date` is a date policy, so it
+    never takes the options."""
+    from el_engine import POLICY_TYPE_KEYWORDS
+    return [
+        f"[option-set-name] Options '{oset.name}': '{oset.name}' is a policy type "
+        f"keyword, so a policy of type {oset.name} takes {oset.name} values, never "
+        f"these options. Rename the options set. {_TYPED_CITATION}"
+        for oset in _option_sets(model) if oset.name in POLICY_TYPE_KEYWORDS
+    ]
 
 
 def _validate_calendar_dates(model) -> List[str]:

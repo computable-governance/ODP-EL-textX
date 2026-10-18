@@ -11585,3 +11585,51 @@ static models of the 29 published files and hybrid models of the six API
 scenarios: the same world and edge counts and AF/EF verdicts as before.
 
 Verifier parity: none (grammar; nothing reads an options set yet).
+
+## 2.2.0-11 — options sets: validator (`toolchain/el_validator.py`, `toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: validator rules (one extended, two new).
+
+**Standard reference:** clause to be confirmed.
+
+**Now.**
+- `el_engine.policy_options(pol)`: the options of the options set a
+  policy's type names (the first declared), or None when the type is a
+  keyword or names no options set. `el_engine.POLICY_TYPE_KEYWORDS` lists
+  the grammar's type keywords.
+- `policy-value-type` checks a policy (Policy or NormativePolicy) whose
+  type names a declared options set: its `initial_value`, envelope list
+  values and range ends are each one of the options:
+  `[policy-value-type] Policy 'P': initial_value "maybe" is not one of the
+  options of 'ApprovalStates' [pending, approved, rejected]. (clause to be
+  confirmed)`. A quoted string and a bare name both read as text, so
+  `"approved"` is the option `approved`.
+- A type that names no options set is **unchecked and silent, as in
+  2.1.0**: `tests/examples/typed_values/ok_typed_values.el`
+  (`ServiceTier : TierOptions`, no options set) validates with no message,
+  unchanged.
+- New error `option-duplicate`: `[option-duplicate] Options 'M': option
+  'courier' is listed more than once. (clause to be confirmed)`, one per
+  repeated option.
+- New error `option-set-name`: an options set named like a type keyword
+  (`options date [...]`) can never be used, since `policy P : date` is a
+  date policy: `[option-set-name] Options 'date': 'date' is a policy type
+  keyword, so a policy of type date takes date values, never these
+  options. Rename the options set. (clause to be confirmed)`. A name that
+  only begins with a keyword (`dateWindows`) is accepted.
+- 71 validator rules (45 errors, 26 warnings).
+
+**Limits.** `true` and `false` parse as booleans, so an option named
+`true` or `false` is never matched by a value. Two options sets with one
+name: the first declared is read, and nothing reports the second.
+Envelope membership of an option value is the 2.1.0 `envelope-membership`
+rule, unchanged.
+
+**Files changed:** `toolchain/el_validator.py`, `toolchain/el_engine.py`
+(the helper only; no judging change), `tests/test_option_sets.py`.
+
+**Verification:** full suite 1859 → 1876 collected, 1873 passed, 0
+failures. The published-specs golden test (2.2.0-1) passes unchanged;
+static and hybrid Kripke models as before.
+
+Verifier parity: none (validator only).
