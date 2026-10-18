@@ -165,6 +165,26 @@
       ],
       "policy_values": []
     },
+    "scenarios/procurement_tender/procurement_tender_scenario.el": {
+      "parsed": true,
+      "errors": [],
+      "warnings": [
+        [
+          "W-standing-not-modelled",
+          "Standing duty 'keepPublicLiabilityA': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+        ],
+        [
+          "W-standing-not-modelled",
+          "Standing duty 'keepPublicLiabilityB': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+        ]
+      ],
+      "policy_values": [
+        [
+          "minPublicLiability",
+          "20000000 AUD"
+        ]
+      ]
+    },
     "scenarios/referral/referral_scenario.el": {
       "parsed": true,
       "errors": [],

@@ -1,7 +1,7 @@
 """
 2.2.0-1 — golden test of the published specifications.
 
-Pins, for each of the 13 shipped scenarios (scenarios/**/*.el) and the 16
+Pins, for each of the 14 shipped scenarios (scenarios/**/*.el) and the 16
 published examples (tests/examples/**/*.el):
   - whether it parses;
   - the validator's errors and warnings, in order, as (tag, message text);
@@ -40,6 +40,7 @@ PUBLISHED_FILES = [
     "scenarios/fhir/generated_governance.el",
     "scenarios/gp_referral/gp_referral_scenario.el",
     "scenarios/probes/transfer_probe.el",
+    "scenarios/procurement_tender/procurement_tender_scenario.el",
     "scenarios/referral/referral_scenario.el",
     "scenarios/specialist_pool/specialist_pool_scenario.el",
     "scenarios/terms_of_engagement/external_agent_access_scenario.el",
@@ -110,7 +111,7 @@ def _dump(data):
 
 
 def test_published_specs_unchanged():
-    assert len(PUBLISHED_FILES) == 29
+    assert len(PUBLISHED_FILES) == 30
     assert published_files(REPO_ROOT) == sorted(PUBLISHED_FILES), (
         "The set of published .el files changed; update PUBLISHED_FILES "
         "and regenerate (see the module docstring)."
