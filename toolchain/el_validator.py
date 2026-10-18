@@ -146,10 +146,12 @@ Rules implemented
         An integer is accepted for decimal/number, an interval for
         integer/decimal. An ID type is not checked.  clause to be confirmed
   calendar-date  2.1.0-2: a Date, or an Instant's date part, is a real
-        calendar date (ISO 8601).                     clause to be confirmed
+        calendar date (ISO 8601); 2.2.0-6: in a comparison's limit too.
+                                                     clause to be confirmed
   instant-valid  2.1.0-2: an Instant's time of day and UTC offset are
         in range: hour <= 23, minute <= 59, seconds only 00, offset
-        hours <= 23 and minutes <= 59, no -00:00.     clause to be confirmed
+        hours <= 23 and minutes <= 59, no -00:00; 2.2.0-6: in a
+        comparison's limit too.                       clause to be confirmed
   range-ends  2.1.0-2: a 'range of [a to b]' has ends of one kind
         (number, percentage, amount in one currency, duration, date,
         instant) and its low end is not above its high end.
@@ -160,7 +162,8 @@ Rules implemented
   comparison-type  2.1.0-13: a comparison's limit is a number,
         percentage or amount literal (an amount's code in the ISO 4217
         form), or a Policy of type integer, decimal, number, percentage or
-        amount with such a value.                    clause to be confirmed
+        amount with such a value; 2.2.0-6: or a date, instant or duration
+        literal or Policy.                           clause to be confirmed
   fact-key-clash  2.1.0-13: one fact key is read two ways: by a plain
         precondition (truthy) and by a comparison (a typed value), or by
         comparisons of different kinds or currencies. clause to be confirmed
@@ -966,6 +969,11 @@ def _validate_calendar_dates(model) -> List[str]:
                     f"[calendar-date] {_policy_label(pol)}: {where} "
                     f"{v.value} is not a calendar date. {_TYPED_CITATION}"
                 )
+    for label, cmp, where in _comparison_literals(model):   # 2.2.0-6
+        v = cmp.literal
+        if _value_kind(v) in ("date", "instant") and _calendar_date(v.value[:10]) is None:
+            errors.append(f"[calendar-date] {label}: {where} {_comparison_text(cmp)}: limit "
+                          f"{v.value} is not a calendar date. {_TYPED_CITATION}")
     return errors
 
 
@@ -983,7 +991,21 @@ def _validate_instants(model) -> List[str]:
                     f"[instant-valid] {_policy_label(pol)}: {where} {v.value} "
                     f"is not an instant: {problem}. {_TYPED_CITATION}"
                 )
+    for label, cmp, where in _comparison_literals(model):   # 2.2.0-6
+        v = cmp.literal
+        problem = _instant_problem(v.value) if _value_kind(v) == "instant" else None
+        if problem is not None:
+            errors.append(f"[instant-valid] {label}: {where} {_comparison_text(cmp)}: limit "
+                          f"{v.value} is not an instant: {problem}. {_TYPED_CITATION}")
     return errors
+
+
+def _comparison_literals(model):
+    """2.2.0-6: (label, comparison, "precondition" or "keeps") for each
+    comparison whose limit is a literal."""
+    for label, cmp, _ in _comparisons(model):
+        if getattr(cmp, "policy", None) is None and cmp.literal is not None:
+            yield label, cmp, ("keeps" if label.startswith("Standing duty") else "precondition")
 
 
 def _range_key(v):
@@ -1073,7 +1095,8 @@ def _validate_currency_codes(model) -> List[str]:
 
 # ── 2.1.0-13: comparisons and envelopes ───────────────────────────────────────
 
-_COMPARABLE_POLICY_TYPES = ("integer", "decimal", "number", "percentage", "amount")
+_COMPARABLE_POLICY_TYPES = ("integer", "decimal", "number", "percentage", "amount",
+                            "date", "instant", "duration")   # 2.2.0-6: and the time kinds
 
 
 def _precondition_holders(model):
@@ -1121,7 +1144,8 @@ def _comparison_text(cmp) -> str:
 
 def _comparison_limit_kind(cmp) -> Optional[str]:
     """2.1.0-13: "number", "percentage", "amount in <code>", or None when
-    the limit has no comparable value."""
+    the limit has no comparable value. 2.2.0-6: also "date", "instant" or
+    "duration"."""
     from el_engine import _operand
     policy = getattr(cmp, "policy", None)
     typed = getattr(policy, "initial_value", None) if policy is not None else cmp.literal
@@ -1136,7 +1160,9 @@ def _validate_comparison_types(model) -> List[str]:
     percentage or amount literal, or a Policy of a comparable type keyword
     with a comparable value; an amount's code has the ISO 4217 form (three
     upper-case letters A-Z), so "60 sec" (read as an amount with code
-    'sec'; 2.2.0-4: "60 day" is a duration) is refused."""
+    'sec'; 2.2.0-4: "60 day" is a duration) is refused. 2.2.0-6: a date,
+    instant or duration literal or Policy is accepted too; an invalid date
+    or instant is calendar-date's or instant-valid's, not reported here."""
     errors: List[str] = []
     for label, cmp, _ in _comparisons(model):
         policy = getattr(cmp, "policy", None)
@@ -1145,9 +1171,13 @@ def _validate_comparison_types(model) -> List[str]:
         if policy is not None and (getattr(policy, "policy_type", None) or "") not in _COMPARABLE_POLICY_TYPES:
             problem = (f"limit {policy.name} is a policy of type "
                        f"'{policy.policy_type}'; a comparison takes a policy of type "
-                       f"integer, decimal, number, percentage or amount")
+                       f"integer, decimal, number, percentage, amount, date, instant or "
+                       f"duration")   # 2.2.0-6
+        elif typed is not None and _value_form_fault(typed):
+            pass   # 2.2.0-6: calendar-date or instant-valid reports it
         elif _comparison_limit_kind(cmp) is None:
-            problem = f"limit {_value_text(typed) if typed is not None else '?'} is not a number, percentage or amount"
+            problem = (f"limit {_value_text(typed) if typed is not None else '?'} is not a "
+                       f"number, percentage, amount, date, instant or duration")   # 2.2.0-6
         elif _value_kind(typed) == "amount" and not re.fullmatch(r"[A-Z]{3}", typed.code):
             problem = (f"limit {_value_text(typed)} has currency code '{typed.code}', not three "
                        f"upper-case letters A-Z (ISO 4217 form); a duration's unit is "
@@ -1173,7 +1203,8 @@ def _validate_fact_key_clash(model) -> List[str]:
                 kind = _comparison_limit_kind(p)
                 if kind is None:
                     continue  # comparison-type reports it
-                key, reading = p.fact, f"{'an' if kind.startswith('amount') else 'a'} {kind}"
+                article = "an" if kind.startswith(("amount", "instant")) else "a"
+                key, reading = p.fact, f"{article} {kind}"
             uses.setdefault(key, {}).setdefault(reading, []).append(label)
     errors: List[str] = []
     for key, readings in uses.items():

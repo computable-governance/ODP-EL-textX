@@ -14,6 +14,21 @@ adheres to _[Semantic Versioning][semver]_.
   in a standing duty's `keeps`. Exact equality of the values (`"2.0" ==
   2` holds); an amount in another currency is not established. `=>`
   stays a syntax error. No 2.1.0 specification changes meaning.
+- **2.2.0-4 to 2.2.0-6 Date, instant and duration limits in comparisons.**
+  `precondition: "certificate expiry" >= 2027-06-30`, `"notified at" <=
+  2027-06-30T17:00+10:00`, `"notice given within" <= 24 hours`, or a policy
+  of type date, instant or duration. Dates by calendar day, instants by
+  moment, durations in minutes; a date is never compared with an instant.
+  A duration limit is never signed (`+60 days` is a syntax error in a
+  comparison; policy values still accept it). Invalid date or instant
+  limits are reported by `calendar-date` and `instant-valid`.
+- **Changed texts, on invalid specifications only (2.2.0-4, 2.2.0-6).**
+  `comparison-type` messages: an amount code not in ISO 4217 form now ends
+  "a duration's unit is minute, hour, day, week, month or year" (was "a
+  duration cannot be compared"); the type lists add date, instant and
+  duration. The published example
+  `tests/examples/comparisons/invalid_comparison_type.el` uses `60 sec`
+  instead of `60 day`, which is now a valid duration.
 - **2.2.0-7 to 2.2.0-9 `deadline: <Policy>`.** A token's deadline may name
   a Policy of type duration (`deadline: NoticePeriod`): the deadline is
   the policy's declared value, read-only, through one resolver

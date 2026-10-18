@@ -187,3 +187,73 @@ def test_keeps_with_a_date_limit():
     assert record.effects == (
         "breached 'duty' held by 'Supplier': 'certificate expiry' 2027-05-31 >= 2027-06-30 "
         "(Cutoff) at as_at 2027-01-01T09:00:00+10:00",)
+
+
+# ── Validator (2.2.0-6) ──────────────────────────────────────────────────
+
+_CITATION = "(clause to be confirmed)"
+
+
+def _errors(pre):
+    return _parse(pre, validate=True).errors
+
+
+@pytest.mark.parametrize("pre", [
+    '"x" >= 2027-06-30', '"x" <= 2027-06-30T17:00+10:00', '"x" <= 24 hours',
+    '"x" == 60 day', '"x" >= Cutoff', '"x" < Closes', '"x" != NoticePeriod',
+])
+def test_time_limits_accepted(pre):
+    assert _errors(pre) == []
+
+
+@pytest.mark.parametrize("pre, error", [
+    ('"x" >= 2027-02-30',
+     "[calendar-date] Action 'assess': precondition \"x\" >= 2027-02-30: limit 2027-02-30 "
+     f"is not a calendar date. {_CITATION}"),
+    ('"x" <= 2027-06-30T17:00+24:00',
+     "[instant-valid] Action 'assess': precondition \"x\" <= 2027-06-30T17:00+24:00: limit "
+     f"2027-06-30T17:00+24:00 is not an instant: not a UTC offset. {_CITATION}"),
+    ('"x" <= 2027-02-30T17:00Z',
+     "[calendar-date] Action 'assess': precondition \"x\" <= 2027-02-30T17:00Z: limit "
+     f"2027-02-30T17:00Z is not a calendar date. {_CITATION}"),
+])
+def test_invalid_literal_reported_once(pre, error):
+    """One fault, one error: comparison-type does not report it again."""
+    assert _errors(pre) == [error]
+
+
+def test_invalid_policy_date_reported_once():
+    src = _SPEC.format(pre='"x" >= Cutoff').replace("initial_value: 2027-06-30 ",
+                                                     "initial_value: 2027-02-30 ")
+    errors = _quiet(parse_string, src, validate=True).errors
+    assert errors == [f"[calendar-date] Policy 'Cutoff': initial_value 2027-02-30 is not a "
+                      f"calendar date. {_CITATION}"]
+
+
+def test_fact_key_clash_names_the_time_kinds():
+    src = """enterprise specification ClashProbe
+policy Closes : instant { initial_value: 2027-06-30T17:00+10:00 }
+party Assessor
+community C {
+    objective: "probe"
+    Assessor fills r
+    role r {
+        action assess { actor: r precondition: "when" >= 2027-06-30 }
+        action review {
+            actor: r
+            precondition: "when" <= Closes
+            precondition: "span" <= 1 day
+            precondition: "span" <= 5
+        }
+    }
+}
+"""
+    errors = _quiet(parse_string, src, validate=True).errors
+    assert errors == [
+        "[fact-key-clash] Fact 'when' is read in more than one way (a date in Action 'assess'; "
+        "an instant in Action 'review'); one reported value cannot satisfy both. Use a "
+        f"different fact key for each reading. {_CITATION}",
+        "[fact-key-clash] Fact 'span' is read in more than one way (a duration in Action "
+        "'review'; a number in Action 'review'); one reported value cannot satisfy both. Use "
+        f"a different fact key for each reading. {_CITATION}",
+    ]

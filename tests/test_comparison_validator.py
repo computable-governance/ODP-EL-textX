@@ -88,14 +88,19 @@ def test_comparable_limits(limit):
 
 
 @pytest.mark.parametrize("limit, policy_type", [
-    ("Label", "string"), ("Flag", "boolean"), ("Window", "duration"),
-    ("Cutoff", "date"), ("Tier", "TierOptions"),
-])
+    ("Label", "string"), ("Flag", "boolean"), ("Tier", "TierOptions"),
+])   # 2.2.0-6: Window (duration) and Cutoff (date) are comparable
 def test_policy_of_another_type_refused(limit, policy_type):
     assert _errors(_actions(("a", [f'"x" >= {limit}']))) == [
         f"[comparison-type] Action 'a': precondition \"x\" >= {limit}: limit {limit} is a "
         f"policy of type '{policy_type}'; a comparison takes a policy of type integer, "
-        f"decimal, number, percentage or amount. {_CITATION}"]
+        f"decimal, number, percentage, amount, date, instant or duration. {_CITATION}"]
+
+
+@pytest.mark.parametrize("limit", ["Window", "Cutoff"])
+def test_time_policy_limits_comparable(limit):
+    # 2.2.0-6: refused in 2.1.0
+    assert _errors(_actions(("a", [f'"x" >= {limit}']))) == []
 
 
 def test_sixty_sec_refused():

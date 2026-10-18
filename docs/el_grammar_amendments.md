@@ -11382,6 +11382,53 @@ unchanged from 2.2.0-4.
 Verifier parity: R11, R12, R14, R17 reworded (the limit kinds and the new
 not-established reasons); no status change.
 
+## 2.2.0-6 — date, instant and duration comparisons: validator and docs (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator and documentation.
+
+**Standard reference:** clause to be confirmed.
+
+**Now.**
+- `comparison-type` accepts a date, instant or duration literal (through
+  the engine's `_operand()`, 2.2.0-5) and a Policy of type date, instant
+  or duration. Its messages name the new kinds: `a comparison takes a
+  policy of type integer, decimal, number, percentage, amount, date,
+  instant or duration` (was `... percentage or amount`) and `is not a
+  number, percentage, amount, date, instant or duration` (was `... not a
+  number, percentage or amount`). Both appear on invalid specifications
+  only; no published file shows them.
+- `calendar-date` and `instant-valid` also check a comparison's date or
+  instant literal (`[calendar-date] Action 'assess': precondition "x" >=
+  2027-02-30: limit 2027-02-30 is not a calendar date. (clause to be
+  confirmed)`). `comparison-type` does not report the same fault again,
+  for a literal or for a policy limit whose value calendar-date or
+  instant-valid reports.
+- `fact-key-clash` names the readings "a date", "an instant", "a
+  duration".
+- `[W-standing-shared-fact]` needs no change: it compares fact keys and
+  holders, not readings.
+- Docs: DSL_TOOLCHAIN_REFERENCE "Scope of values" (the bullet that said a
+  date, instant or duration cannot be a limit), "Comparisons" (the limit
+  kinds, an example parsed and judged before it was written, the reported
+  text table, the validator), and the policy-values limitation; grammar
+  README; CONCEPTS_INDEX; CHANGELOG (with the changed texts and the
+  fixture).
+
+**Tests changed:** `tests/test_comparison_validator.py`
+(`test_policy_of_another_type_refused`: Window and Cutoff move to the new
+`test_time_policy_limits_comparable`; the message's type list) and
+`tests/test_standing_validator.py` (the same message).
+
+**Files changed:** `toolchain/el_validator.py`,
+`tests/test_time_comparisons.py`, `docs/DSL_TOOLCHAIN_REFERENCE.md`,
+`docs/CONCEPTS_INDEX.md`, `grammar/v2/README.md`, `CHANGELOG.md`.
+
+**Verification:** full suite 1834 → 1846 collected, 1843 passed, 0 failures. The published-specs golden test passes
+unchanged from 2.2.0-4.
+
+Verifier parity: none (validator and documentation only; R11, R12, R14,
+R17 were reworded in 2.2.0-5).
+
 ## 2.2.0-7 — `deadline: <Policy>`: grammar and engine (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_engine.py`)
 
 **Status:** IMPLEMENTED. Type: grammar amendment (`DeonticToken` and

@@ -43,8 +43,9 @@ Full text in `docs/DSL_TOOLCHAIN_REFERENCE.md`; each change is logged as
   wall-clock time supplied at check time, under a clock; a duration
   deadline (`"21 days"`) is counted from activation, as in 2.0.0.
 - **Comparisons in preconditions.** `precondition: "<fact>" >= <limit>`
-  (also `<=`, `>`, `<`, and from 2.2.0 `==`, `!=`), the limit a number, percentage, amount or
-  policy. There is no arithmetic.
+  (also `<=`, `>`, `<`, and from 2.2.0 `==`, `!=`), the limit a number,
+  percentage, amount or policy, and from 2.2.0 a date, instant or duration
+  literal or policy. There is no arithmetic.
 - **Policy-fed deadlines (2.2.0).** `deadline: NoticePeriod` names a
   Policy of type duration instead of quoting the duration; the deadline
   is the policy's declared value, read-only, counted as the same literal

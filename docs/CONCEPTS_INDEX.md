@@ -7371,7 +7371,8 @@ shipped scenario or published example uses it.
 
 **Definition:** `precondition: "<fact>" <op> <limit>` compares a value
 reported with the act against a number, percentage, amount or policy
-limit (`>=`, `<=`, `>`, `<`; 2.2.0 adds `==`, `!=`). No arithmetic.
+limit (`>=`, `<=`, `>`, `<`; 2.2.0 adds `==`, `!=`, and date, instant and
+duration limits). No arithmetic.
 
 **Standard:** clause to be confirmed.
 

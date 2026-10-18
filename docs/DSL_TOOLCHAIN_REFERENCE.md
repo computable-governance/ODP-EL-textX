@@ -117,11 +117,12 @@ else:
   as in 2.0.0). A policy value may also be an integer interval (`7..10`)
   or an option of a user-defined type.
 - A comparison has one reported fact, one of `>=`, `<=`, `>`, `<`, `==`,
-  `!=` (`==` and `!=` from 2.2.0), and one limit: a number, percentage or
-  amount literal, or a policy of type integer, decimal, number, percentage
-  or amount. There is no `and` or `or`, no arithmetic and no functions
-  (`and` and `+` are syntax errors), and a date, instant or duration
-  cannot be a limit. An action may carry several preconditions: all must
+  `!=` (`==` and `!=` from 2.2.0), and one limit: a number, percentage,
+  amount, date, instant or duration literal, or a policy of one of those
+  types (date, instant and duration from 2.2.0). There is no `and` or `or`,
+  no arithmetic and no functions (`and` and `+` are syntax errors; no
+  "date plus 30 days"), and a date is never compared with an instant. An
+  action may carry several preconditions: all must
   hold, and a refused act gives the reason of the first one that fails (a
   false comparison is reported before one not established). A standing
   duty's `keeps` is one comparison.
@@ -385,6 +386,35 @@ action assess {
   (`20000000 AUD`, written without digit grouping), or a Policy of type
   integer, decimal, number, percentage or amount, at its value (its
   `initial_value`; policy values are read-only).
+- From 2.2.0 the limit may also be a date (`2027-06-30`), an instant
+  (`2027-06-30T17:00+10:00`, `2027-06-30T07:00Z`) or a duration (`24
+  hours`, `60 days`), or a Policy of type date, instant or duration.
+  Dates compare by calendar day; instants by moment (`17:00+10:00` equals
+  `07:00Z`); durations in minutes, through the deadline unit table (a
+  30-day month, a 365-day year), so `1 day <= 24 hours` holds and `1
+  month <= 24 hours` fails. A duration limit is a whole number and a unit,
+  never signed (`+60 days` and `-60 days` are syntax errors in a
+  comparison; a policy's duration value still accepts `+5 days`, as in
+  2.1.0). `60 sec` is not a duration (sec is not a unit): it reads as an
+  amount and is refused by `comparison-type`.
+
+```
+policy NoticePeriod : duration { initial_value: 24 hours }
+
+action renew {
+    actor: assessorRole
+    precondition: "certificate expiry" >= 2027-06-30
+    precondition: "notified at" <= 2027-06-30T17:00+10:00
+    precondition: "notice given within" <= NoticePeriod
+}
+```
+
+With `{"certificate expiry": "2027-07-01", "notified at":
+"2027-06-30T07:00Z", "notice given within": "25 hours"}` the act is
+refused: `precondition not satisfied: 'notice given within' 25 hours <= 24
+hours (NoticePeriod)`. A date reported where an instant is the limit, or
+the reverse, is not established (`reported 2027-07-01T09:00+10:00: not a
+date value`).
 - Only on actions. Step preconditions are not enforced by any engine path,
   so a comparison in a step is the error `comparison-in-step`.
 
@@ -408,6 +438,9 @@ in the notation of the 2.1.0 values (source standard to be confirmed):
 | number | `-?digits` or `-?digits.digits`, ASCII | `"25000000"`, `"5.50"` |
 | percentage | the number then `%`, no space | `"8.5%"` |
 | amount | the number, one space, three upper-case letters | `"25000000.00 AUD"` |
+| date (2.2.0) | `YYYY-MM-DD`, a calendar date | `"2027-06-30"` |
+| instant (2.2.0) | the 2.1.0 Instant notation, with a UTC offset | `"2027-06-30T17:00+10:00"`, `"2027-06-30T07:00Z"` |
+| duration (2.2.0) | a whole number, one space, a unit (minute to year, singular or plural) | `"24 hours"`, `"1440 minutes"` |
 
 At most 100 characters. A number limit accepts a decimal report
 (`"5.50" >= 5`). Amounts are compared only within one currency, never
@@ -449,8 +482,11 @@ when its fact is truthy in Python, so the strings `"false"`, `"no"` and
 `"0"` pass, and `False`, `0` and `""` do not. Send real booleans.
 
 **Validator.** Errors: `comparison-type` (the limit is a number,
-percentage or amount, an amount code in ISO 4217 form, or a policy of a
-comparable type; `"x" <= 60 day` is refused), `fact-key-clash` (one fact
+percentage, amount, date, instant or duration, an amount code in ISO 4217
+form, or a policy of a comparable type; `"x" <= 60 sec` is refused, with
+"a duration's unit is minute, hour, day, week, month or year"; from 2.2.0
+`"x" <= 60 day` is a duration), `calendar-date` and `instant-valid` (from
+2.2.0 also on a comparison's date or instant limit), `fact-key-clash` (one fact
 read two ways), `comparison-in-step`, `envelope-currency` (an amount
 initial value with envelope amounts in another currency) and
 `envelope-membership` (the initial value inside every envelope rule). The
@@ -967,7 +1003,8 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - `-0` reads as the integer `0` (the sign is lost); `-0.0` keeps its sign
 - Leading zeros are accepted (`007` is `7`)
 - Durations and integer intervals still accept a leading `+` (`+5 days`,
-  `+1..3`); plain numbers do not
+  `+1..3`) as policy values; plain numbers do not, and neither does a
+  duration limit in a comparison (2.2.0)
 - Envelopes are checked by the validator only: an `initial_value` outside
   its envelope is an error (`envelope-membership`), and so is an amount in
   another currency than the envelope's (`envelope-currency`). No engine or

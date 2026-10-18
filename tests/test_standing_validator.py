@@ -148,7 +148,8 @@ def test_invalid_term_ends(end, problem):
                       "A-Z (ISO 4217 form); a duration's unit is minute, hour, day, week, "
                       "month or year"),
     ('"x" >= Label', "limit Label is a policy of type 'string'; a comparison takes a policy "
-                     "of type integer, decimal, number, percentage or amount"),
+                     "of type integer, decimal, number, percentage, amount, date, instant or "
+                     "duration"),
 ])
 def test_keeps_comparison_type(keeps, problem):
     errors = _result(f"burden duty {{ standing keeps: {keeps} ends_at: ContractEnd "
