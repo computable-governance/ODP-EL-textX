@@ -11359,3 +11359,41 @@ Verifier parity: R19 added, Mirrored; R1 back to Mirrored (the
 policy-fed deadline is no longer absent) and R10 reworded (a policy-fed
 deadline is read from the specification, never from
 `WorldState.policy_values`).
+
+## 2.2.0-9 — `deadline: <Policy>`: validator and docs (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator rule and documentation.
+
+**Standard reference:** clause to be confirmed.
+
+**Now.**
+- New error `deadline-policy-type`: a Policy named in a deadline slot
+  (top-level or role-scoped token) is of type duration, with a usable
+  value (a whole number of a unit, not negative): `[deadline-policy-type]
+  Token 'notice': deadline NoticePeriod is a policy of type 'date'; it must
+  be of type duration. (clause to be confirmed)`. Such a token has no
+  measurable deadline.
+- The deadline warnings read the deadline through `deadline_text()` (via
+  `_token_deadline()`): `[W-19]`, `[W-24]`, `[W-25]` and the three
+  date-deadline warnings. A duration policy gives the same messages as the
+  same literal duration; the W-24 raised for it in 2.2.0-7 is gone. A
+  policy that gives no deadline reads as no deadline.
+- `standing-fields` counts a policy-fed deadline as a deadline.
+- 69 validator rules (43 errors, 26 warnings).
+- Docs: DSL_TOOLCHAIN_REFERENCE "Deadlines" (a duration policy, with an
+  example parsed and run before it was written) and the rule counts and
+  the policy-values limitation; grammar README; CONCEPTS_INDEX "Policy-fed
+  deadlines (2.2.0)"; CHANGELOG.
+
+**Limits.** Duration policies only; date and instant deadline policies
+are not supported. No warning when a policy gives a deadline to no token,
+or when one policy feeds several tokens.
+
+**Files changed:** `toolchain/el_validator.py`,
+`tests/test_policy_deadline.py`, `docs/DSL_TOOLCHAIN_REFERENCE.md`,
+`docs/CONCEPTS_INDEX.md`, `grammar/v2/README.md`, `CHANGELOG.md`.
+
+**Verification:** full suite 1783 → 1790 collected, 1787 passed, 0 failures. The published-specs golden test
+(2.2.0-1) passes unchanged.
+
+Verifier parity: none (validator and documentation only).

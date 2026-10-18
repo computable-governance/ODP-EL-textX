@@ -45,6 +45,10 @@ Full text in `docs/DSL_TOOLCHAIN_REFERENCE.md`; each change is logged as
 - **Comparisons in preconditions.** `precondition: "<fact>" >= <limit>`
   (also `<=`, `>`, `<`, and from 2.2.0 `==`, `!=`), the limit a number, percentage, amount or
   policy. There is no arithmetic.
+- **Policy-fed deadlines (2.2.0).** `deadline: NoticePeriod` names a
+  Policy of type duration instead of quoting the duration; the deadline
+  is the policy's declared value, read-only, counted as the same literal
+  duration would be.
 - **Standing duties.** `burden X { standing keeps: <comparison>
   ends_at: <date, instant or policy> ended_by: <event> ... }`: a burden
   kept for a term and judged at each check.

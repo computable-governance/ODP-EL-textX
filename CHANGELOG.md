@@ -14,6 +14,13 @@ adheres to _[Semantic Versioning][semver]_.
   in a standing duty's `keeps`. Exact equality of the values (`"2.0" ==
   2` holds); an amount in another currency is not established. `=>`
   stays a syntax error. No 2.1.0 specification changes meaning.
+- **2.2.0-7 to 2.2.0-9 `deadline: <Policy>`.** A token's deadline may name
+  a Policy of type duration (`deadline: NoticePeriod`): the deadline is
+  the policy's declared value, read-only, through one resolver
+  (`el_engine.deadline_text()`) in the engine, both verifier builders and
+  the validator's deadline warnings. Violation lines name the policy
+  (`(policy NoticePeriod = 24 hours)`). New error `deadline-policy-type`.
+  Parity row R19 added.
 
 ## [2.1.0] - 2026-10-17
 

@@ -7347,6 +7347,26 @@ are not judged by deadline).
 
 ---
 
+## Policy-fed deadlines (2.2.0)
+
+**Definition:** `deadline: <Policy>` names a Policy of type duration as a
+token's deadline; the deadline is the policy's declared value
+(read-only), counted from activation as a literal duration is.
+
+**Standard:** clause to be confirmed.
+
+**Toolchain status:** implemented (2.2.0-7 to 2.2.0-9). One resolver,
+`el_engine.deadline_text()`, read by the engine, both verifier builders
+and the validator's deadline warnings; violation lines name the policy.
+Error `deadline-policy-type`. Parity rows R1, R10 and R19: the verifier
+reads the declared value from the specification, never
+`WorldState.policy_values`.
+
+**Demonstrated in:** tests only (`tests/test_policy_deadline.py`). No
+shipped scenario or published example uses it.
+
+---
+
 ## Comparisons in preconditions (2.1.0)
 
 **Definition:** `precondition: "<fact>" <op> <limit>` compares a value

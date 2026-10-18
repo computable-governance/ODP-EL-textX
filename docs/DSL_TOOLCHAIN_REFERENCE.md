@@ -12,7 +12,7 @@ ComputableGovernance stack. Intended as project context for future sessions.
 ```
 el_grammar.tx     — textX grammar defining the DSL syntax
 el_parser.py      — loads grammar, parses .el files, invokes validator
-el_validator.py   — 68 rules (42 errors, 26 warnings) checked at specification time
+el_validator.py   — 69 rules (43 errors, 26 warnings) checked at specification time
 el_reasoner.py    — governance queries over the static model
 el_kripke.py      — Layer 4 Kripke semantics (modal obligation verification)
 example.el        — payment processing scenario exercising all constructs
@@ -25,9 +25,9 @@ example.el        — payment processing scenario exercising all constructs
 ### What it does
 
 Runs at **specification time**, before any execution. Takes a parsed DSL-EL
-model and checks it against 68 rules: 42 errors and 26 warnings (tags
+model and checks it against 69 rules: 43 errors and 26 warnings (tags
 beginning `[W-`). Each rule in the table below is traced to a clause of
-ISO/IEC 15414:2015; the rules added in 2.1.0 end "(clause to be
+ISO/IEC 15414:2015; the rules added in 2.1.0 and 2.2.0 end "(clause to be
 confirmed)". Analogous to a compiler's semantic phase — the grammar
 checks syntax, the validator checks meaning.
 
@@ -79,6 +79,9 @@ Added in 2.1.0 (20):
   `[W-strict-precondition]` (see "Comparisons"); `[W-standing-no-end]`,
   `[W-standing-shared-fact]`, `[W-standing-not-modelled]` (see "Standing
   duties").
+
+Added in 2.2.0 (1):
+- Error: `deadline-policy-type` (see "Deadlines").
 
 ### Usage
 
@@ -246,6 +249,38 @@ event E", write a burden with `state: pending`, `triggered_by: E` and
 `deadline: "N days"`. `check_live_violations()` violates an eventual burden
 when the tick minus its activation tick reaches the duration. This is
 unchanged from v2.0.0.
+
+**A duration policy (2.2.0).** The deadline may name a Policy of type
+duration instead of quoting the duration (source standard to be
+confirmed):
+
+```
+policy NoticePeriod : duration { initial_value: 24 hours }
+
+burden notice {
+    for_action: "giveNotice"
+    state: active
+    deadline: NoticePeriod
+}
+```
+
+- The deadline is the policy's declared `initial_value`, read-only, and
+  is then counted exactly as the same duration written as a literal
+  (`deadline: "24 hours"`). Top-level and role-scoped tokens.
+- One resolver, `el_engine.deadline_text()`, gives every reader the
+  deadline text: the engine, both verifier builders and the validator's
+  deadline warnings. `TokenInstance.deadline` holds the resolved text
+  (`"24 hours"`).
+- Violation lines name the policy: `violated 'notice' held by 'Supplier'
+  (elapsed 1440 >= deadline 1440 steps) (policy NoticePeriod = 24 hours)`,
+  and the same suffix on a declared violation.
+- A policy of another type, or with a negative value (`-5 days`), gives
+  no measurable deadline and is the error `deadline-policy-type`
+  (`deadline NoticePeriod is a policy of type 'date'; it must be of type
+  duration`). An undeclared name is a reference error at parse time.
+- The verifier reads the same declared value from the specification,
+  never `WorldState.policy_values` (`docs/ENGINE_VERIFIER_PARITY.md`, rows
+  R10 and R19). A standing duty takes no deadline (`standing-fields`).
 
 **A date.** A deadline that is a date alone, `"by 2026-11-30"`, or a date
 and time with a UTC offset, `"2026-11-30T17:00+10:00"` or
@@ -719,7 +754,7 @@ if conflicts:
 Specification (.el file)
         │
         ▼
-   el_parser.py  ──► el_validator.py (68 rules)
+   el_parser.py  ──► el_validator.py (69 rules)
         │                    │
         │            errors and warnings
         │
@@ -940,8 +975,10 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - `5 sec` gets no "if you meant a duration" hint: there is no seconds
   unit to suggest
 - Policy values are read-only. The engine reads a policy's typed
-  `initial_value` from the specification as a comparison limit and as a
-  standing duty's `ends_at`; the verifier does not read policy values.
+  `initial_value` from the specification as a comparison limit, as a
+  standing duty's `ends_at` and, 2.2.0, as a policy-fed deadline; the
+  verifier reads a policy's declared value only as a policy-fed deadline
+  (R19), never `WorldState.policy_values`.
   The text copy seeded into `WorldState.policy_values` is read by nothing
   in the toolchain. The superseded gp_referral API builder does not seed it
 - A NormativePolicy's value is checked but not seeded

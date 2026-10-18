@@ -206,3 +206,68 @@ def test_hybrid_reads_the_declared_value_not_policy_values():
                                          policy_values=(("NoticePeriod", "1 minute"),))
     after = _summary(_quiet(build_kripke_from_runtime, runtime, horizon=_HORIZON))
     assert before == after
+
+
+# ── Validator (2.2.0-9) ──────────────────────────────────────────────────
+
+def _messages(**kw):
+    result = _quiet(parse_string, _src(**kw), validate=True)
+    assert result.model is not None, result.errors
+    return result.errors, result.warnings
+
+
+def _deadline_warnings(warnings):
+    tags = ("[W-19]", "[W-24]", "[W-25]", "[W-deadline-")
+    return [w for w in warnings if w.startswith(tags)]
+
+
+@pytest.mark.parametrize("mode", ["", "discharge_mode: strict"])
+def test_duration_policy_reads_as_the_literal(mode):
+    """The same errors and warnings as the literal, apart from the
+    deadline warnings, which are silent for both."""
+    policy, literal = _messages(mode=mode), _messages(deadline='"24 hours"', mode=mode)
+    assert policy == literal
+    assert _deadline_warnings(policy[1]) == []
+
+
+@pytest.mark.parametrize("kw, problem", [
+    ({"ptype": "date", "value": "2027-06-30"},
+     "is a policy of type 'date'; it must be of type duration"),
+    ({"ptype": "integer", "value": "5"},
+     "is a policy of type 'integer'; it must be of type duration"),
+    ({"value": "-5 days"},
+     "has value -5 days, not a usable duration (a whole number of a unit, not negative)"),
+])
+def test_deadline_policy_type(kw, problem):
+    errors, warnings = _messages(**kw)
+    assert [e for e in errors if e.startswith("[deadline-policy-type]")] == [
+        f"[deadline-policy-type] Token 'notice': deadline NoticePeriod {problem}. "
+        f"(clause to be confirmed)"]
+    # As for a token with no deadline: W-24 says it is never violated.
+    assert any(w.startswith("[W-24] Eventual burden 'notice' has no enforceable deadline (none)")
+               for w in warnings)
+
+
+def test_inline_token_checked():
+    src = """enterprise specification InlineProbe
+policy Cutoff : date { initial_value: 2027-06-30 }
+community C {
+    objective: "o"
+    role r { burden inlineNotice { state: active deadline: Cutoff } }
+}
+"""
+    errors = _quiet(parse_string, src, validate=True).errors
+    assert "[deadline-policy-type] Token 'inlineNotice': deadline Cutoff is a policy of type " \
+           "'date'; it must be of type duration. (clause to be confirmed)" in errors
+
+
+def test_standing_duty_refuses_a_policy_deadline():
+    src = """enterprise specification StandingProbe
+policy NoticePeriod : duration { initial_value: 24 hours }
+policy MinimumCover : amount { initial_value: 20000000 AUD }
+party Supplier { holds keepCover }
+burden keepCover { standing keeps: "insurance cover" >= MinimumCover state: active deadline: NoticePeriod }
+"""
+    errors = _quiet(parse_string, src, validate=True).errors
+    assert ("[standing-fields] Standing duty 'keepCover': it has a deadline; its term is set "
+            "by ends_at or ended_by. (clause to be confirmed)") in errors

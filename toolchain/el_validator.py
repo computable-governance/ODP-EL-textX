@@ -191,6 +191,9 @@ Rules implemented
   W-standing-not-modelled  2.1.0-20: every standing duty: the verifier
         does not model its term end or breach; the status route gives no
         verdict for it. Advisory.                    clause to be confirmed
+  deadline-policy-type  2.2.0-9: a Policy in a deadline slot is of type
+        duration, with a usable value (a whole number of a unit, not
+        negative).                                   clause to be confirmed
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -337,6 +340,9 @@ def validate_spec(model) -> List[str]:
     errors.extend(_validate_standing_no_end(model))
     errors.extend(_validate_standing_shared_fact(model))
     errors.extend(_validate_standing_not_modelled(model))   # 2.1.0-20
+
+    # 2.2.0-9 — policy-fed deadlines (clause to be confirmed)
+    errors.extend(_validate_deadline_policy_type(model))
 
     # V-14 — PolicyRef targets in communities
     for community in all_communities.values():
@@ -1353,7 +1359,7 @@ def _validate_standing_fields(model) -> List[str]:
             problems.append("it is strict; a standing duty must be eventual")
         if el.state not in ("active", "pending"):
             problems.append(f"its state is '{el.state}'; it must be active or pending")
-        if getattr(el, "deadline", None):
+        if getattr(el, "deadline", None) or getattr(el, "deadline_policy", None) is not None:
             problems.append("it has a deadline; its term is set by ends_at or ended_by")
         if getattr(el, "discharged_by", None) is not None:
             problems.append("it has discharged_by; only its term end ends it")
@@ -1409,6 +1415,38 @@ def _validate_term_end_type(model) -> List[str]:
         if problem is not None:
             errors.append(f"[term-end-type] Standing duty '{el.name}': {problem}. "
                           f"{_TYPED_CITATION}")
+    return errors
+
+
+def _validate_deadline_policy_type(model) -> List[str]:
+    """deadline-policy-type (2.2.0-9): a Policy named in a deadline slot
+    (`deadline: <Policy>`, top-level or role-scoped token) is of type
+    duration, and its value is a usable duration (el_engine.deadline_text()
+    reads it); otherwise the token has no measurable deadline."""
+    from el_engine import deadline_text
+
+    tokens = list(_collect(model, "DeonticToken"))
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            tokens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                          if _cls(t) == "InlineToken")
+    errors: List[str] = []
+    for tok in tokens:
+        pol = getattr(tok, "deadline_policy", None)
+        if pol is None:
+            continue
+        ptype = getattr(pol, "policy_type", "") or ""
+        if ptype != "duration":
+            problem = f"is a policy of type '{ptype}'; it must be of type duration"
+        elif deadline_text(tok) is None:
+            problem = (f"has value {_value_text(getattr(pol, 'initial_value', None))}, "
+                       f"not a usable duration (a whole number of a unit, not negative)")
+        else:
+            continue
+        errors.append(f"[deadline-policy-type] Token '{tok.name}': deadline {pol.name} "
+                      f"{problem}. {_TYPED_CITATION}")
     return errors
 
 
@@ -2120,6 +2158,14 @@ def _validate_embargo_for_action_consistency(model) -> List[str]:
     return warnings
 
 
+def _token_deadline(tok) -> Optional[str]:
+    """2.2.0-9: a token's deadline as the engine and the verifier read it
+    (el_engine.deadline_text(): a literal, or a duration policy's declared
+    value), None for none."""
+    from el_engine import deadline_text
+    return deadline_text(tok) or None
+
+
 def _strict_burdens(model) -> List[Any]:
     """AM-103: every discharge_mode: strict Burden — top-level DeonticTokens
     and role-scoped InlineTokens (AM-24; P3 places them in role.holds_tokens)."""
@@ -2151,7 +2197,7 @@ def _validate_strict_burden_deadline(model) -> List[str]:
 
     warnings: List[str] = []
     for tok in _strict_burdens(model):
-        deadline = getattr(tok, "deadline", None) or None
+        deadline = _token_deadline(tok)   # 2.2.0-9: through the resolver
         if _has_deadline_magnitude(deadline):
             continue
         if deadline is None:
@@ -2430,7 +2476,7 @@ def _validate_unviolatable_eventual_burden(model) -> List[str]:
             continue
         if getattr(tok, "standing", False):
             continue  # 2.1.0-19: a standing duty is breached at a check, met at its term end
-        deadline = getattr(tok, "deadline", None) or None
+        deadline = _token_deadline(tok)   # 2.2.0-9: through the resolver
         if _has_deadline_magnitude(deadline) or tok.name in concludable:
             continue
         if _read_date_deadline(deadline)[0] is not None:
@@ -2472,7 +2518,7 @@ def _validate_deadline_without_unit(model) -> List[str]:
     for tok in tokens:
         if getattr(tok, "kind", None) != "burden":
             continue
-        deadline = getattr(tok, "deadline", None) or None
+        deadline = _token_deadline(tok)   # 2.2.0-9: through the resolver
         if not deadline or not any(c.isdigit() for c in deadline):
             continue
         if _has_deadline_magnitude(deadline):
@@ -2536,7 +2582,7 @@ def _validate_date_deadlines(model) -> List[str]:
 
     warnings: List[str] = []
     for tok in _deadline_burdens(model):
-        deadline = getattr(tok, "deadline", None) or None
+        deadline = _token_deadline(tok)   # 2.2.0-9: through the resolver
         if not deadline:
             continue
         if _DATE_SHAPE_RE.search(deadline):
