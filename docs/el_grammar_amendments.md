@@ -12162,3 +12162,36 @@ verdict changes).
 comments only).
 
 Verifier parity: none (docs only).
+## 2.2.1-1 — T5 requires every permit the action requires (`toolchain/el_kripke.py`)
+
+**Status:** IMPLEMENTED. Type: verifier.
+
+**Before.** The engine's Step 6 performs an action only when the actor
+holds every permit its `requires_permit` clauses name, each active. T6
+(examine) read the whole list in both builders, but T5 (exercise) checked
+only the permit being exercised. For an action requiring permits `p` and
+`q`, a model with `p` held and `q` not granted, pending, or held by another
+actor had an `exercise:p` edge the engine refuses ("required permit 'q'
+not held by actor"): `EF occurred:<action>` true where the engine never
+performs it.
+
+**Now.** T5 in both builders requires every permit in the action's
+requirement list (`_build_permit_requirement_index()`), each held by the
+exercising permit's holder; in hybrid mode each also active in the world
+(`_permit_active()`), so the edge follows revocation and reinstatement.
+Static permits do not change state and are already filtered to active
+permits, as static T6 reads them. An action with no `requires_permit` is
+unaffected. Embargo checks and T6 are unchanged.
+
+**Limit.** The model keeps one holder per permit name, as T6 already did:
+a permit name held by two actors is read as held by one of them only.
+
+**Files changed:** `toolchain/el_kripke.py`,
+`docs/ENGINE_VERIFIER_PARITY.md`, `tests/test_t5_required_permits.py`.
+
+**Verification:** full suite 1902 → 1916 collected, 1899 → 1913 passed,
+0 failures. The published-specs golden test (2.2.0-1) passes unchanged;
+static models of the 29 published files and hybrid models of the six API
+scenarios: the same world and edge counts and AF/EF verdicts as before.
+
+Verifier parity: R26 added, Mirrored (was Over: T5 in both builders checked only the exercised permit; T6 already checked every required permit).

@@ -7,7 +7,7 @@ abstracts it or leaves it out. **Update this table in the same commit as
 any change to an engine rule or a Kripke rule**, so that it does not drift
 from the code. Started in 2.1.0-5 with the rows about deadlines, the clock
 and policy values; preconditions added in 2.1.0-12, standing duties in
-2.1.0-17, policy-fed deadlines in 2.2.0-8, token events and violation records (unreleased). Other parts of the engine are not yet listed.
+2.1.0-17, policy-fed deadlines in 2.2.0-8, token events and violation records (unreleased; rows R20 to R25), the permit check in 2.2.1-1 (row R26). Other parts of the engine are not yet listed.
 
 **Conventions**
 - *Static* is `build_kripke_model()` (before execution). *Hybrid* is
@@ -54,3 +54,4 @@ and policy values; preconditions added in 2.1.0-12, standing duties in
 | R25 | A refusal in `Runtime.advance()` at Step 5 (an active embargo the actor holds covers the action) or Step 6 (a required permit not held) is also recorded as a `ViolationRecord` with source `refused_attempt` (2.3.0-8): kind `embargo` or `permit_requirement`, violator the actor, at the current step, declared by `system`; one per identity, so a repeat at the same step adds none. The keyword `record_refused_attempts` is off by default in `el_engine.advance()`; no other refusal, nor `claim()`, `decline()` or a declarer's refusal, is recorded. The reason, `blocked_by`, tokens and tick are unchanged | Absent: neither builder has blocked transitions or permit and embargo violations; the hybrid builder reads only `discharged` and the token states, which a refused attempt does not change | Absent | Under, as R22: no path speaks about refused attempts; no burden's AF or EF changes (pinned by `tests/test_refused_attempt_records.py`: the same worlds, edges and initial obligations before and after a refused attempt, in both builders) |
 
 Under R20: `Runtime.in_force_at()` and `Runtime.token_states_at()` are queries over the token events of `Runtime.history()`, not engine rules. No engine or verifier rule reads them.
+| R26 | An action is performed only when the actor holds every permit its `requires_permit` clauses name, each active (`advance()` Step 6) | T5 (exercise) and T6 (examine), both builders: every required permit active and held by the same holder (2.2.1-1). Before, T6 checked every required permit and T5 only the permit being exercised: "T6 mirrored; T5 abstracted", Over (EF falsely true, AF falsely false) | Mirrored | Under, one case: the model keeps one holder per permit name, so a permit name held by two actors is read as held by one of them only |

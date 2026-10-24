@@ -557,9 +557,9 @@ def _build_permit_requirement_index(model: Any) -> Dict[str, List[str]]:
 
     Deliberately returns a LIST per action, not a single name: the
     grammar permits more than one requires_permit clause on an Action
-    (ActionBodyItem is a *=-collected alternation with no cap), even
-    though no current scenario declares more than one. T6 must check
-    that ALL listed permits are active, not just one.
+    (ActionBodyItem is a *=-collected alternation with no cap), so an
+    action may require several permits. T5 and T6 must check all: every
+    listed permit active and held by the actor, not just one.
     """
     index: Dict[str, List[str]] = {}
     for el in model.elements:
@@ -3179,6 +3179,15 @@ def build_kripke_model(model: Any, horizon: int = 10,
                 descriptors, action_emits_index, action_destroys_index,
             ):
                 continue
+            # Every permit the action requires, held by this holder: the
+            # engine's Step 6, read as T6 reads it (permit_descriptors is
+            # already filtered to active permits).
+            if not all(
+                permit_descriptors.get(p) is not None
+                and permit_descriptors[p].holder == pdesc.holder
+                for p in permit_requirement_index.get(pdesc.for_action, [])
+            ):
+                continue
             if pdesc.for_action in current_occurred:
                 # Already occurred in this world — mirrors T1's implicit
                 # "not PENDING → skip" guard: nothing left for this rule to
@@ -4345,6 +4354,15 @@ def build_kripke_from_runtime(runtime: Any, horizon: int,
             # genuinely superseded per-world (e.g. mid-revoke, before any
             # T8 reinstate). Same helper T6 uses, same two-tier fallback.
             if not _permit_active(w, permit_id):
+                continue
+            # Every permit the action requires, active and held by this
+            # holder: the engine's Step 6, read as T6 reads it.
+            if not all(
+                _permit_active(w, p)
+                and permit_descriptors.get(p) is not None
+                and permit_descriptors[p].holder == pdesc.holder
+                for p in permit_requirement_index.get(pdesc.for_action, [])
+            ):
                 continue
 
             if embargo_blocks(w, pdesc.holder, pdesc.for_action):  # AM-99b, AM-102
