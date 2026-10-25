@@ -867,6 +867,7 @@ TokenOp : 'create' | 'destroy' | 'transfer' | 'activate' | 'pend' | 'clone' ;
  * ConditionalAction — §6.4.6
  * An action whose occurrence depends on the deontic state of participants.
  */
+// Parsed but not read; see Conditional actions in docs/DSL_TOOLCHAIN_REFERENCE.md.
 ConditionalAction:
     'conditional_action' name=ID '{'
         (description=DescriptionAttr)?

@@ -108,6 +108,28 @@ else:
         print(err)
 ```
 
+### Conditional actions
+
+In the standard's sense (§6.4.6) a conditional action is an action whose
+performance depends on the tokens its participants hold: permits it
+requires, burdens that favour it, embargoes that inhibit it. In this
+toolchain that is an ordinary role `action` with `requires_permit` and
+`inhibited_by_embargo` lines. The engine refuses it to a performer who
+does not hold every required permit, or who holds an active embargo
+covering it. A burden favours it through its `for_action` (or, for a
+burden with no `for_action`, an action that names it with
+`favoured_by_burden`). The reasoner's `can_perform()` reads the same
+`requires_permit` and `inhibited_by_embargo` lines; it does not read
+favouring burdens.
+
+Two forms are accepted but not acted on (see "Found by running contract
+clauses" under [Known Limitations and Open
+Issues](#known-limitations-and-open-issues)):
+- the `conditional_action` keyword is parsed and its token names are
+  resolved, but nothing reads it;
+- `requires_permit <permit> for <role>` is parsed and the role stored, but
+  the performer's own permit is checked.
+
 ---
 
 ## Typed policy values (2.1.0)
@@ -1109,7 +1131,7 @@ for chain in chains:
 Implements §6.4.6 conditional action semantics:
 - Actor must hold required permits (requires_permit declarations)
 - Actor must NOT hold active embargos for the action (inhibited_by_embargo)
-- Burdens do not block but favouring burdens are noted
+- Burdens do not block; favouring burdens are not read (see Conditional actions)
 
 **Important limitation:** This is a *static* check against declared token
 holdings in ObjectDecl bodies. Runtime token state changes (via speech acts)
@@ -1230,11 +1252,38 @@ working toolchain connected to a real ODP-EL grammar and parser.
 
 R is built **from the DSL-EL delegation structure alone** — obligations,
 deadlines, and actor assignments generate the full branching tree of possible
-futures. Three transition rules expand the model from the initial world:
-- **T1 DISCHARGE** — active holder performs the obligated action → DISCHARGED
-- **T2 VIOLATION** — deadline steps elapsed, obligation still PENDING → VIOLATED
-- **T3 TICK**      — time passes (suppressed if any strict obligation is pending
-                     and its holder is active)
+futures.
+
+The engine (`el_engine.py`) executes acts on a live ledger, and its rules
+decide what is allowed and what happens next. The verifier cannot run every
+possible future for real, so it carries simplified copies of those rules: the
+transition rules below. The static builder applies them to the specification
+alone; the hybrid builder applies them to the engine's live state. Because
+they are separate copies, each can differ from the engine and from the other.
+`docs/ENGINE_VERIFIER_PARITY.md` records each difference and its direction:
+over (the verifier admits behaviour the engine refuses) or under (it omits
+behaviour the engine allows).
+
+These transition rules expand the model from the initial world
+(static = `build_kripke_model()`, hybrid = `build_kripke_from_runtime()`);
+[`docs/KRIPKE_TRANSITION_RULES.md`](KRIPKE_TRANSITION_RULES.md) has the
+detail and the guards:
+
+| Rule | Name | In one line | Builder |
+|------|------|-------------|---------|
+| T1  | Discharge | an active holder performs the obligated action → DISCHARGED | both |
+| T2  | Deadline Expiry (Violate) | an enforceable deadline elapses with the obligation PENDING → VIOLATED | both |
+| T2b | Episode Conclusion (Violate) | an eventual obligation with no enforceable deadline, once its token group is settled without it (the members' states already satisfy the group's condition) → VIOLATED | both |
+| T3  | Tick | time passes (suppressed while a strict obligation is pending and its holder is active) | both |
+| T4  | Delegation Revoke | a revocable burden-transferring delegation is revoked; the burden falls back to the delegator | hybrid |
+| T5  | Exercise | a usable permit's action occurs, firing the event it emits, if any | both |
+| T6  | Examine (permit-gated discharge) | an obligation whose action requires a permit is discharged while the permit is active | both |
+| T7  | Authorization Revoke | the granted permit is superseded and the revocation embargo activated | hybrid |
+| T8  | Authorization Reinstate | the permit is reactivated and the revocation embargo lifted | hybrid |
+| T9  | Transfer | an action's `effect transfer` moves a burden to the actor filling the target role | hybrid |
+| T10 | Delegation Reinstate | the reverse of T4 | hybrid |
+| T11 | Event Firing | an action that requires no permit emits an event that activates waiting obligations (a waiting obligation is declared, with its trigger not yet fired) | both |
+| C1  | Claim | a claimable pool obligation the holder accepted becomes PENDING; its siblings lapse | static |
 
 An optional **hybrid mode** (implemented as `build_kripke_from_runtime` in `el_kripke.py`) allows the Layer 3
 ledger to anchor the initial world and prune unreachable branches.
