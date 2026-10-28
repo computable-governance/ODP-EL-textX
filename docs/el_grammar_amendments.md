@@ -12036,3 +12036,42 @@ log range).
 only).
 
 Verifier parity: none (docs only).
+
+## 2.3.0-7 — refused attempts: a record's identity holds its source (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine.
+
+**Standard reference:** §6.3.8 (violation), §7.8.6 NOTE 2 (responses to
+violations).
+
+**Before.** A violation record's identity was (rule, violator, behaviour,
+occurred_at). A declaration of an occurrence already recorded as a refused
+attempt would have been refused as already recorded (open finding of
+2026-10-28).
+
+**Now.**
+- `ViolationRecord.occurrence` is (rule, violator, behaviour,
+  occurred_at); `ViolationRecord.identity` is the occurrence and the
+  `source`.
+- `declare_breach()` refuses only an occurrence already declared (same
+  identity); the refusal text is unchanged. A declaration of an occurrence
+  recorded as a refused attempt is accepted as a second record (`source:
+  declared`), with one effect line after the declaration line: `confirms
+  the refused attempt recorded at step N`.
+- `fire_violation_responses()`: the marker key is (response,) +
+  occurrence, the same five items as in 2.3.0-4. A response fires once
+  per occurrence, not once per record: with `also_on_refused_attempts:
+  true` it fires on the refused attempt and not again on its declaration;
+  without it, it fires on the declaration. This is a deliberate choice.
+- Nothing produces a `refused_attempt` record yet (2.3.0-8).
+
+**Files changed:** `toolchain/el_engine.py`,
+`docs/ENGINE_VERIFIER_PARITY.md` (R22, R24 wording),
+`tests/test_violation_record_identity.py` (new).
+
+**Verification:** full suite 1975 → 1981 passed, 0 failures. The
+published-specs golden test passes unchanged; existing Kripke pins pass.
+
+Verifier parity: R22 and R24 reworded (identity with source; marker on the
+occurrence); absent in both builders as before; no Kripke count or AF/EF
+verdict changes.

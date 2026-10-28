@@ -91,7 +91,8 @@ class WorldState:
     # entry per ViolationResponse fired, keyed per violated token instance —
     # fire_violation_responses()'s once-only marker. See that function.
     # 2.3.0-4: for a violation record, (response name, rule, violator,
-    # behaviour, occurred_at), five items, so never equal to an instance key.
+    # behaviour, occurred_at), five items, so never equal to an instance key;
+    # 2.3.0-7: the record's occurrence, without its source.
     responded: FrozenSet[Tuple[Any, ...]] = frozenset()
     # 2.1.0-3: each top-level Policy's value, (policy name, value text)
     # sorted by name (policy_value_text()). Seeded read-only from
@@ -189,9 +190,17 @@ class ViolationRecord:
     warnings: Tuple[str, ...] = ()      # e.g. history unknown
 
     @property
-    def identity(self) -> Tuple[str, str, str, int]:
-        """One occurrence: declaring it again is refused."""
+    def occurrence(self) -> Tuple[str, str, str, int]:
+        """2.3.0-7: what happened, whoever recorded it; a response fires once
+        per occurrence."""
         return (self.rule, self.violator, self.behaviour, self.occurred_at)
+
+    @property
+    def identity(self) -> Tuple[str, str, str, int, str]:
+        """One record: the occurrence and its source (2.3.0-7). Recording it
+        again is refused; a declaration of an occurrence recorded as a refused
+        attempt is a second record."""
+        return self.occurrence + (self.source,)
 
 
 @dataclass(frozen=True)
@@ -3462,8 +3471,11 @@ def declare_breach(
     The declarer passes, for one Action with `declares_violation_of
     token_name`, the checks declare_violation() applies (role,
     preconditions on `facts`, embargo, permit) and is not the violator.
-    The same occurrence (rule, violator, behaviour, occurred_at) is recorded
-    once; a second declaration is refused.
+    The same occurrence (rule, violator, behaviour, occurred_at) is declared
+    once; a second declaration is refused. 2.3.0-7: an occurrence recorded
+    as a refused attempt (source 'refused_attempt') may still be declared:
+    a second record, source 'declared', with the effect line 'confirms the
+    refused attempt recorded at step N'.
 
     The tick does not advance: no token changes, so the declaration is not
     governed by the strict-mode guard and does not let time pass. It fires
@@ -3558,22 +3570,27 @@ def declare_breach(
             return refuse(f"'{violator}' held permit '{token_name}' at step {occurred_at}: "
                           f"acting under it is not a violation")
 
-    identity = (token_name, violator, behaviour, occurred_at)
-    for earlier in state.violation_records:
-        if earlier.identity == identity:
-            return refuse(f"already recorded: violation of '{token_name}' by '{violator}' "
-                          f"in '{behaviour}' at step {occurred_at}, declared at step "
-                          f"{earlier.declared_at} by '{earlier.declared_by}'")
-
     record_ = ViolationRecord(
         rule=token_name, kind=kind, violator=violator, behaviour=behaviour,
         declared_by=declarer, occurred_at=occurred_at, declared_at=tick,
         source="declared", rule_holder=rule_holder, warnings=tuple(warnings),
     )
+    # 2.3.0-7: the identity holds the source, so only an earlier declaration
+    # refuses this one; a refused attempt of the occurrence is confirmed.
+    confirms: Tuple[str, ...] = ()
+    for earlier in state.violation_records:
+        if earlier.identity == record_.identity:
+            return refuse(f"already recorded: violation of '{token_name}' by '{violator}' "
+                          f"in '{behaviour}' at step {occurred_at}, declared at step "
+                          f"{earlier.declared_at} by '{earlier.declared_by}'")
+        if earlier.occurrence == record_.occurrence and not confirms:
+            confirms = (f"confirms the refused attempt recorded at step "
+                        f"{earlier.declared_at}",)
+
     effects = precondition_lines + (
         f"declared violation of {kind_text} '{token_name}' by '{violator}' in "
         f"'{behaviour}' at step {occurred_at} (declared at step {tick})",
-    ) + tuple(warnings)
+    ) + confirms + tuple(warnings)
     new_state = state.with_violation_records(state.violation_records + (record_,))
     return new_state, TransitionRecord(
         tick=tick,
@@ -4013,7 +4030,9 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     state.violation_records whose rule is VR.on_violation_of — a permit,
     embargo or permit requirement — with source 'declared', or any source
     when VR has also_on_refused_attempts. The marker key is (VR name, rule,
-    violator, behaviour, occurred_at); the effects are 1–4 above, with the
+    violator, behaviour, occurred_at), the record's occurrence (2.3.0-7):
+    one firing per occurrence, so a refused attempt and its later
+    declaration fire a flagged response once; the effects are 1–4 above, with the
     record's violator as the violator (terminate: its chain). Instances
     are taken first, then records, per response.
 
@@ -4059,7 +4078,7 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
         ]
         also_refused = getattr(vr, "also_on_refused_attempts", False)
         occurrences += [
-            ((vr.name,) + rec.identity,
+            ((vr.name,) + rec.occurrence,
              f"{_KIND_TEXT[rec.kind]} '{rec.rule}' by '{rec.violator}' in "
              f"'{rec.behaviour}' at step {rec.occurred_at}", rec.violator)
             for rec in state.violation_records
