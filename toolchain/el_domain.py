@@ -1350,7 +1350,11 @@ class ViolationResponse(_ELParentable):
     an obligation, which applies to that object."
 
     The violation response is itself a burden on the responding actor.
-    V-NEW-15: violated_burden must be a burden token (not permit/embargo).
+    violated_burden names the token whose violation fires it: a burden
+    (its token 'violated'), or, 2.3.0-4, a permit or embargo (a
+    ViolationRecord naming it, el_engine.declare_breach()). The attribute
+    keeps its name. V-NEW-15 (burden only) was never registered and no
+    longer applies.
     V-NEW-16: if response_kind is escalate, escalate_to must be a party.
     (AM-104: implemented as warning [W-23], not an error.)
     AM-104: el_engine.fire_violation_responses() reads response_kind.
@@ -1364,6 +1368,7 @@ class ViolationResponse(_ELParentable):
     burden_role:      Optional[object] = None   # AM-115: → Role (creates_burden_for_role)
     escalate_to:      Optional[object] = None   # → EnterpriseObject (party)
     revokes:          List = field(default_factory=list)  # AM-115: List[Authorization] (P13 unwraps RevokesItem)
+    also_on_refused_attempts: bool   = False    # 2.3.0-4: fire on refused_attempt records too
     description:      Optional[str]   = None
 
 

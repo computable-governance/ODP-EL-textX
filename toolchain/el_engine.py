@@ -90,7 +90,9 @@ class WorldState:
     # AM-104: one (response name, violated token name, holder, granted_at_tick)
     # entry per ViolationResponse fired, keyed per violated token instance —
     # fire_violation_responses()'s once-only marker. See that function.
-    responded: FrozenSet[Tuple[str, str, str, int]] = frozenset()
+    # 2.3.0-4: for a violation record, (response name, rule, violator,
+    # behaviour, occurred_at), five items, so never equal to an instance key.
+    responded: FrozenSet[Tuple[Any, ...]] = frozenset()
     # 2.1.0-3: each top-level Policy's value, (policy name, value text)
     # sorted by name (policy_value_text()). Seeded read-only from
     # initial_value by initial_state(spec) and Runtime; nothing sets it and
@@ -4007,6 +4009,14 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     escalate, remediate and penalise have no effect beyond 1–3 without a
     revokes list.
 
+    2.3.0-4: VR also fires once per ViolationRecord (declare_breach()) in
+    state.violation_records whose rule is VR.on_violation_of — a permit,
+    embargo or permit requirement — with source 'declared', or any source
+    when VR has also_on_refused_attempts. The marker key is (VR name, rule,
+    violator, behaviour, occurred_at); the effects are 1–4 above, with the
+    record's violator as the violator (terminate: its chain). Instances
+    are taken first, then records, per response.
+
     Tick only advances when at least one response actually fires — same
     conditional-advance pattern and poll-safety rationale as
     check_live_violations(); a no-op poll (nothing currently violated, or
@@ -4039,16 +4049,29 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
         burden_role = getattr(getattr(vr, "burden_role", None), "name", None)  # AM-115
         revokes = getattr(vr, "revokes", None) or []  # AM-115
 
-        violated = [t for t in tokens
-                    if t.token_name == violated_burden_name and t.state == "violated"]
-        for inst in violated:
-            key = (vr.name, inst.token_name, inst.holder, inst.granted_at_tick)
+        # (responded key, what was violated, violator): each violated
+        # instance, then (2.3.0-4) each violation record naming the token.
+        occurrences = [
+            ((vr.name, inst.token_name, inst.holder, inst.granted_at_tick),
+             f"'{inst.token_name}' by '{inst.holder}'", inst.holder)
+            for inst in tokens
+            if inst.token_name == violated_burden_name and inst.state == "violated"
+        ]
+        also_refused = getattr(vr, "also_on_refused_attempts", False)
+        occurrences += [
+            ((vr.name,) + rec.identity,
+             f"{_KIND_TEXT[rec.kind]} '{rec.rule}' by '{rec.violator}' in "
+             f"'{rec.behaviour}' at step {rec.occurred_at}", rec.violator)
+            for rec in state.violation_records
+            if rec.rule == violated_burden_name and rec.kind in _BREACH_KINDS
+            and (rec.source == "declared" or also_refused)
+        ]
+        for key, violation, violator in occurrences:
             if key in responded:
                 continue
             responded.add(key)
             fired.append(vr.name)
-            kind_line = (f"fired '{vr.name}' ({kind}) on violation of "
-                         f"'{inst.token_name}' by '{inst.holder}'")
+            kind_line = f"fired '{vr.name}' ({kind}) on violation of {violation}"
 
             # 1 — creates_burden, to obligates or (AM-115) to each actor
             # filling creates_burden_for_role; with no filler, nobody.
@@ -4094,7 +4117,7 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
                         tokens, spec, auth, responding_actor, tick, effects_log, causes)
             elif kind == "terminate":
                 tokens = _terminate_authorizations(
-                    tokens, spec, _violator_chain(spec, inst.holder),
+                    tokens, spec, _violator_chain(spec, violator),
                     responding_actor, tick, effects_log, causes,
                 )
 

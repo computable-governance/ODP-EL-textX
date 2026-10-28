@@ -1331,6 +1331,9 @@ ViolationResponse:
         ('creates_burden_for_role' ':' burden_role=[Role])?     // AM-115
         ('escalate_to'     ':' escalate_to=[EnterpriseObject])?
         (revokes+=RevokesItem)*                                 // AM-115
+        // 2.3.0-4: also fire on a violation record from a refused attempt
+        // (none is made yet); by default only declared records fire it.
+        ('also_on_refused_attempts' ':' also_on_refused_attempts?='true')?
         ('description'     ':' description=STRING)?
     '}'
 ;

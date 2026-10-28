@@ -11902,3 +11902,58 @@ published-specs golden test passes unchanged; existing Kripke pins pass.
 
 Verifier parity: R23 (absent, follows R22; no Kripke count or AF/EF
 verdict changes).
+
+## 2.3.0-4 — violation records: responses (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: grammar (one optional attribute), domain,
+engine.
+
+**Standard reference:** §6.3.8, §7.8.6 NOTE 2 (a rule may prescribe
+actions on certain types of violations; failing them is itself a
+violation).
+
+**Grammar.** One optional line in `ViolationResponse`, before
+`description`:
+
+```
+also_on_refused_attempts: true
+```
+
+Default false. `ViolationResponse.also_on_refused_attempts: bool` in the
+domain class. No other grammar change; every 2.2.0 specification parses
+the same. `on_violation_of` keeps its attribute name `violated_burden`
+and its type (any DeonticToken). The domain docstring no longer states
+V-NEW-15 (burden only), which was never registered.
+
+**Now.**
+- `fire_violation_responses()` also fires a response once per violation
+  record (2.3.0-2) whose `rule` is its `on_violation_of`, after the
+  violated burden instances, per response in spec order. A record with
+  source `declared` fires it; a `refused_attempt` record (none is made
+  yet) only with `also_on_refused_attempts: true`.
+- Its marker key in `WorldState.responded` is (response, rule, violator,
+  behaviour, occurred_at): five items, never equal to a burden instance's
+  four-item key, which is unchanged.
+- The effects are those for a burden (grant to obligates or to
+  `creates_burden_for_role`'s fillers, escalation line, `revokes`,
+  terminate on the violator chain), with the record's violator. The kind
+  line: `fired 'R' (kind) on violation of <embargo|permit|permit
+  requirement> 'T' by 'X' in 'B' at step N`.
+- Responses to burdens: effects, texts, order and keys unchanged.
+
+**Limits.** A response on a permit fires on a denial and on a missing
+requirement alike; telling them apart would need grammar. Nothing
+produces a `refused_attempt` record yet, so the flag has no effect in
+practice.
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_engine.py`, `docs/ENGINE_VERIFIER_PARITY.md` (R24),
+`tests/test_violation_record_responses.py` (new).
+
+**Verification:** full suite 1959 → 1968 passed, 0 failures. The
+published-specs golden test passes unchanged; existing Kripke pins pass.
+
+Verifier parity: R24 (absent; a burden such a response creates stays
+WAITING in the static model and is untracked in the hybrid one until
+granted; no Kripke count or AF/EF verdict of a published specification
+changes).
