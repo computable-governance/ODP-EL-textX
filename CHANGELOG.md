@@ -27,6 +27,37 @@ adheres to _[Semantic Versioning][semver]_.
   refusals leave it `None`. The reason text is unchanged. Same section of
   the reference, and row R21 of
   [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md).
+- **Violation records for permits and embargoes.** A violation of an
+  embargo (its holder performed an action it covers), of a permit (a third
+  party prevented the holder's permitted action) or of a permit
+  requirement (the actor acted without the permit the action requires) is
+  declared with `Runtime.declare_breach()` and recorded as a
+  `ViolationRecord`, in the record's `violation_records` and in
+  `WorldState.violation_records`; no token changes state and the tick does
+  not advance. The declarer passes the checks a burden's declaration
+  applies and may not be the violator; whether each token was in force at
+  the occurrence is read from the token events (unknown history: accepted
+  with a warning); a prevention justified by an embargo on the permit's
+  holder is refused (Annex B.1.7.4); one occurrence is recorded once.
+  ViolationResponses on a permit or embargo fire once per record; the new
+  optional `also_on_refused_attempts: true` extends that to refused
+  attempts (none is recorded yet). Kripke: absent (rows R22 to R24). See
+  "Violation records" in
+  [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md);
+  entries 2.3.0-1 to 2.3.0-6 in
+  [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
+- **Validator warnings** `[W-breach-response-duty]`,
+  `[W-refused-attempts-burden]` and `[W-breach-undeclarable]`; 74 rules
+  (45 errors, 29 warnings).
+
+### Changed
+
+- **V-NEW-24** accepts a permit or an embargo as the target of
+  `declares_violation_of`; the error "only a burden can be violated" is
+  removed. A burden target must still be strict, and the declaring Action
+  must still require a permit.
+- `advance()` and `declare_violation()` share one embargo and permit
+  check; no reason text changed.
 
 ## [2.2.0] - 2026-10-18
 

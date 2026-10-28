@@ -63,6 +63,19 @@ Full text in `docs/DSL_TOOLCHAIN_REFERENCE.md`; each change is logged as
 The source standards and ISO/IEC 15414 clauses of these additions are to
 be confirmed; each new validator message ends "(clause to be confirmed)".
 
+## Unreleased: violation records
+
+Logged as 2.3.0-1 to 2.3.0-6 in `docs/el_grammar_amendments.md`; full
+text in "Violation records" in `docs/DSL_TOOLCHAIN_REFERENCE.md`.
+
+- `declares_violation_of` may name a permit or an embargo (V-NEW-24);
+  the violation is recorded as an event, not a token state.
+- `on_violation_of` may name a permit or an embargo; the response fires
+  once per violation record.
+- **`also_on_refused_attempts: true`**, an optional line in a
+  `violation_response` before `description`: the response also fires on
+  records of refused attempts (none is recorded yet). Default false.
+
 ## Known Gaps
 
 The remaining gaps are semantic precision items rather than missing

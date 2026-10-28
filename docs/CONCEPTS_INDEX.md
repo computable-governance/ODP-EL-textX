@@ -7449,6 +7449,31 @@ under).
 
 **Toolchain status:** started in 2.1.0-5. **Partial:** it lists only the
 rows added in 2.1.0 and 2.2.0 (R1 to R18: deadlines, the clock, policy
-values, preconditions, standing duties; R19, 2.2.0: policy-fed deadlines);
+values, preconditions, standing duties; R19, 2.2.0: policy-fed deadlines;
+unreleased: R20 and R21, token events and `blocked_by`; R22 to R24,
+violation records);
 the rest of the engine is not yet listed. Updated in the same commit as any engine or Kripke rule it
 describes.
+
+---
+
+## Violation records for permits and embargoes (unreleased)
+
+**Definition:** a violation of an embargo, of a permit (a denial of
+permission) or of a permit requirement, recorded as an event, not as a
+token state (§6.3.8, §7.8.6, §7.8.7; Annex B.1.6.3, B.1.7.4, B.1.7.5).
+
+**Toolchain status:** implemented in the engine (2.3.0-1 to 2.3.0-5):
+`Runtime.declare_breach()`, `ViolationRecord`, responses, three validator
+warnings. The verifier does not model them (parity rows R22 to R24).
+Full text: "Violation records" in `docs/DSL_TOOLCHAIN_REFERENCE.md`.
+
+## A declared occurrence already recorded as a refused attempt — OPEN FINDING (2026-10-28)
+
+**OPEN FINDING** — open question, deferred to the refused-attempts work.
+A violation record's identity is (rule, violator, behaviour,
+occurred_at); `source` is not part of it. When refused attempts are
+recorded (`source: refused_attempt`), a later declaration of the same
+occurrence will be refused as already recorded. Should it be accepted
+instead, for example as a confirmation of the refused attempt? Not
+decided.

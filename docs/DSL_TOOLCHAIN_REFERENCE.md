@@ -12,7 +12,7 @@ ComputableGovernance stack. Intended as project context for future sessions.
 ```
 el_grammar.tx     — textX grammar defining the DSL syntax
 el_parser.py      — loads grammar, parses .el files, invokes validator
-el_validator.py   — 71 rules (45 errors, 26 warnings) checked at specification time
+el_validator.py   — 74 rules (45 errors, 29 warnings) checked at specification time
 el_reasoner.py    — governance queries over the static model
 el_kripke.py      — Layer 4 Kripke semantics (modal obligation verification)
 example.el        — payment processing scenario exercising all constructs
@@ -25,10 +25,10 @@ example.el        — payment processing scenario exercising all constructs
 ### What it does
 
 Runs at **specification time**, before any execution. Takes a parsed DSL-EL
-model and checks it against 71 rules: 45 errors and 26 warnings (tags
+model and checks it against 74 rules: 45 errors and 29 warnings (tags
 beginning `[W-`). Each rule in the table below is traced to a clause of
 ISO/IEC 15414:2015; the rules added in 2.1.0 and 2.2.0 end "(clause to be
-confirmed)". Analogous to a compiler's semantic phase — the grammar
+confirmed)", and the unreleased ones cite their clauses. Analogous to a compiler's semantic phase — the grammar
 checks syntax, the validator checks meaning.
 
 `validate_spec()` returns one list of messages; `parse()` splits it into
@@ -83,6 +83,11 @@ Added in 2.1.0 (20):
 Added in 2.2.0 (3):
 - Errors: `deadline-policy-type` (see "Deadlines"); `option-duplicate`,
   `option-set-name` (see "Typed policy values", options sets).
+
+Unreleased (3; V-NEW-24 rewritten):
+- Warnings: `[W-breach-response-duty]`, `[W-refused-attempts-burden]`,
+  `[W-breach-undeclarable]` (see "Violation records"). V-NEW-24 now
+  accepts a permit or an embargo as the target of `declares_violation_of`.
 
 ### Usage
 
@@ -869,6 +874,136 @@ start). The text is unchanged; low priority.
 
 ---
 
+## Violation records (unreleased)
+
+A permit or an embargo can be violated (ISO/IEC 15414:2015 §6.3.8
+violation; §7.8.6 behaviour violations; §7.8.7 deontic token rules). Such
+a violation is recorded as an **event** in the ledger, a `ViolationRecord`;
+no token changes state. A burden's violation is unchanged: its token
+becomes `violated`, by its deadline or by `declare_violation()`. Logged as
+2.3.0-1 to 2.3.0-5 in `docs/el_grammar_amendments.md`; parity rows R22 to
+R24.
+
+**Three kinds** (Annex B.1.6.3, B.1.7.4, B.1.7.5 give examples):
+
+| kind | the rule | the violator | `rule_holder` |
+|---|---|---|---|
+| `embargo` | the embargo | its holder, who performed an action it covers | the violator |
+| `permit` (denial of permission) | the permit | a third party, who prevented the holder's permitted action | the permit's holder |
+| `permit_requirement` (acting without the permit) | the requirement, named by the permit type | the actor, who performed an action that requires a permit it did not hold | `None` |
+
+**A `ViolationRecord`** has `rule`, `kind` (`burden`, `permit`, `embargo`,
+`permit_requirement`; no `burden` record is made yet), `violator` (an
+enterprise object, never a role), `behaviour` (the action concerned),
+`declared_by`, `occurred_at`, `declared_at`, `source` (`declared`, or
+`refused_attempt`, which nothing produces yet), `rule_holder` and
+`warnings`. The declaring act's record carries it in
+`violation_records`, with outcome `violation` and the rule in
+`violations`; `WorldState.violation_records` holds every record so far
+(the same objects).
+
+**Not stored, derived when read.** The violator's principals: from the
+delegation chain (`principal_of`, `delegated_from`, as
+`fire_violation_responses()` builds the violator chain). The rule's
+authority: from the token events of `Runtime.history()` (the `by` and
+`cause` of the grant of the violated token).
+
+**Declaring one.** `Runtime.declare_breach(token, kind, violator,
+behaviour, declarer, occurred_at, rule_holder=None, facts=None)`, over
+the pure `el_engine.declare_breach(...)`. The declaration is an Action
+with `declares_violation_of <token>` and `requires_permit` (V-NEW-24); one
+such Action serves both permit kinds, and the caller names the kind. The
+declarer must pass, for one such Action, the checks a burden's
+declaration applies: enrolled, fills a role declaring it, its
+preconditions on `facts`, no active embargo covering it, every required
+permit held. Then, in order:
+
+- the declarer is not the violator;
+- the violator is an enterprise object (or an enrolled actor), not a role;
+- `behaviour` is an action declared in a role;
+- embargo: the embargo covers `behaviour` (the engine's Step 5 coverage)
+  and the violator held it in force at `occurred_at`;
+- permit: `rule_holder` is named and is not the violator, the permit
+  covers `behaviour` (the action requires it, or it is the permit's
+  `for_action`), the holder held it in force at `occurred_at`, and no
+  embargo covering `behaviour` was in force on the holder then
+  (justified prevention, below);
+- permit requirement: `behaviour` requires the permit, and the violator
+  did not hold it in force at `occurred_at`;
+- the occurrence is not already recorded.
+
+A refusal is a blocked record with a reason; the texts are listed in
+2.3.0-2 and 2.3.0-3. Programming errors raise: an undeclared token
+(`KeyError`), kind `burden` (use `declare_violation()`), an unknown kind,
+or a token of another kind (`ValueError`).
+
+**Justified prevention.** Annex B.1.7.4: preventing an action under an
+embargo is not a violation of the permission. A denial of permission is
+refused when an embargo covering the prevented action was in force *held
+by the permit's holder* at `occurred_at`; the reason names the embargo:
+`preventing 'B' at step N was justified by embargo 'E' held by 'H': not a
+violation of permit 'P'`. That the embargo must be held by the permit's
+holder is our reading of B.1.7.4; an embargo held by anyone else
+justifies nothing.
+
+**Was the token in force then?** The engine stays pure: the caller passes
+the answers as `in_force`. `breach_history_queries()` lists the (token,
+holder) pairs from the specification, and `Runtime.declare_breach()`
+answers each with `in_force_at(token, holder, occurred_at)` (see "Token
+events in the ledger"). When the answer is unknown (`None`: the history
+does not reproduce the state, or a direct engine call without `in_force`),
+the declaration is accepted with a warning, on the record's `warnings`
+and as an effect line: `history unknown: could not establish whether 'H'
+held <embargo|permit> 'T' at step N; accepted on the declaration`, with
+` (an embargo would justify the prevention)` added for a justifying
+embargo.
+
+**Identity.** One occurrence is (rule, violator, behaviour,
+occurred_at). Declaring it again is refused: `already recorded: violation
+of 'T' by 'X' in 'B' at step N, declared at step D by 'Y'`. A different
+`occurred_at` is a new record; one behaviour breaking two rules (an
+embargo and a missing permit) gives two records.
+
+**Ticks.** `occurred_at` and `declared_at` are ticks, and `occurred_at`
+may not be after the current tick. Mapping a wall-clock time to the tick
+of an occurrence is a later item. A declaration changes no token and
+**does not advance the tick**: it is not refused by a strict burden's
+freeze (Step 3.5) and lets no time pass. It fires no response.
+
+**Responses.** A ViolationResponse whose `on_violation_of` names a permit
+or embargo fires once per record naming it, in `fire_violation_responses()`
+(§7.8.6 NOTE 2: a rule may prescribe actions on certain types of
+violations; failing them is itself a violation). Records with source
+`declared` fire it; with `also_on_refused_attempts: true` in the response,
+`refused_attempt` records too. The marker in `WorldState.responded` is
+(response, rule, violator, behaviour, occurred_at). The effects are a
+burden response's (grant, escalation line, `revokes`, terminate on the
+violator chain), with the record's violator; the line reads `fired 'R'
+(kind) on violation of embargo 'E' by 'X' in 'B' at step N`. A response
+on a permit fires on a denial and on a missing requirement alike.
+
+**Validator.** V-NEW-24 accepts a permit or embargo target (a burden must
+still be strict; the Action must still require a permit). Warnings:
+`[W-breach-response-duty]` (a response to a permit or embargo that
+creates no burden and revokes nothing; terminate exempt),
+`[W-refused-attempts-burden]` (the flag on a response to a burden),
+`[W-breach-undeclarable]` (a declared permit or embargo that applies to no
+declared action).
+
+**Verifier.** Absent in both builders (R22 to R24): there is no permit or
+embargo violation path, so this is an under-approximation, and no Kripke
+count or AF/EF verdict changes. A burden created by a response to a
+permit or embargo stays WAITING in the static model and is not tracked by
+the hybrid model until the engine grants it.
+
+**Not yet.** No HTTP route declares one. Nothing produces a
+`refused_attempt` record. **Open question:** should a declaration of an
+occurrence already recorded as a refused attempt be accepted? With the
+identity above it is refused as already recorded; the source is not part
+of the identity (see `docs/CONCEPTS_INDEX.md`).
+
+---
+
 ## The Reasoner (`el_reasoner.py`)
 
 ### What it does
@@ -982,7 +1117,7 @@ if conflicts:
 Specification (.el file)
         │
         ▼
-   el_parser.py  ──► el_validator.py (71 rules)
+   el_parser.py  ──► el_validator.py (74 rules)
         │                    │
         │            errors and warnings
         │

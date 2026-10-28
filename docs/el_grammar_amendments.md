@@ -12006,3 +12006,33 @@ published-specs golden test passes unchanged (no published file gets a
 new message).
 
 Verifier parity: none (validator only).
+
+## 2.3.0-6 — violation records: docs (`docs/`, `grammar/v2/README.md`, `CHANGELOG.md`)
+
+**Status:** IMPLEMENTED. Type: documentation.
+
+**Now.**
+- `docs/DSL_TOOLCHAIN_REFERENCE.md`: new section "Violation records"
+  (the three kinds, the record, the checks, justified prevention, unknown
+  history, identity, ticks, responses, validator, verifier). It states
+  that "held by the permit's holder" is our reading of Annex B.1.7.4, that
+  `occurred_at` is a tick and mapping wall-clock time to it is a later
+  item, and the open question on a declaration of an occurrence already
+  recorded as a refused attempt. Rule counts: 74 rules (45 errors, 29
+  warnings) in the component overview, the validator section and the
+  component diagram; the unreleased rules listed.
+- `docs/CONCEPTS_INDEX.md`: an entry for violation records, the open
+  question as an OPEN FINDING, and the parity-matrix entry's row list
+  (R20 to R24 added).
+- `grammar/v2/README.md`: the unreleased grammar change
+  (`also_on_refused_attempts`).
+- `CHANGELOG.md`: Added (violation records, the three warnings) and
+  Changed (V-NEW-24, the shared check) under Unreleased.
+
+**Not changed:** `CLAUDE.md` (it still states 71 rules and the 2.2.0
+log range).
+
+**Verification:** full suite 1975 passed, 0 failures (unchanged; docs
+only).
+
+Verifier parity: none (docs only).
