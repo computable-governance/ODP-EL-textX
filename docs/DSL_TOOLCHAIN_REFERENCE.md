@@ -818,6 +818,32 @@ Both read only the token events of `history()`, never the effect text.
   check is per token and holder: other tokens are still answered.
 - The history is in memory only, for the life of the `Runtime`.
 
+**Which token refused an act? `blocked_by`.** A blocked record names, in
+`blocked_by`, the token that refused the act, as a `TokenRef` (`token_name`,
+`token_kind`, `holder`, `state`, `granted_at_tick`). The `reason` text is
+unchanged.
+
+- **Step 5, an embargo:** the active embargo instance held by the actor
+  that covers the action.
+- **Step 6, a permit:** the required permit the actor does not hold
+  active: the actor's latest instance of it (for example `superseded` after
+  a revocation), or, if the actor never held it, `state` and
+  `granted_at_tick` `None`.
+- **`declare_violation()`:** the same, for its embargo and permit checks,
+  for the refusal it reports (the first candidate declaring action's).
+- **Every other refusal leaves it `None`:** enrolment, role, a declaration
+  made through `advance()`, the strict guard (Step 3.5, refused because of
+  burdens), preconditions, and `declare_violation()`'s other refusals (not
+  overdue, the holder declaring, no active instance).
+- **Step 6 applies only to declared actions.** The permit check reads the
+  Action's `requires_permit`, so an action no role declares (a bare
+  `for_action` string) needs no permit and its refusal never names one
+  (see `docs/CONCEPTS_INDEX.md`, "Step 6's permit check applies only to
+  declared actions").
+- The refused record's tick is the tick it was judged at, so
+  `in_force_at(ref.token_name, ref.holder, record.tick)` agrees with it:
+  `True` for the embargo, `False` for the permit.
+
 **Completeness.** The events are found by comparing the token instances
 before and after the act, so every change made by an engine function is
 listed, whatever made it. A change made outside the engine functions (for

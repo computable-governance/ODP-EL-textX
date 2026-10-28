@@ -624,8 +624,25 @@ def _note_causes(causes: Optional[dict], before, after, cause: str,
         causes[(e.token_name, e.token_kind, e.holder, e.granted_at_tick)] = (cause, cause_ref)
 
 
-def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int
-             ) -> Tuple[WorldState, TransitionRecord]:
+def _token_ref(tok: TokenInstance) -> TokenRef:
+    return TokenRef(token_name=tok.token_name, token_kind=tok.kind, holder=tok.holder,
+                    state=tok.state, granted_at_tick=tok.granted_at_tick)
+
+
+def _missing_permit_ref(state: WorldState, actor_name: str, permit_name: str) -> TokenRef:
+    """The required permit that refused an act: the actor's latest instance
+    of it (not active), or, if the actor never held it, state and
+    granted_at_tick None."""
+    held = [t for t in state.tokens
+            if t.token_name == permit_name and t.kind == "permit" and t.holder == actor_name]
+    if held:
+        return _token_ref(max(held, key=lambda t: t.granted_at_tick))
+    return TokenRef(token_name=permit_name, token_kind="permit", holder=actor_name,
+                    state=None, granted_at_tick=None)
+
+
+def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int,
+             blocked_by: Optional[TokenRef] = None) -> Tuple[WorldState, TransitionRecord]:
     return state, TransitionRecord(
         tick=tick,
         actor_name=actor,
@@ -635,6 +652,7 @@ def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int
         effects=(),
         violations=(),
         reason=reason,
+        blocked_by=blocked_by,
     )
 
 
@@ -1205,7 +1223,8 @@ def advance(
                 and tok.state == "active"):
             if _embargo_covers(coverage, tok.token_name, tok.for_action, action_name):
                 return _blocked(state, actor_name, action_name,
-                                f"active embargo '{tok.token_name}' blocks action", tick)
+                                f"active embargo '{tok.token_name}' blocks action", tick,
+                                _token_ref(tok))
 
     # ── Step 6: Permit check ──────────────────────────────────────────────────
     if grammar_action:
@@ -1214,7 +1233,8 @@ def advance(
                 permit_name = req.token.name
                 if not _actor_holds_permit(state, actor_name, permit_name):
                     return _blocked(state, actor_name, action_name,
-                                    f"required permit '{permit_name}' not held by actor", tick)
+                                    f"required permit '{permit_name}' not held by actor", tick,
+                                    _missing_permit_ref(state, actor_name, permit_name))
 
     # ── Step 7: Effect application ────────────────────────────────────────────
     tokens = list(state.tokens)
@@ -3200,8 +3220,10 @@ def declare_violation(
     coverage = _embargo_coverage(spec)
     action = None
     first_reason = None
+    first_blocked_by: Optional[TokenRef] = None   # the token behind first_reason, if any
     precondition_lines: Tuple[str, ...] = ()
     for candidate in actions:
+        blocked_by: Optional[TokenRef] = None
         reason = _role_refusal(spec, state, declarer, candidate.name)
         if reason is None:
             reason, precondition_lines = _precondition_refusal(candidate.preconditions, facts)
@@ -3212,19 +3234,22 @@ def declare_violation(
                         and _embargo_covers(coverage, tok.token_name, tok.for_action,
                                             candidate.name)):
                     reason = f"active embargo '{tok.token_name}' blocks action"
+                    blocked_by = _token_ref(tok)
                     break
         if reason is None:
             for req in candidate.deontic_requirements:
                 if (req.kind == "requires_permit" and req.token
                         and not _actor_holds_permit(state, declarer, req.token.name)):
                     reason = f"required permit '{req.token.name}' not held by actor"
+                    blocked_by = _missing_permit_ref(state, declarer, req.token.name)
                     break
         if reason is None:
             action = candidate
             break
-        first_reason = first_reason or reason
+        if first_reason is None:
+            first_reason, first_blocked_by = reason, blocked_by
     if action is None:
-        return _blocked(state, declarer, label, first_reason, tick)
+        return _blocked(state, declarer, label, first_reason, tick, first_blocked_by)
     label = action.name
 
     # Prohibition: not a burden the declarer holds.

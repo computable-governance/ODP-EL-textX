@@ -21,6 +21,12 @@ adheres to _[Semantic Versioning][semver]_.
   or state changed. See "Token events in the ledger" in
   [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md) and
   row R20 of [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md).
+- **The token that refused an act.** A blocked record's `blocked_by`
+  (`TokenRef`) names the embargo (Step 5) or the required permit (Step 6)
+  that refused it, in `advance()` and `declare_violation()`; other
+  refusals leave it `None`. The reason text is unchanged. Same section of
+  the reference, and row R21 of
+  [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md).
 
 ## [2.2.0] - 2026-10-18
 
