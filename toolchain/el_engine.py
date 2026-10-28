@@ -99,9 +99,10 @@ class WorldState:
     # initial_value by initial_state(spec) and Runtime; nothing sets it and
     # nothing in the engine or verifier reads it yet.
     policy_values: Tuple[Tuple[str, str], ...] = ()
-    # 2.3.0-2: every violation record made so far (declare_breach()), in
-    # order; the same objects as the ledger's records. Read by the identity
-    # check and fire_violation_responses(); no verifier reads it.
+    # 2.3.0-2: every violation record made so far (declare_breach(); 2.3.0-8
+    # refused attempts in advance()), in order; the same objects as the
+    # ledger's records. Read by the identity check and
+    # fire_violation_responses(); no verifier reads it.
     violation_records: Tuple["ViolationRecord", ...] = ()
 
     # 2.1.0-3: replace() carries every other field, policy_values included.
@@ -185,7 +186,7 @@ class ViolationRecord:
     declared_by: str
     occurred_at: int           # a tick (the wall-clock mapping is a later item)
     declared_at: int           # a tick
-    source: str = "declared"   # 'declared' | 'refused_attempt' (not produced yet)
+    source: str = "declared"   # 'declared' | 'refused_attempt' (advance(), 2.3.0-8)
     rule_holder: Optional[str] = None   # the violated token's holder; None for a requirement
     warnings: Tuple[str, ...] = ()      # e.g. history unknown
 
@@ -724,6 +725,35 @@ def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int,
     )
 
 
+def _refused_attempt(state: WorldState,
+                     record: TransitionRecord) -> Tuple[WorldState, TransitionRecord]:
+    """2.3.0-8: record a refusal at advance() Step 5 or 6 as a violation
+    (§6.3.8): the act attempted was one the rule forbids or does not permit.
+    The standard does not say that a refused attempt is a violation; this
+    is a design extension that follows its definition. Rule: the blocking
+    token (record.blocked_by); kind 'embargo' (Step 5) or
+    'permit_requirement' (Step 6); violator the actor; behaviour the action;
+    occurred_at = declared_at = the tick; declared_by 'system'; rule_holder
+    the actor for an embargo, None for a requirement (as declare_breach()).
+    One record per identity: a repeat at the same tick adds none. The reason
+    and blocked_by are unchanged; one effect line says which."""
+    ref = record.blocked_by
+    kind = "embargo" if ref.token_kind == "embargo" else "permit_requirement"
+    vr = ViolationRecord(
+        rule=ref.token_name, kind=kind, violator=record.actor_name,
+        behaviour=record.action_name, declared_by="system",
+        occurred_at=record.tick, declared_at=record.tick, source="refused_attempt",
+        rule_holder=record.actor_name if kind == "embargo" else None,
+    )
+    what = (f"violation of {_KIND_TEXT[kind]} '{vr.rule}' by '{vr.violator}' in "
+            f"'{vr.behaviour}' at step {vr.occurred_at}")
+    if any(earlier.identity == vr.identity for earlier in state.violation_records):
+        return state, replace(record, effects=(f"refused attempt already recorded: {what}",))
+    return (state.with_violation_records(state.violation_records + (vr,)),
+            replace(record, effects=(f"recorded refused attempt: {what}",),
+                    violation_records=(vr,)))
+
+
 def _find_spec_tokens_for_event(spec, event_name: str, attr: str) -> set:
     """Return names of spec tokens whose `attr` (triggered_by/discharged_by) matches event_name.
 
@@ -1140,6 +1170,8 @@ def advance(
     actor_name: str,
     facts: Optional[dict] = None,
     live_evaluations: Optional[List[LiveEvaluation]] = None,
+    *,
+    record_refused_attempts: bool = False,
 ) -> Tuple[WorldState, TransitionRecord]:
     """
     Execute one governance-checked action step.
@@ -1157,10 +1189,20 @@ def advance(
                   Option C — claim()/decline()) folded into the same
                   accept_evaluations gating set spec-declared Evaluation
                   elements already build below.
+    record_refused_attempts : 2.3.0-8, keyword only, off by default. When
+                  set, a refusal at Step 5 (an active embargo the actor
+                  holds covers the action) or Step 6 (a required permit not
+                  held) is also recorded as a ViolationRecord with source
+                  'refused_attempt' (_refused_attempt()). Runtime.advance()
+                  sets it; a dry run or any other hypothetical call leaves
+                  it off and records nothing. claim() and decline() never
+                  set it.
 
     Returns
     -------
-    (new_state, record) — new_state equals state if blocked.
+    (new_state, record) — new_state equals state if blocked, except that a
+    refused attempt recorded under record_refused_attempts is added to
+    new_state.violation_records (tokens and tick unchanged).
     """
     if facts is None:
         facts = {}
@@ -1289,7 +1331,10 @@ def advance(
     reason, blocked_by = _deontic_refusal(spec, state, actor_name, action_name,
                                           grammar_action or None)
     if reason is not None:
-        return _blocked(state, actor_name, action_name, reason, tick, blocked_by)
+        blocked = _blocked(state, actor_name, action_name, reason, tick, blocked_by)
+        if record_refused_attempts:
+            return _refused_attempt(*blocked)
+        return blocked
 
     # ── Step 7: Effect application ────────────────────────────────────────────
     tokens = list(state.tokens)

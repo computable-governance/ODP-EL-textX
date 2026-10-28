@@ -12075,3 +12075,57 @@ published-specs golden test passes unchanged; existing Kripke pins pass.
 Verifier parity: R22 and R24 reworded (identity with source; marker on the
 occurrence); absent in both builders as before; no Kripke count or AF/EF
 verdict changes.
+
+## 2.3.0-8 — refused attempts: recorded as violations (`toolchain/el_engine.py`, `toolchain/el_runtime.py`)
+
+**Status:** IMPLEMENTED. Type: engine and runtime.
+
+**Standard reference:** §6.3.8 (violation), §6.4.4 (embargo), §6.4.6,
+§7.8.7. The standard does not say that a refused attempt is a violation:
+recording one is a design extension that follows the definition of
+violation in §6.3.8.
+
+**Before.** A refusal at `advance()` Step 5 or 6 left only a blocked
+record (with `blocked_by`, 2.3.0-1); the state was unchanged.
+
+**Now.**
+- `el_engine.advance(..., *, record_refused_attempts=False)`. When set, a
+  refusal at Step 5 (an active embargo the actor holds covers the action)
+  or Step 6 (a required permit not held) is also recorded
+  (`_refused_attempt()`): a `ViolationRecord` with `rule` the blocking
+  token, `kind` `embargo` or `permit_requirement`, `violator` the actor,
+  `behaviour` the action, `occurred_at` = `declared_at` = the tick,
+  `declared_by` `system`, `source` `refused_attempt`, `rule_holder` the
+  actor for an embargo and None for a requirement (as `declare_breach()`).
+  It is on the record (`violation_records`) and in
+  `WorldState.violation_records`. Outcome, reason and `blocked_by` are
+  unchanged; tokens and tick are unchanged; no token events.
+- One effect line: `recorded refused attempt: violation of embargo 'E' by
+  'X' in 'B' at step N` (`permit requirement 'P'` for Step 6). A repeat at
+  the same step (same identity) adds no record and has the line `refused
+  attempt already recorded: ...`.
+- `Runtime.advance()` (and so `POST /actors/{actor}/execute-action`) sets
+  the keyword. Engine calls without it, and so any dry run, record
+  nothing and return the same state object as before.
+- Not recorded: refusals before Step 5 (not enrolled, role, declaration
+  Action, strict-mode guard, preconditions), so an embargoed act refused
+  earlier is not recorded; `claim()` and `decline()`; a declarer's refusal
+  in `declare_violation()` or `declare_breach()`.
+- With `also_on_refused_attempts: true` a ViolationResponse fires on these
+  records (2.3.0-4), once per occurrence (2.3.0-7).
+
+**Limits.** Step 6 applies only to a declared action (open finding "Step
+6's permit check applies only to declared actions"): an undeclared action
+performed without a permit is not refused, so no `permit_requirement`
+attempt is recorded for it. Step 5 covers undeclared actions.
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_runtime.py`,
+`docs/ENGINE_VERIFIER_PARITY.md` (R25),
+`tests/test_refused_attempt_records.py` (new).
+
+**Verification:** full suite 1981 → 1998 passed, 0 failures. The
+published-specs golden test passes unchanged; existing Kripke pins pass.
+
+Verifier parity: R25 (absent in both builders; under-approximation, no
+blocked or permit and embargo violation paths; no Kripke count or AF/EF
+verdict changes).

@@ -278,9 +278,12 @@ class Runtime:
 
     def advance(self, action_name: str, actor_name: str,
                 facts: Optional[dict] = None) -> TransitionRecord:
-        """Execute one governed action step and append the record to the ledger."""
+        """Execute one governed action step and append the record to the ledger.
+        2.3.0-8: a refusal at Step 5 (embargo) or Step 6 (permit not held) is
+        also recorded as a refused attempt (record_refused_attempts)."""
         new_state, record = _engine_advance(
-            self._state, action_name, self._spec, actor_name, facts
+            self._state, action_name, self._spec, actor_name, facts,
+            record_refused_attempts=True,
         )
         self._state = new_state
         self._ledger.append(record)
