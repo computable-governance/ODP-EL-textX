@@ -39,13 +39,24 @@ adheres to _[Semantic Versioning][semver]_.
   the occurrence is read from the token events (unknown history: accepted
   with a warning); a prevention justified by an embargo on the permit's
   holder is refused (Annex B.1.7.4); one occurrence is recorded once.
-  ViolationResponses on a permit or embargo fire once per record; the new
-  optional `also_on_refused_attempts: true` extends that to refused
-  attempts (none is recorded yet). Kripke: absent (rows R22 to R24). See
+  ViolationResponses on a permit or embargo fire once per occurrence; the
+  new optional `also_on_refused_attempts: true` extends that to refused
+  attempts. Kripke: absent (rows R22 to R25). See
   "Violation records" in
   [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md);
-  entries 2.3.0-1 to 2.3.0-6 in
+  entries 2.3.0-1 to 2.3.0-9 in
   [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
+- **Refused attempts recorded as violations.** A refusal by
+  `Runtime.advance()` at Step 5 (an active embargo) or Step 6 (a required
+  permit not held) is also recorded as a `ViolationRecord` with source
+  `refused_attempt`, declared by `system`, at the current step; the
+  reason, `blocked_by`, tokens and tick are unchanged, and one effect line
+  is added. A repeat at the same step adds no record. The keyword
+  `record_refused_attempts` of `el_engine.advance()` is off by default, so
+  engine calls and dry runs record nothing; `claim()`, `decline()` and
+  declarers' refusals are never recorded. This is a design extension that
+  follows the definition of violation (§6.3.8), not something the
+  standard states.
 - **Validator warnings** `[W-breach-response-duty]`,
   `[W-refused-attempts-burden]` and `[W-breach-undeclarable]`; 74 rules
   (45 errors, 29 warnings).
@@ -58,6 +69,12 @@ adheres to _[Semantic Versioning][semver]_.
   must still require a permit.
 - `advance()` and `declare_violation()` share one embargo and permit
   check; no reason text changed.
+- A violation record's identity holds its source
+  (`ViolationRecord.identity`; `ViolationRecord.occurrence` is the
+  occurrence alone). A declaration of an occurrence recorded as a refused
+  attempt is accepted as a second record, with the line `confirms the
+  refused attempt recorded at step N`; a response fires once per
+  occurrence (deliberately, not once per record).
 
 ## [2.2.0] - 2026-10-18
 

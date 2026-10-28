@@ -74,7 +74,8 @@ text in "Violation records" in `docs/DSL_TOOLCHAIN_REFERENCE.md`.
   once per violation record.
 - **`also_on_refused_attempts: true`**, an optional line in a
   `violation_response` before `description`: the response also fires on
-  records of refused attempts (none is recorded yet). Default false.
+  records of refused attempts (recorded by `Runtime.advance()`), once per
+  occurrence. Default false.
 
 ## Known Gaps
 

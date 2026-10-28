@@ -12129,3 +12129,36 @@ published-specs golden test passes unchanged; existing Kripke pins pass.
 Verifier parity: R25 (absent in both builders; under-approximation, no
 blocked or permit and embargo violation paths; no Kripke count or AF/EF
 verdict changes).
+
+## 2.3.0-9 — refused attempts: docs (`docs/`, `grammar/v2/`, `CHANGELOG.md`)
+
+**Status:** IMPLEMENTED. Type: documentation (and one grammar comment).
+
+**Now.**
+- `docs/DSL_TOOLCHAIN_REFERENCE.md`, "Violation records": identity with
+  source and the confirmation line; a new paragraph "Refused attempts"
+  (what is recorded, the effect lines, repeats, the keyword off by
+  default, only Steps 5 and 6, no record for `claim()`, `decline()` or a
+  declarer's refusal, the Step 6 limit); responses fire once per
+  occurrence, a deliberate choice; verifier rows R22 to R25; the open
+  question removed. It states plainly that a refused attempt as a
+  violation is a design extension that follows the definition of
+  violation (§6.3.8), not something the standard states.
+- `docs/CONCEPTS_INDEX.md`: the finding "A declared occurrence already
+  recorded as a refused attempt" resolved by 2.3.0-7; the violation-records
+  entry and the parity-matrix row list (R25); the consequence for refused
+  attempts noted under "Step 6's permit check applies only to declared
+  actions" (still open).
+- `CHANGELOG.md` (Unreleased): refused attempts under Added; the identity
+  change under Changed.
+- `grammar/v2/README.md` and the comment above `also_on_refused_attempts`
+  in `grammar/v2/el_grammar.tx`: "none is recorded yet" removed. Comment
+  only: no rule changed, every specification parses the same.
+- `tests/test_violation_record_responses.py`: module docstring only.
+
+**Not changed:** `CLAUDE.md`.
+
+**Verification:** full suite 1998 passed, 0 failures (unchanged; docs and
+comments only).
+
+Verifier parity: none (docs only).

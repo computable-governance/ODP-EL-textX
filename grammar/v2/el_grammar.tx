@@ -1332,7 +1332,7 @@ ViolationResponse:
         ('escalate_to'     ':' escalate_to=[EnterpriseObject])?
         (revokes+=RevokesItem)*                                 // AM-115
         // 2.3.0-4: also fire on a violation record from a refused attempt
-        // (none is made yet); by default only declared records fire it.
+        // (2.3.0-8); by default only declared records fire it.
         ('also_on_refused_attempts' ':' also_on_refused_attempts?='true')?
         ('description'     ':' description=STRING)?
     '}'

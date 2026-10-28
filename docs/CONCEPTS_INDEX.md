@@ -7147,6 +7147,9 @@ with or without the permit. AM-114 keeps undeclared actions unrestricted
 discharges one of the actor's own burdens; or require the permit named by
 any permit token whose `for_action` it is; or a validator warning for a
 permit/embargo `for_action` no role declares. Not scheduled.
+Consequence for refused attempts (2.3.0-8): such an action is never
+refused for a missing permit, so no `permit_requirement` refused attempt
+is recorded for it.
 
 ## Static builder: a specification with no `fills` statement stays unrestricted — OPEN FINDING (2026-09-27)
 
@@ -7450,8 +7453,8 @@ under).
 **Toolchain status:** started in 2.1.0-5. **Partial:** it lists only the
 rows added in 2.1.0 and 2.2.0 (R1 to R18: deadlines, the clock, policy
 values, preconditions, standing duties; R19, 2.2.0: policy-fed deadlines;
-unreleased: R20 and R21, token events and `blocked_by`; R22 to R24,
-violation records);
+unreleased: R20 and R21, token events and `blocked_by`; R22 to R25,
+violation records and refused attempts);
 the rest of the engine is not yet listed. Updated in the same commit as any engine or Kripke rule it
 describes.
 
@@ -7463,14 +7466,26 @@ describes.
 permission) or of a permit requirement, recorded as an event, not as a
 token state (§6.3.8, §7.8.6, §7.8.7; Annex B.1.6.3, B.1.7.4, B.1.7.5).
 
-**Toolchain status:** implemented in the engine (2.3.0-1 to 2.3.0-5):
-`Runtime.declare_breach()`, `ViolationRecord`, responses, three validator
-warnings. The verifier does not model them (parity rows R22 to R24).
+**Toolchain status:** implemented in the engine (2.3.0-1 to 2.3.0-5,
+2.3.0-7, 2.3.0-8): `Runtime.declare_breach()`, `ViolationRecord`,
+responses, three validator warnings, and refused attempts recorded by
+`Runtime.advance()` at Steps 5 and 6. A refused attempt as a violation is
+a design extension that follows the definition of violation (§6.3.8),
+not something the standard states. A response fires once per occurrence,
+by deliberate choice. The verifier does not model them (parity rows R22
+to R25).
 Full text: "Violation records" in `docs/DSL_TOOLCHAIN_REFERENCE.md`.
 
-## A declared occurrence already recorded as a refused attempt — OPEN FINDING (2026-10-28)
+## A declared occurrence already recorded as a refused attempt — OPEN FINDING (2026-10-28), RESOLVED 2026-10-28
 
-**OPEN FINDING** — open question, deferred to the refused-attempts work.
+**OPEN FINDING (2026-10-28), RESOLVED 2026-10-28 by 2.3.0-7.** The
+identity now holds the source (`ViolationRecord.identity`;
+`ViolationRecord.occurrence` is the occurrence alone): the declaration is
+accepted as a second record, with the line `confirms the refused attempt
+recorded at step N`, and a response fires once per occurrence (marker on
+the occurrence). Original text:
+
+Open question, deferred to the refused-attempts work.
 A violation record's identity is (rule, violator, behaviour,
 occurred_at); `source` is not part of it. When refused attempts are
 recorded (`source: refused_attempt`), a later declaration of the same

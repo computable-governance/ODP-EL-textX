@@ -4,7 +4,7 @@ Layer 3 — ViolationResponses on violation records (2.3.0-4).
 A ViolationResponse whose on_violation_of names a permit or embargo fires
 once per ViolationRecord naming it (declare_breach()): by default only
 records with source 'declared'; with `also_on_refused_attempts: true`,
-also 'refused_attempt' records (none is produced yet; the tests build one).
+also 'refused_attempt' records (the tests build one; 2.3.0-8 produces them).
 The once-only marker key is (response, rule, violator, behaviour,
 occurred_at). Responses on violated burdens are unchanged. Kripke: a
 burden such a response creates stays WAITING in the static model and is

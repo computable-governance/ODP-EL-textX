@@ -881,8 +881,8 @@ violation; §7.8.6 behaviour violations; §7.8.7 deontic token rules). Such
 a violation is recorded as an **event** in the ledger, a `ViolationRecord`;
 no token changes state. A burden's violation is unchanged: its token
 becomes `violated`, by its deadline or by `declare_violation()`. Logged as
-2.3.0-1 to 2.3.0-5 in `docs/el_grammar_amendments.md`; parity rows R22 to
-R24.
+2.3.0-1 to 2.3.0-5, 2.3.0-7 and 2.3.0-8 in
+`docs/el_grammar_amendments.md`; parity rows R22 to R25.
 
 **Three kinds** (Annex B.1.6.3, B.1.7.4, B.1.7.5 give examples):
 
@@ -896,7 +896,7 @@ R24.
 `permit_requirement`; no `burden` record is made yet), `violator` (an
 enterprise object, never a role), `behaviour` (the action concerned),
 `declared_by`, `occurred_at`, `declared_at`, `source` (`declared`, or
-`refused_attempt`, which nothing produces yet), `rule_holder` and
+`refused_attempt`, below), `rule_holder` and
 `warnings`. The declaring act's record carries it in
 `violation_records`, with outcome `violation` and the rule in
 `violations`; `WorldState.violation_records` holds every record so far
@@ -930,7 +930,8 @@ permit held. Then, in order:
   (justified prevention, below);
 - permit requirement: `behaviour` requires the permit, and the violator
   did not hold it in force at `occurred_at`;
-- the occurrence is not already recorded.
+- the occurrence is not already declared (a refused attempt of it does not
+  count, below).
 
 A refusal is a blocked record with a reason; the texts are listed in
 2.3.0-2 and 2.3.0-3. Programming errors raise: an undeclared token
@@ -958,11 +959,49 @@ held <embargo|permit> 'T' at step N; accepted on the declaration`, with
 ` (an embargo would justify the prevention)` added for a justifying
 embargo.
 
-**Identity.** One occurrence is (rule, violator, behaviour,
-occurred_at). Declaring it again is refused: `already recorded: violation
-of 'T' by 'X' in 'B' at step N, declared at step D by 'Y'`. A different
-`occurred_at` is a new record; one behaviour breaking two rules (an
-embargo and a missing permit) gives two records.
+**Identity.** An occurrence (`ViolationRecord.occurrence`) is (rule,
+violator, behaviour, occurred_at); a record's identity
+(`ViolationRecord.identity`, 2.3.0-7) is the occurrence and its source.
+Declaring an occurrence again is refused: `already recorded: violation
+of 'T' by 'X' in 'B' at step N, declared at step D by 'Y'`. Declaring an
+occurrence already recorded as a refused attempt is accepted, as a
+second record (source `declared`), with the effect line `confirms the
+refused attempt recorded at step N`. A different `occurred_at` is a new
+record; one behaviour breaking two rules (an embargo and a missing
+permit) gives two records.
+
+**Refused attempts** (2.3.0-8). The standard does not say that a refused
+attempt is a violation. Recording one is a design extension that follows
+the definition of violation (§6.3.8): the act attempted is one the rule
+forbids (an embargo) or does not permit (a permit requirement), even
+though the engine prevented it. When `Runtime.advance()` refuses an act
+at Step 5 (an active embargo the actor holds covers the action) or Step 6
+(a required permit not held), it also records a `ViolationRecord`:
+`rule` the blocking token (`blocked_by`), `kind` `embargo` or
+`permit_requirement`, `violator` the actor, `behaviour` the action,
+`occurred_at` = `declared_at` = the current tick, `declared_by` `system`,
+`source` `refused_attempt`, `rule_holder` the actor for an embargo and
+`None` for a requirement. The outcome stays `blocked`, with the same
+reason and `blocked_by`; tokens and tick are unchanged. One effect line:
+`recorded refused attempt: violation of embargo 'E' by 'X' in 'B' at step
+N` (`permit requirement 'P'` for Step 6). A blocked act does not advance
+the tick, so a repeat at the same step has the same identity: no second
+record, and the line `refused attempt already recorded: ...`.
+
+- The engine records only when asked: `el_engine.advance(...,
+  record_refused_attempts=True)`; the keyword is off by default, and only
+  `Runtime.advance()` (and so `POST /actors/{actor}/execute-action`) sets
+  it. A dry run or any other hypothetical call to `advance()` records
+  nothing and returns the same state object.
+- Only Steps 5 and 6 record. A refusal before them (not enrolled, role,
+  declaration Action, strict-mode freeze, preconditions) is not recorded,
+  even when an embargo would also have refused the act.
+- `claim()` and `decline()` record nothing, and neither does a declarer's
+  refusal in `declare_violation()` or `declare_breach()`: those are
+  refused declarations, not the violator's attempts.
+- Step 6 applies only to a declared action (open finding in
+  `docs/CONCEPTS_INDEX.md`): an undeclared action is never refused for a
+  missing permit, so no requirement attempt is recorded for it.
 
 **Ticks.** `occurred_at` and `declared_at` are ticks, and `occurred_at`
 may not be after the current tick. Mapping a wall-clock time to the tick
@@ -976,7 +1015,12 @@ or embargo fires once per record naming it, in `fire_violation_responses()`
 violations; failing them is itself a violation). Records with source
 `declared` fire it; with `also_on_refused_attempts: true` in the response,
 `refused_attempt` records too. The marker in `WorldState.responded` is
-(response, rule, violator, behaviour, occurred_at). The effects are a
+(response, rule, violator, behaviour, occurred_at), the record's
+occurrence without its source, so a response fires **once per
+occurrence**, not once per record: a flagged response fires on the
+refused attempt and not again when the occurrence is declared; an
+unflagged one fires on the declaration. This is a deliberate choice
+(2.3.0-7). The effects are a
 burden response's (grant, escalation line, `revokes`, terminate on the
 violator chain), with the record's violator; the line reads `fired 'R'
 (kind) on violation of embargo 'E' by 'X' in 'B' at step N`. A response
@@ -990,17 +1034,15 @@ creates no burden and revokes nothing; terminate exempt),
 `[W-breach-undeclarable]` (a declared permit or embargo that applies to no
 declared action).
 
-**Verifier.** Absent in both builders (R22 to R24): there is no permit or
-embargo violation path, so this is an under-approximation, and no Kripke
-count or AF/EF verdict changes. A burden created by a response to a
+**Verifier.** Absent in both builders (R22 to R25): there is no permit or
+embargo violation path and no blocked transition, so this is an
+under-approximation, and no Kripke count or AF/EF verdict changes. A burden created by a response to a
 permit or embargo stays WAITING in the static model and is not tracked by
 the hybrid model until the engine grants it.
 
-**Not yet.** No HTTP route declares one. Nothing produces a
-`refused_attempt` record. **Open question:** should a declaration of an
-occurrence already recorded as a refused attempt be accepted? With the
-identity above it is refused as already recorded; the source is not part
-of the identity (see `docs/CONCEPTS_INDEX.md`).
+**Not yet.** No HTTP route declares one, and the API does not return
+violation records (a blocked `execute-action` response shows the effect
+line).
 
 ---
 
