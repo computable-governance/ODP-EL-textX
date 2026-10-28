@@ -11790,3 +11790,79 @@ on an action), §7.8.7 (deontic token rules).
 published-specs golden test passes unchanged.
 
 Verifier parity: none (no engine rule changed; R21 unchanged).
+
+## 2.3.0-2 — violation records: declaring a violation of a permit or an embargo (`toolchain/el_engine.py`, `toolchain/el_runtime.py`)
+
+**Status:** IMPLEMENTED. Type: engine and runtime.
+
+**Standard reference:** §6.3.8 (violation), §7.8.6 (behaviour
+violations), §7.8.7 (deontic token rules); Annex B.1.6.3, B.1.7.5.
+
+**Before.** Only a burden could be violated: by its deadline, or, if
+strict, by `declare_violation()`. A breach of an embargo, a denial of a
+permission, or an act without a required permit left no trace.
+
+**Now.**
+- `ViolationRecord`: `rule`, `kind` (`burden`, `permit`, `embargo`,
+  `permit_requirement`), `violator` (an enterprise object, never a role),
+  `behaviour` (the action concerned), `declared_by`, `occurred_at` and
+  `declared_at` (ticks), `source` (`declared`; `refused_attempt` exists
+  but nothing produces it yet), `rule_holder` (the holder of the violated
+  token; None for a requirement) and `warnings`. Its identity is (rule,
+  violator, behaviour, occurred_at). No record of kind `burden` is made: a
+  burden's violation stays its token's state.
+- `TransitionRecord.violation_records` (the records the act makes) and
+  `WorldState.violation_records` (every record so far, the same objects),
+  both empty by default.
+- `el_engine.declare_breach(state, spec, token, kind, violator, behaviour,
+  declarer, occurred_at, rule_holder=None, facts=None, in_force=None)`.
+  Kinds: an embargo breach (its holder performed an action the embargo
+  covers), a denial of permission (a third party prevented the holder's
+  permitted action; the violator is that third party), a permit
+  requirement (the actor performed an action without the permit it
+  requires; the rule is named by the permit). The declarer passes the
+  checks `declare_violation()` applies for one Action with
+  `declares_violation_of` the token (one shared helper,
+  `_declaration_action_for()`) and is not the violator. Refusal texts:
+  `'B' at step N has not happened yet: the current step is T`;
+  `'X' is the violator and may not declare its own violation of 'T'`;
+  `'X' is a role; name the enterprise object that filled it`;
+  `'X' is not an enterprise object of the specification`;
+  `no role declares an action 'B'`; `embargo 'E' does not apply to 'B'`;
+  `'X' did not hold embargo 'E' in force at step N`;
+  `a denial of permission names the holder whose action was prevented
+  (rule_holder)`; `'X' holds 'P': the holder cannot deny its own
+  permission`; `permit 'P' does not cover 'B'`;
+  `'H' did not hold permit 'P' in force at step N`;
+  `'B' does not require permit 'P'`;
+  `'X' held permit 'P' at step N: acting under it is not a violation`;
+  `already recorded: violation of 'T' by 'X' in 'B' at step N, declared
+  at step D by 'Y'`. The enrolment, declaring-Action, role, precondition,
+  embargo and permit refusals are the existing texts.
+- Whether a token was in force at `occurred_at` comes from the caller as
+  `in_force`; the engine stays pure. `breach_history_queries()` lists the
+  (token, holder) pairs, from the spec. `Runtime.declare_breach()` answers
+  them with `in_force_at()` (slice 1) and appends the record. An unknown
+  answer is accepted with the warning `history unknown: could not
+  establish whether 'H' held <kind> 'T' at step N; accepted on the
+  declaration`, on the record and as an effect line.
+- A declaration changes no token and does not advance the tick, so it is
+  outside the strict-mode guard and lets no time pass. It fires no
+  ViolationResponse.
+- `declare_violation()`'s behaviour and texts are unchanged.
+
+**Limits.** `occurred_at` is a tick; mapping wall-clock time to it is a
+later item. The validator still refuses `declares_violation_of` on a
+permit or embargo (V-NEW-24) until it is rewritten. Justified prevention
+(an embargo on the holder) is 2.3.0-3.
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_runtime.py`,
+`docs/ENGINE_VERIFIER_PARITY.md` (R22), `tests/test_violation_records.py`
+(new).
+
+**Verification:** full suite 1932 → 1952 passed, 0 failures. The
+published-specs golden test passes unchanged; existing Kripke pins pass.
+
+Verifier parity: R22 (absent in both builders; under-approximation, no
+permit or embargo violation paths; no Kripke count or AF/EF verdict
+changes).

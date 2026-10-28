@@ -21,9 +21,11 @@ from el_engine import (
     TransitionRecord,
     advance as _engine_advance,
     advance_clock as _engine_advance_clock,
+    breach_history_queries,
     check_live_violations as _engine_check_live_violations,
     claim as _engine_claim,
     decline as _engine_decline,
+    declare_breach as _engine_declare_breach,
     declare_violation as _engine_declare_violation,
     discharge_burden as _engine_discharge_burden,
     enroll,
@@ -345,6 +347,26 @@ class Runtime:
         new_state, record = _engine_declare_violation(
             self._state, self._spec, burden_name, declarer, at_tick, facts
         )
+        self._state = new_state
+        self._ledger.append(record)
+        return record
+
+    def declare_breach(self, token_name: str, kind: str, violator: str, behaviour: str,
+                       declarer: str, occurred_at: int, rule_holder: Optional[str] = None,
+                       facts: Optional[dict] = None) -> TransitionRecord:
+        """2.3.0-2: declare a violation of a permit or embargo that occurred at
+        step `occurred_at`, as `declarer`; append the record to the ledger.
+        Whether each token was in force then is read from history()
+        (in_force_at()) and passed to el_engine.declare_breach(), which stays
+        pure; see its docstring. Fires no ViolationResponse."""
+        in_force = {
+            (token, holder): self.in_force_at(token, holder, occurred_at)
+            for token, holder in breach_history_queries(
+                self._spec, token_name, kind, violator, behaviour, rule_holder)
+        }
+        new_state, record = _engine_declare_breach(
+            self._state, self._spec, token_name, kind, violator, behaviour, declarer,
+            occurred_at, rule_holder, facts, in_force)
         self._state = new_state
         self._ledger.append(record)
         return record

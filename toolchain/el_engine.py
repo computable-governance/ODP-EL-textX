@@ -96,6 +96,10 @@ class WorldState:
     # initial_value by initial_state(spec) and Runtime; nothing sets it and
     # nothing in the engine or verifier reads it yet.
     policy_values: Tuple[Tuple[str, str], ...] = ()
+    # 2.3.0-2: every violation record made so far (declare_breach()), in
+    # order; the same objects as the ledger's records. Read by the identity
+    # check and fire_violation_responses(); no verifier reads it.
+    violation_records: Tuple["ViolationRecord", ...] = ()
 
     # 2.1.0-3: replace() carries every other field, policy_values included.
     def with_tokens(self, tokens) -> "WorldState":
@@ -106,6 +110,9 @@ class WorldState:
 
     def with_responded(self, responded) -> "WorldState":
         return replace(self, responded=frozenset(responded))
+
+    def with_violation_records(self, records) -> "WorldState":
+        return replace(self, violation_records=tuple(records))
 
     def policy_value(self, name: str) -> Optional[str]:
         """2.1.0-3: the policy's value text, or None."""
@@ -126,6 +133,7 @@ class TransitionRecord:
     fired_responses: Tuple[str, ...] = ()  # ViolationResponse names fired (fire_violation_responses() only)
     token_events: Tuple["TokenEvent", ...] = ()  # each change to a token instance (_token_events())
     blocked_by: Optional["TokenRef"] = None      # the token that refused the act (blocked records)
+    violation_records: Tuple["ViolationRecord", ...] = ()  # violations this act records (2.3.0-2)
 
 
 @dataclass(frozen=True)
@@ -158,6 +166,30 @@ class TokenRef:
     holder: str
     state: Optional[str]
     granted_at_tick: Optional[int]
+
+
+@dataclass(frozen=True)
+class ViolationRecord:
+    """2.3.0-2: one violation of a permit or embargo, recorded as an event
+    (§6.3.8, §7.8.6); no token changes state. A burden's violation stays its
+    token's state ('violated'), and no record of kind 'burden' is made yet.
+    Principals and the rule's authority are not stored: they are read from
+    the delegation chain and the token events."""
+    rule: str                  # the token; for permit_requirement, the permit type
+    kind: str                  # 'burden' | 'permit' | 'embargo' | 'permit_requirement'
+    violator: str              # an enterprise object, never a role
+    behaviour: str             # the action concerned
+    declared_by: str
+    occurred_at: int           # a tick (the wall-clock mapping is a later item)
+    declared_at: int           # a tick
+    source: str = "declared"   # 'declared' | 'refused_attempt' (not produced yet)
+    rule_holder: Optional[str] = None   # the violated token's holder; None for a requirement
+    warnings: Tuple[str, ...] = ()      # e.g. history unknown
+
+    @property
+    def identity(self) -> Tuple[str, str, str, int]:
+        """One occurrence: declaring it again is refused."""
+        return (self.rule, self.violator, self.behaviour, self.occurred_at)
 
 
 @dataclass(frozen=True)
@@ -3143,6 +3175,30 @@ def fire_event(
     return new_state, record
 
 
+def _declaration_action_for(spec, state: WorldState, declarer: str, actions, facts: dict):
+    """The first declaration Action in `actions` the declarer passes every
+    check for: role (AM-114), preconditions (Step 4), embargo and permit
+    (Steps 5 and 6, 2.3.0-1). Returns (action, precondition lines, None,
+    None), or (None, (), the first candidate's refusal, its blocked_by).
+    Shared by declare_violation() and declare_breach() (2.3.0-2)."""
+    first_reason = None
+    first_blocked_by: Optional[TokenRef] = None   # the token behind first_reason, if any
+    for candidate in actions:
+        blocked_by: Optional[TokenRef] = None
+        precondition_lines: Tuple[str, ...] = ()
+        reason = _role_refusal(spec, state, declarer, candidate.name)
+        if reason is None:
+            reason, precondition_lines = _precondition_refusal(candidate.preconditions, facts)
+        if reason is None:
+            reason, blocked_by = _deontic_refusal(spec, state, declarer, candidate.name,
+                                                  candidate)
+        if reason is None:
+            return candidate, precondition_lines, None, None
+        if first_reason is None:
+            first_reason, first_blocked_by = reason, blocked_by
+    return None, (), first_reason, first_blocked_by
+
+
 def declare_violation(
     state: WorldState,
     spec,
@@ -3229,23 +3285,8 @@ def declare_violation(
         return _blocked(state, declarer, label,
                         f"no action declares '{burden_name}' violated "
                         f"(declares_violation_of)", tick)
-    action = None
-    first_reason = None
-    first_blocked_by: Optional[TokenRef] = None   # the token behind first_reason, if any
-    precondition_lines: Tuple[str, ...] = ()
-    for candidate in actions:
-        blocked_by: Optional[TokenRef] = None
-        reason = _role_refusal(spec, state, declarer, candidate.name)
-        if reason is None:
-            reason, precondition_lines = _precondition_refusal(candidate.preconditions, facts)
-        if reason is None:   # Steps 5 and 6 (2.3.0-1)
-            reason, blocked_by = _deontic_refusal(spec, state, declarer, candidate.name,
-                                                  candidate)
-        if reason is None:
-            action = candidate
-            break
-        if first_reason is None:
-            first_reason, first_blocked_by = reason, blocked_by
+    action, precondition_lines, first_reason, first_blocked_by = _declaration_action_for(
+        spec, state, declarer, actions, facts)
     if action is None:
         return _blocked(state, declarer, label, first_reason, tick, first_blocked_by)
     label = action.name
@@ -3307,6 +3348,215 @@ def declare_violation(
                                    "declaration", label),
     )
     return new_state, record
+
+
+_BREACH_KINDS = ("permit", "embargo", "permit_requirement")
+_KIND_TEXT = {"permit": "permit", "embargo": "embargo",
+              "permit_requirement": "permit requirement"}
+
+
+def _breach_token(spec, token_name: str, kind: str):
+    """2.3.0-2: the spec DeonticToken a breach declaration names, checked
+    against `kind`. Raises ValueError for a burden or an unknown kind, or a
+    token of the wrong kind; KeyError for an undeclared token."""
+    if kind == "burden":
+        raise ValueError("a burden's violation is declared with declare_violation()")
+    if kind not in _BREACH_KINDS:
+        raise ValueError(
+            f"kind must be 'permit', 'embargo' or 'permit_requirement', not '{kind}'")
+    token_el = _spec_token(spec, token_name)
+    if token_el is None:
+        raise KeyError(f"DeonticToken '{token_name}' not found in spec")
+    need = "embargo" if kind == "embargo" else "permit"
+    if token_el.kind != need:
+        raise ValueError(f"DeonticToken '{token_name}' is a '{token_el.kind}', not a {need}")
+    return token_el
+
+
+def breach_history_queries(
+    spec, token_name: str, kind: str, violator: str, behaviour: str,
+    rule_holder: Optional[str] = None,
+) -> Tuple[Tuple[str, str], ...]:
+    """2.3.0-2: the (token, holder) pairs whose standing at the occurrence
+    declare_breach() judges, taken from the spec (an instance may be gone
+    by now): the embargo and the violator; the permit and its holder; the
+    required permit and the violator. Runtime.declare_breach() answers each
+    with Runtime.in_force_at(token, holder, occurred_at)."""
+    _breach_token(spec, token_name, kind)
+    if kind in ("embargo", "permit_requirement"):
+        return ((token_name, violator),)
+    return ((token_name, rule_holder),) if rule_holder else ()
+
+
+def _permit_covers(spec, token_el, action) -> bool:
+    """2.3.0-2: the permit covers the action: the action requires it, or it
+    is the permit's for_action."""
+    if any(req.kind == "requires_permit" and req.token and req.token.name == token_el.name
+           for req in getattr(action, "deontic_requirements", []) or []):
+        return True
+    return getattr(token_el, "for_action", None) == action.name
+
+
+def _role_names(spec) -> Set[str]:
+    return {role.name for el in spec.elements
+            if type(el).__name__ in ("Community", "Domain", "Federation")
+            for role in getattr(el, "roles", []) or []}
+
+
+def declare_breach(
+    state: WorldState,
+    spec,
+    token_name: str,
+    kind: str,
+    violator: str,
+    behaviour: str,
+    declarer: str,
+    occurred_at: int,
+    rule_holder: Optional[str] = None,
+    facts: Optional[dict] = None,
+    in_force: Optional[Dict[Tuple[str, str], Optional[bool]]] = None,
+) -> Tuple[WorldState, TransitionRecord]:
+    """
+    2.3.0-2: declare a violation of a permit or an embargo (§6.3.8, §7.8.6,
+    §7.8.7). It is recorded as an event, a ViolationRecord on the record and
+    in WorldState.violation_records; no token changes state. A burden's
+    violation is declared with declare_violation(), unchanged.
+
+    Kinds:
+      - embargo: `violator` held the embargo `token_name` and performed
+        `behaviour`, an action it covers (_embargo_coverage());
+      - permit: `violator` prevented `rule_holder` from performing
+        `behaviour`, an action the permit covers (the action requires it,
+        or it is the permit's for_action) — a denial of permission;
+      - permit_requirement: `violator` performed `behaviour` without the
+        permit `token_name` that the action requires; the rule is the
+        requirement, named by the permit.
+
+    `occurred_at` is the step the behaviour took place (a tick, at most the
+    current one). `in_force` holds, for each pair breach_history_queries()
+    lists, whether that holder held that token active at `occurred_at`
+    (Runtime.in_force_at()); a missing or None answer is unknown, and the
+    declaration is accepted with a warning on the record and in the effects.
+    Runtime.declare_breach() supplies it.
+
+    The declarer passes, for one Action with `declares_violation_of
+    token_name`, the checks declare_violation() applies (role,
+    preconditions on `facts`, embargo, permit) and is not the violator.
+    The same occurrence (rule, violator, behaviour, occurred_at) is recorded
+    once; a second declaration is refused.
+
+    The tick does not advance: no token changes, so the declaration is not
+    governed by the strict-mode guard and does not let time pass. It fires
+    no ViolationResponse. Raises KeyError for an undeclared token and
+    ValueError for a burden, an unknown kind or a token of another kind.
+    Returns (new_state, record): record.outcome is 'violation' with
+    token_name in violations and the ViolationRecord in violation_records,
+    or 'blocked' with a reason (state unchanged).
+    """
+    if facts is None:
+        facts = {}
+    token_el = _breach_token(spec, token_name, kind)
+    tick = state.tick
+    label = f"declare_violation:{token_name}"
+    kind_text = _KIND_TEXT[kind]
+
+    def refuse(reason, blocked_by=None):
+        return _blocked(state, declarer, label, reason, tick, blocked_by)
+
+    if occurred_at > tick:
+        return refuse(f"'{behaviour}' at step {occurred_at} has not happened yet: "
+                      f"the current step is {tick}")
+    if declarer not in {a.actor_name for a in state.actors}:
+        return refuse(f"actor '{declarer}' is not enrolled")
+    actions = _declaration_actions(spec).get(token_name, [])
+    if not actions:
+        return refuse(f"no action declares '{token_name}' violated (declares_violation_of)")
+    action, precondition_lines, reason, blocked_by = _declaration_action_for(
+        spec, state, declarer, actions, facts)
+    if action is None:
+        return refuse(reason, blocked_by)
+    label = action.name
+
+    if declarer == violator:
+        return refuse(f"'{declarer}' is the violator and may not declare its own "
+                      f"violation of '{token_name}'")
+    objects = {el.name for el in spec.elements if type(el).__name__ == "EnterpriseObject"}
+    if violator not in objects and violator not in {a.actor_name for a in state.actors}:
+        if violator in _role_names(spec):
+            return refuse(f"'{violator}' is a role; name the enterprise object that filled it")
+        return refuse(f"'{violator}' is not an enterprise object of the specification")
+    behaviour_action, _ = _find_action(spec, behaviour)
+    if behaviour_action is None:
+        return refuse(f"no role declares an action '{behaviour}'")
+
+    answers = in_force or {}
+    warnings: List[str] = []
+
+    def standing(token: str, holder: str, word: str) -> Optional[bool]:
+        known = answers.get((token, holder))
+        if known is None:
+            warnings.append(
+                f"history unknown: could not establish whether '{holder}' held {word} "
+                f"'{token}' at step {occurred_at}; accepted on the declaration")
+        return known
+
+    if kind == "embargo":
+        rule_holder = violator
+        if not _embargo_covers(_embargo_coverage(spec), token_name,
+                               getattr(token_el, "for_action", None), behaviour):
+            return refuse(f"embargo '{token_name}' does not apply to '{behaviour}'")
+        if standing(token_name, violator, "embargo") is False:
+            return refuse(f"'{violator}' did not hold embargo '{token_name}' in force "
+                          f"at step {occurred_at}")
+    elif kind == "permit":
+        if not rule_holder:
+            return refuse("a denial of permission names the holder whose action was "
+                          "prevented (rule_holder)")
+        if rule_holder == violator:
+            return refuse(f"'{violator}' holds '{token_name}': the holder cannot deny its "
+                          f"own permission")
+        if not _permit_covers(spec, token_el, behaviour_action):
+            return refuse(f"permit '{token_name}' does not cover '{behaviour}'")
+        if standing(token_name, rule_holder, "permit") is False:
+            return refuse(f"'{rule_holder}' did not hold permit '{token_name}' in force "
+                          f"at step {occurred_at}")
+    else:
+        rule_holder = None
+        if not any(req.kind == "requires_permit" and req.token
+                   and req.token.name == token_name
+                   for req in behaviour_action.deontic_requirements):
+            return refuse(f"'{behaviour}' does not require permit '{token_name}'")
+        if standing(token_name, violator, "permit") is True:
+            return refuse(f"'{violator}' held permit '{token_name}' at step {occurred_at}: "
+                          f"acting under it is not a violation")
+
+    identity = (token_name, violator, behaviour, occurred_at)
+    for earlier in state.violation_records:
+        if earlier.identity == identity:
+            return refuse(f"already recorded: violation of '{token_name}' by '{violator}' "
+                          f"in '{behaviour}' at step {occurred_at}, declared at step "
+                          f"{earlier.declared_at} by '{earlier.declared_by}'")
+
+    record_ = ViolationRecord(
+        rule=token_name, kind=kind, violator=violator, behaviour=behaviour,
+        declared_by=declarer, occurred_at=occurred_at, declared_at=tick,
+        source="declared", rule_holder=rule_holder, warnings=tuple(warnings),
+    )
+    effects = precondition_lines + (
+        f"declared violation of {kind_text} '{token_name}' by '{violator}' in "
+        f"'{behaviour}' at step {occurred_at} (declared at step {tick})",
+    ) + tuple(warnings)
+    new_state = state.with_violation_records(state.violation_records + (record_,))
+    return new_state, TransitionRecord(
+        tick=tick,
+        actor_name=declarer,
+        action_name=label,
+        outcome="violation",
+        discharged=(),
+        effects=effects,
+        violations=(token_name,),
+        violation_records=(record_,),
+    )
 
 
 def check_live_violations(
