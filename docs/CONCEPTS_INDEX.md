@@ -7216,6 +7216,14 @@ names the real caller; refuse strict burdens unless the caller is
 authorised as for a declaration; FHIR adapters' trust under the
 `fire_event()` authorisation finding above. Deferred from AM-115.
 
+**Addendum (2026-10-28):** `discharge_burden()` does not call
+`_discharge()`. It never supersedes `any_discharged` siblings; `advance()`
+and `fire_event()` do (through `_discharge()`), and the static verifier's
+P6b models it. It discharges any instance of the burden that is not
+already discharged, including pending, violated and superseded ones,
+whereas `_discharge()` discharges only active ones. Behaviour unchanged;
+not scheduled.
+
 ## Separation of duties: the gateway's filler must not fill declarerRole — OPEN FINDING (2026-09-27)
 
 **OPEN FINDING** — recorded in AM-115; a §7.8.2 assignment-rule

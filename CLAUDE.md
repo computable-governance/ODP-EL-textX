@@ -276,7 +276,7 @@ AM-23 (typed PolicyValue), AM-24 (InlineToken), AM-25 (Federation/Domain as
 community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition).
 The last AM entry is AM-115 (section 5.8). The 2.1.0 changes follow it,
 numbered 2.1.0-1 to 2.1.0-25, then the 2.2.0 changes, 2.2.0-1 to 2.2.0-13
-(section 7.4).
+(section 7.4), then the 2.3.0 changes, 2.3.0-1 to 2.3.0-9.
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -524,6 +524,10 @@ intended change):
   `option-set-name`. The validator has 71 rules: 45 errors and 26
   warnings. Reworded `comparison-type` messages (invalid specifications
   only; see `CHANGELOG.md`).
+- 2.3.0 (unreleased) adds three validator warnings,
+  `W-breach-response-duty`, `W-refused-attempts-burden` and
+  `W-breach-undeclarable`; the validator has 74 rules: 45 errors and 29
+  warnings.
 
 Partly implemented: Federation (specifications parse and validate; the
 loader covers Domain members only, see section 7.3 item 3).
