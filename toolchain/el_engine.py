@@ -641,6 +641,31 @@ def _missing_permit_ref(state: WorldState, actor_name: str, permit_name: str) ->
                     state=None, granted_at_tick=None)
 
 
+def _deontic_refusal(spec, state: WorldState, actor_name: str, action_name: str,
+                     grammar_action=None) -> Tuple[Optional[str], Optional[TokenRef]]:
+    """2.3.0-1: advance() Steps 5 and 6, shared with declare_violation():
+    the refusal reason and the token behind it, or (None, None). Step 5:
+    an active embargo held by the actor that covers action_name
+    (_embargo_coverage()). Step 6: a permit grammar_action requires that the
+    actor does not hold active; skipped when grammar_action is None (an
+    undeclared action)."""
+    coverage = _embargo_coverage(spec)
+    for tok in state.tokens:
+        if (tok.holder == actor_name
+                and tok.kind == "embargo"
+                and tok.state == "active"
+                and _embargo_covers(coverage, tok.token_name, tok.for_action, action_name)):
+            return f"active embargo '{tok.token_name}' blocks action", _token_ref(tok)
+    if grammar_action is not None:
+        for req in grammar_action.deontic_requirements:
+            if req.kind == "requires_permit" and req.token:
+                permit_name = req.token.name
+                if not _actor_holds_permit(state, actor_name, permit_name):
+                    return (f"required permit '{permit_name}' not held by actor",
+                            _missing_permit_ref(state, actor_name, permit_name))
+    return None, None
+
+
 def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int,
              blocked_by: Optional[TokenRef] = None) -> Tuple[WorldState, TransitionRecord]:
     return state, TransitionRecord(
@@ -1216,25 +1241,12 @@ def advance(
     # covers — the Actions that name it via inhibited_by_embargo, else its
     # for_action, else every action (_embargo_coverage()). Applies to
     # discharging actions too.
-    coverage = _embargo_coverage(spec)
-    for tok in state.tokens:
-        if (tok.holder == actor_name
-                and tok.kind == "embargo"
-                and tok.state == "active"):
-            if _embargo_covers(coverage, tok.token_name, tok.for_action, action_name):
-                return _blocked(state, actor_name, action_name,
-                                f"active embargo '{tok.token_name}' blocks action", tick,
-                                _token_ref(tok))
-
     # ── Step 6: Permit check ──────────────────────────────────────────────────
-    if grammar_action:
-        for req in grammar_action.deontic_requirements:
-            if req.kind == "requires_permit" and req.token:
-                permit_name = req.token.name
-                if not _actor_holds_permit(state, actor_name, permit_name):
-                    return _blocked(state, actor_name, action_name,
-                                    f"required permit '{permit_name}' not held by actor", tick,
-                                    _missing_permit_ref(state, actor_name, permit_name))
+    # Both in _deontic_refusal() (2.3.0-1), shared with declare_violation().
+    reason, blocked_by = _deontic_refusal(spec, state, actor_name, action_name,
+                                          grammar_action or None)
+    if reason is not None:
+        return _blocked(state, actor_name, action_name, reason, tick, blocked_by)
 
     # ── Step 7: Effect application ────────────────────────────────────────────
     tokens = list(state.tokens)
@@ -3217,7 +3229,6 @@ def declare_violation(
         return _blocked(state, declarer, label,
                         f"no action declares '{burden_name}' violated "
                         f"(declares_violation_of)", tick)
-    coverage = _embargo_coverage(spec)
     action = None
     first_reason = None
     first_blocked_by: Optional[TokenRef] = None   # the token behind first_reason, if any
@@ -3227,22 +3238,9 @@ def declare_violation(
         reason = _role_refusal(spec, state, declarer, candidate.name)
         if reason is None:
             reason, precondition_lines = _precondition_refusal(candidate.preconditions, facts)
-        if reason is None:
-            for tok in state.tokens:
-                if (tok.holder == declarer and tok.kind == "embargo"
-                        and tok.state == "active"
-                        and _embargo_covers(coverage, tok.token_name, tok.for_action,
-                                            candidate.name)):
-                    reason = f"active embargo '{tok.token_name}' blocks action"
-                    blocked_by = _token_ref(tok)
-                    break
-        if reason is None:
-            for req in candidate.deontic_requirements:
-                if (req.kind == "requires_permit" and req.token
-                        and not _actor_holds_permit(state, declarer, req.token.name)):
-                    reason = f"required permit '{req.token.name}' not held by actor"
-                    blocked_by = _missing_permit_ref(state, declarer, req.token.name)
-                    break
+        if reason is None:   # Steps 5 and 6 (2.3.0-1)
+            reason, blocked_by = _deontic_refusal(spec, state, declarer, candidate.name,
+                                                  candidate)
         if reason is None:
             action = candidate
             break

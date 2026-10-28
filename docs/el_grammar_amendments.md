@@ -11763,3 +11763,30 @@ the six API scenarios: the same world and edge counts and AF/EF verdicts
 as at 2.2.0-12.
 
 Verifier parity: none (no engine or verifier rule changed).
+
+## 2.3.0-1 — violation records: one embargo and permit check (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine refactor, no behaviour change.
+
+**Standard reference:** §6.4.4 (embargo), §6.4.6 (permits and embargoes
+on an action), §7.8.7 (deontic token rules).
+
+**Now.**
+- `el_engine._deontic_refusal(spec, state, actor, action_name,
+  grammar_action=None)` is `advance()` Steps 5 and 6: an active embargo
+  the actor holds that covers the action (`_embargo_coverage()`), then a
+  permit `grammar_action` requires that the actor does not hold active
+  (skipped for an undeclared action, as before). It returns the reason
+  and the token behind it (`blocked_by`), or `(None, None)`.
+- `advance()` and `declare_violation()` both call it, instead of keeping
+  a copy each. The violation-record declaration (2.3.0-2) is the third
+  caller.
+- No reason text, `blocked_by`, check order or outcome changed.
+
+**Files changed:** `toolchain/el_engine.py`,
+`tests/test_deontic_refusal.py` (new).
+
+**Verification:** full suite 1929 → 1932 passed, 0 failures. The
+published-specs golden test passes unchanged.
+
+Verifier parity: none (no engine rule changed; R21 unchanged).
