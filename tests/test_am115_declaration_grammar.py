@@ -199,10 +199,10 @@ def test_v_new_24_eventual_burden():
     assert "'recB', an eventual burden" in err
 
 
-def test_v_new_24_not_a_burden():
+def test_v_new_24_accepts_a_permit():
+    # 2.3.0-5: a permit or embargo may be declared violated (declare_breach()).
     result = _parse(decl_items="requires_permit declP\n            declares_violation_of useP")
-    (err,) = _codes(result.errors, "[V-NEW-24]")
-    assert "'useP', a permit" in err
+    assert _codes(result.errors, "[V-NEW-24]") == []
 
 
 def test_v_new_24_no_permit():

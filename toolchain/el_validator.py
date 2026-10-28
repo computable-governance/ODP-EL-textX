@@ -206,6 +206,14 @@ Rules implemented
   deadline-policy-type  2.2.0-9: a Policy in a deadline slot is of type
         duration, with a usable value (a whole number of a unit, not
         negative).                                   clause to be confirmed
+  W-breach-response-duty  2.3.0-5: a ViolationResponse to a permit or
+        embargo that creates no burden and revokes nothing, unless it is
+        a terminate response. Advisory.             §6.3.8, §7.8.6 NOTE 2
+  W-refused-attempts-burden  2.3.0-5: also_on_refused_attempts on a
+        response to a burden has no effect. Advisory.    §6.3.8, §7.8.6
+  W-breach-undeclarable  2.3.0-5: a declaration Action names a permit or
+        embargo that applies to no declared action, so every declaration
+        of it is refused. Advisory.               §6.3.8, §6.6.5, §7.8.6
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -230,7 +238,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 # 2.1.0-7: the date and instant helpers moved to el_engine (shared with date
 # deadlines); the 2.1.0-2 rules use them from there.
-from el_engine import _calendar_date, _instant_moment, _instant_problem
+from el_engine import _calendar_date, _embargo_coverage, _instant_moment, _instant_problem
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -421,7 +429,8 @@ def validate_spec(model) -> List[str]:
     # V-NEW-23 — revoked Authorizations: revocable, embargo, obligates' grant (AM-115, §6.6.4)
     errors.extend(_validate_response_revocations(model))
 
-    # V-NEW-24 — declaration actions: strict burden, under a permit (AM-115, §6.6.5, §7.10.4)
+    # V-NEW-24 — declaration actions: strict burden, under a permit (AM-115,
+    # 2.3.0-5; §6.3.8, §6.6.5, §7.10.4)
     errors.extend(_validate_declaration_actions(model))
 
     # V-NEW-25 — creates_burden_for_role needs creates_burden (AM-115, §7.8.6 NOTE 2)
@@ -429,6 +438,12 @@ def validate_spec(model) -> List[str]:
 
     # W-29 — creates_burden_for_role names an unfilled role (AM-115, §7.8.2)
     errors.extend(_validate_response_role_filled(model))
+
+    # 2.3.0-5 — responses to and declarations of permit and embargo violations
+    # (§6.3.8, §6.6.5, §7.8.6 NOTE 2)
+    errors.extend(_validate_breach_response_duty(model))
+    errors.extend(_validate_refused_attempts_burden(model))
+    errors.extend(_validate_breach_undeclarable(model))
 
     # W-24 — eventual burden that can never be violated (AM-108, §6.4.3, §7.8.7)
     errors.extend(_validate_unviolatable_eventual_burden(model))
@@ -2476,12 +2491,14 @@ def _validate_response_revocations(model) -> List[str]:
 
 
 def _validate_declaration_actions(model) -> List[str]:
-    """V-NEW-24 (AM-115): an Action with `declares_violation_of B` is a
-    declaration (§6.6.5). B must be a strict burden: an eventual burden is
-    violated by the clock (check_live_violations()), and declaring it could
-    only anticipate its deadline. The Action must require a permit
-    (§7.10.4: declaration is tied to a permit), which
-    el_engine.declare_violation() checks. Error."""
+    """V-NEW-24 (AM-115, 2.3.0-5): an Action with `declares_violation_of T`
+    is a declaration (§6.6.5). A burden T must be strict: an eventual burden
+    is violated by the clock (check_live_violations()), and declaring it
+    could only anticipate its deadline. 2.3.0-5: T may also be a permit or
+    an embargo, whose violation is recorded as an event (§6.3.8, §7.8.6;
+    el_engine.declare_breach()). The Action must require a permit
+    (§7.10.4: declaration is tied to a permit), which the engine checks.
+    Error."""
     errors: List[str] = []
     for el in model.elements:
         if _cls(el) not in ("Community", "Domain", "Federation"):
@@ -2493,12 +2510,8 @@ def _validate_declaration_actions(model) -> List[str]:
                     continue
                 for tok in declared:
                     if getattr(tok, "kind", None) != "burden":
-                        errors.append(
-                            f"[V-NEW-24] Action '{action.name}' declares_violation_of "
-                            f"'{tok.name}', a {getattr(tok, 'kind', None)}: only a burden "
-                            f"can be violated. (§6.6.5, §6.4.3)"
-                        )
-                    elif (getattr(tok, "discharge_mode", None) or "eventual") != "strict":
+                        continue   # 2.3.0-5: a permit or embargo may be declared violated
+                    if (getattr(tok, "discharge_mode", None) or "eventual") != "strict":
                         errors.append(
                             f"[V-NEW-24] Action '{action.name}' declares_violation_of "
                             f"'{tok.name}', an eventual burden: its deadline violates it "
@@ -2513,6 +2526,91 @@ def _validate_declaration_actions(model) -> List[str]:
                         f"(§6.6.5, §7.10.4)"
                     )
     return errors
+
+
+def _breach_responses(model):
+    """2.3.0-5: (response, target token) for each ViolationResponse whose
+    on_violation_of is a permit or an embargo."""
+    for vr in _collect(model, "ViolationResponse"):
+        target = getattr(vr, "violated_burden", None)
+        if getattr(target, "kind", None) in ("permit", "embargo"):
+            yield vr, target
+
+
+def _validate_breach_response_duty(model) -> List[str]:
+    """[W-breach-response-duty] (2.3.0-5): a ViolationResponse to a permit
+    or embargo violation that creates no burden and lists no revocation:
+    obligates is named, but nothing is prescribed for it to do, although
+    §7.8.6 NOTE 2 makes the response rule an obligation on that object. A
+    terminate response is exempt: it revokes the violator's Authorizations
+    without a revokes line. Advisory, like W-22."""
+    warnings: List[str] = []
+    for vr, target in _breach_responses(model):
+        if getattr(vr, "response_kind", None) == "terminate":
+            continue
+        if getattr(vr, "creates_burden", None) is not None or getattr(vr, "revokes", None):
+            continue
+        warnings.append(
+            f"[W-breach-response-duty] ViolationResponse '{vr.name}' responds to a violation "
+            f"of {target.kind} '{target.name}' but obliges no action: add creates_burden "
+            f"(granted to obligates, or with creates_burden_for_role to the role's fillers) "
+            f"or a revokes line. (§6.3.8, §7.8.6 NOTE 2)"
+        )
+    return warnings
+
+
+def _validate_refused_attempts_burden(model) -> List[str]:
+    """[W-refused-attempts-burden] (2.3.0-5): also_on_refused_attempts on a
+    response to a burden. A refused attempt breaches a permit or an embargo
+    only, so the flag has no effect there. Advisory."""
+    warnings: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        target = getattr(vr, "violated_burden", None)
+        if getattr(vr, "also_on_refused_attempts", False) and \
+                getattr(target, "kind", None) == "burden":
+            warnings.append(
+                f"[W-refused-attempts-burden] ViolationResponse '{vr.name}' sets "
+                f"also_on_refused_attempts but responds to burden '{target.name}': a refused "
+                f"attempt breaches only a permit or an embargo. (§6.3.8, §7.8.6)"
+            )
+    return warnings
+
+
+def _validate_breach_undeclarable(model) -> List[str]:
+    """[W-breach-undeclarable] (2.3.0-5): a declaration Action names a
+    permit or embargo that applies to no declared action, so
+    el_engine.declare_breach() refuses every declaration of it. A permit
+    applies to an action that requires it or that is its for_action; an
+    embargo to the actions el_engine._embargo_coverage() gives it (every
+    action, for a general embargo). Advisory."""
+    actions = []
+    for el in model.elements:
+        if _cls(el) in ("Community", "Domain", "Federation"):
+            for role in getattr(el, "roles", []) or []:
+                actions.extend(getattr(role, "actions", []) or [])
+    names = {a.name for a in actions}
+    required = {req.token.name for a in actions
+                for req in getattr(a, "deontic_requirements", []) or []
+                if req.kind == "requires_permit" and req.token}
+    coverage = _embargo_coverage(model)
+    warnings: List[str] = []
+    for action in actions:
+        for tok in getattr(action, "declares_violation_of", []) or []:
+            kind = getattr(tok, "kind", None)
+            if kind == "permit":
+                applies = tok.name in required or getattr(tok, "for_action", None) in names
+            elif kind == "embargo":
+                covered = coverage.get(tok.name)
+                applies = covered is None or bool(covered & names)
+            else:
+                continue
+            if not applies:
+                warnings.append(
+                    f"[W-breach-undeclarable] Action '{action.name}' declares_violation_of "
+                    f"{kind} '{tok.name}', which applies to no declared action: every "
+                    f"declaration of it would be refused. (§6.3.8, §6.6.5, §7.8.6)"
+                )
+    return warnings
 
 
 def _validate_response_role_target(model) -> List[str]:

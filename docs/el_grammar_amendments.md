@@ -11957,3 +11957,52 @@ Verifier parity: R24 (absent; a burden such a response creates stays
 WAITING in the static model and is untracked in the hybrid one until
 granted; no Kripke count or AF/EF verdict of a published specification
 changes).
+
+## 2.3.0-5 — violation records: validator (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator (one rule rewritten, three new
+warnings).
+
+**Standard reference:** §6.3.8, §6.6.5, §7.8.6 and §7.8.6 NOTE 2,
+§7.10.4.
+
+**Now.**
+- **V-NEW-24 rewritten.** `declares_violation_of` may name a permit or
+  an embargo (`el_engine.declare_breach()`, 2.3.0-2). The error "only a
+  burden can be violated" is removed. Kept unchanged: a burden target must
+  be strict, and the declaring Action must require a permit.
+- **V-NEW-15** (a response's `on_violation_of` must be a burden) stays
+  unregistered.
+- New warning `[W-breach-response-duty]`: a ViolationResponse to a permit
+  or embargo violation that creates no burden and lists no revocation,
+  unless its response_kind is terminate (terminate revokes the violator's
+  Authorizations without a revokes line). Same severity as W-22.
+  `[W-breach-response-duty] ViolationResponse 'R' responds to a violation
+  of embargo 'E' but obliges no action: add creates_burden (granted to
+  obligates, or with creates_burden_for_role to the role's fillers) or a
+  revokes line. (§6.3.8, §7.8.6 NOTE 2)`. An escalate response with
+  neither also gets W-22.
+- New warning `[W-refused-attempts-burden]`:
+  `also_on_refused_attempts` on a response to a burden has no effect.
+  `[W-refused-attempts-burden] ViolationResponse 'R' sets
+  also_on_refused_attempts but responds to burden 'B': a refused attempt
+  breaches only a permit or an embargo. (§6.3.8, §7.8.6)`.
+- New warning `[W-breach-undeclarable]`: a declaration Action names a
+  permit that no declared action requires and whose `for_action` is no
+  declared action, or an embargo whose coverage (`_embargo_coverage()`)
+  holds no declared action; every declaration of it would be refused.
+  `[W-breach-undeclarable] Action 'A' declares_violation_of permit 'P',
+  which applies to no declared action: every declaration of it would be
+  refused. (§6.3.8, §6.6.5, §7.8.6)`.
+- 74 validator rules (45 errors, 29 warnings).
+
+**Files changed:** `toolchain/el_validator.py`,
+`tests/test_validator_breach_rules.py` (new),
+`tests/test_am115_declaration_grammar.py` (`test_v_new_24_not_a_burden`
+becomes `test_v_new_24_accepts_a_permit`: the removed error).
+
+**Verification:** full suite 1968 → 1975 passed, 0 failures. The
+published-specs golden test passes unchanged (no published file gets a
+new message).
+
+Verifier parity: none (validator only).
