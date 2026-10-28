@@ -16,18 +16,25 @@ Pinned here:
     through a fixed sequence of acts;
   - no side effects: with event production switched off, every record's
     other fields and every state are the same;
-  - blocked records and no-op sweeps carry no events.
+  - blocked records and no-op sweeps carry no events;
+  - the cause of each kind of change: the create effect, discharge (by
+    action, destroy effect, discharged_by event, fire_event(),
+    discharge_burden()), any_discharged supersession, transfer and
+    delegation reassignment, violation (deadline, date, episode
+    conclusion, standing breach, declaration), term end, a response's
+    grant and revocations, revocation and reinstatement.
 """
 import contextlib
 import io
 from collections import Counter
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 import el_api
 import el_engine
-from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_engine import DeadlineClock, enroll, grant_token, initial_state, token_from_spec
 from el_parser import parse_string
 from el_runtime import Runtime
 
@@ -137,7 +144,7 @@ def test_history_is_build_record_then_ledger():
     assert rt.history() == (rt.build_record, record)
     assert [(e.event, e.token_name, e.from_state, e.to_state, e.by, e.cause, e.cause_ref)
             for e in record.token_events] == [
-        ("active", "waitingBurden", "pending", "active", "Operator", "action", "startWork"),
+        ("active", "waitingBurden", "pending", "active", "Operator", "event", "workStarted"),
     ]
 
 
@@ -244,3 +251,334 @@ def test_blocked_records_and_no_op_sweeps_carry_no_events():
     assert (sweep.outcome, sweep.token_events) == ("ok", ())
     assert rt.fire_violation_responses().token_events == ()
     assert rt.advance_clock(5).token_events == ()
+
+
+# ── Causes, per site ──────────────────────────────────────────────────────────
+
+def _events(record):
+    return [(e.event, e.token_name, e.holder, e.from_state, e.to_state, e.by, e.cause,
+             e.cause_ref) for e in record.token_events]
+
+
+_ACTS = """
+enterprise specification LedgerCausesProbe
+
+party Lead
+party WorkerA
+party WorkerB
+
+community ProbeCommunity
+    description: "A lead and two workers"
+    {
+        objective: "Either worker's task"
+            satisfaction: any_discharged(taskGroup)
+
+        event jobDone
+            description: "Emitted by the lead"
+        event externalDone
+            description: "Fired by fire_event() only"
+
+        role leadRole
+            description: "The lead"
+            {
+                action assignJob {
+                    description: "Creates jobBurden for each worker"
+                    actor: leadRole
+                    effect create jobBurden to workerRole
+                }
+                action closeFile {
+                    description: "Discharges fileBurden by a destroy effect"
+                    actor: leadRole
+                    effect destroy fileBurden
+                }
+                action finishReport {
+                    description: "Discharges reportBurden by for_action"
+                    actor: leadRole
+                }
+                action announceJobDone {
+                    description: "Emits jobDone"
+                    actor: leadRole
+                    emits: jobDone
+                }
+                action handOver {
+                    description: "Transfers handBurden to the workers"
+                    actor: leadRole
+                    effect transfer handBurden to workerRole
+                }
+            }
+
+        role workerRole
+            description: "A worker"
+            {
+                action doTaskA {
+                    description: "Discharges taskA"
+                    actor: workerRole
+                }
+                action doTaskB {
+                    description: "Discharges taskB"
+                    actor: workerRole
+                }
+            }
+    }
+
+burden jobBurden {
+    state: active
+    discharged_by: jobDone
+    discharge_mode: eventual
+}
+
+burden fileBurden {
+    state: active
+    discharge_mode: eventual
+}
+
+burden reportBurden {
+    for_action: "finishReport"
+    state: active
+    discharge_mode: eventual
+}
+
+burden externalBurden {
+    state: active
+    discharged_by: externalDone
+    discharge_mode: eventual
+}
+
+burden callBurden {
+    state: active
+    discharge_mode: eventual
+}
+
+burden handBurden {
+    state: active
+    discharge_mode: eventual
+}
+
+burden taskA {
+    for_action: "doTaskA"
+    state: active
+    discharge_mode: eventual
+}
+
+burden taskB {
+    for_action: "doTaskB"
+    state: active
+    discharge_mode: eventual
+}
+
+token_group taskGroup {
+    member: taskA
+    member: taskB
+}
+"""
+
+
+def _acts_runtime() -> Runtime:
+    result = _quiet(parse_string, _ACTS, validate=False)
+    assert result.ok, result.errors
+    spec = result.model
+    state = initial_state()
+    state = enroll(state, "Lead", role_name="leadRole")
+    state = enroll(state, "WorkerA", role_name="workerRole")
+    state = enroll(state, "WorkerB", role_name="workerRole")
+    for name, holder in (("fileBurden", "Lead"), ("reportBurden", "Lead"),
+                         ("externalBurden", "Lead"), ("callBurden", "Lead"),
+                         ("handBurden", "Lead"), ("taskA", "WorkerA"), ("taskB", "WorkerB")):
+        state = grant_token(state, token_from_spec(spec, name, holder, 0))
+    return Runtime(state, spec)
+
+
+def test_create_effect_grants_to_each_role_filler():
+    rt = _acts_runtime()
+    assert _events(rt.advance("assignJob", "Lead")) == [
+        ("granted", "jobBurden", "WorkerA", None, "active", "Lead", "action", "assignJob"),
+        ("granted", "jobBurden", "WorkerB", None, "active", "Lead", "action", "assignJob"),
+    ]
+
+
+def test_discharge_causes():
+    rt = _acts_runtime()
+    assert _events(rt.advance("closeFile", "Lead")) == [
+        ("discharged", "fileBurden", "Lead", "active", "discharged", "Lead", "action", "closeFile")]
+    assert _events(rt.advance("finishReport", "Lead")) == [
+        ("discharged", "reportBurden", "Lead", "active", "discharged", "Lead", "action",
+         "finishReport")]
+    # discharged_by: the lead's event discharges the workers' burdens
+    rt.advance("assignJob", "Lead")
+    assert _events(rt.advance("announceJobDone", "Lead")) == [
+        ("discharged", "jobBurden", "WorkerA", "active", "discharged", "Lead", "event", "jobDone"),
+        ("discharged", "jobBurden", "WorkerB", "active", "discharged", "Lead", "event", "jobDone"),
+    ]
+    assert _events(rt.fire_event("externalDone", source="feed")) == [
+        ("discharged", "externalBurden", "Lead", "active", "discharged", "feed", "event",
+         "externalDone")]
+    assert _events(rt.discharge_burden("callBurden")) == [
+        ("discharged", "callBurden", "Lead", "active", "discharged", "Lead", "discharge_call",
+         None)]
+
+
+def test_any_discharged_sibling_is_superseded():
+    rt = _acts_runtime()
+    assert _events(rt.advance("doTaskA", "WorkerA")) == [
+        ("discharged", "taskA", "WorkerA", "active", "discharged", "WorkerA", "action", "doTaskA"),
+        ("superseded", "taskB", "WorkerB", "active", "superseded", "WorkerA", "sibling", "taskA"),
+    ]
+
+
+def test_transfer_removes_and_grants():
+    rt = _acts_runtime()
+    assert _events(rt.advance("handOver", "Lead")) == [
+        ("granted", "handBurden", "WorkerA", None, "active", "Lead", "action", "handOver"),
+        ("granted", "handBurden", "WorkerB", None, "active", "Lead", "action", "handOver"),
+        ("removed", "handBurden", "Lead", "active", None, "Lead", "action", "handOver"),
+    ]
+
+
+_DELEGATION = """
+enterprise specification LedgerDelegationProbe
+
+party Delegator {}
+
+party Delegate {
+    holds probeBurden
+}
+
+burden probeBurden {
+    state: active
+    discharge_mode: eventual
+}
+
+commitment probeCommitment {
+    by: Delegator
+    obligation: "o"
+    creates_burden: probeBurden
+}
+
+delegation probeDelegation {
+    from: Delegator
+    to: Delegate
+    obligation: "o"
+    transfers_burden: probeBurden
+    revocable: true
+}
+"""
+
+
+def test_delegation_revocation_moves_the_instance():
+    from el_engine import reinstate_delegation, revoke_delegation
+    result = _quiet(parse_string, _DELEGATION, validate=False)
+    assert result.ok, result.errors
+    rt = _quiet(Runtime.build_from_spec, result.model)
+    state, record = revoke_delegation(rt.current_state(), rt._spec, "probeDelegation")
+    assert _events(record) == [
+        ("granted", "probeBurden", "Delegator", None, "active", "Delegator",
+         "delegation_revoked", "probeDelegation"),
+        ("removed", "probeBurden", "Delegate", "active", None, "Delegator",
+         "delegation_revoked", "probeDelegation"),
+    ]
+    _, record = reinstate_delegation(state, rt._spec, "probeDelegation")
+    assert [(e.event, e.holder, e.cause) for e in record.token_events] == [
+        ("granted", "Delegate", "delegation_reinstated"),
+        ("removed", "Delegator", "delegation_reinstated"),
+    ]
+
+
+# ── Violations ────────────────────────────────────────────────────────────────
+
+_AEST = timezone(timedelta(hours=10))
+
+_DEADLINES = """
+enterprise specification LedgerDeadlinesProbe
+policy MinimumCover : amount { initial_value: 20000000 AUD }
+party Holder { holds durationBurden holds dateBurden holds siblingBurden
+               holds episodeBurden holds keptDuty holds datedDuty holds eventDuty }
+community C {
+    objective: "o"
+        satisfaction: all_discharged(episodeGroup)
+    event contractTerminated
+    Holder fills r
+    role r {
+        action terminate { actor: r emits: contractTerminated }
+        action finishSibling { actor: r }
+    }
+    lifecycle { terminating { on_objective_achieved: true } }
+}
+burden durationBurden { state: active deadline: "1 hour" discharge_mode: eventual }
+burden dateBurden { state: active deadline: "by 2026-11-30" discharge_mode: eventual }
+burden siblingBurden { for_action: "finishSibling" state: active discharge_mode: eventual }
+burden episodeBurden { state: active deadline: "referral episode" discharge_mode: eventual }
+burden keptDuty { standing keeps: "insurance cover" >= MinimumCover state: active }
+burden datedDuty { standing keeps: "insurance cover" >= MinimumCover
+                   ends_at: 2026-11-01 state: active }
+burden eventDuty { standing keeps: "insurance cover" >= MinimumCover
+                   ended_by: contractTerminated state: active }
+commitment siblingCommitment { by: Holder obligation: "o" creates_burden: siblingBurden }
+commitment episodeCommitment { by: Holder obligation: "o" creates_burden: episodeBurden }
+token_group episodeGroup {
+    member: siblingBurden
+    member: episodeBurden
+}
+"""
+
+
+def test_violation_and_term_end_causes():
+    result = _quiet(parse_string, _DEADLINES, validate=False)
+    assert result.ok, result.errors
+    rt = _quiet(Runtime.build_from_spec, result.model, clock=DeadlineClock(utc_offset=_AEST))
+
+    assert _events(rt.advance("terminate", "Holder")) == [
+        ("discharged", "eventDuty", "Holder", "active", "discharged", "Holder", "event",
+         "contractTerminated")]
+    rt.advance("finishSibling", "Holder")
+    rt.advance_clock(60)
+    record = rt.check_live_violations(as_at=datetime(2026, 12, 1, tzinfo=_AEST),
+                                      facts={"insurance cover": "15000000 AUD"})
+    assert {e.token_name: (e.event, e.by, e.cause) for e in record.token_events} == {
+        "durationBurden": ("violated", "system", "deadline"),
+        "dateBurden": ("violated", "system", "date_due"),
+        "episodeBurden": ("violated", "system", "episode_concluded"),
+        "keptDuty": ("violated", "system", "standing_breach"),
+        "datedDuty": ("discharged", "system", "term_end"),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_TOE))
+def test_declaration_response_and_reinstatement_causes(name):
+    make, gw, dog, mgr, agent, act, auths = _TOE[name]
+    rt = _quiet(make)
+    rt.advance("refuseRequest", gw)
+
+    record = rt.declare_violation("refusalRecordBurden", dog, at_tick=5)
+    assert _events(record) == [
+        ("violated", "refusalRecordBurden", gw, "active", "violated", dog, "declaration",
+         "declareRefusalRecordViolation")]
+
+    record = rt.fire_violation_responses()
+    by_token = {e.token_name: (e.event, e.holder, e.by, e.cause, e.cause_ref)
+                for e in record.token_events}
+    permits = [t.token_name for t in rt.current_state().tokens
+               if t.kind == "permit" and t.state == "superseded"]
+    assert len(permits) == len(auths)
+    assert by_token.pop("gatewayInvestigationBurden") == (
+        "granted", mgr, "system", "response", "unrecordedRefusalResponse")
+    assert sorted(by_token.values()) == sorted(
+        ("superseded", agent, "system", "revocation", auth) for auth in auths)
+
+    record = rt.reinstate_authorization(auths[0])
+    assert {(e.event, e.token_kind, e.cause, e.cause_ref) for e in record.token_events} == {
+        ("lifted", "embargo", "reinstatement", auths[0]),
+        ("active", "permit", "reinstatement", auths[0]),
+    }
+
+
+def test_revocation_supersedes_the_permit_and_grants_the_embargo():
+    rt = _quiet(el_api._build_referral_runtime)
+    rt.advance("initiateReferral", "GPClinician", facts=_REFERRAL_FACTS["initiateReferral"])
+    record = rt.revoke_authorization("patientDataAuthorization")
+    assert [(e.event, e.token_kind, e.holder, e.by, e.cause, e.cause_ref)
+            for e in record.token_events] == [
+        ("superseded", "permit", "SpecialistAIAgent", record.actor_name, "revocation",
+         "patientDataAuthorization"),
+        ("granted", "embargo", "SpecialistAIAgent", record.actor_name, "revocation",
+         "patientDataAuthorization"),
+    ]

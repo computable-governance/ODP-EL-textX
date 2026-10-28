@@ -612,6 +612,18 @@ def _token_events(before, after, tick: int, by: str, cause: str,
     return tuple(events)
 
 
+def _note_causes(causes: Optional[dict], before, after, cause: str,
+                 cause_ref: Optional[str] = None) -> None:
+    """Record (cause, cause_ref) in `causes` for every instance changed
+    between `before` and `after` (one step of an act), for _token_events().
+    A later step's note replaces an earlier one: the event shows the final
+    state, so its cause is the last change's."""
+    if causes is None:
+        return
+    for e in _token_events(before, after, 0, "", cause, cause_ref):
+        causes[(e.token_name, e.token_kind, e.holder, e.granted_at_tick)] = (cause, cause_ref)
+
+
 def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int
              ) -> Tuple[WorldState, TransitionRecord]:
     return state, TransitionRecord(
@@ -762,7 +774,7 @@ def _term_end_text(el) -> Tuple[bool, Optional[str]]:
 
 
 def _discharge(spec, tokens: list, keys: Set[Tuple[str, str]],
-               effects_log: list) -> Tuple[list, List[str]]:
+               effects_log: list, causes: Optional[dict] = None) -> Tuple[list, List[str]]:
     """Transition every active burden instance in `keys` ((token_name,
     holder) pairs) to 'discharged', then supersede its active
     any_discharged siblings (AM-57). Returns (tokens, discharged names in
@@ -812,6 +824,8 @@ def _discharge(spec, tokens: list, keys: Set[Tuple[str, str]],
                     for i, t in enumerate(tokens):
                         if t.token_name == sibling_name and t.state == "active":
                             tokens[i] = _transition(t, "superseded")
+                            if causes is not None:
+                                causes[_instance_key(t)] = ("sibling", discharged_name)
                             effects_log.append(
                                 f"superseded burden '{sibling_name}' held by "
                                 f"'{t.holder}' (sibling '{discharged_name}' "
@@ -1108,6 +1122,7 @@ def advance(
     discharge_keys: Set[Tuple[str, str]] = set()
     if grammar_action and grammar_action.emits:
         discharge_keys = _event_discharge_keys(spec, state, grammar_action.emits.name)
+    event_keys = set(discharge_keys)
 
     # Burdens the actor holds that this action discharges by a destroy
     # effect, or by for_action — AM-113: not for a burden that declares
@@ -1204,10 +1219,15 @@ def advance(
     # ── Step 7: Effect application ────────────────────────────────────────────
     tokens = list(state.tokens)
     effects_log: list[str] = list(precondition_lines)  # 2.1.0-12: satisfied comparisons
+    # Token event causes other than the default ('action'): see _token_events().
+    causes: dict = {
+        _instance_key(t): ("event", grammar_action.emits.name)
+        for t in tokens if (t.token_name, t.holder) in event_keys
+    }
 
     # 7a — Discharge identified burdens (transition to 'discharged'), then
     # AM-57 any_discharged sibling supersession (_discharge()).
-    tokens, discharged_names = _discharge(spec, tokens, discharge_keys, effects_log)
+    tokens, discharged_names = _discharge(spec, tokens, discharge_keys, effects_log, causes)
 
     # 7a-claim — AM-62 (see DN_003): CLAIM transitions
     # ('claimable' -> 'active'). Distinct from discharge above — claiming
@@ -1247,6 +1267,7 @@ def advance(
                     for i, t in enumerate(tokens):
                         if t.token_name == sibling_name and t.state == "claimable":
                             tokens[i] = _transition(t, "lapsed")
+                            causes[_instance_key(t)] = ("sibling", claimed_name)
                             effects_log.append(
                                 f"lapsed burden '{sibling_name}' held by "
                                 f"'{t.holder}' (sibling '{claimed_name}' "
@@ -1390,12 +1411,14 @@ def advance(
     # 7c — AM-22: event-triggered token activation. 2.1.0-18: first, the
     # event ends the term of the standing duties it names in ended_by.
     if grammar_action and grammar_action.emits:
+        before_event = list(tokens)
         discharged_names = list(discharged_names) + _end_standing_by_event(
             spec, tokens, grammar_action.emits.name, effects_log)
         tokens, triggered_log = _activate_triggered_tokens(
             spec, tokens, grammar_action.emits.name, tick
         )
         effects_log.extend(triggered_log)
+        _note_causes(causes, before_event, tokens, "event", grammar_action.emits.name)
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
     record = TransitionRecord(
@@ -1407,7 +1430,7 @@ def advance(
         effects=tuple(effects_log),
         violations=(),
         token_events=_token_events(state.tokens, new_state.tokens, tick, actor_name,
-                                   "action", action_name),
+                                   "action", action_name, causes),
     )
     return new_state, record
 
@@ -3065,7 +3088,9 @@ def fire_event(
             return _blocked(state, source, f"fire_event:{event_name}", reason, tick)
 
     effects_log: list[str] = []
-    tokens, discharged_names = _discharge(spec, list(state.tokens), discharge_keys, effects_log)
+    causes: dict = {}
+    tokens, discharged_names = _discharge(spec, list(state.tokens), discharge_keys, effects_log,
+                                          causes)
     discharged_names = discharged_names + _end_standing_by_event(   # 2.1.0-18
         spec, tokens, event_name, effects_log)
     tokens, triggered_log = _activate_triggered_tokens(spec, tokens, event_name, tick)
@@ -3081,7 +3106,7 @@ def fire_event(
         effects=tuple(effects_log),
         violations=(),
         token_events=_token_events(state.tokens, new_state.tokens, tick, source,
-                                   "event", event_name),
+                                   "event", event_name, causes),
     )
     return new_state, record
 
@@ -3393,6 +3418,7 @@ def check_live_violations(
     tokens = list(state.tokens)
     violated_names: List[str] = []
     effects_log: List[str] = []
+    causes: dict = {}   # token event causes other than the default ('deadline')
 
     for i, tok in enumerate(tokens):
         # AM-57: superseded burdens are already excluded here (state != "active"
@@ -3408,9 +3434,11 @@ def check_live_violations(
             if verdict == "met":
                 tokens[i] = _transition(tok, "discharged")
                 met_names.append(tok.token_name)
+                causes[_instance_key(tok)] = ("term_end", None)
             elif verdict == "breached":
                 tokens[i] = _transition(tok, "violated")
                 violated_names.append(tok.token_name)
+                causes[_instance_key(tok)] = ("standing_breach", None)
             continue
 
         spec_tok = _spec_token(spec, tok.token_name)
@@ -3426,6 +3454,7 @@ def check_live_violations(
             elif as_at >= due:
                 tokens[i] = _transition(tok, "violated")
                 violated_names.append(tok.token_name)
+                causes[_instance_key(tok)] = ("date_due", None)
                 effects_log.append(
                     f"violated '{tok.token_name}' held by '{tok.holder}' "
                     f"(due {due.isoformat()}; as_at {as_at.isoformat()}; "
@@ -3444,6 +3473,7 @@ def check_live_violations(
                                         satisfaction_conditions, concludes_by_element):
                 tokens[i] = _transition(tok, "violated")
                 violated_names.append(tok.token_name)
+                causes[_instance_key(tok)] = ("episode_concluded", None)
                 effects_log.append(
                     f"violated '{tok.token_name}' held by '{tok.holder}' "
                     f"(owning community/federation concluded; no elapsed-time "
@@ -3481,7 +3511,7 @@ def check_live_violations(
         effects=tuple(effects_log),
         violations=tuple(violated_names),
         token_events=_token_events(state.tokens, new_state.tokens, tick, "system",
-                                   "deadline"),
+                                   "deadline", None, causes),
     )
     return new_state, record
 
@@ -3567,7 +3597,8 @@ def _violator_chain(spec, holder: str) -> Set[str]:
 
 
 def _revoke_for_response(
-    tokens, spec, auth, responder: str, tick: int, effects_log: List[str]
+    tokens, spec, auth, responder: str, tick: int, effects_log: List[str],
+    causes: Optional[dict] = None,
 ) -> List[TokenInstance]:
     """AM-104/AM-115: revoke one Authorization for a firing response via
     _apply_revocation(), if it is revocable with an on_revocation embargo,
@@ -3587,7 +3618,9 @@ def _revoke_for_response(
                for t in tokens):
         effects_log.append(f"not revoked '{auth.name}': permit '{permit_name}' is not active")
         return list(tokens)
+    before = list(tokens)
     tokens, revocation_effects = _apply_revocation(tokens, spec, auth, tick)
+    _note_causes(causes, before, tokens, "revocation", auth.name)
     to_agent = getattr(getattr(auth, "authorized_agent", None), "name", None)
     target = f"to '{to_agent}'" if to_agent else f"to role '{getattr(auth, 'authorized_role', None)}'"
     effects_log.append(f"revoked '{auth.name}' ({target})")
@@ -3596,7 +3629,8 @@ def _revoke_for_response(
 
 
 def _terminate_authorizations(
-    tokens, spec, violators: Set[str], responder: str, tick: int, effects_log: List[str]
+    tokens, spec, violators: Set[str], responder: str, tick: int, effects_log: List[str],
+    causes: Optional[dict] = None,
 ) -> List[TokenInstance]:
     """AM-104: effect 4 of fire_violation_responses() for response_kind
     terminate with no revokes list. Revokes each qualifying to_agent
@@ -3609,7 +3643,7 @@ def _terminate_authorizations(
         to_agent = getattr(getattr(auth, "authorized_agent", None), "name", None)
         if to_agent not in violators:
             continue
-        tokens = _revoke_for_response(tokens, spec, auth, responder, tick, effects_log)
+        tokens = _revoke_for_response(tokens, spec, auth, responder, tick, effects_log, causes)
     return list(tokens)
 
 
@@ -3690,6 +3724,7 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     responded = set(state.responded)
     fired: List[str] = []
     effects_log: List[str] = []
+    causes: dict = {}   # token event causes: the response, or the revocation it made
 
     for vr in spec.elements:
         if type(vr).__name__ != "ViolationResponse":
@@ -3739,6 +3774,7 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
                         )
                     else:
                         tokens.append(token_from_spec(spec, cb, recipient, tick))
+                        causes[_instance_key(tokens[-1])] = ("response", vr.name)
                         effects_log.append(f"fired '{vr.name}': granted '{cb}' to '{recipient}'")
             else:
                 effects_log.append(kind_line)
@@ -3756,11 +3792,11 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
             if revokes:
                 for auth in revokes:
                     tokens = _revoke_for_response(
-                        tokens, spec, auth, responding_actor, tick, effects_log)
+                        tokens, spec, auth, responding_actor, tick, effects_log, causes)
             elif kind == "terminate":
                 tokens = _terminate_authorizations(
                     tokens, spec, _violator_chain(spec, inst.holder),
-                    responding_actor, tick, effects_log,
+                    responding_actor, tick, effects_log, causes,
                 )
 
     new_tick = tick + 1 if fired else tick
@@ -3775,7 +3811,7 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
         violations=(),
         fired_responses=tuple(fired),
         token_events=_token_events(state.tokens, new_state.tokens, tick, "system",
-                                   "response"),
+                                   "response", None, causes),
     )
     return new_state, record
 

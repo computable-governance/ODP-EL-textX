@@ -758,14 +758,29 @@ outcomes and token states are unchanged; the events describe them in data.
 | `by` | the record's actor: the performer, the authority, the declarer, the `fire_event()` source, `system` for sweeps and responses, `model` for the build record |
 | `cause`, `cause_ref` | why, and the name it refers to (below) |
 
-**Causes.** Each engine function gives its events a cause: `advance()`
-`action` (the action name), `revoke_authorization()` `revocation` and
-`reinstate_authorization()` `reinstatement` (the Authorization),
-`revoke_delegation()` `delegation_revoked` and `reinstate_delegation()`
-`delegation_reinstated` (the Delegation), `discharge_burden()`
-`discharge_call`, `fire_event()` `event` (the event), `declare_violation()`
-`declaration` (the declaring action), `check_live_violations()` `deadline`,
-`fire_violation_responses()` `response`.
+**Causes.** The `cause` says why the instance changed, and `cause_ref`
+names what it refers to:
+
+| cause | cause_ref | the change |
+|---|---|---|
+| `initial` | — | a grant in the build record |
+| `action` | the action | what `advance()` does by default: a create effect, a discharge by a destroy effect or by `for_action`, pend, activate, transfer, clone, claim |
+| `event` | the event | a discharge by `discharged_by`, an activation by `triggered_by`, a standing duty's term ended by `ended_by`; from an emitting action or `fire_event()` |
+| `sibling` | the sibling discharged or claimed | a burden superseded in an `any_discharged` group, or lapsed when a sibling is claimed |
+| `deadline` | — | a duration deadline elapsed (`check_live_violations()`) |
+| `date_due` | — | a date deadline judged due |
+| `episode_concluded` | — | a deadline with no magnitude, its episode concluded |
+| `standing_breach` | — | a standing duty's keeps judged false |
+| `term_end` | — | a standing duty's term ended by its date |
+| `declaration` | the declaring action | `declare_violation()` |
+| `revocation` | the Authorization | `revoke_authorization()`, or a response's revocation |
+| `reinstatement` | the Authorization | `reinstate_authorization()` |
+| `response` | the ViolationResponse | a burden a response grants |
+| `delegation_revoked`, `delegation_reinstated` | the Delegation | `revoke_delegation()`, `reinstate_delegation()` |
+| `discharge_call` | — | `discharge_burden()` |
+
+When one act changes an instance twice, the event shows the final state and
+the cause of the last change.
 
 **The build record and `Runtime.history()`.** A `Runtime` records the
 tokens it starts from in `Runtime.build_record`: `actor_name` `model`,
@@ -794,6 +809,11 @@ reinstatement lifts every instance of its embargo (see
 holder"). The events record this as it happens: a revocation lists a
 `superseded` event for each holder of the permit, including holders the
 Authorization does not name.
+
+A response's revocation of an embargo that is already active produces no
+event, although its effect line still says "activated embargo" (in both
+terms-of-engagement scenarios, `outsideScopeEmbargo` is active from the
+start). The text is unchanged; low priority.
 
 ---
 
