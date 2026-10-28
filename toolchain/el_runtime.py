@@ -8,6 +8,7 @@ Standard reference: ISO/IEC 15414:2015 §6.6, §7.8, §7.10
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 from typing import List, Optional, Tuple
 
@@ -441,6 +442,58 @@ class Runtime:
     def history(self) -> Tuple[TransitionRecord, ...]:
         """The build record, then the ledger, in order."""
         return (self._build_record, *self._ledger)
+
+    def _fold_instances(self, token_name: str, holder: str,
+                        tick: Optional[int] = None) -> Optional[Counter]:
+        """The (instance key, state) pairs held by `holder` under
+        `token_name` that history()'s events describe: after the build
+        record and every record with a tick below `tick` (all of them when
+        `tick` is None). None if an event changes an instance the fold
+        does not have."""
+        live: Counter = Counter()
+        for record in self.history():
+            if tick is not None and record is not self._build_record and record.tick >= tick:
+                continue
+            for e in record.token_events:
+                if e.token_name != token_name or e.holder != holder:
+                    continue
+                key = (e.token_kind, e.granted_at_tick)
+                if e.from_state is not None:
+                    if live[(key, e.from_state)] < 1:
+                        return None
+                    live[(key, e.from_state)] -= 1
+                if e.to_state is not None:
+                    live[(key, e.to_state)] += 1
+        return +live
+
+    def token_states_at(self, token_name: str, holder: str,
+                        tick: int) -> Optional[Tuple[str, ...]]:
+        """The states of the instances of `token_name` held by `holder` when
+        an act at `tick` was judged: after the build record and every event
+        of a record with a lower tick (every act that changes a token
+        advances the tick). One state per instance, by grant tick; () if
+        none was held. None (unknown) when `tick` is before the build
+        record's tick or after the current tick, or when the history does
+        not reproduce the holder's current instances of the token (a change
+        made outside the runtime's methods)."""
+        if tick < self._build_record.tick or tick > self._state.tick:
+            return None
+        current = +Counter(((t.kind, t.granted_at_tick), t.state) for t in self._state.tokens
+                           if t.token_name == token_name and t.holder == holder)
+        if self._fold_instances(token_name, holder) != current:
+            return None
+        live = self._fold_instances(token_name, holder, tick)
+        if live is None:
+            return None
+        return tuple(state for (_, state) in sorted(live.elements(),
+                                                    key=lambda ks: (ks[0][1], ks[1])))
+
+    def in_force_at(self, token_name: str, holder: str, tick: int) -> Optional[bool]:
+        """Whether `holder` held `token_name` active when an act at `tick`
+        was judged (token_states_at()): True or False, or None when that is
+        unknown."""
+        states = self.token_states_at(token_name, holder, tick)
+        return None if states is None else "active" in states
 
     def current_state(self) -> WorldState:
         """Return the current immutable WorldState."""

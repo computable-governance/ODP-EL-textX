@@ -582,3 +582,14 @@ def test_revocation_supersedes_the_permit_and_grants_the_embargo():
         ("granted", "embargo", "SpecialistAIAgent", record.actor_name, "revocation",
          "patientDataAuthorization"),
     ]
+
+
+def test_claimed_sibling_lapses_the_other_pool_member():
+    rt = _quiet(el_api._build_erequesting_claiming_runtime)
+    record = rt.claim("providerAClaimBurden", "DiagnosticProviderA")
+    assert _events(record) == [
+        ("active", "providerAClaimBurden", "DiagnosticProviderA", "claimable", "active",
+         "DiagnosticProviderA", "action", "claimReferralA"),
+        ("lapsed", "providerBClaimBurden", "DiagnosticProviderB", "claimable", "lapsed",
+         "DiagnosticProviderA", "sibling", "providerAClaimBurden"),
+    ]

@@ -14,8 +14,11 @@ adheres to _[Semantic Versioning][semver]_.
   instance (granted, removed, or a new state), with the tick, who made it
   and a cause. A `Runtime` has a `build_record` listing the tokens it
   starts from (by `model`), outside the ledger, and `history()`, the build
-  record then the ledger. No effect line, reason, outcome or state
-  changed. See "Token events in the ledger" in
+  record then the ledger. `Runtime.in_force_at(token, holder, tick)` and
+  `Runtime.token_states_at(...)` answer from those events whether a token
+  was in force when an act at a tick was judged (`None` when the history
+  does not reproduce the current state). No effect line, reason, outcome
+  or state changed. See "Token events in the ledger" in
   [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md) and
   row R20 of [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md).
 

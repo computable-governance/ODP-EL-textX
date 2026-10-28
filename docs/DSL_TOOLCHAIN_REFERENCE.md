@@ -792,6 +792,32 @@ a `Runtime(state, spec)` built from a granted state. It is not in the ledger:
 the ledger records acts, and the hybrid verifier reads it unchanged.
 `Runtime.history()` returns the build record, then the ledger, in order.
 
+**Was a token in force? `Runtime.in_force_at(token_name, holder, tick)`.**
+It answers whether `holder` held `token_name` active when an act at `tick`
+was judged: `True` or `False`, or `None` when that is unknown.
+`Runtime.token_states_at(token_name, holder, tick)` gives the states behind
+the answer, one per instance the holder had, by grant tick (`()` if none).
+Both read only the token events of `history()`, never the effect text.
+
+- **Ticks, not wall-clock time.** `tick` is the engine's tick
+  (`WorldState.tick`; a record's `tick` is the tick its act was judged
+  at). The state at `tick` is the build record's grants followed by the
+  events of every record with a lower tick: every act that changes a token
+  advances the tick, so an act and its events never share a tick with a
+  later act. A date or `as_at` is not a tick; to ask about a wall-clock
+  moment, find the record judged at it first.
+- **In force** means `active`, for a permit, an embargo or a burden. A
+  holder with several instances is in force if any of them is.
+- **Never held**, with a complete history: `False` (and `()`).
+- **`None` when the history is missing or does not reproduce the current
+  state:** a `tick` before the build record's tick or after the current
+  tick; or, for that token and holder, folding every event of `history()`
+  does not give the holder's current instances, because something changed
+  them outside the runtime's methods (for example `grant_token()` on its
+  state, or `revoke_delegation()`, which the runtime does not wrap). The
+  check is per token and holder: other tokens are still answered.
+- The history is in memory only, for the life of the `Runtime`.
+
 **Completeness.** The events are found by comparing the token instances
 before and after the act, so every change made by an engine function is
 listed, whatever made it. A change made outside the engine functions (for
