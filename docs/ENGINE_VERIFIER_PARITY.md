@@ -7,7 +7,7 @@ abstracts it or leaves it out. **Update this table in the same commit as
 any change to an engine rule or a Kripke rule**, so that it does not drift
 from the code. Started in 2.1.0-5 with the rows about deadlines, the clock
 and policy values; preconditions added in 2.1.0-12, standing duties in
-2.1.0-17, policy-fed deadlines in 2.2.0-8. Other parts of the engine are not yet listed.
+2.1.0-17, policy-fed deadlines in 2.2.0-8, token events (unreleased). Other parts of the engine are not yet listed.
 
 **Conventions**
 - *Static* is `build_kripke_model()` (before execution). *Hybrid* is
@@ -46,3 +46,4 @@ and policy values; preconditions added in 2.1.0-12, standing duties in
 | R17 | Not judged (2.1.0-18): nothing reported, not text, wrong kind (2.2.0-5: not a date, instant or duration value, so a date reported against an instant limit, or an instant against a date; 2.2.0-12: not one of the options of an options-typed policy limit, or an ordering operator against one), another currency, no `as_at`, or a term end that cannot be judged: no verdict, never "kept" | not applicable | — | — (covered by R14) |
 | R18 | A standing duty is not a satisfaction-group member (2.1.0-19: the validator error `standing-in-group`), so it neither concludes nor blocks an episode or objective | not a member either (the groups are read from the same declarations) | Mirrored (by exclusion) | — |
 | R19 | A policy-fed deadline (`deadline: <Policy>`, 2.2.0-7) is the policy's declared duration (`initial_value`), read through `deadline_text()`; a policy not of type duration or with no usable value gives no measurable deadline | Both builders read the same declared value through `deadline_text()` at build time (2.2.0-8): enforceable deadlines and the hybrid fallback steps | Mirrored | — while policy values are read-only. If policy values ever change at run time, this row becomes both directions until the verifier reads the same value |
+| R20 | Each record lists its token events (`token_events`: a grant, a state change or a removal of one instance, with who made it and why), found by comparing the instances before and after the act; a runtime's build record lists the initial grants. No engine rule reads them, and they change no other field of a record or state | Not read: the hybrid builder reads only `discharged` from the ledger, and the build record is not in the ledger | Not used | — (pinned by `tests/test_ledger_token_events.py`: with events switched off, every record and state is the same) |

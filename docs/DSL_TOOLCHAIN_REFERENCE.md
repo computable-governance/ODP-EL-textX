@@ -741,6 +741,62 @@ where a reported value came from.
 
 ---
 
+## Token events in the ledger (unreleased)
+
+Each `TransitionRecord` lists, in `token_events`, every change its act made
+to a token instance, as `TokenEvent` records. The effect lines, reasons,
+outcomes and token states are unchanged; the events describe them in data.
+
+**A `TokenEvent`** has:
+
+| field | meaning |
+|---|---|
+| `event` | `granted` (a new instance), `removed` (the instance left its holder: a transfer or a delegation reassignment, followed by a `granted` for the new holder), or the new state (`active`, `pending`, `discharged`, `violated`, `superseded`, `lifted`, `lapsed`, ...) |
+| `token_name`, `token_kind`, `holder`, `granted_at_tick` | the instance |
+| `from_state`, `to_state` | the state before and after (`None` before a grant, after a removal) |
+| `tick` | the record's tick |
+| `by` | the record's actor: the performer, the authority, the declarer, the `fire_event()` source, `system` for sweeps and responses, `model` for the build record |
+| `cause`, `cause_ref` | why, and the name it refers to (below) |
+
+**Causes.** Each engine function gives its events a cause: `advance()`
+`action` (the action name), `revoke_authorization()` `revocation` and
+`reinstate_authorization()` `reinstatement` (the Authorization),
+`revoke_delegation()` `delegation_revoked` and `reinstate_delegation()`
+`delegation_reinstated` (the Delegation), `discharge_burden()`
+`discharge_call`, `fire_event()` `event` (the event), `declare_violation()`
+`declaration` (the declaring action), `check_live_violations()` `deadline`,
+`fire_violation_responses()` `response`.
+
+**The build record and `Runtime.history()`.** A `Runtime` records the
+tokens it starts from in `Runtime.build_record`: `actor_name` `model`,
+`action_name` `build`, outcome `ok`, at the starting tick, with one `granted`
+event (by `model`, cause `initial`) per token, in its starting state (a
+`pending` token is granted `pending`). It is made when the `Runtime` is
+constructed, so it covers `build_from_spec()`, `build_from_federation()` and
+a `Runtime(state, spec)` built from a granted state. It is not in the ledger:
+the ledger records acts, and the hybrid verifier reads it unchanged.
+`Runtime.history()` returns the build record, then the ledger, in order.
+
+**Completeness.** The events are found by comparing the token instances
+before and after the act, so every change made by an engine function is
+listed, whatever made it. A change made outside the engine functions (for
+example `grant_token()` on a runtime's state) is not.
+
+**Known limit: the instance is inferred.** A `TokenInstance` has no id. An
+instance is identified by token name, kind, holder and `granted_at_tick`;
+two instances with the same four values (a token cloned to a holder who
+already holds it from the same tick) are matched in list order.
+
+**Open findings now visible in the events.** A revocation supersedes every
+instance of the Authorization's permit, whoever holds it, and a
+reinstatement lifts every instance of its embargo (see
+`docs/CONCEPTS_INDEX.md`, "Revocation supersedes a permit by name for every
+holder"). The events record this as it happens: a revocation lists a
+`superseded` event for each holder of the permit, including holders the
+Authorization does not name.
+
+---
+
 ## The Reasoner (`el_reasoner.py`)
 
 ### What it does

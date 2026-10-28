@@ -124,6 +124,40 @@ class TransitionRecord:
     violations: Tuple[str, ...]         # violation names (if outcome == 'violation')
     reason: Optional[str] = None        # set when outcome == 'blocked'
     fired_responses: Tuple[str, ...] = ()  # ViolationResponse names fired (fire_violation_responses() only)
+    token_events: Tuple["TokenEvent", ...] = ()  # each change to a token instance (_token_events())
+    blocked_by: Optional["TokenRef"] = None      # the token that refused the act (blocked records)
+
+
+@dataclass(frozen=True)
+class TokenEvent:
+    """One change to one token instance, made by the act its record records.
+
+    An instance is identified by (token_name, token_kind, holder,
+    granted_at_tick); TokenInstance has no id of its own, so two instances
+    with the same four values are matched in list order."""
+    event: str                  # 'granted' | 'removed' | the new state ('active',
+                                # 'pending', 'discharged', 'violated', 'superseded', ...)
+    token_name: str
+    token_kind: str             # 'burden' | 'permit' | 'embargo'
+    holder: str
+    granted_at_tick: int
+    from_state: Optional[str]   # None for 'granted'
+    to_state: Optional[str]     # None for 'removed'
+    tick: int                   # the record's tick
+    by: str                     # the record's actor_name; 'model' for a runtime's build record
+    cause: str                  # why: 'initial', 'action', 'event', 'revocation', ...
+    cause_ref: Optional[str] = None  # the name the cause refers to
+
+
+@dataclass(frozen=True)
+class TokenRef:
+    """The token that refused an act: its holder's instance, or, for a
+    permit never held, state and granted_at_tick None."""
+    token_name: str
+    token_kind: str
+    holder: str
+    state: Optional[str]
+    granted_at_tick: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -533,6 +567,49 @@ def _precondition_refusal(preconditions, facts: dict) -> Tuple[Optional[str], Tu
     if unknown:
         return f"precondition not established: {unknown[0]}", ()
     return None, tuple(lines)
+
+
+def _instance_key(tok: TokenInstance) -> Tuple[str, str, str, int]:
+    return (tok.token_name, tok.kind, tok.holder, tok.granted_at_tick)
+
+
+def _token_events(before, after, tick: int, by: str, cause: str,
+                  cause_ref: Optional[str] = None,
+                  causes: Optional[Dict[Tuple[str, str, str, int], Tuple[str, Optional[str]]]] = None,
+                  ) -> Tuple[TokenEvent, ...]:
+    """The token events of one act: every instance of `after` not in
+    `before` is 'granted', every instance of `before` not in `after` is
+    'removed' (its holder changed), and every instance whose state changed
+    is an event named by its new state. Instances are matched by
+    _instance_key(), in list order when a key repeats. Each event's cause
+    is causes[key] when the act noted one, else (cause, cause_ref).
+    Events follow `after` order; removals come last."""
+    causes = causes or {}
+    pool: Dict[Tuple[str, str, str, int], List[TokenInstance]] = {}
+    for t in before:
+        pool.setdefault(_instance_key(t), []).append(t)
+
+    def _event(t, name, from_state, to_state):
+        c, ref = causes.get(_instance_key(t), (cause, cause_ref))
+        return TokenEvent(event=name, token_name=t.token_name, token_kind=t.kind,
+                          holder=t.holder, granted_at_tick=t.granted_at_tick,
+                          from_state=from_state, to_state=to_state, tick=tick, by=by,
+                          cause=c, cause_ref=ref)
+
+    events: List[TokenEvent] = []
+    for t in after:
+        matches = pool.get(_instance_key(t))
+        if not matches:
+            events.append(_event(t, "granted", None, t.state))
+            continue
+        old = matches.pop(0)
+        if old.state != t.state:
+            events.append(_event(t, t.state, old.state, t.state))
+    for t in before:
+        if t in pool.get(_instance_key(t), ()):
+            pool[_instance_key(t)].remove(t)
+            events.append(_event(t, "removed", t.state, None))
+    return tuple(events)
 
 
 def _blocked(state: WorldState, actor: str, action: str, reason: str, tick: int
@@ -1329,6 +1406,8 @@ def advance(
         discharged=tuple(discharged_names),
         effects=tuple(effects_log),
         violations=(),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, actor_name,
+                                   "action", action_name),
     )
     return new_state, record
 
@@ -2424,6 +2503,8 @@ def revoke_authorization(
         discharged=(),
         effects=tuple(effects_log),
         violations=(),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, auth.authority.name,
+                                   "revocation", authorization_name),
     )
     return new_state, record
 
@@ -2570,6 +2651,8 @@ def reinstate_authorization(
         discharged=(),
         effects=tuple(effects_log),
         violations=(),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, auth.authority.name,
+                                   "reinstatement", authorization_name),
     )
     return new_state, record
 
@@ -2669,6 +2752,8 @@ def revoke_delegation(
         discharged=(),
         effects=effects_log,
         violations=(),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, delegator_name,
+                                   "delegation_revoked", delegation_name),
     )
     return new_state, record
 
@@ -2766,6 +2851,8 @@ def reinstate_delegation(
         discharged=(),
         effects=effects_log,
         violations=(),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, delegator_name,
+                                   "delegation_reinstated", delegation_name),
     )
     return new_state, record
 
@@ -2940,6 +3027,8 @@ def discharge_burden(
         discharged=tuple(discharged_names),
         effects=tuple(effects_log),
         violations=(),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, holder,
+                                   "discharge_call"),
     )
     return new_state, record
 
@@ -2991,6 +3080,8 @@ def fire_event(
         discharged=tuple(discharged_names),
         effects=tuple(effects_log),
         violations=(),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, source,
+                                   "event", event_name),
     )
     return new_state, record
 
@@ -3164,6 +3255,8 @@ def declare_violation(
         discharged=(),
         effects=effects,
         violations=(burden_name,),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, declarer,
+                                   "declaration", label),
     )
     return new_state, record
 
@@ -3387,6 +3480,8 @@ def check_live_violations(
         discharged=tuple(met_names),
         effects=tuple(effects_log),
         violations=tuple(violated_names),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, "system",
+                                   "deadline"),
     )
     return new_state, record
 
@@ -3679,6 +3774,8 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
         effects=tuple(effects_log),
         violations=(),
         fired_responses=tuple(fired),
+        token_events=_token_events(state.tokens, new_state.tokens, tick, "system",
+                                   "response"),
     )
     return new_state, record
 

@@ -5,6 +5,20 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
+## [Unreleased]
+
+### Added
+
+- **Token events in the ledger.** Each `TransitionRecord` has
+  `token_events`: one `TokenEvent` per change its act made to a token
+  instance (granted, removed, or a new state), with the tick, who made it
+  and a cause. A `Runtime` has a `build_record` listing the tokens it
+  starts from (by `model`), outside the ledger, and `history()`, the build
+  record then the ledger. No effect line, reason, outcome or state
+  changed. See "Token events in the ledger" in
+  [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md) and
+  row R20 of [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md).
+
 ## [2.2.0] - 2026-10-18
 
 Equality in comparisons, date, instant and duration limits, deadlines that

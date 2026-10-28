@@ -9,11 +9,12 @@ Standard reference: ISO/IEC 15414:2015 §6.6, §7.8, §7.10
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from el_engine import (
     DeadlineClock,
     _require_aware,
+    _token_events,
     WorldState,
     TokenInstance,
     TransitionRecord,
@@ -99,6 +100,19 @@ class Runtime:
         self._state = state
         self._spec = spec
         self._ledger: List[TransitionRecord] = []
+        # The build record: one 'granted' event (by 'model', cause 'initial')
+        # for each token in the state the runtime starts from. Kept out of
+        # _ledger, which records acts; history() returns both.
+        self._build_record = TransitionRecord(
+            tick=state.tick,
+            actor_name="model",
+            action_name="build",
+            outcome="ok",
+            discharged=(),
+            effects=(),
+            violations=(),
+            token_events=_token_events((), state.tokens, state.tick, "model", "initial"),
+        )
         # 2.1.0-7: the run's wall clock (None: date deadlines are not judged)
         # and the latest as_at accepted by check_live_violations().
         self._clock = clock
@@ -418,6 +432,15 @@ class Runtime:
             or any(token_name in e for e in r.effects)
             or any(token_name in v for v in r.violations)
         ]
+
+    @property
+    def build_record(self) -> TransitionRecord:
+        """The record of the initial grants: the tokens the runtime started with."""
+        return self._build_record
+
+    def history(self) -> Tuple[TransitionRecord, ...]:
+        """The build record, then the ledger, in order."""
+        return (self._build_record, *self._ledger)
 
     def current_state(self) -> WorldState:
         """Return the current immutable WorldState."""
