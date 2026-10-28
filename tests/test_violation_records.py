@@ -312,8 +312,8 @@ def test_history_queries():
     assert breach_history_queries(spec, "stopE", "embargo", "Ag", "use") == (("stopE", "Ag"),)
     assert breach_history_queries(spec, "useP", "permit_requirement", "Ag", "use") == (
         ("useP", "Ag"),)
-    assert breach_history_queries(spec, "useP", "permit", "Bo", "use", "Ag") == (
-        ("useP", "Ag"),)
+    assert breach_history_queries(spec, "readP", "permit", "Bo", "read", "Ag") == (
+        ("readP", "Ag"),)
     assert breach_history_queries(spec, "useP", "permit", "Bo", "use") == ()
 
 

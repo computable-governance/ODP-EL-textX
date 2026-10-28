@@ -3380,12 +3380,27 @@ def breach_history_queries(
     """2.3.0-2: the (token, holder) pairs whose standing at the occurrence
     declare_breach() judges, taken from the spec (an instance may be gone
     by now): the embargo and the violator; the permit and its holder; the
-    required permit and the violator. Runtime.declare_breach() answers each
-    with Runtime.in_force_at(token, holder, occurred_at)."""
+    required permit and the violator. 2.3.0-3: for a denial of permission,
+    also every embargo covering the behaviour, held by the permit's holder
+    (_justifying_embargoes()). Runtime.declare_breach() answers each with
+    Runtime.in_force_at(token, holder, occurred_at)."""
     _breach_token(spec, token_name, kind)
     if kind in ("embargo", "permit_requirement"):
         return ((token_name, violator),)
-    return ((token_name, rule_holder),) if rule_holder else ()
+    if not rule_holder:
+        return ()
+    return ((token_name, rule_holder),) + tuple(
+        (embargo, rule_holder) for embargo in _justifying_embargoes(spec, behaviour))
+
+
+def _justifying_embargoes(spec, behaviour: str) -> List[str]:
+    """2.3.0-3: the spec's embargoes that cover `behaviour`
+    (_embargo_coverage()), in declaration order. One of them in force on
+    the permit's holder justifies preventing the behaviour (B.1.7.4)."""
+    coverage = _embargo_coverage(spec)
+    return [el.name for el in spec.elements
+            if type(el).__name__ == "DeonticToken" and el.kind == "embargo"
+            and _embargo_covers(coverage, el.name, getattr(el, "for_action", None), behaviour)]
 
 
 def _permit_covers(spec, token_el, action) -> bool:
@@ -3427,7 +3442,10 @@ def declare_breach(
         `behaviour`, an action it covers (_embargo_coverage());
       - permit: `violator` prevented `rule_holder` from performing
         `behaviour`, an action the permit covers (the action requires it,
-        or it is the permit's for_action) — a denial of permission;
+        or it is the permit's for_action) — a denial of permission. It is
+        refused when an embargo covering the behaviour was in force on
+        `rule_holder` at `occurred_at`: that prevention is justified, not a
+        violation (2.3.0-3, Annex B.1.7.4);
       - permit_requirement: `violator` performed `behaviour` without the
         permit `token_name` that the action requires; the rule is the
         requirement, named by the permit.
@@ -3492,12 +3510,12 @@ def declare_breach(
     answers = in_force or {}
     warnings: List[str] = []
 
-    def standing(token: str, holder: str, word: str) -> Optional[bool]:
+    def standing(token: str, holder: str, word: str, note: str = "") -> Optional[bool]:
         known = answers.get((token, holder))
         if known is None:
             warnings.append(
                 f"history unknown: could not establish whether '{holder}' held {word} "
-                f"'{token}' at step {occurred_at}; accepted on the declaration")
+                f"'{token}' at step {occurred_at}; accepted on the declaration{note}")
         return known
 
     if kind == "embargo":
@@ -3520,6 +3538,14 @@ def declare_breach(
         if standing(token_name, rule_holder, "permit") is False:
             return refuse(f"'{rule_holder}' did not hold permit '{token_name}' in force "
                           f"at step {occurred_at}")
+        # 2.3.0-3: prevention justified by an embargo on the holder is not a
+        # violation of the permission (B.1.7.4).
+        for embargo in _justifying_embargoes(spec, behaviour):
+            if standing(embargo, rule_holder, "embargo",
+                        " (an embargo would justify the prevention)") is True:
+                return refuse(f"preventing '{behaviour}' at step {occurred_at} was justified "
+                              f"by embargo '{embargo}' held by '{rule_holder}': not a "
+                              f"violation of permit '{token_name}'")
     else:
         rule_holder = None
         if not any(req.kind == "requires_permit" and req.token

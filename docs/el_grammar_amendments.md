@@ -11866,3 +11866,39 @@ published-specs golden test passes unchanged; existing Kripke pins pass.
 Verifier parity: R22 (absent in both builders; under-approximation, no
 permit or embargo violation paths; no Kripke count or AF/EF verdict
 changes).
+
+## 2.3.0-3 — violation records: justified prevention (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine.
+
+**Standard reference:** §6.3.8, §7.8.7; Annex B.1.7.4 (preventing an
+action under an embargo is not a violation of the permission).
+
+**Now.**
+- `declare_breach()` refuses a denial of permission (kind `permit`) when
+  an embargo covering the prevented behaviour (`_embargo_coverage()`, the
+  engine's Step 5 rule) was in force on the permit's holder at
+  `occurred_at`: `preventing 'B' at step N was justified by embargo 'E'
+  held by 'H': not a violation of permit 'P'`. The embargoes are checked
+  in declaration order; the first in force is named.
+- `breach_history_queries()` adds (E, holder) for every embargo covering
+  the behaviour (`_justifying_embargoes()`), so `Runtime.declare_breach()`
+  answers them from `in_force_at()`. An embargo in force on anyone else,
+  or not in force at the occurrence, justifies nothing.
+- Unknown history for such an embargo is accepted with the warning
+  `history unknown: could not establish whether 'H' held embargo 'E' at
+  step N; accepted on the declaration (an embargo would justify the
+  prevention)`.
+- Embargo breaches and permit requirements are judged as in 2.3.0-2.
+
+**Files changed:** `toolchain/el_engine.py`,
+`docs/ENGINE_VERIFIER_PARITY.md` (R23),
+`tests/test_violation_justified_prevention.py` (new),
+`tests/test_violation_records.py` (one query assertion moved to an
+action no embargo covers).
+
+**Verification:** full suite 1952 → 1959 passed, 0 failures. The
+published-specs golden test passes unchanged; existing Kripke pins pass.
+
+Verifier parity: R23 (absent, follows R22; no Kripke count or AF/EF
+verdict changes).
