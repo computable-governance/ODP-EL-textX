@@ -214,6 +214,9 @@ Rules implemented
   W-breach-undeclarable  2.3.0-5: a declaration Action names a permit or
         embargo that applies to no declared action, so every declaration
         of it is refused. Advisory.               §6.3.8, §6.6.5, §7.8.6
+  W-burden-not-modelled  a burden with no root: nothing creates it for
+        a holder, so the pre-execution model has no obligation for it.
+        Advisory.                                 §7.8.7, §6.4.1, §7.10.3
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -459,6 +462,9 @@ def validate_spec(model) -> List[str]:
 
     # W-27/W-28 — burden/permit whose action no role filler may perform (AM-114, §7.8.2)
     errors.extend(_validate_role_filler_performers(model))
+
+    # W-burden-not-modelled — burden with no root (§7.8.7, §6.4.1, §7.10.3)
+    errors.extend(_validate_burden_not_modelled(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -2366,6 +2372,63 @@ def _validate_strict_burden_violation_response(model) -> List[str]:
             f"(on_violation_of). If its holder never discharges it, nothing "
             f"responds. Not needed if the enforcement point discharges the burden "
             f"atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        )
+    return warnings
+
+
+def _validate_burden_not_modelled(model) -> List[str]:
+    """[W-burden-not-modelled]: a top-level burden with no root, that is,
+    no key in el_engine._build_obligation_descriptors(model). The
+    pre-execution model has no obligation for it, so the verifier gives
+    no verdict on it. A burden the runtime does grant (an object's holds,
+    an action's effect create) is seen only by a hybrid model; a role's
+    holds is never granted. Standing duties are left out
+    (W-standing-not-modelled covers them). Limit: role-body inline
+    burdens (InlineToken) are not read; the descriptor builder never
+    indexes them. Advisory."""
+    from el_engine import _build_obligation_descriptors
+
+    descriptors = _build_obligation_descriptors(model)
+    object_holders: Dict[str, str] = {}
+    for obj in _collect(model, "EnterpriseObject"):
+        for tok in getattr(obj, "holds_tokens", None) or ():
+            object_holders.setdefault(_obj_name(tok), obj.name)
+    creators: Dict[str, str] = {}
+    role_holders: Dict[str, str] = {}
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            for tok in getattr(role, "holds_tokens", None) or ():
+                role_holders.setdefault(_obj_name(tok), role.name)
+            for action in getattr(role, "actions", []) or []:
+                for eff in getattr(action, "deontic_effects", None) or ():
+                    if getattr(eff, "operation", None) == "create":
+                        creators.setdefault(_obj_name(getattr(eff, "token", None)), action.name)
+
+    warnings: List[str] = []
+    for tok in _collect(model, "DeonticToken"):
+        if getattr(tok, "kind", None) != "burden" or getattr(tok, "standing", False):
+            continue
+        if tok.name in descriptors:
+            continue
+        if tok.name in object_holders:
+            hint = (f" Object '{object_holders[tok.name]}' holds it, so the runtime "
+                    f"grants it and only a hybrid model sees it.")
+        elif tok.name in creators:
+            hint = (f" Action '{creators[tok.name]}' creates it (effect create), so "
+                    f"only a hybrid model sees it once it exists.")
+        elif tok.name in role_holders:
+            hint = (f" Role '{role_holders[tok.name]}' holds it, but the runtime never "
+                    f"grants a role's holds; give the role's filler a Commitment.")
+        else:
+            hint = ""
+        warnings.append(
+            f"[W-burden-not-modelled] Burden '{tok.name}' has no root: no Commitment "
+            f"or other construct creates it for a holder, so the pre-execution model "
+            f"has no obligation for it and the verifier gives no verdict on it. Add a "
+            f"Commitment by the object accountable for it.{hint} "
+            f"(§7.8.7, §6.4.1, §7.10.3)"
         )
     return warnings
 

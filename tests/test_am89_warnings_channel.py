@@ -57,6 +57,15 @@ burden singleBurden {
     deadline: "1 hour"
 }
 
+// A Commitment roots the burden, so [W-burden-not-modelled] does not fire.
+party Holder {}
+
+commitment singleCommitment {
+    by: Holder
+    obligation: "Discharge the single burden"
+    creates_burden: singleBurden
+}
+
 community TestCommunity {
     objective: "Test community for W-16b probe"
     satisfaction: all_discharged(singleBurden)
@@ -71,6 +80,15 @@ enterprise specification W16bAndErrorProbe
 burden singleBurden {
     state: active
     deadline: "1 hour"
+}
+
+// A Commitment roots the burden, so [W-burden-not-modelled] does not fire.
+party Holder {}
+
+commitment singleCommitment {
+    by: Holder
+    obligation: "Discharge the single burden"
+    creates_burden: singleBurden
 }
 
 community TestCommunity {

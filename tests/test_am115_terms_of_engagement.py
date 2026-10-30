@@ -67,10 +67,13 @@ def _refused(name):
 
 
 @pytest.mark.parametrize("name", sorted(_SCENARIOS))
-def test_scenarios_validate_without_warnings(name):
+def test_scenarios_validate_with_only_the_burden_not_modelled_warning(name):
+    # declarationDutyBurden is held by a role only and never granted (GAP-6).
     result = _quiet(parse, _SCENARIOS[name][1])
     assert result.ok, result.errors
-    assert result.warnings == []
+    assert len(result.warnings) == 1
+    assert result.warnings[0].startswith(
+        "[W-burden-not-modelled] Burden 'declarationDutyBurden'")
 
 
 @pytest.mark.parametrize("name", sorted(_SCENARIOS))
