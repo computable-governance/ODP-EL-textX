@@ -40,8 +40,8 @@ Class inventory (mirrors STEP1_grammar_audit.md):
                CommunityInteraction
     Group F  — Role, InlineToken, Action, EmitsDecl, DeclaresViolationItem (AM-115),
                DeonticRequirement,
-               DeonticEffect, ConditionalAction, Process, Step,
-               ActorRef, ArtefactRef, ResourceRef, DescriptionAttr,
+               DeonticEffect, RoleFillEffect (2.4.0-2), ConditionalAction,
+               Process, Step, ActorRef, ArtefactRef, ResourceRef, DescriptionAttr,
                SubObjectiveRef, SatisfiesObjective,
                RequiresPermitItem, InhibitedByItem, FavouredByItem
     Group G  — Lifecycle, Establishing, EmbeddedCommitment, Changes,
@@ -848,6 +848,17 @@ class DeonticEffect(_ELParentable):
 
 
 @dataclass
+class RoleFillEffect(_ELParentable):
+    """2.4.0-2, §7.6.2, §7.8.2 — an action's effect that an object comes
+    to fill a role when the action is performed.
+
+    Grammar rule: RoleFillEffect. P4 collects it in Action.role_fills.
+    """
+    role:   Optional[object] = None  # → Role ref
+    filler: Optional[object] = None  # → EnterpriseObject ref
+
+
+@dataclass
 class PreconditionDecl(_ELParentable):
     """Grammar rule: PreconditionDecl — action/step precondition.
     2.1.0-11: either a plain fact (description) or a Comparison."""
@@ -920,6 +931,7 @@ class Action(_ELParentable):
     preconditions:        List = field(default_factory=list)  # List[str]
     deontic_requirements: List = field(default_factory=list)  # List[DeonticRequirement]
     deontic_effects:      List = field(default_factory=list)  # List[DeonticEffect]
+    role_fills:           List = field(default_factory=list)  # 2.4.0-2: List[RoleFillEffect]; P4, declared order
     emits:                Optional[object] = None  # AM-22: → EventDecl ref; P4 from EmitsDecl
     favoured_by:          List = field(default_factory=list)  # List[DeonticToken]; P4 from FavouredByItem
     declares_violation_of: List = field(default_factory=list)  # AM-115: List[DeonticToken]; P4 from DeclaresViolationItem
@@ -1433,7 +1445,7 @@ DOMAIN_CLASSES = [
     JoinLeaveEffect, CommunityInteraction,
     # F
     Role, InlineToken, Action, EmitsDecl, DeclaresViolationItem, ConditionalAction, Process, Step,
-    DeonticRequirement, DeonticEffect, PreconditionDecl,
+    DeonticRequirement, DeonticEffect, RoleFillEffect, PreconditionDecl,
     DescriptionAttr, ActorRef, ArtefactRef, ResourceRef,
     RequiresPermitItem, InhibitedByItem, FavouredByItem,
     SatisfiesObjective,

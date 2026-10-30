@@ -745,8 +745,8 @@ Action:
 
 ActionBodyItem:
     ActorRef | ArtefactRef | ResourceRef
-    | PreconditionDecl | FavouredByItem | DeonticRequirement | DeonticEffect
-    | EmitsDecl | DeclaresViolationItem
+    | PreconditionDecl | FavouredByItem | DeonticRequirement | RoleFillEffect
+    | DeonticEffect | EmitsDecl | DeclaresViolationItem
 ;
 
 /*
@@ -862,6 +862,21 @@ DeonticEffect:
 ;
 
 TokenOp : 'create' | 'destroy' | 'transfer' | 'activate' | 'pend' | 'clone' ;
+
+/*
+ * RoleFillEffect — 2.4.0-2, §7.6.2 (and NOTE 2), §7.6.3, §7.8.2;
+ * §7.8.7 NOTE 3 (informative)
+ * When the action is performed, the named enterprise object comes to fill
+ * the named role (an assignment of an object to a role, §7.6.2; at most
+ * one object fills a role at a time, §7.8.2). Action bodies only, not
+ * Step or ConditionalAction bodies. One filler per line (the per-line
+ * pattern, CLAUDE.md §5.3). Tried before DeonticEffect, which also begins
+ * with 'effect'. Parsed into Action.role_fills, never deontic_effects; the
+ * engine applies it from 2.4.0-3.
+ */
+RoleFillEffect:
+    'effect' 'fill' role=[Role] 'with' filler=[EnterpriseObject]
+;
 
 /*
  * ConditionalAction — §6.4.6

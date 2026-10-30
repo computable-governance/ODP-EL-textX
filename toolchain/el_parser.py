@@ -157,6 +157,8 @@ def process_action(action):
             action.deontic_requirements.append(item)
         elif cls == 'DeonticEffect':
             action.deontic_effects.append(item)
+        elif cls == 'RoleFillEffect':  # 2.4.0-2: kept apart from deontic_effects
+            action.role_fills.append(item)
         elif cls == 'FavouredByItem':
             action.favoured_by.append(item.token)
         elif cls == 'EmitsDecl':
