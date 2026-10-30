@@ -20,7 +20,10 @@ Seven-step execution pipeline (CLAUDE.md §7.1):
   5. Embargo sweep   — active embargo held by the actor that covers this
                        action → blocked (coverage: _embargo_coverage(), AM-102)
   6. Permit check    — DeonticRequirement(requires_permit) must be held by actor
-  7. Effect application — DeonticEffect operations + burden discharge transitions
+     6b. Role fills  — each `effect fill R with X` of the action must be
+                       allowed (2.4.0-3, §7.8.2); check only
+  7. Effect application — role fills, then DeonticEffect operations + burden
+                       discharge transitions
 
 Standard reference: ISO/IEC 15414:2015 §6.4, §6.6, §7.8, §7.10
 """
@@ -272,6 +275,60 @@ def _role_refusal(spec, state: "WorldState", actor_name: str,
     return (f"actor '{actor_name}' does not fill role "
             f"{' or '.join(repr(r) for r in sorted(declaring))}, "
             f"which declares action '{action_name}'")
+
+
+def _excluded_roles(spec) -> Dict[str, Set[str]]:
+    """2.4.0-3: role name -> the roles its assignment_policy excludes
+    (`excludes_role`, §7.6.2, §7.8.2 NOTE 5), across every Community and
+    Federation. The other assignment rules are not read."""
+    index: Dict[str, Set[str]] = {}
+    for el in spec.elements:
+        if type(el).__name__ not in ("Community", "Federation"):
+            continue
+        for policy in getattr(el, "assignment_policies", []) or []:
+            for rule in policy.rules:
+                if type(rule).__name__ == "ExcludesRoleRule":
+                    index.setdefault(policy.role_name, set()).add(rule.excluded_role_name)
+    return index
+
+
+def _role_fill_refusal(spec, state: "WorldState", fills) -> Optional[str]:
+    """2.4.0-3: advance() Step 6b. The refusal reason for the first of an
+    action's role fills that may not be applied, or None. Each fill is
+    judged against the state, the specification's `fills` statements and
+    the act's earlier fills: the role is declared in exactly one Community
+    or Federation, matched by name; at most one object fills it, and no
+    object fills it again (§7.8.2); the filler fills no role that the new
+    role's assignment_policy excludes, nor one whose policy excludes the
+    new role (§7.8.2 NOTE 5)."""
+    filled: List[Tuple[str, str]] = [
+        (a.actor_name, a.role_name) for a in state.actors if a.role_name
+    ] + role_fillers(spec)
+    excludes = _excluded_roles(spec)
+    for fill in fills:
+        role, filler = fill.role.name, fill.filler.name
+        homes = [el.name for el in spec.elements
+                 if type(el).__name__ in ("Community", "Federation")
+                 and any(r.name == role for r in getattr(el, "roles", []))]
+        if len(homes) > 1:
+            return (f"role '{role}' is declared in more than one community "
+                    f"({', '.join(repr(h) for h in homes)})")
+        if not homes:
+            return f"role '{role}' is not declared in a community"
+        holders = [a for a, r in filled if r == role]
+        if filler in holders:
+            return f"'{filler}' already fills role '{role}'"
+        if holders:
+            return f"role '{role}' is already filled by '{holders[0]}'"
+        for other in sorted({r for a, r in filled if a == filler}):
+            if other in excludes.get(role, ()):
+                return (f"'{filler}' fills '{other}', which the assignment "
+                        f"policy of '{role}' excludes")
+            if role in excludes.get(other, ()):
+                return (f"'{filler}' fills '{other}', whose assignment "
+                        f"policy excludes '{role}'")
+        filled.append((filler, role))
+    return None
 
 
 def _declaration_actions(spec) -> Dict[str, List[Any]]:
@@ -1198,6 +1255,17 @@ def advance(
                   it off and records nothing. claim() and decline() never
                   set it.
 
+    Role fills (2.4.0-3): an action's `effect fill R with X` lines are
+    checked at Step 6b, after the permit check, against the current state
+    and the act's earlier fills (_role_fill_refusal()); the first failure
+    refuses the whole act (state and tick unchanged, blocked_by None, never
+    a refused attempt). Step 7 then applies them first, in declared order,
+    through join_role(): X is enrolled in R and R's on_join tokens are
+    granted in their declared state at this tick (token event cause
+    'on_join', cause_ref R). Step 7b's create and transfer, and Step 7c's
+    triggered activation, see the new fillers. claim() runs the burden's
+    for_action through advance(), so a claim fills too.
+
     Returns
     -------
     (new_state, record) — new_state equals state if blocked, except that a
@@ -1336,14 +1404,37 @@ def advance(
             return _refused_attempt(*blocked)
         return blocked
 
+    # ── Step 6b: Role fills, check only (2.4.0-3) ─────────────────────────────
+    role_fills = list(grammar_action.role_fills) if grammar_action else []
+    if role_fills:
+        reason = _role_fill_refusal(spec, state, role_fills)
+        if reason is not None:
+            return _blocked(state, actor_name, action_name, reason, tick)
+
     # ── Step 7: Effect application ────────────────────────────────────────────
     tokens = list(state.tokens)
+    actors = state.actors
     effects_log: list[str] = list(precondition_lines)  # 2.1.0-12: satisfied comparisons
     # Token event causes other than the default ('action'): see _token_events().
     causes: dict = {
         _instance_key(t): ("event", grammar_action.emits.name)
         for t in tokens if (t.token_name, t.holder) in event_keys
     }
+
+    # 7-fill — 2.4.0-3 (§7.6.2, §7.8.2, §7.8.7 NOTE 3): each fill in declared
+    # order, through join_role(): the filler is enrolled in the role and the
+    # role's on_join tokens are granted in their declared state at this
+    # tick. Before 7b, whose create and transfer resolve roles against
+    # `actors`, and before 7c, which activates tokens triggered_by the event.
+    for fill in role_fills:
+        role, filler = fill.role.name, fill.filler.name
+        before_fill = list(tokens)
+        filled, join_log = join_role(replace(state, actors=actors, tokens=tuple(tokens)),
+                                     spec, filler, role)
+        actors, tokens = filled.actors, list(filled.tokens)
+        _note_causes(causes, before_fill, tokens, "on_join", role)
+        effects_log.append(f"filled role '{role}' with '{filler}'")
+        effects_log.extend(join_log)
 
     # 7a — Discharge identified burdens (transition to 'discharged'), then
     # AM-57 any_discharged sibling supersession (_discharge()).
@@ -1406,7 +1497,7 @@ def advance(
                 target_role = eff.to_role
                 if target_role:
                     targets = [
-                        a.actor_name for a in state.actors
+                        a.actor_name for a in actors
                         if a.role_name == target_role
                     ] or [target_role]
                 else:
@@ -1474,7 +1565,7 @@ def advance(
                 # performing this action" fallback breaks.
                 if eff.from_role:
                     from_actors = [
-                        a.actor_name for a in state.actors
+                        a.actor_name for a in actors
                         if a.role_name == eff.from_role
                     ] or [eff.from_role]
                 else:
@@ -1482,7 +1573,7 @@ def advance(
                 to_role = eff.to_role
                 if to_role:
                     to_actors = [
-                        a.actor_name for a in state.actors
+                        a.actor_name for a in actors
                         if a.role_name == to_role
                     ] or [to_role]
                     updated: list[TokenInstance] = []
@@ -1540,7 +1631,7 @@ def advance(
         effects_log.extend(triggered_log)
         _note_causes(causes, before_event, tokens, "event", grammar_action.emits.name)
 
-    new_state = state.with_tokens(tokens).with_tick(tick + 1)
+    new_state = replace(state, actors=actors).with_tokens(tokens).with_tick(tick + 1)
     record = TransitionRecord(
         tick=tick,
         actor_name=actor_name,

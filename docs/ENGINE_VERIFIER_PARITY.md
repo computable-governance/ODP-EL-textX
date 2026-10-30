@@ -7,7 +7,7 @@ abstracts it or leaves it out. **Update this table in the same commit as
 any change to an engine rule or a Kripke rule**, so that it does not drift
 from the code. Started in 2.1.0-5 with the rows about deadlines, the clock
 and policy values; preconditions added in 2.1.0-12, standing duties in
-2.1.0-17, policy-fed deadlines in 2.2.0-8, token events and violation records in 2.3.0 (rows R20 to R25), the permit check in 2.3.0-10 (row R26). Other parts of the engine are not yet listed.
+2.1.0-17, policy-fed deadlines in 2.2.0-8, token events and violation records in 2.3.0 (rows R20 to R25), the permit check in 2.3.0-10 (row R26), role fills by an action in 2.4.0-3 (row R27). Other parts of the engine are not yet listed.
 
 **Conventions**
 - *Static* is `build_kripke_model()` (before execution). *Hybrid* is
@@ -55,3 +55,4 @@ and policy values; preconditions added in 2.1.0-12, standing duties in
 
 Under R20: `Runtime.in_force_at()` and `Runtime.token_states_at()` are queries over the token events of `Runtime.history()`, not engine rules. No engine or verifier rule reads them.
 | R26 | An action is performed only when the actor holds every permit its `requires_permit` clauses name, each active (`advance()` Step 6) | T5 (exercise) and T6 (examine), both builders: every required permit active and held by the same holder (2.3.0-10). Before, T6 checked every required permit and T5 only the permit being exercised: "T6 mirrored; T5 abstracted", Over (EF falsely true, AF falsely false) | Mirrored | Under, one case: the model keeps one holder per permit name, so a permit name held by two actors is read as held by one of them only |
+| R27 | An action's `effect fill R with X` (2.4.0-3) makes X fill R when the act is applied: one filler per role and no refill; `excludes_role` both ways; the role named in one community (`advance()` Step 6b). A refusal blocks the whole act. R's on_join tokens are granted to X in their declared state at the act's tick (token events cause `on_join`) | Static: none. Performers come from spec `fills` only (`_role_performer_check()`), so X never performs R's actions and R's on_join tokens are not obligations; with no `fills` statement anywhere, the static model stays unrestricted (transitional) and anyone may perform R's actions. Hybrid: reads `state.actors` once, at the anchor, so a fill made before the build is seen and one made after is not | Absent | **Under** where the specification states its fillers (paths through R's actions and on_join duties are missing: EF falsely false; AF on those duties is never claimed, since they have no descriptor). **Over** where it states none (the transitional exception). Like R3, the `activate` effect (pinned by `tests/test_role_fill_verifier.py`) |

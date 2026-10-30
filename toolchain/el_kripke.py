@@ -2163,8 +2163,11 @@ def _role_performer_check(
     """AM-114: may_perform(actor, action) — the engine's role rule
     (el_engine._role_refusal()): the actor fills a role declaring the
     action, or no role declares it. A fixed actor -> roles map: role
-    membership never changes during a run, so World needs no role
-    dimension. `actor_roles` None means membership is unknown (static
+    membership never changes within the model, so World needs no role
+    dimension. The engine may change it during a run (an action's
+    `effect fill`, 2.4.0-3); the model does not follow: the static builder
+    reads the specification's `fills`, the hybrid builder reads
+    state.actors once, at its anchor. `actor_roles` None means membership is unknown (static
     builder over a spec with no `fills` statement, transitional): no
     restriction."""
     cache: Dict[str, Set[str]] = {}
