@@ -5,6 +5,25 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
+## [Unreleased]
+
+### Added
+
+- **Validator warning `[W-burden-not-modelled]`.** A burden with no root:
+  no Commitment, ViolationResponse `creates_burden`, Authorization
+  `creates_burden_on_authority` or Delegation `transfers_token_group`
+  creates it for a holder, so the pre-execution model has no obligation for
+  it and the verifier gives no verdict on it. The specification still
+  validates (`.ok` unchanged). It fires on 4 of the 30 published
+  specifications (7 warnings): the ereferral model (4), the two
+  terms_of_engagement scenarios (1 each) and one standing-duty example (1);
+  the published-specs golden records them. Kripke world and edge counts
+  are unchanged. 75 rules (45 errors, 30 warnings). See "Burdens the
+  verifier does not model" in
+  [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md) and
+  entry 2.4.0-1 in
+  [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
+
 ## [2.3.0] - 2026-10-30
 
 Token events in the ledger, violation records for permits and embargoes,

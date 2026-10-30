@@ -12232,3 +12232,77 @@ verdict, static and hybrid, for the six API scenarios (at k = 1 and at each
 scenario's deadline scale) and the consent scenario: the same as 2.2.0.
 
 Verifier parity: none.
+
+## 2.4.0-1 — burden with no root: validator (`toolchain/el_validator.py`)
+
+**Status:** COMPLETE on branch `burden-not-modelled` (unreleased). Type:
+validator (one new warning).
+
+**Standard reference:** §7.8.7 (a token is created or transferred by a
+speech act and is associated with exactly one active object), §6.4.1 (a
+token is held by exactly one active enterprise object), §7.10.3 (a
+commitment is modelled as creating a burden associated with the agent).
+
+**Why.** A silent gap: a burden that nothing creates for a holder passes
+the validator (`.ok`), but `el_engine._build_obligation_descriptors()`
+gives it no descriptor, so neither Kripke builder has an obligation for it
+and the verifier gives no verdict on it. Nothing said so. W-20 (a strict
+burden named by no ViolationResponse) concerns the response to a breach,
+not the root, and says nothing about eventual burdens; extending it would
+change its meaning, so this is a new rule.
+
+**Now.**
+- New warning `[W-burden-not-modelled]` on every top-level burden, not
+  standing, whose name is not a key of
+  `_build_obligation_descriptors(model)`. The roots are a Commitment, a
+  ViolationResponse `creates_burden` (to `obligates`, or to the filler of
+  `creates_burden_for_role`), an Authorization
+  `creates_burden_on_authority` and a Delegation `transfers_token_group`.
+  A Delegation `transfers_burden` alone, an object's or a role's `holds`,
+  an action's `effect create` and `on_join R transfer B` are not roots.
+  `[W-burden-not-modelled] Burden 'B' has no root: no Commitment or other
+  construct creates it for a holder, so the pre-execution model has no
+  obligation for it and the verifier gives no verdict on it. Add a
+  Commitment by the object accountable for it. (§7.8.7, §6.4.1,
+  §7.10.3)`, with at most one hint before the clauses, in this order:
+  "Object 'O' holds it, so the runtime grants it and only a hybrid model
+  sees it."; "Action 'A' creates it (effect create), so only a hybrid
+  model sees it once it exists."; "Role 'R' holds it, but the runtime
+  never grants a role's holds; give the role's filler a Commitment."
+- Registered after W-27/W-28 and before V-17, which fixes each warning's
+  position in the golden's ordered lists.
+- Out of scope: standing duties (`[W-standing-not-modelled]`) and
+  role-body inline burdens (never indexed by the descriptors). A
+  ViolationResponse to an unfilled role gets `[W-29]` and its burden this
+  warning.
+- 75 validator rules (45 errors, 30 warnings).
+
+**Scan.** The 30 published specifications: 4 files affected, 7 warnings.
+`scenarios/ereferral/ereferral_model.el` 4 (referralBurden,
+examinationBurden, aiExaminationBurden, acknowledgementBurden: a role's
+holds only); `scenarios/terms_of_engagement/external_agent_access_scenario.el`
+and `public_data_portal_scenario.el` 1 each (declarationDutyBurden, a
+role's holds only, documented in the scenarios as never granted, GAP-6);
+`tests/examples/standing/invalid_standing_in_group.el` 1 (fileReport, an
+object's holds). All are true positives. No scenario is edited.
+
+**Files changed:** `toolchain/el_validator.py`,
+`tests/test_burden_not_modelled.py` (new, 10 tests: no warning for a
+Commitment, a ViolationResponse `creates_burden`, an Authorization
+`creates_burden_on_authority`, a Delegation token group, a standing duty;
+a warning with its hint for no mention, an object's holds, a role's holds,
+effect create only, and a response to an unfilled role; one test pins the
+full text), `tests/test_am115_terms_of_engagement.py` (the no-warnings
+test expects exactly the new warning),
+`tests/test_public_data_portal_scenario.py` (the fixture accepts it),
+`tests/test_am89_warnings_channel.py` (the probes get a Commitment, so
+their exact counts hold), `tests/published_specs_golden.json`
+(regenerated with `--write`: 4 entries change, 7 warnings added, nothing
+else).
+
+**Verification:** full suite 2036 → 2046 passed, 2 skipped, 1 xfailed, 0
+failures. Kripke world and edge counts unchanged on 23 builds (static h10
+of each tracked scenario that parses; hybrid h10 of the six API
+scenarios, and the referral scenario at its deadline scale).
+
+Verifier parity: none (validator only).

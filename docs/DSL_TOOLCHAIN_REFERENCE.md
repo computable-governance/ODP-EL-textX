@@ -12,7 +12,7 @@ ComputableGovernance stack. Intended as project context for future sessions.
 ```
 el_grammar.tx     — textX grammar defining the DSL syntax
 el_parser.py      — loads grammar, parses .el files, invokes validator
-el_validator.py   — 74 rules (45 errors, 29 warnings) checked at specification time
+el_validator.py   — 75 rules (45 errors, 30 warnings) checked at specification time
 el_reasoner.py    — governance queries over the static model
 el_kripke.py      — Layer 4 Kripke semantics (modal obligation verification)
 example.el        — payment processing scenario exercising all constructs
@@ -25,7 +25,7 @@ example.el        — payment processing scenario exercising all constructs
 ### What it does
 
 Runs at **specification time**, before any execution. Takes a parsed DSL-EL
-model and checks it against 74 rules: 45 errors and 29 warnings (tags
+model and checks it against 75 rules: 45 errors and 30 warnings (tags
 beginning `[W-`). Each rule in the table below is traced to a clause of
 ISO/IEC 15414:2015; the rules added in 2.1.0 and 2.2.0 end "(clause to be
 confirmed)", and the 2.3.0 ones cite their clauses. Analogous to a compiler's semantic phase — the grammar
@@ -88,6 +88,10 @@ Added in 2.2.0 (3):
 - Warnings: `[W-breach-response-duty]`, `[W-refused-attempts-burden]`,
   `[W-breach-undeclarable]` (see "Violation records"). V-NEW-24 now
   accepts a permit or an embargo as the target of `declares_violation_of`.
+
+Unreleased (1):
+- Warnings: `[W-burden-not-modelled]` (see "Burdens the verifier does not
+  model").
 
 ### Usage
 
@@ -1068,6 +1072,50 @@ line).
 
 ---
 
+## Burdens the verifier does not model (unreleased)
+
+`[W-burden-not-modelled]` (2.4.0-1) warns on a burden the pre-execution
+model has no obligation for, so the verifier gives no verdict on it. The
+specification still validates; the warning goes to `result.warnings` and
+`.ok` is unchanged.
+
+**Roots.** A burden is modelled when one of these creates it for a holder
+(the obligation descriptors of `el_engine._build_obligation_descriptors()`):
+- a Commitment (`creates_burden`, held by its `by`);
+- a ViolationResponse `creates_burden` (held by its `obligates`, or by the
+  filler of its `creates_burden_for_role`); it waits until the violation;
+- an Authorization `creates_burden_on_authority` (held by the authority);
+- a Delegation `transfers_token_group` (each member held by the delegate).
+
+A Delegation `transfers_burden` alone is not a root: it extends a chain
+from another root. In this release `on_join R transfer B` is not a root
+either, even when the role is filled.
+
+**Message.** `[W-burden-not-modelled] Burden 'B' has no root: no Commitment
+or other construct creates it for a holder, so the pre-execution model has
+no obligation for it and the verifier gives no verdict on it. Add a
+Commitment by the object accountable for it. (§7.8.7, §6.4.1, §7.10.3)`,
+with at most one hint before the clauses, in this order:
+- an object's `holds`: "Object 'O' holds it, so the runtime grants it and
+  only a hybrid model sees it."
+- an action's `effect create`: "Action 'A' creates it (effect create), so
+  only a hybrid model sees it once it exists."
+- a role's `holds`: "Role 'R' holds it, but the runtime never grants a
+  role's holds; give the role's filler a Commitment."
+
+**Limits.**
+- Standing duties are not read; `[W-standing-not-modelled]` covers them.
+- Role-body inline burdens are not read (the descriptors never index
+  them).
+- A burden only an `effect create` produces is flagged: the static model
+  has no instance of it and never offers the creating act; only a hybrid
+  model sees it once it exists. If that is intended, the warning is a
+  known limit, not an error.
+- A ViolationResponse whose `creates_burden_for_role` names an unfilled
+  role gets `[W-29]`, and its burden gets this warning too.
+
+---
+
 ## The Reasoner (`el_reasoner.py`)
 
 ### What it does
@@ -1181,7 +1229,7 @@ if conflicts:
 Specification (.el file)
         │
         ▼
-   el_parser.py  ──► el_validator.py (74 rules)
+   el_parser.py  ──► el_validator.py (75 rules)
         │                    │
         │            errors and warnings
         │

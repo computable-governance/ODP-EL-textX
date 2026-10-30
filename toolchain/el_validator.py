@@ -214,9 +214,9 @@ Rules implemented
   W-breach-undeclarable  2.3.0-5: a declaration Action names a permit or
         embargo that applies to no declared action, so every declaration
         of it is refused. Advisory.               §6.3.8, §6.6.5, §7.8.6
-  W-burden-not-modelled  a burden with no root: nothing creates it for
-        a holder, so the pre-execution model has no obligation for it.
-        Advisory.                                 §7.8.7, §6.4.1, §7.10.3
+  W-burden-not-modelled  2.4.0-1: a burden with no root: nothing
+        creates it for a holder, so the pre-execution model has no
+        obligation for it. Advisory.              §7.8.7, §6.4.1, §7.10.3
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
