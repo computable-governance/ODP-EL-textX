@@ -28,7 +28,7 @@ Runs at **specification time**, before any execution. Takes a parsed DSL-EL
 model and checks it against 74 rules: 45 errors and 29 warnings (tags
 beginning `[W-`). Each rule in the table below is traced to a clause of
 ISO/IEC 15414:2015; the rules added in 2.1.0 and 2.2.0 end "(clause to be
-confirmed)", and the unreleased ones cite their clauses. Analogous to a compiler's semantic phase — the grammar
+confirmed)", and the 2.3.0 ones cite their clauses. Analogous to a compiler's semantic phase — the grammar
 checks syntax, the validator checks meaning.
 
 `validate_spec()` returns one list of messages; `parse()` splits it into
@@ -84,7 +84,7 @@ Added in 2.2.0 (3):
 - Errors: `deadline-policy-type` (see "Deadlines"); `option-duplicate`,
   `option-set-name` (see "Typed policy values", options sets).
 
-Unreleased (3; V-NEW-24 rewritten):
+2.3.0 (3; V-NEW-24 rewritten):
 - Warnings: `[W-breach-response-duty]`, `[W-refused-attempts-burden]`,
   `[W-breach-undeclarable]` (see "Violation records"). V-NEW-24 now
   accepts a permit or an embargo as the target of `declares_violation_of`.
@@ -768,7 +768,7 @@ where a reported value came from.
 
 ---
 
-## Token events in the ledger (unreleased)
+## Token events in the ledger (2.3.0)
 
 Each `TransitionRecord` lists, in `token_events`, every change its act made
 to a token instance, as `TokenEvent` records. The effect lines, reasons,
@@ -896,7 +896,7 @@ start). The text is unchanged; low priority.
 
 ---
 
-## Violation records (unreleased)
+## Violation records (2.3.0)
 
 A permit or an embargo can be violated (ISO/IEC 15414:2015 §6.3.8
 violation; §7.8.6 behaviour violations; §7.8.7 deontic token rules). Such
@@ -1507,6 +1507,15 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - A term end by date needs a clock; one fixed UTC offset.
 - Not supported: a term given as a duration, declaring a breach, ending a
   term by community conclusion.
+
+**Token events, violation records and refused attempts (2.3.0):**
+- Engine only: the verifier does not model token events, violation records
+  or refused attempts (rows R20 to R25 of
+  [ENGINE_VERIFIER_PARITY.md](ENGINE_VERIFIER_PARITY.md)); a declared
+  breach of a permit or embargo changes no token and no Kripke world.
+- Whether a token was in force at an occurrence is read from the token
+  events; a history that does not reproduce the current state gives
+  "unknown", and the declaration is accepted with a warning.
 
 **Found by running contract clauses (v2.0.0 and 2.1.0):**
 

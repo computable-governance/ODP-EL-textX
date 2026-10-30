@@ -11842,7 +11842,7 @@ permission, or an act without a required permit left no trace.
 - Whether a token was in force at `occurred_at` comes from the caller as
   `in_force`; the engine stays pure. `breach_history_queries()` lists the
   (token, holder) pairs, from the spec. `Runtime.declare_breach()` answers
-  them with `in_force_at()` (slice 1) and appends the record. An unknown
+  them with `in_force_at()` (the token events) and appends the record. An unknown
   answer is accepted with the warning `history unknown: could not
   establish whether 'H' held <kind> 'T' at step N; accepted on the
   declaration`, on the record and as an effect line.
@@ -12162,7 +12162,7 @@ verdict changes).
 comments only).
 
 Verifier parity: none (docs only).
-## 2.2.1-1 — T5 requires every permit the action requires (`toolchain/el_kripke.py`)
+## 2.3.0-10 — T5 requires every permit the action requires (`toolchain/el_kripke.py`)
 
 **Status:** IMPLEMENTED. Type: verifier.
 
@@ -12195,3 +12195,40 @@ static models of the 29 published files and hybrid models of the six API
 scenarios: the same world and edge counts and AF/EF verdicts as before.
 
 Verifier parity: R26 added, Mirrored (was Over: T5 in both builders checked only the exercised permit; T6 already checked every required permit).
+
+## 2.3.0-11 — docs: transition rules table, conditional actions note, T9 and superseded wording (docs)
+
+**Status:** IMPLEMENTED. Type: documentation.
+
+**Now.** `docs/DSL_TOOLCHAIN_REFERENCE.md` gains a "Conditional actions"
+note (§6.4.6: an action whose performance depends on the tokens its
+participants hold; what the engine and the reasoner read, and the two
+forms that are accepted but not acted on) and an introduction to the
+verifier's transition rules; `docs/KRIPKE_TRANSITION_RULES.md` gets the
+T9 and superseded wording; one comment in `grammar/v2/el_grammar.tx`.
+
+**Files changed:** `docs/DSL_TOOLCHAIN_REFERENCE.md`,
+`docs/KRIPKE_TRANSITION_RULES.md`, `grammar/v2/el_grammar.tx`.
+
+Verifier parity: none (no engine or verifier rule changed).
+
+## 2.3.0-12 — version, changelog, docs (`toolchain/el_api.py`, docs)
+
+**Status:** IMPLEMENTED. Type: release.
+
+**Now.** Version 2.3.0 (`el_api` app version); `CHANGELOG.md` [2.3.0];
+the README release paragraph; the "(unreleased)" labels of the 2.3.0
+entries in `CLAUDE.md`, `docs/CONCEPTS_INDEX.md`,
+`docs/DSL_TOOLCHAIN_REFERENCE.md`, `docs/ENGINE_VERIFIER_PARITY.md` and
+`grammar/v2/README.md` become 2.3.0; the T5 fix (2.2.1-1 and 2.2.1-2 in
+their commit subjects) is numbered 2.3.0-10 and 2.3.0-11; a "Token events,
+violation records and refused attempts (2.3.0)" note under known
+limitations.
+
+**Verification:** public suite 2036 passed, 2 skipped, 1 xfailed, 0
+failures; the published-specs golden test passes, and the golden file is
+unchanged. Kripke world and edge counts and every obligation's AF/EF
+verdict, static and hybrid, for the six API scenarios (at k = 1 and at each
+scenario's deadline scale) and the consent scenario: the same as 2.2.0.
+
+Verifier parity: none.

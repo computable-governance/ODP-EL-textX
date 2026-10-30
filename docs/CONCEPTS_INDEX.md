@@ -7461,14 +7461,14 @@ under).
 **Toolchain status:** started in 2.1.0-5. **Partial:** it lists only the
 rows added in 2.1.0 and 2.2.0 (R1 to R18: deadlines, the clock, policy
 values, preconditions, standing duties; R19, 2.2.0: policy-fed deadlines;
-unreleased: R20 and R21, token events and `blocked_by`; R22 to R25,
-violation records and refused attempts);
+2.3.0: R20 and R21, token events and `blocked_by`; R22 to R25,
+violation records and refused attempts; R26, the permit check);
 the rest of the engine is not yet listed. Updated in the same commit as any engine or Kripke rule it
 describes.
 
 ---
 
-## Violation records for permits and embargoes (unreleased)
+## Violation records for permits and embargoes (2.3.0)
 
 **Definition:** a violation of an embargo, of a permit (a denial of
 permission) or of a permit requirement, recorded as an event, not as a

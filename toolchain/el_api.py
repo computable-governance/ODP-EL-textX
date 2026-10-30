@@ -488,7 +488,7 @@ app = FastAPI(
         "Read-only coordination query endpoints for agents operating under "
         "ODP Enterprise Language governance (ISO/IEC 15414:2015)."
     ),
-    version="2.2.0",
+    version="2.3.0",
 )
 
 app.add_middleware(

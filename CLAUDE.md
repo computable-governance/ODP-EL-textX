@@ -524,7 +524,7 @@ intended change):
   `option-set-name`. The validator has 71 rules: 45 errors and 26
   warnings. Reworded `comparison-type` messages (invalid specifications
   only; see `CHANGELOG.md`).
-- 2.3.0 (unreleased) adds three validator warnings,
+- 2.3.0 adds three validator warnings,
   `W-breach-response-duty`, `W-refused-attempts-burden` and
   `W-breach-undeclarable`; the validator has 74 rules: 45 errors and 29
   warnings.

@@ -5,7 +5,24 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
-## [Unreleased]
+## [2.3.0] - 2026-10-30
+
+Token events in the ledger, violation records for permits and embargoes,
+refused attempts recorded as violations, and the verifier's check of every
+permit an action requires. No 2.2.0 verdict, reason or ledger line changed
+for what 2.2.0 accepts. The 30 published specifications (the 14 shipped
+scenarios and the 16 examples in `tests/examples/`) give the same parse
+results, errors, warnings and seeded policy values; the new warnings fire on
+none of them. Kripke world and edge counts and AF/EF verdicts are unchanged
+for the shipped scenarios (measured: static and hybrid models of the six API
+scenarios and the consent scenario); the T5 fix below changes the model
+only for an action that requires more than one permit, which none of them
+has. Details per sub-change are in
+[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
+2.3.0-1 to 2.3.0-12).
+
+Thanks to Andy Bond for the procurement tender scenario
+(`scenarios/procurement_tender/`, PR 2).
 
 ### Added
 
@@ -75,6 +92,21 @@ adheres to _[Semantic Versioning][semver]_.
   attempt is accepted as a second record, with the line `confirms the
   refused attempt recorded at step N`; a response fires once per
   occurrence (deliberately, not once per record).
+
+### Fixed
+
+- **Kripke T5 requires every permit the action requires.** Before, T5
+  (exercise) checked only the permit being exercised, while T6 (examine)
+  and the engine checked them all, so the model could let an act through
+  that the engine refuses (`EF` falsely true, `AF` falsely false). Both
+  builders now check every `requires_permit`, each held by the exercising
+  permit's holder (and active, in hybrid mode). Row R26 of
+  [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md)
+  (Mirrored; one case under: a permit name held by two actors is read as
+  held by one). Entries 2.3.0-10 and 2.3.0-11 of
+  [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md); the
+  reference gains a "Conditional actions" note and a table of the
+  verifier's transition rules.
 
 ## [2.2.0] - 2026-10-18
 

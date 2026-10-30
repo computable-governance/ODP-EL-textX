@@ -63,7 +63,7 @@ Full text in `docs/DSL_TOOLCHAIN_REFERENCE.md`; each change is logged as
 The source standards and ISO/IEC 15414 clauses of these additions are to
 be confirmed; each new validator message ends "(clause to be confirmed)".
 
-## Unreleased: violation records
+## 2.3.0: violation records
 
 Logged as 2.3.0-1 to 2.3.0-6 in `docs/el_grammar_amendments.md`; full
 text in "Violation records" in `docs/DSL_TOOLCHAIN_REFERENCE.md`.
