@@ -217,6 +217,18 @@ Rules implemented
   W-burden-not-modelled  2.4.0-1: a burden with no root: nothing
         creates it for a holder, so the pre-execution model has no
         obligation for it. Advisory.              §7.8.7, §6.4.1, §7.10.3
+  fill-one-filler  2.4.0-4: one action fills the same role more than
+        once.                                                     §7.8.2
+  W-fill-role-filled  2.4.0-4: an action fills a role that a `fills`
+        statement already fills, so it is always refused.
+        Advisory.                                         §7.8.2, §7.6.3
+  W-fill-excluded-role  2.4.0-4: an action fills a role with an object
+        that, by a `fills` statement, fills a role excluded by the
+        assignment policy of either role, so it is always refused.
+        Advisory.                                §7.8.2 NOTE 5, §7.6.2
+  W-fill-not-modelled  2.4.0-4: once per role an action fills: the
+        verifier does not model the fill. Advisory.
+                                                 §7.6.2 NOTE 2, §7.8.2
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -465,6 +477,12 @@ def validate_spec(model) -> List[str]:
 
     # W-burden-not-modelled — burden with no root (§7.8.7, §6.4.1, §7.10.3)
     errors.extend(_validate_burden_not_modelled(model))
+
+    # 2.4.0-4 — an action fills a role (§7.8.2, §7.6.2, §7.6.3)
+    errors.extend(_validate_fill_one_filler(model))
+    errors.extend(_validate_fill_filled_role(model))
+    errors.extend(_validate_fill_excluded_role(model))
+    errors.extend(_validate_fill_not_modelled(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -2382,7 +2400,8 @@ def _validate_burden_not_modelled(model) -> List[str]:
     pre-execution model has no obligation for it, so the verifier gives
     no verdict on it. A burden the runtime does grant (an object's holds,
     an action's effect create) is seen only by a hybrid model; a role's
-    holds is never granted. Standing duties are left out
+    holds is never granted; a role's on_join token is granted to whoever
+    fills the role (2.4.0-4 hint). Standing duties are left out
     (W-standing-not-modelled covers them). Limit: role-body inline
     burdens (InlineToken) are not read; the descriptor builder never
     indexes them. Advisory."""
@@ -2395,9 +2414,13 @@ def _validate_burden_not_modelled(model) -> List[str]:
             object_holders.setdefault(_obj_name(tok), obj.name)
     creators: Dict[str, str] = {}
     role_holders: Dict[str, str] = {}
+    joiners: Dict[str, str] = {}   # 2.4.0-4: burden -> role granting it on_join
     for el in model.elements:
         if _cls(el) not in ("Community", "Domain", "Federation"):
             continue
+        for jle in getattr(el, "join_leave_effects", None) or ():
+            if getattr(jle, "kind", None) == "on_join":
+                joiners.setdefault(_obj_name(getattr(jle, "token", None)), jle.role_name)
         for role in getattr(el, "roles", []) or []:
             for tok in getattr(role, "holds_tokens", None) or ():
                 role_holders.setdefault(_obj_name(tok), role.name)
@@ -2405,6 +2428,10 @@ def _validate_burden_not_modelled(model) -> List[str]:
                 for eff in getattr(action, "deontic_effects", None) or ():
                     if getattr(eff, "operation", None) == "create":
                         creators.setdefault(_obj_name(getattr(eff, "token", None)), action.name)
+
+    fill_actions: Dict[str, str] = {}
+    for action, role, _ in _effect_fills(model):
+        fill_actions.setdefault(role, action)
 
     warnings: List[str] = []
     for tok in _collect(model, "DeonticToken"):
@@ -2421,6 +2448,12 @@ def _validate_burden_not_modelled(model) -> List[str]:
         elif tok.name in role_holders:
             hint = (f" Role '{role_holders[tok.name]}' holds it, but the runtime never "
                     f"grants a role's holds; give the role's filler a Commitment.")
+        elif tok.name in joiners:
+            role = joiners[tok.name]
+            hint = (f" Role '{role}' grants it on joining (on_join); the runtime "
+                    f"grants it to whoever fills {role}, and only a hybrid model sees it.")
+            if role in fill_actions:
+                hint += f" Action '{fill_actions[role]}' fills {role} (effect fill)."
         else:
             hint = ""
         warnings.append(
@@ -2692,12 +2725,13 @@ def _validate_response_role_target(model) -> List[str]:
 
 def _validate_response_role_filled(model) -> List[str]:
     """W-29 (AM-115): creates_burden_for_role names a role no `fills`
-    statement fills. The engine grants the burden to the role's fillers
-    only; with none it grants nothing (fail-closed, as AM-114), and the
+    statement fills and no action fills (2.4.0-4). The engine grants the
+    burden to the role's fillers only; with none it grants nothing (fail-closed, as AM-114), and the
     verifier has no holder for it. Advisory."""
     from el_engine import role_fillers
 
     filled = {role for _, role in role_fillers(model)}
+    filled |= {role for _, role, _ in _effect_fills(model)}   # 2.4.0-4
     warnings: List[str] = []
     for vr in _collect(model, "ViolationResponse"):
         role = _obj_name(getattr(vr, "burden_role", None))
@@ -2947,11 +2981,13 @@ def _validate_role_filler_performers(model) -> List[str]:
     `holds`) fills no role declaring its for_action.
 
     Checked only where every element declaring the relevant action states
-    its fillers (has at least one `fills`): elsewhere role membership is
+    its fillers (has at least one `fills`, or an action's `effect fill` of
+    one of its roles, 2.4.0-4: a possible filler): elsewhere role membership is
     not in the specification (API builders may still assign it). An
     undeclared action has no role to fill and is skipped. Advisory."""
     from el_engine import _build_obligation_descriptors
 
+    effect_fills = _effect_fills(model)
     fillers: Dict[int, Dict[str, Set[str]]] = {}   # id(element) -> actor -> roles
     declared: Dict[str, List[Tuple[Any, str]]] = {}  # action -> [(element, role)]
     emitters: Dict[str, List[str]] = {}              # event -> [action]
@@ -2962,6 +2998,10 @@ def _validate_role_filler_performers(model) -> List[str]:
         if _cls(el) != "Domain":
             for rf in getattr(el, "role_fillers", []) or []:
                 by_actor.setdefault(_obj_name(rf.obj), set()).add(_obj_name(rf.role))
+            local = {r.name for r in getattr(el, "roles", []) or []}
+            for _, role, filler in effect_fills:   # 2.4.0-4: possible fillers
+                if role in local:
+                    by_actor.setdefault(filler, set()).add(role)
         fillers[id(el)] = by_actor
         for role in getattr(el, "roles", []) or []:
             for action in getattr(role, "actions", []) or []:
@@ -3033,6 +3073,112 @@ def _validate_role_filler_performers(model) -> List[str]:
             f"can never be exercised. (§7.8.2, §6.4.5)"
         )
     return warnings
+
+
+def _effect_fills(model) -> List[Tuple[str, str, str]]:
+    """2.4.0-4: (action, role, filler) names for every `effect fill` of a
+    role Action in a Community, Domain or Federation (Action.role_fills),
+    in declared order (§7.6.2, §7.8.2)."""
+    triples: List[Tuple[str, str, str]] = []
+    for el in model.elements:
+        if _cls(el) not in ("Community", "Domain", "Federation"):
+            continue
+        for role in getattr(el, "roles", []) or []:
+            for action in getattr(role, "actions", []) or []:
+                for fill in getattr(action, "role_fills", None) or ():
+                    triples.append((action.name, _obj_name(fill.role),
+                                    _obj_name(fill.filler)))
+    return triples
+
+
+def _validate_fill_one_filler(model) -> List[str]:
+    """[fill-one-filler] (2.4.0-4): one action fills the same role more
+    than once, with the same or a different object. At most one object
+    fills a role at any time (§7.8.2)."""
+    counts: Dict[Tuple[str, str], int] = {}
+    for action, role, _ in _effect_fills(model):
+        counts[(action, role)] = counts.get((action, role), 0) + 1
+    return [
+        f"[fill-one-filler] Action '{action}' fills role '{role}' more than once: "
+        f"at most one object fills a role at any time. (§7.8.2)"
+        for (action, role), n in counts.items() if n > 1
+    ]
+
+
+def _validate_fill_filled_role(model) -> List[str]:
+    """[W-fill-role-filled] (2.4.0-4): an action fills a role that a
+    `fills` statement already fills. A filled role is not refilled, so
+    the engine always refuses the action (§7.8.2, §7.6.3). Advisory."""
+    from el_engine import role_fillers
+
+    stated: Dict[str, str] = {}
+    for obj, role in role_fillers(model):
+        stated.setdefault(role, obj)
+    warnings: List[str] = []
+    seen: Set[Tuple[str, str]] = set()
+    for action, role, _ in _effect_fills(model):
+        if role not in stated or (action, role) in seen:
+            continue
+        seen.add((action, role))
+        warnings.append(
+            f"[W-fill-role-filled] Action '{action}' fills role '{role}', which "
+            f"'{stated[role]}' already fills (a fills statement): one object fills a "
+            f"role at a time and a filled role is not refilled, so the action is "
+            f"always refused. (§7.8.2, §7.6.3)"
+        )
+    return warnings
+
+
+def _validate_fill_excluded_role(model) -> List[str]:
+    """[W-fill-excluded-role] (2.4.0-4): an action fills role R with an
+    object that, by a `fills` statement, fills a role S, where R's
+    assignment_policy excludes S or S's excludes R (`excludes_role`).
+    The engine always refuses the action (§7.8.2 NOTE 5, §7.6.2).
+    Advisory."""
+    from el_engine import _excluded_roles, role_fillers
+
+    excludes = _excluded_roles(model)
+    stated = role_fillers(model)
+    warnings: List[str] = []
+    seen: Set[Tuple[str, str, str]] = set()
+    for action, role, filler in _effect_fills(model):
+        for other in sorted({r for obj, r in stated if obj == filler}):
+            if (action, role, other) in seen:
+                continue
+            if other in excludes.get(role, ()):
+                policy, excluded = role, other
+            elif role in excludes.get(other, ()):
+                policy, excluded = other, role
+            else:
+                continue
+            seen.add((action, role, other))
+            warnings.append(
+                f"[W-fill-excluded-role] Action '{action}' fills role '{role}' with "
+                f"'{filler}', which fills '{other}'; the assignment policy of "
+                f"'{policy}' excludes '{excluded}', so the action is always refused. "
+                f"(§7.8.2 NOTE 5, §7.6.2)"
+            )
+    return warnings
+
+
+def _validate_fill_not_modelled(model) -> List[str]:
+    """[W-fill-not-modelled] (2.4.0-4): once per role that some action
+    fills. The verifier does not model the fill: a static model has no
+    filler from it, and a hybrid model sees the filler only once the act
+    has run (§7.6.2 NOTE 2, §7.8.2). Advisory."""
+    by_role: Dict[str, List[str]] = {}
+    for action, role, _ in _effect_fills(model):
+        actions = by_role.setdefault(role, [])
+        if action not in actions:
+            actions.append(action)
+    return [
+        f"[W-fill-not-modelled] Role '{role}' is filled by an action "
+        f"({', '.join(actions)}): the verifier does not model the fill. A static "
+        f"model has no filler from it, so the role's actions and on_join tokens "
+        f"are missing for that filler; a hybrid model sees the filler only once "
+        f"the act has run. (§7.6.2 NOTE 2, §7.8.2)"
+        for role, actions in by_role.items()
+    ]
 
 
 def _validate_burden_embargo_conflict(model) -> List[str]:
