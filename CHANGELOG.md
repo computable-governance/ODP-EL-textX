@@ -18,11 +18,53 @@ adheres to _[Semantic Versioning][semver]_.
   specifications (7 warnings): the ereferral model (4), the two
   terms_of_engagement scenarios (1 each) and one standing-duty example (1);
   the published-specs golden records them. Kripke world and edge counts
-  are unchanged. 75 rules (45 errors, 30 warnings). See "Burdens the
+  are unchanged. See "Burdens the
   verifier does not model" in
   [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md) and
   entry 2.4.0-1 in
   [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
+- **An action fills a role: `effect fill <Role> with <Object>`.** A new
+  action-body line (action bodies only, one fill per line): when the
+  action is performed, the object comes to fill the role (§7.6.2, §7.6.3,
+  §7.8.2). The engine checks every fill after the permit check (Step 6b):
+  the role is declared in exactly one community, at most one object fills
+  it and a filled role is not refilled, and `excludes_role` applies both
+  ways; a refusal blocks the whole act, with state and tick unchanged.
+  Then the filler is enrolled and the role's `on_join` tokens are granted
+  in their declared state at the act's tick (token events cause
+  `on_join`). A claim of a burden whose action fills a role fills it too.
+  No leave or refill; `requires_capability`, `requires_token` and
+  `requires_relation` are not judged; build-time `fills` stay unchecked;
+  the verifier does not model the fill (row R27 of
+  [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md)). See
+  "Filling a role by an action" in
+  [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md),
+  which also lists the design decisions that are ours and not the
+  standard's, and entries 2.4.0-2 to 2.4.0-6 in
+  [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
+- **Validator rules for role fills.** Error `[fill-one-filler]` (one
+  action fills a role twice); warnings `[W-fill-role-filled]` (the role is
+  already filled by a `fills` statement), `[W-fill-excluded-role]` (an
+  `excludes_role` makes the fill always refused) and
+  `[W-fill-not-modelled]` (once per role an action fills). `[W-27]`,
+  `[W-28]` and `[W-29]` count an effect fill as a possible filler, and
+  `[W-burden-not-modelled]` gives an on_join hint.
+- **The procurement tender rewritten with a contractor role.** The award
+  fills `contractorRole`, whose `on_join` tokens carry the contractor's
+  duties, written once (534 → 432 lines). README limit 2 is rewritten (a
+  role is filled once and not left; the verifier does not model the
+  fill); limit 4 no longer needs a workaround, because on_join grants in
+  the declared state. Three expected warnings.
+- Kripke world and edge counts unchanged on all builds; the tender's
+  static model has 4 fewer obligations. The validator has 79 rules (46
+  errors, 33 warnings).
+
+### Fixed
+
+- **The procurement tender's cover duty ended at acceptance.** Accepting
+  the award (`claim()`) runs the bid's action, which emitted the
+  completion event and so ended the public liability cover duty at once.
+  The completion event now comes from a buyer act, `certifyCompletion`.
 
 ## [2.3.0] - 2026-10-30
 

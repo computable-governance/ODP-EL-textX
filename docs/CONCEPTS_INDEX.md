@@ -7179,6 +7179,10 @@ where requirements such as authentication attach to role fulfilment;
 `assignment_policy` is still documentation only (GAP-2 in the
 terms-of-engagement scenarios). No change now.
 
+**Note (2.4.0-3):** checked for effect fills since 2.4.0-3 (an action's
+`effect fill R with X` is refused when R already has a filler); spec
+`fills` still unchecked. Still OPEN.
+
 ## Duplicate action names across roles — OPEN FINDING (2026-09-27)
 
 **OPEN FINDING** — idea recorded in AM-114. Two roles (in one community
@@ -7236,6 +7240,10 @@ declaration of a burden the declarer holds); nothing stops one object
 from filling both `accessGatewayRole` and `declarerRole`. A checked
 assignment rule (validator or `join_role()`) is future work, with the
 role cardinality finding above.
+
+**Note (2.4.0-3):** checked for effect fills since 2.4.0-3
+(`excludes_role` both ways, at the filling act); spec `fills` still
+unchecked, and `requires_relation` stays documentation. Still OPEN.
 
 ## The declarer's own burden is only detectable — OPEN FINDING (2026-09-27)
 

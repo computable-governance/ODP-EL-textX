@@ -39,7 +39,9 @@ action)`): T1 and T6 (the effective holder performs `for_action`), T5 (the
 permit holder), C1 (static; the holder claims), T11 and T9 (the edge needs
 at least one eligible performer who is not embargoed). The actor → roles
 map is fixed — role membership never changes during a run, so `World`
-has no role dimension. **Hybrid:** from `state.actors`. **Static:** from
+has no role dimension. Not modelled for an action's role fill (`effect
+fill R with X`, 2.4.0-3): the engine changes membership during the run,
+the model does not follow it (parity row R27). **Hybrid:** from `state.actors`. **Static:** from
 the specification's `obj fills role` statements (Community/Federation
 bodies), and every filler is in the static actor set; a specification
 with no `fills` statement at all stays unrestricted (transitional — see

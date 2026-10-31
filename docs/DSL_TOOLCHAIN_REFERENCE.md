@@ -12,7 +12,7 @@ ComputableGovernance stack. Intended as project context for future sessions.
 ```
 el_grammar.tx     — textX grammar defining the DSL syntax
 el_parser.py      — loads grammar, parses .el files, invokes validator
-el_validator.py   — 75 rules (45 errors, 30 warnings) checked at specification time
+el_validator.py   — 79 rules (46 errors, 33 warnings) checked at specification time
 el_reasoner.py    — governance queries over the static model
 el_kripke.py      — Layer 4 Kripke semantics (modal obligation verification)
 example.el        — payment processing scenario exercising all constructs
@@ -25,7 +25,7 @@ example.el        — payment processing scenario exercising all constructs
 ### What it does
 
 Runs at **specification time**, before any execution. Takes a parsed DSL-EL
-model and checks it against 75 rules: 45 errors and 30 warnings (tags
+model and checks it against 79 rules: 46 errors and 33 warnings (tags
 beginning `[W-`). Each rule in the table below is traced to a clause of
 ISO/IEC 15414:2015; the rules added in 2.1.0 and 2.2.0 end "(clause to be
 confirmed)", and the 2.3.0 ones cite their clauses. Analogous to a compiler's semantic phase — the grammar
@@ -89,9 +89,11 @@ Added in 2.2.0 (3):
   `[W-breach-undeclarable]` (see "Violation records"). V-NEW-24 now
   accepts a permit or an embargo as the target of `declares_violation_of`.
 
-Unreleased (1):
+Unreleased (5):
+- Errors: `fill-one-filler` (see "Filling a role by an action").
 - Warnings: `[W-burden-not-modelled]` (see "Burdens the verifier does not
-  model").
+  model"); `[W-fill-role-filled]`, `[W-fill-excluded-role]`,
+  `[W-fill-not-modelled]` (see "Filling a role by an action").
 
 ### Usage
 
@@ -803,6 +805,7 @@ names what it refers to:
 | `episode_concluded` | — | a deadline with no magnitude, its episode concluded |
 | `standing_breach` | — | a standing duty's keeps judged false |
 | `term_end` | — | a standing duty's term ended by its date |
+| `on_join` | the role | a token granted to an object an action's `effect fill` makes fill the role (2.4.0-3; see "Filling a role by an action") |
 | `declaration` | the declaring action | `declare_violation()` |
 | `revocation` | the Authorization | `revoke_authorization()`, or a response's revocation |
 | `reinstatement` | the Authorization | `reinstate_authorization()` |
@@ -1102,6 +1105,10 @@ with at most one hint before the clauses, in this order:
   only a hybrid model sees it once it exists."
 - a role's `holds`: "Role 'R' holds it, but the runtime never grants a
   role's holds; give the role's filler a Commitment."
+- `on_join R transfer B` (2.4.0-4): "Role 'R' grants it on joining
+  (on_join); the runtime grants it to whoever fills R, and only a hybrid
+  model sees it.", followed by "Action 'A' fills R (effect fill)." when an
+  action fills R (see "Filling a role by an action").
 
 **Limits.**
 - Standing duties are not read; `[W-standing-not-modelled]` covers them.
@@ -1113,6 +1120,155 @@ with at most one hint before the clauses, in this order:
   known limit, not an error.
 - A ViolationResponse whose `creates_burden_for_role` names an unfilled
   role gets `[W-29]`, and its burden gets this warning too.
+
+---
+
+## Filling a role by an action (2.4.0)
+
+An action may make a named enterprise object fill a role when the action
+is performed (2.4.0-2 to 2.4.0-5). Before, a role was filled only at build
+time: by an `obj fills role` statement, or by the API builders.
+
+**Syntax.** In an action body, one line per fill:
+
+```
+action awardToSupplierA {
+    actor: buyerRole
+    requires_permit awardPermit
+    inhibited_by_embargo awardMadeEmbargo
+    effect fill contractorRole with SupplierA
+    effect activate awardMadeEmbargo
+}
+```
+
+(from `scenarios/procurement_tender/`, its precondition left out)
+
+`effect fill <Role> with <Object>`: the role and the object are
+cross-references to a declared Role and EnterpriseObject. Action bodies
+only, not Step or ConditionalAction bodies. The lines are kept in
+`Action.role_fills`, in declared order, apart from `deontic_effects`.
+
+**When it is applied.** The fill rides on `advance()`, so every earlier
+step governs the whole act: enrolment and the role check (Step 2), the
+strict guard (Step 3.5: while a strict burden is actionable, an act that
+discharges nothing is refused), preconditions (Step 4), embargoes (Step 5)
+and permits (Step 6). Then:
+
+- **Step 6b, check only.** Each fill, in declared order, is judged against
+  the current state, the specification's `fills` statements and the act's
+  earlier fills. The first failure refuses the whole act. In order:
+  1. the role is declared in exactly one Community or Federation, matched
+     by name: `role 'R' is not declared in a community`, or `role 'R' is
+     declared in more than one community ('C1', 'C2')`;
+  2. the same object already fills the role: `'X' already fills role 'R'`;
+  3. another object fills it (a `fills` statement, a build-time enrolment
+     or an earlier fill, including an earlier line of this act): `role 'R'
+     is already filled by 'Y'`;
+  4. `excludes_role`, both ways (§7.8.2 NOTE 5): `'X' fills 'S', which the
+     assignment policy of 'R' excludes`, or `'X' fills 'S', whose
+     assignment policy excludes 'R'`.
+
+  A refusal leaves state and tick unchanged, with `blocked_by` None and no
+  refused-attempt record (those stay for Steps 5 and 6).
+- **Step 7, before 7a.** Each fill, in declared order, through
+  `join_role()`: the object is enrolled in the role, and the role's
+  `on_join` tokens are granted to it in their declared state (a pending
+  token stays pending) at the act's tick. Step 7b's `create` and
+  `transfer` and Step 7c's triggered activation see the new filler, so
+  `effect create T to R` in the same act grants T to it.
+
+**Record lines.** After any satisfied comparison lines, one line per fill
+and one per on_join grant:
+
+```
+filled role 'contractorRole' with 'SupplierA'
+on_join 'contractorRole': granted 'incidentNotificationBurden' to 'SupplierA'
+on_join 'contractorRole': granted 'keepPublicLiability' to 'SupplierA'
+```
+
+**Token events.** Each on_join grant is a `granted` event with cause
+`on_join` and `cause_ref` the role; `by` is the act's actor (see "Token
+events in the ledger"). An on_join token activated by the same act's
+emitted event (`triggered_by`) shows one `granted` event, in state
+`active`, with cause `event`: the last change in an act sets the cause.
+Role membership itself has no structured event; who filled a role at
+which tick is read from the effect line.
+
+**Claims fill too.** `claim()` runs the burden's `for_action` through
+`advance()`, so a claim of a burden whose action fills a role fills it,
+and an event the action emits is emitted at the claim. An emitted
+`ended_by` event therefore ends a standing duty at the claim. The
+procurement tender had this bug before 2.4.0-5: accepting the award
+emitted the completion event and ended the cover duty at acceptance. The
+rewrite moves the completion event to a buyer act, `certifyCompletion`.
+
+**Validator** (2.4.0-4):
+- `[fill-one-filler]` (error): one action fills the same role more than
+  once. (§7.8.2)
+- `[W-fill-role-filled]`: an action fills a role that a `fills` statement
+  already fills, so it is always refused. (§7.8.2, §7.6.3)
+- `[W-fill-excluded-role]`: an action fills a role with an object that, by
+  a `fills` statement, fills a role the assignment policy of either role
+  excludes, so it is always refused. (§7.8.2 NOTE 5, §7.6.2)
+- `[W-fill-not-modelled]`: once per role an action fills: the verifier
+  does not model the fill. (§7.6.2 NOTE 2, §7.8.2)
+
+`[W-27]`, `[W-28]` and `[W-29]` count an effect fill as a possible filler
+of its role, and `[W-burden-not-modelled]` gives an on_join hint (see
+"Burdens the verifier does not model").
+
+**Limits.**
+- No leave and no refill: a filled role keeps its filler for the run, and
+  a fill made in error cannot be undone.
+- Of the assignment policy, only `excludes_role` is judged.
+  `requires_capability`, `requires_token` and `requires_relation` stay
+  documentation; a capability that matters can be a precondition of the
+  filling action.
+- The verifier does not model the fill (row R27 of
+  [ENGINE_VERIFIER_PARITY.md](ENGINE_VERIFIER_PARITY.md)). A static model
+  takes its performers from `fills` statements only, so the filler never
+  performs the role's actions and its on_join tokens are not obligations;
+  a specification with no `fills` statement at all stays unrestricted. A
+  hybrid model reads role membership once, at its anchor: a fill made
+  before the build is seen, one made after is not.
+- Build-time fills (`fills` statements, `join_role()`, `enroll()`) are not
+  checked: several may fill one role, and `excludes_role` is not applied
+  to them (see `docs/CONCEPTS_INDEX.md`, "Role cardinality" and
+  "Separation of duties").
+
+**Our design decisions, not the standard's.** The standard says what a
+role fill must satisfy, not how a specification makes one happen. These
+six choices are ours:
+- (a) The fill is an effect of another action, performed by an actor who
+  need not be the filler. The standard calls the act of filling itself a
+  speech act.
+- (b) The filler is named in the action's effect. §7.6.2's directly
+  identified object belongs to the assignment rules, not to an action.
+- (c) Who may perform the filling act is governed only by the host
+  action's permits, embargoes and role (the generic §7.8.7 NOTE 1);
+  nothing is specific to role assignment.
+- (d) A failed assignment check refuses the whole act. The standard does
+  not say what happens to a failed attempt.
+- (e) One fill, no refill and no leave act: narrower than §7.8.2 and
+  §7.6.3 allow.
+- (f) on_join grants fresh tokens to the filler. The standard's model
+  transfers or clones a token the community holds, the original going
+  pending (§7.8.7 NOTE 3 and NOTE 6).
+
+**Clauses.**
+- Normative: §7.6.2 (assignment is part of the establishing behaviour;
+  the rules may identify the objects directly); §7.6.3 (the assigned
+  objects can change during the community's lifetime); §7.4 (membership
+  through dynamic change in the community's configuration); §7.8.2 (at
+  most one object fills a role at any time; the assignment rule applies;
+  a role is refilled only where the specification permits it); §6.4.7
+  (speech act).
+- Informative: §7.6.2 NOTE 2 (assignment can be late and dynamic); §7.8.7
+  NOTE 3 (filling or leaving a role is a speech act; tokens pass to the
+  object taking up the role) and NOTE 6 (a token is cloned to the filler,
+  the original pending); Annex B.1.5.7 (agreeing to purchase from a new
+  supplier leads to a fill) and B.2.4 (filling the borrower role yields a
+  burden and a permit).
 
 ---
 
@@ -1229,7 +1385,7 @@ if conflicts:
 Specification (.el file)
         │
         ▼
-   el_parser.py  ──► el_validator.py (75 rules)
+   el_parser.py  ──► el_validator.py (79 rules)
         │                    │
         │            errors and warnings
         │
@@ -1464,6 +1620,10 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
   declared), but nothing reads either at runtime or in the verifier.
   `member: C fills R` and `represented_by` have no effect. A federation
   `role` with `X fills R` does take effect
+- Role filled by an action (2.4.0): a role filled by `effect fill` is not
+  left or refilled, and the verifier does not model the fill (row R27 of
+  [ENGINE_VERIFIER_PARITY.md](ENGINE_VERIFIER_PARITY.md)); see "Filling a
+  role by an action"
 
 **Typed policy values (2.1.0):**
 - `-0` reads as the integer `0` (the sign is lost); `-0.0` keeps its sign
@@ -1596,7 +1756,10 @@ same results as on 2.1.0.
   order (`elapsed 122 >= deadline 120 steps`). Reported 61 minutes after
   the work order, it was violated at minute 123 (`elapsed 123 >= deadline
   120 steps`), only 62 minutes after the report. A token that must wait for
-  an event has to be held by its party from the start of the run.
+  an event has to be held by its party from the start of the run. Since
+  2.4.0 it may instead be granted at a role fill: `on_join R transfer T`
+  grants T in its declared state when an action's `effect fill R with X`
+  fills R (see "Filling a role by an action").
 
   ```
   burden fixDefect {

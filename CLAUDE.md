@@ -277,7 +277,7 @@ community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition)
 The last AM entry is AM-115 (section 5.8). The 2.1.0 changes follow it,
 numbered 2.1.0-1 to 2.1.0-25, then the 2.2.0 changes, 2.2.0-1 to 2.2.0-13
 (section 7.4), then the 2.3.0 changes, 2.3.0-1 to 2.3.0-12, then the
-unreleased 2.4.0-1.
+unreleased 2.4.0-1 to 2.4.0-6.
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -290,6 +290,13 @@ actor with its role (`enroll(..., role_name=...)`, or state `fills` and
 use `Runtime.build_from_spec()` / `enroll_role_fillers()`). Undeclared
 actions stay unrestricted. The static builder stays unrestricted for a
 spec with no `fills` statement (transitional; see CONCEPTS_INDEX).
+A role may also be filled by an action (2.4.0-3): `effect fill R with X`
+in an action body makes X fill R when the act is applied, checked at
+`advance()` Step 6b (one filler, no refill, `excludes_role` both ways; a
+refusal blocks the whole act) and granting R's on_join tokens in their
+declared state. No leave act; the verifier does not model the fill
+(parity row R27). See "Filling a role by an action" in
+`docs/DSL_TOOLCHAIN_REFERENCE.md`.
 
 ### 5.8 Violation declaration (AM-115)
 A strict burden is never violated by the engine's clock. An Action with
@@ -533,8 +540,12 @@ intended change):
   burden with no root (no Commitment, ViolationResponse `creates_burden`,
   Authorization `creates_burden_on_authority` or Delegation
   `transfers_token_group` creates it for a holder), so the verifier gives
-  no verdict on it. It fires on 4 published files (7 warnings). The
-  validator has 75 rules: 45 errors and 30 warnings.
+  no verdict on it. It fires on 4 published files (7 warnings).
+- Unreleased (2.4.0-2 to 2.4.0-6): an action fills a role (`effect fill
+  <Role> with <Object>`, section 5.7); the validator error
+  `fill-one-filler` and the warnings `W-fill-role-filled`,
+  `W-fill-excluded-role` and `W-fill-not-modelled`. The validator has 79
+  rules: 46 errors and 33 warnings.
 
 Partly implemented: Federation (specifications parse and validate; the
 loader covers Domain members only, see section 7.3 item 3).
@@ -692,8 +703,10 @@ not yet modelled as first-class grammar constructs or runtime operations.
 The current `JoinLeaveEffect` in ContractDecl is a grammar convenience with
 no standard grounding (see AM-11 — agreed to remove). The standard-compliant
 replacement requires explicit `ActionDecl` with `DeonticEffect` for role entry/exit.
-**Next action:** Defer until Layer 3 engine integration work resumes; then
-model as `Action` within a `Role` body with appropriate `DeonticEffect` entries.
+**Fill: done (2.4.0-2 to 2.4.0-5)** as an action effect, `effect fill R
+with X`, not as a separate speech act (section 5.7).
+**Next action:** leave (and refill) is still future work; defer until
+Layer 3 engine integration work resumes.
 
 ### 13.5 Agent-facing REST query surface — complete (2026-06-19)
 

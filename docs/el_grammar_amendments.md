@@ -12235,7 +12235,7 @@ Verifier parity: none.
 
 ## 2.4.0-1 — burden with no root: validator (`toolchain/el_validator.py`)
 
-**Status:** COMPLETE on branch `burden-not-modelled` (unreleased). Type:
+**Status:** COMPLETE (unreleased). Type:
 validator (one new warning).
 
 **Standard reference:** §7.8.7 (a token is created or transferred by a
@@ -12306,3 +12306,266 @@ of each tracked scenario that parses; hybrid h10 of the six API
 scenarios, and the referral scenario at its deadline scale).
 
 Verifier parity: none (validator only).
+
+## 2.4.0-2 — an action fills a role: grammar (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_parser.py`)
+
+**Status:** COMPLETE (unreleased). Type:
+grammar (one rule) and parse object.
+
+**Standard reference:** §7.6.2 (assignment of objects to roles; the rules
+may identify the objects directly) and its NOTE 2 (informative: assignment
+can be late and dynamic), §7.6.3, §7.8.2; §7.8.7 NOTE 3 (informative).
+The full clause list is in 2.4.0-3.
+
+**Why.** A role could be filled only at build time (`obj fills role`, or
+the API builders), so a specification could not say that an act, such as
+an award, makes an object fill a role. A scenario that needed it granted
+each candidate's duties in advance and worked around the rest.
+
+**Now.**
+- `ActionBodyItem` gains `RoleFillEffect`, tried before `DeonticEffect`
+  (both begin with `effect`):
+  `RoleFillEffect: 'effect' 'fill' role=[Role] 'with' filler=[EnterpriseObject];`
+  One fill per line (the per-line pattern for references). Action bodies
+  only, not Step or ConditionalAction bodies.
+- Domain class `RoleFillEffect` (`role`, `filler`); `Action.role_fills`,
+  filled by P4 (`process_action()`) in declared order, never
+  `deontic_effects`.
+- Nothing reads it yet: the engine applies it from 2.4.0-3.
+
+**Out of scope:** a leave or refill form; fills in Step or
+ConditionalAction bodies.
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`,
+`toolchain/el_parser.py`, `tests/test_role_fill_grammar.py` (new, 7
+tests: parses; role and filler resolve; several lines kept in order; in
+`role_fills`, not `deontic_effects`; an unknown role and an unknown object
+are parse errors; not accepted in a Step or ConditionalAction body).
+
+**Verification:** full suite 2046 → 2053 passed, 2 skipped, 1 deselected,
+1 xfailed, 0 failures. The construct is unused by every published
+specification: Kripke world and edge counts unchanged on all 23 builds;
+golden unchanged.
+
+Verifier parity: none (grammar only).
+
+## 2.4.0-3 — an action fills a role: engine (`toolchain/el_engine.py`, `toolchain/el_kripke.py`)
+
+**Status:** COMPLETE (unreleased). Type:
+engine.
+
+**Standard reference.**
+- Normative: §7.6.2 (assignment is part of the establishing behaviour; the
+  rules may identify the objects directly); §7.6.3 (the assigned objects
+  can change during the community's lifetime); §7.4 (membership through
+  dynamic change in the community's configuration); §7.8.2 (at most one
+  object fills a role at any time; the assignment rule applies; a role is
+  refilled only where the specification permits it); §6.4.7 (speech act).
+- Informative: §7.6.2 NOTE 2 (assignment can be late and dynamic); §7.8.7
+  NOTE 3 (filling or leaving a role is a speech act; tokens pass to the
+  object taking up the role) and NOTE 6 (a token is cloned to the filler,
+  the original pending); Annex B.1.5.7 (agreeing to purchase from a new
+  supplier leads to a fill) and B.2.4 (filling the borrower role yields a
+  burden and a permit).
+
+**Why.** 2.4.0-2 lets a specification write the fill; the engine had no
+step that applies it.
+
+**Now.**
+- `advance()` **Step 6b**, check only, after the permit check
+  (`_role_fill_refusal()`). Each fill, in declared order, against the
+  current state, the specification's `fills` and the act's earlier fills;
+  the first failure refuses the whole act:
+  - the role is declared in no Community or Federation, or in more than
+    one (`role 'R' is declared in more than one community ('C1', 'C2')`);
+  - the same object already fills it (`'X' already fills role 'R'`);
+  - another object fills it, by a `fills` statement, a build-time
+    enrolment or an earlier fill (`role 'R' is already filled by 'Y'`);
+  - `excludes_role` both ways (§7.8.2 NOTE 5): the filler fills a role the
+    new role's assignment policy excludes, or one whose policy excludes
+    the new role.
+
+  A refusal leaves state and tick unchanged, `blocked_by` None, and makes
+  no refused-attempt record. Earlier steps refuse first (role, strict
+  guard, preconditions, embargo, permit), as for any act.
+- **Fill sub-step, before Step 7a.** Each fill through `join_role()`: the
+  filler is enrolled in the role and the role's on_join tokens are granted
+  in their declared state at the act's tick. Record lines `filled role 'R'
+  with 'X'`, then `on_join 'R': granted 'T' to 'X'`. Token events cause
+  `on_join`, cause_ref the role, `by` the act's actor. Step 7b's create and
+  transfer resolve roles against the post-fill actors, and Step 7c runs
+  after the fill, so an on_join token `triggered_by` the act's own event is
+  activated in the same act (one `granted` event, cause `event`: the last
+  change sets the cause).
+- `claim()` runs the burden's `for_action` through `advance()`, so a claim
+  fills too (pinned by a test).
+- Docstrings: `advance()` (Step 6b) and the module's pipeline list;
+  `el_kripke._role_performer_check()`: membership never changes within the
+  model, while the engine may change it during a run.
+- An act with no fill line is unchanged, record and state alike.
+
+**Design decisions, ours and not the standard's.**
+- (a) The fill is an effect of another action, performed by an actor who
+  need not be the filler. The standard calls the act of filling itself a
+  speech act.
+- (b) The filler is named in the action's effect. §7.6.2's directly
+  identified object belongs to the assignment rules, not to an action.
+- (c) Who may perform the filling act is governed only by the host
+  action's permits, embargoes and role (the generic §7.8.7 NOTE 1);
+  nothing is specific to role assignment.
+- (d) A failed assignment check refuses the whole act. The standard does
+  not say what happens to a failed attempt.
+- (e) One fill, no refill and no leave act: narrower than §7.8.2 and
+  §7.6.3 allow.
+- (f) on_join grants fresh tokens to the filler. The standard's model
+  transfers or clones a token the community holds, the original going
+  pending (§7.8.7 NOTE 3 and NOTE 6).
+
+**Out of scope:** a leave act and refill; judging `requires_capability`,
+`requires_token` and `requires_relation` (documentation, as before);
+checking build-time fills; a structured role-membership event in the
+ledger; modelling the fill in the verifier.
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/el_kripke.py`
+(docstring only), `docs/ENGINE_VERIFIER_PARITY.md` (row R27),
+`tests/test_role_fill_engine.py` (new, 19 tests),
+`tests/test_role_fill_verifier.py` (new, 3 tests: a static build with and
+without the fill line is the same; a hybrid model built after the fill
+sees the filler, one built before does not).
+
+**Verification:** full suite 2053 → 2075 passed, 2 skipped, 1 deselected,
+1 xfailed, 0 failures. Kripke world and edge counts unchanged on all 23
+builds; golden unchanged.
+
+Verifier parity: R27 (absent; under where the specification states its
+fillers, over where it states none).
+
+## 2.4.0-4 — an action fills a role: validator (`toolchain/el_validator.py`)
+
+**Status:** COMPLETE (unreleased). Type:
+validator (one error, three warnings, four rules extended).
+
+**Standard reference:** §7.8.2 and its NOTE 5, §7.6.2 and its NOTE 2,
+§7.6.3.
+
+**Why.** The engine refuses a fill the specification can already show is
+impossible, and the verifier does not model fills at all; nothing told the
+author. The existing role-filler rules also read `fills` statements only,
+so a role filled by an action looked unfilled.
+
+**Now.**
+- `[fill-one-filler]` (error): one action fills the same role more than
+  once, with the same or a different object. (§7.8.2)
+- `[W-fill-role-filled]`: an action fills a role a `fills` statement
+  already fills; the act is always refused. (§7.8.2, §7.6.3)
+- `[W-fill-excluded-role]`: an action fills a role with an object that, by
+  a `fills` statement, fills a role excluded by the assignment policy of
+  either role; the act is always refused. (§7.8.2 NOTE 5, §7.6.2)
+- `[W-fill-not-modelled]`: once per role some action fills, naming the
+  actions: the verifier does not model the fill. (§7.6.2 NOTE 2, §7.8.2)
+- `[W-27]`, `[W-28]` and `[W-29]` count an effect fill as a possible
+  filler of its role; messages unchanged.
+- `[W-burden-not-modelled]` keeps warning on an on_join burden (on_join is
+  not a root) and gains a last hint: "Role 'R' grants it on joining
+  (on_join); the runtime grants it to whoever fills R, and only a hybrid
+  model sees it.", with "Action 'A' fills R (effect fill)." when an action
+  fills R. Earlier hints and their order unchanged.
+- Registered after `W-burden-not-modelled` and before V-17.
+- 79 validator rules (46 errors, 33 warnings).
+
+**Out of scope:** a filler-kind check (party, agent, active object); an
+error for a role declared in several communities (the engine refuses it at
+the act).
+
+**Files changed:** `toolchain/el_validator.py`,
+`tests/test_role_fill_validator.py` (new, 14 tests).
+
+**Verification:** full suite 2075 → 2089 passed, 2 skipped, 1 deselected,
+1 xfailed, 0 failures. No published specification has a fill yet: golden
+unchanged; Kripke world and edge counts unchanged on all 23 builds.
+
+Verifier parity: none (validator only).
+
+## 2.4.0-5 — the tender with a contractor role (`scenarios/procurement_tender/`)
+
+**Status:** COMPLETE (unreleased). Type:
+scenario and tests.
+
+**Standard reference:** as 2.4.0-3.
+
+**Why.** The tender wrote each bidder's contract duties twice, granted
+them in advance to both bidders, and worked around `effect create`
+granting a token active. It also had a bug unrelated to fills: accepting
+the award (`claim()` of the winning bid) runs the bid's action, which
+emitted the completion event and so ended the public liability cover duty
+at acceptance.
+
+**Now.**
+- One `contractorRole`. Each award action has `effect fill contractorRole
+  with SupplierA` (or `SupplierB`); the role's on_join tokens carry the
+  contractor's duties, written once, in their declared state, so the
+  incident duty waits for the incident. The role's assignment policy
+  excludes the panel and probity roles.
+- One standing cover duty, `keepPublicLiability`, ended by
+  `contractCompleted`, which the buyer's new `certifyCompletion` emits.
+  Accepting the award no longer ends it (the claim bug fixed).
+- 534 → 432 lines; each extra bidder costs about 30 lines instead of about
+  90.
+- Static model: 87 worlds and 86 edges, as before; obligations 10 → 6 (the
+  per-bidder incident and cover duties leave the pre-execution model).
+- Validation: no errors, 3 warnings, in order: `[W-standing-not-modelled]`
+  (`keepPublicLiability`), `[W-burden-not-modelled]`
+  (`incidentNotificationBurden`, with the on_join hint),
+  `[W-fill-not-modelled]` (`contractorRole`).
+- README: limit 2 rewritten (a role is filled once and not left; the
+  verifier does not model the fill); limit 4 no longer needs a workaround.
+
+**Out of scope:** replacing a contractor within a run (no leave act).
+
+**Files changed:**
+`scenarios/procurement_tender/procurement_tender_scenario.el`,
+`scenarios/procurement_tender/README.md`, `scenarios/README.md`,
+`tests/test_procurement_tender_scenario.py` (18 → 22 tests),
+`tests/published_specs_golden.json` (regenerated with `--write`: the
+tender entry only).
+
+**Verification:** full suite 2089 → 2093 passed, 2 skipped, 1 deselected,
+1 xfailed, 0 failures. Kripke world and edge counts unchanged on all 23
+builds (the tender 87/86); obligation descriptors change on the tender
+only (10 → 6).
+
+Verifier parity: R27 (now exercised by a published specification).
+
+## 2.4.0-6 — an action fills a role: docs (`docs/`, `CHANGELOG.md`, `CLAUDE.md`)
+
+**Status:** COMPLETE (unreleased). Type:
+documentation.
+
+**Now.**
+- `docs/DSL_TOOLCHAIN_REFERENCE.md`: new section "Filling a role by an
+  action (2.4.0)" (syntax, the Step 6b order and refusal texts, record
+  lines, token events, claims, the four rules, limits, the six design
+  decisions and the clause list, each clause marked normative or
+  informative); the `on_join` row of the token-event cause table; the
+  on_join hint of `W-burden-not-modelled`; rule counts 79 (46 errors, 33
+  warnings) in the component overview, the validator section and the
+  component diagram; the unreleased rules listed; a Known Limitations
+  bullet; a cross-reference from the `effect create` clause to on_join.
+- `docs/ENGINE_VERIFIER_PARITY.md`: the note under R20 moved below the
+  table, so rows R26 and R27 render as rows. No row changed.
+- `docs/KRIPKE_TRANSITION_RULES.md`: beside "role membership never changes
+  during a run", a note that the model does not follow an action's fill.
+- `docs/CONCEPTS_INDEX.md`: notes under "Role cardinality" and
+  "Separation of duties": checked for effect fills since 2.4.0-3, spec
+  `fills` still unchecked. Both stay OPEN.
+- `CHANGELOG.md` (Unreleased): Added and Fixed.
+- `CLAUDE.md`: the numbering sentence, the counts list, section 5.7 and
+  section 13.4.
+
+**Not changed:** `grammar/v2/README.md` (it does not list action body
+items); `scenarios/procurement_tender/README.md` (updated in 2.4.0-5).
+
+**Verification:** full suite 2093 passed, 2 skipped, 1 deselected, 1
+xfailed, 0 failures (unchanged; docs only).
+
+Verifier parity: none (docs only).
