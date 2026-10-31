@@ -187,11 +187,15 @@
       "warnings": [
         [
           "W-standing-not-modelled",
-          "Standing duty 'keepPublicLiabilityA': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+          "Standing duty 'keepPublicLiability': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
         ],
         [
-          "W-standing-not-modelled",
-          "Standing duty 'keepPublicLiabilityB': the verifier does not model its term end or breach; the status route gives no verdict for it and the recommended action never discharges it. (clause to be confirmed)"
+          "W-burden-not-modelled",
+          "Burden 'incidentNotificationBurden' has no root: no Commitment or other construct creates it for a holder, so the pre-execution model has no obligation for it and the verifier gives no verdict on it. Add a Commitment by the object accountable for it. Role 'contractorRole' grants it on joining (on_join); the runtime grants it to whoever fills contractorRole, and only a hybrid model sees it. Action 'awardToSupplierA' fills contractorRole (effect fill). (§7.8.7, §6.4.1, §7.10.3)"
+        ],
+        [
+          "W-fill-not-modelled",
+          "Role 'contractorRole' is filled by an action (awardToSupplierA, awardToSupplierB): the verifier does not model the fill. A static model has no filler from it, so the role's actions and on_join tokens are missing for that filler; a hybrid model sees the filler only once the act has run. (§7.6.2 NOTE 2, §7.8.2)"
         ]
       ],
       "policy_values": [

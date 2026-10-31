@@ -1,7 +1,7 @@
 """
 Procurement tender scenario (scenarios/procurement_tender/): claim-and-award,
-panel sign-off, incident notification and subcontracting, checked against the
-real parsed specification and the live engine (Layer 3).
+panel sign-off, the contractor role, incident notification and subcontracting,
+checked against the real parsed specification and the live engine (Layer 3).
 
 Mechanisms under test:
   - "no award before sign-off" as an ordering constraint: the award actions
@@ -10,25 +10,32 @@ Mechanisms under test:
     only the probity officer may declare it violated, and not before its
     deadline
   - a single award: the award activates awardMadeEmbargo, which inhibits both
-    award actions
+    award actions; without the embargo, the filled contractor role refuses a
+    second award
+  - the award fills contractorRole with the winner (effect fill, 2.4.0-3),
+    and the role's on_join duties are granted to the winner only; neither
+    the panel nor the probity officer may fill it (excludes_role)
   - the winner's acceptance (a live accept Evaluation, Runtime.claim()) claims
-    its contract burden and lapses the other bid; the other bidder cannot
-    accept without an award notice
+    its contract burden and lapses the other bid; the other bidder does not
+    fill the contractor role, so it cannot accept
   - incident notification: eventual, "24 hours" from the contractor's own
     incident report, escalated to the principal when late
-  - subcontracting: gated by the award notice and an authorization; revoking
-    the authorization activates subcontractEmbargo
+  - subcontracting: gated by the contractor role and an authorization;
+    revoking the authorization activates subcontractEmbargo
   - public liability cover: a comparison precondition on the award (cover
-    at submission), and a standing duty for the term, triggered by the
-    award and ended by performance; a reported lapse is a breach
+    at submission), and a standing duty for the term, granted at the award
+    and ended when the buyer certifies completion; a reported lapse is a
+    breach
 
 The static verifier (Layer 4) is not exercised: it models claiming only from
 a spec-declared accept Evaluation, and this scenario decides the winner at
-runtime; nor does it model standing duties (see the scenario README).
+runtime; nor does it model standing duties or a role filled by an action
+(see the scenario README).
 """
 import contextlib
 import io
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -41,18 +48,17 @@ SCENARIO = "scenarios/procurement_tender/procurement_tender_scenario.el"
 # Tokens created by the specification's commitments, delegation and
 # authorizations. Runtime.build_from_spec() does not resolve those chains
 # (its documented known gap), so they are granted here, as the other
-# scenario builders do.
+# scenario builders do. subcontractApproval goes to the contractor, so it
+# is granted after the award (_approved()).
 GRANTS = [
     ("supplierAContractBurden", "SupplierA"),       # commitment supplierABid
     ("supplierBContractBurden", "SupplierB"),       # commitment supplierBBid
     ("panelSignOffBurden", "PanelChair"),           # delegation evaluationToPanel
-    ("incidentNotificationBurdenA", "SupplierA"),   # commitment supplierANotifiesIncidents
-    ("incidentNotificationBurdenB", "SupplierB"),   # commitment supplierBNotifiesIncidents
-    ("keepPublicLiabilityA", "SupplierA"),          # commitment supplierAKeepsCover
-    ("keepPublicLiabilityB", "SupplierB"),          # commitment supplierBKeepsCover
-    ("subcontractApproval", "SupplierA"),           # authorization subcontractApprovalForSupplierA
     ("signOffDeclarationPermit", "ProbityOfficer"), # authorization probityDeclarationAuthority
 ]
+
+# The contractor's duties, granted by the award (on_join contractorRole).
+CONTRACTOR_DUTIES = {"incidentNotificationBurden", "keepPublicLiability"}
 
 # "10 working days" and "24 hours" in one-minute steps (AM-111).
 SIGN_OFF_DEADLINE_STEPS = 20160
@@ -66,12 +72,15 @@ CLOCK = DeadlineClock(utc_offset=AEST)
 # for the term), as text in the toolchain's amount notation.
 BID_COVER_A = {"Supplier A public liability cover at submission": "25000000.00 AUD"}
 BID_COVER_B = {"Supplier B public liability cover at submission": "25000000.00 AUD"}
-COVER_KEPT = {"Supplier A public liability cover": "25000000.00 AUD"}
-COVER_LAPSED = {"Supplier A public liability cover": "15000000.00 AUD"}
+COVER_KEPT = {"Contractor public liability cover": "25000000.00 AUD"}
+COVER_LAPSED = {"Contractor public liability cover": "15000000.00 AUD"}
 
-# The only warnings: [W-standing-not-modelled] on each cover duty (the
-# verifier doesn't model standing duties; see the scenario README).
-STANDING_DUTIES = ("keepPublicLiabilityA", "keepPublicLiabilityB")
+# The only warnings, in validator order (see the scenario README).
+EXPECTED_WARNINGS = (
+    ("[W-standing-not-modelled]", "'keepPublicLiability'"),
+    ("[W-burden-not-modelled]", "'incidentNotificationBurden'"),
+    ("[W-fill-not-modelled]", "'contractorRole'"),
+)
 
 
 def _at(day):
@@ -82,6 +91,17 @@ def _at(day):
 def spec():
     result = parse(SCENARIO, validate=True)
     assert result.ok, result.errors
+    return result.model
+
+
+def _variant(tmp_path, old, new):
+    """The scenario with every `old` replaced by `new`, parsed unvalidated."""
+    text = Path(SCENARIO).read_text(encoding="utf-8")
+    assert old in text
+    path = tmp_path / "variant.el"
+    path.write_text(text.replace(old, new), encoding="utf-8")
+    result = parse(str(path), validate=False)
+    assert result.model is not None
     return result.model
 
 
@@ -99,20 +119,42 @@ def _state(rt, token, holder):
                 if t.token_name == token and t.holder == holder)
 
 
-def _awarded_to_a(spec):
+def _held(rt, holder):
+    return {t.token_name for t in rt.current_state().tokens if t.holder == holder}
+
+
+def _fillers(rt, role):
+    return [a.actor_name for a in rt.current_state().actors if a.role_name == role]
+
+
+def _signed_off(spec):
     rt = _runtime(spec)
     assert rt.advance("closeTender", "BuyerAgency").outcome == "ok"
     assert rt.advance("signOffEvaluation", "PanelChair").outcome == "ok"
+    return rt
+
+
+def _awarded_to_a(spec):
+    rt = _signed_off(spec)
     assert rt.advance("awardToSupplierA", "BuyerAgency", facts=BID_COVER_A).outcome == "ok"
     return rt
 
 
-def test_parses_and_validates_with_only_the_standing_duty_warnings():
+def _approved(rt, spec):
+    """rt with subcontractApproval granted to the contractor
+    (authorization subcontractApprovalForContractor)."""
+    state = grant_token(rt.current_state(),
+                        token_from_spec(spec, "subcontractApproval", "SupplierA",
+                                        rt.current_state().tick))
+    return Runtime(state, spec, clock=CLOCK)
+
+
+def test_parses_and_validates_with_the_three_expected_warnings():
     result = parse(SCENARIO, validate=True)
     assert result.ok, result.errors
-    assert len(result.warnings) == len(STANDING_DUTIES)
-    assert all(w.startswith("[W-standing-not-modelled]") for w in result.warnings)
-    assert all(any(f"'{duty}'" in w for w in result.warnings) for duty in STANDING_DUTIES)
+    assert len(result.warnings) == len(EXPECTED_WARNINGS)
+    for warning, (tag, name) in zip(result.warnings, EXPECTED_WARNINGS):
+        assert warning.startswith(tag) and name in warning, warning
 
 
 # ── Award ordering and the strict sign-off ─────────────────────────────────────
@@ -158,20 +200,72 @@ def test_only_the_probity_officer_declares_an_overdue_sign_off(spec):
     assert _state(rt, "reconvenePanelBurden", "BuyerAgency") == "active"
 
 
-# ── Award and acceptance ───────────────────────────────────────────────────────
+# ── Award: the contractor role ─────────────────────────────────────────────────
+
+def test_the_award_fills_the_contractor_role_and_grants_its_duties(spec):
+    rt = _signed_off(spec)
+    assert _fillers(rt, "contractorRole") == []
+    record = rt.advance("awardToSupplierA", "BuyerAgency", facts=BID_COVER_A)
+    assert record.outcome == "ok", record.reason
+    assert "filled role 'contractorRole' with 'SupplierA'" in record.effects
+    events = {e.token_name: e for e in record.token_events
+              if e.holder == "SupplierA" and e.token_name in CONTRACTOR_DUTIES}
+    assert set(events) == CONTRACTOR_DUTIES
+    for e in events.values():
+        assert (e.event, e.cause, e.cause_ref, e.by) == (
+            "granted", "on_join", "contractorRole", "BuyerAgency")
+    # each in its declared state: the incident duty waits for an incident
+    assert _state(rt, "incidentNotificationBurden", "SupplierA") == "pending"
+    assert _state(rt, "keepPublicLiability", "SupplierA") == "active"
+
 
 def test_only_one_award(spec):
     rt = _awarded_to_a(spec)
-    assert _state(rt, "awardNoticeA", "SupplierA") == "active"
+    assert _fillers(rt, "contractorRole") == ["SupplierA"]
+    # the winner holds its bid and the contractor's duties: no award notice
+    assert _held(rt, "SupplierA") == {"supplierAContractBurden"} | CONTRACTOR_DUTIES
     record = rt.advance("awardToSupplierB", "BuyerAgency", facts=BID_COVER_B)
     assert record.outcome == "blocked"
     assert "awardMadeEmbargo" in record.reason
 
 
+def test_a_second_award_is_refused_by_the_filled_role_without_the_embargo(tmp_path):
+    spec = _variant(tmp_path, "            effect activate awardMadeEmbargo\n", "")
+    rt = _awarded_to_a(spec)
+    assert _state(rt, "awardMadeEmbargo", "BuyerAgency") == "pending"
+    record = rt.advance("awardToSupplierB", "BuyerAgency", facts=BID_COVER_B)
+    assert record.outcome == "blocked"
+    assert record.reason == "role 'contractorRole' is already filled by 'SupplierA'"
+    assert _fillers(rt, "contractorRole") == ["SupplierA"]
+    assert _held(rt, "SupplierB") == {"supplierBContractBurden"}
+
+
+def test_the_panel_chair_cannot_be_made_the_contractor(tmp_path):
+    spec = _variant(tmp_path, "effect fill contractorRole with SupplierB",
+                    "effect fill contractorRole with PanelChair")
+    rt = _signed_off(spec)
+    record = rt.advance("awardToSupplierB", "BuyerAgency", facts=BID_COVER_B)
+    assert record.outcome == "blocked"
+    assert record.reason == ("'PanelChair' fills 'evaluationPanelRole', which the "
+                             "assignment policy of 'contractorRole' excludes")
+    # the whole act is refused: no fill, no duties, the embargo not activated
+    assert _fillers(rt, "contractorRole") == []
+    assert not CONTRACTOR_DUTIES & _held(rt, "PanelChair")
+    assert _state(rt, "awardMadeEmbargo", "BuyerAgency") == "pending"
+
+
+def test_the_other_bidder_holds_no_contractor_duties(spec):
+    rt = _awarded_to_a(spec)
+    assert _held(rt, "SupplierB") == {"supplierBContractBurden"}
+
+
+# ── Acceptance ─────────────────────────────────────────────────────────────────
+
 def test_unawarded_bidder_cannot_accept(spec):
     rt = _awarded_to_a(spec)
     record = rt.claim("supplierBContractBurden", "SupplierB")
     assert record.outcome == "blocked"
+    assert "does not fill role 'contractorRole'" in record.reason
     assert _state(rt, "supplierBContractBurden", "SupplierB") == "claimable"
 
 
@@ -181,14 +275,12 @@ def test_acceptance_claims_the_contract_and_lapses_the_other_bid(spec):
     assert record.outcome == "ok"
     assert _state(rt, "supplierAContractBurden", "SupplierA") == "active"
     assert _state(rt, "supplierBContractBurden", "SupplierB") == "lapsed"
-    assert rt.advance("performContractA", "SupplierA").outcome == "ok"
+    assert rt.advance("performContract", "SupplierA").outcome == "ok"
     assert _state(rt, "supplierAContractBurden", "SupplierA") == "discharged"
 
 
 def test_award_needs_cover_at_submission(spec):
-    rt = _runtime(spec)
-    rt.advance("closeTender", "BuyerAgency")
-    rt.advance("signOffEvaluation", "PanelChair")
+    rt = _signed_off(spec)
     record = rt.advance("awardToSupplierA", "BuyerAgency")
     assert record.outcome == "blocked"
     assert "not reported" in record.reason
@@ -200,30 +292,32 @@ def test_award_needs_cover_at_submission(spec):
 # ── Public liability cover for the term ────────────────────────────────────────
 
 def test_cover_duty_starts_at_the_award(spec):
-    rt = _runtime(spec)
-    assert _state(rt, "keepPublicLiabilityA", "SupplierA") == "pending"
-    rt = _awarded_to_a(spec)
-    assert _state(rt, "keepPublicLiabilityA", "SupplierA") == "active"
-    assert _state(rt, "keepPublicLiabilityB", "SupplierB") == "pending"
+    rt = _signed_off(spec)
+    assert not any(t.token_name == "keepPublicLiability" for t in rt.current_state().tokens)
+    rt.advance("awardToSupplierA", "BuyerAgency", facts=BID_COVER_A)
+    assert _state(rt, "keepPublicLiability", "SupplierA") == "active"
 
 
 def test_cover_kept_then_a_lapse_is_breached_and_remediated(spec):
     rt = _awarded_to_a(spec)
     record = rt.check_live_violations(as_at=_at(15), facts=COVER_KEPT)
     assert record.outcome == "ok"
-    assert any(e.startswith("kept 'keepPublicLiabilityA'") for e in record.effects)
+    assert any(e.startswith("kept 'keepPublicLiability'") for e in record.effects)
     record = rt.check_live_violations(as_at=_at(16), facts=COVER_LAPSED)
     assert record.outcome == "violation"
-    assert _state(rt, "keepPublicLiabilityA", "SupplierA") == "violated"
+    assert _state(rt, "keepPublicLiability", "SupplierA") == "violated"
     rt.fire_violation_responses()
     assert _state(rt, "coverLapseReviewBurden", "BuyerAgency") == "active"
 
 
-def test_performance_ends_the_cover_term(spec):
+def test_acceptance_does_not_end_the_cover_term_and_certified_completion_does(spec):
     rt = _awarded_to_a(spec)
-    rt.claim("supplierAContractBurden", "SupplierA")
-    assert rt.advance("performContractA", "SupplierA").outcome == "ok"
-    assert _state(rt, "keepPublicLiabilityA", "SupplierA") == "discharged"
+    assert rt.claim("supplierAContractBurden", "SupplierA").outcome == "ok"
+    assert rt.advance("performContract", "SupplierA").outcome == "ok"
+    assert _state(rt, "keepPublicLiability", "SupplierA") == "active"
+    assert rt.check_live_violations(as_at=_at(15), facts=COVER_KEPT).outcome == "ok"
+    assert rt.advance("certifyCompletion", "BuyerAgency").outcome == "ok"
+    assert _state(rt, "keepPublicLiability", "SupplierA") == "discharged"
     assert rt.check_live_violations(as_at=_at(20), facts=COVER_LAPSED).outcome == "ok"
 
 
@@ -233,32 +327,34 @@ def test_incident_clock_starts_at_the_incident_not_the_award(spec):
     rt = _awarded_to_a(spec)
     rt.advance_clock(2 * INCIDENT_DEADLINE_STEPS)
     assert rt.check_live_violations().outcome == "ok"
-    assert _state(rt, "incidentNotificationBurdenA", "SupplierA") == "pending"
+    assert _state(rt, "incidentNotificationBurden", "SupplierA") == "pending"
 
 
 def test_unawarded_bidder_cannot_report_an_incident(spec):
     rt = _awarded_to_a(spec)
-    assert rt.advance("reportIncidentB", "SupplierB").outcome == "blocked"
-    assert _state(rt, "incidentNotificationBurdenB", "SupplierB") == "pending"
+    record = rt.advance("reportIncident", "SupplierB")
+    assert record.outcome == "blocked"
+    assert "does not fill role 'contractorRole'" in record.reason
+    assert _state(rt, "incidentNotificationBurden", "SupplierA") == "pending"
 
 
 def test_timely_notification_discharges(spec):
     rt = _awarded_to_a(spec)
-    rt.advance("reportIncidentA", "SupplierA")
-    assert _state(rt, "incidentNotificationBurdenA", "SupplierA") == "active"
+    rt.advance("reportIncident", "SupplierA")
+    assert _state(rt, "incidentNotificationBurden", "SupplierA") == "active"
     rt.advance_clock(60)
-    assert rt.advance("notifyIncidentA", "SupplierA").outcome == "ok"
-    assert _state(rt, "incidentNotificationBurdenA", "SupplierA") == "discharged"
+    assert rt.advance("notifyIncident", "SupplierA").outcome == "ok"
+    assert _state(rt, "incidentNotificationBurden", "SupplierA") == "discharged"
     rt.advance_clock(2 * INCIDENT_DEADLINE_STEPS)
     assert rt.check_live_violations().outcome == "ok"
 
 
 def test_late_notification_is_violated_and_escalated(spec):
     rt = _awarded_to_a(spec)
-    rt.advance("reportIncidentA", "SupplierA")
+    rt.advance("reportIncident", "SupplierA")
     rt.advance_clock(INCIDENT_DEADLINE_STEPS + 1)
     assert rt.check_live_violations().outcome == "violation"
-    assert _state(rt, "incidentNotificationBurdenA", "SupplierA") == "violated"
+    assert _state(rt, "incidentNotificationBurden", "SupplierA") == "violated"
     rt.fire_violation_responses()
     assert _state(rt, "incidentFollowUpBurden", "BuyerAgency") == "active"
 
@@ -269,13 +365,17 @@ def test_no_subcontracting_before_award(spec):
     rt = _runtime(spec)
     record = rt.advance("subcontractCivilWorks", "SupplierA")
     assert record.outcome == "blocked"
-    assert "awardNoticeA" in record.reason
+    assert "does not fill role 'contractorRole'" in record.reason
 
 
 def test_subcontracting_needs_approval_and_stops_on_revocation(spec):
     rt = _awarded_to_a(spec)
+    record = rt.advance("subcontractCivilWorks", "SupplierA")
+    assert record.outcome == "blocked"
+    assert "subcontractApproval" in record.reason
+    rt = _approved(rt, spec)
     assert rt.advance("subcontractCivilWorks", "SupplierA").outcome == "ok"
-    rt.revoke_authorization("subcontractApprovalForSupplierA")
+    rt.revoke_authorization("subcontractApprovalForContractor")
     assert _state(rt, "subcontractEmbargo", "SupplierA") == "active"
     record = rt.advance("subcontractCivilWorks", "SupplierA")
     assert record.outcome == "blocked"
