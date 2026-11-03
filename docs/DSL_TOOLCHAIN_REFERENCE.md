@@ -89,7 +89,7 @@ Added in 2.2.0 (3):
   `[W-breach-undeclarable]` (see "Violation records"). V-NEW-24 now
   accepts a permit or an embargo as the target of `declares_violation_of`.
 
-Unreleased (5):
+Added in 2.4.0 (5):
 - Errors: `fill-one-filler` (see "Filling a role by an action").
 - Warnings: `[W-burden-not-modelled]` (see "Burdens the verifier does not
   model"); `[W-fill-role-filled]`, `[W-fill-excluded-role]`,
@@ -1075,7 +1075,7 @@ line).
 
 ---
 
-## Burdens the verifier does not model (unreleased)
+## Burdens the verifier does not model (2.4.0)
 
 `[W-burden-not-modelled]` (2.4.0-1) warns on a burden the pre-execution
 model has no obligation for, so the verifier gives no verdict on it. The

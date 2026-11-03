@@ -4,7 +4,7 @@
 
 Contributed by Andy Bond, BIDLOGIQ Pty Ltd.
 
-Tested against `83c1fff` (2.4.0-4) on Python 3.13. It parses and validates with no errors. It has three warnings, all expected, in this order: `[W-standing-not-modelled]` on the cover duty `keepPublicLiability` (see limit 1), `[W-burden-not-modelled]` on `incidentNotificationBurden` and `[W-fill-not-modelled]` on `contractorRole` (both limit 2). `tests/test_procurement_tender_scenario.py` has 22 tests, which check the live engine (Layer 3).
+Tested against `0e01411` (2.4.0) on Python 3.13. It parses and validates with no errors. It has three warnings, all expected, in this order: `[W-standing-not-modelled]` on the cover duty `keepPublicLiability` (see limit 1), `[W-burden-not-modelled]` on `incidentNotificationBurden` and `[W-fill-not-modelled]` on `contractorRole` (both limit 2). `tests/test_procurement_tender_scenario.py` has 22 tests, which check the live engine (Layer 3).
 
 ## What it models
 
@@ -31,7 +31,7 @@ The panel chair, the probity officer and the suppliers are parties filling roles
 
 ## Limits of the current release
 
-Each limit is stated as what the current release (2.4.0-4) does. The toolchain lists 3 and 4 under "Found by running contract clauses" in [Known Limitations](../../docs/DSL_TOOLCHAIN_REFERENCE.md#known-limitations-and-open-issues). The scenario file marks the workaround for 3 with a `WORKAROUND` comment.
+Each limit is stated as what the current release (2.4.0) does. The toolchain lists 3 and 4 under "Found by running contract clauses" in [Known Limitations](../../docs/DSL_TOOLCHAIN_REFERENCE.md#known-limitations-and-open-issues). The scenario file marks the workaround for 3 with a `WORKAROUND` comment.
 
 1. **The verifier doesn't model standing duties** (`[W-standing-not-modelled]`, `docs/ENGINE_VERIFIER_PARITY.md` R13 to R18). The cover duty is tested on the live engine only. It is kept only at the moments checked: a lapse between two checks isn't seen, and the reported values are trusted as the adapter sends them.
 2. **A role is filled once and not left.** The award fills the contractor role (`effect fill`), and there is no leave or replacement act, so a contractor can't be terminated and replaced within one run. The verifier doesn't model the fill (`[W-fill-not-modelled]`, `docs/ENGINE_VERIFIER_PARITY.md` R27): a static model has no contractor, so the contractor's actions and its incident duty are not in it (`[W-burden-not-modelled]`). The tests check the live engine.

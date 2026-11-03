@@ -277,7 +277,7 @@ community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition)
 The last AM entry is AM-115 (section 5.8). The 2.1.0 changes follow it,
 numbered 2.1.0-1 to 2.1.0-25, then the 2.2.0 changes, 2.2.0-1 to 2.2.0-13
 (section 7.4), then the 2.3.0 changes, 2.3.0-1 to 2.3.0-12, then the
-unreleased 2.4.0-1 to 2.4.0-6.
+2.4.0 changes, 2.4.0-1 to 2.4.0-6.
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -536,12 +536,14 @@ intended change):
   `W-breach-response-duty`, `W-refused-attempts-burden` and
   `W-breach-undeclarable`; the validator has 74 rules: 45 errors and 29
   warnings.
-- Unreleased (2.4.0-1): the validator warning `W-burden-not-modelled`, a
+- 2.4.0 (2.4.0-1): the validator warning `W-burden-not-modelled`, a
   burden with no root (no Commitment, ViolationResponse `creates_burden`,
   Authorization `creates_burden_on_authority` or Delegation
   `transfers_token_group` creates it for a holder), so the verifier gives
-  no verdict on it. It fires on 4 published files (7 warnings).
-- Unreleased (2.4.0-2 to 2.4.0-6): an action fills a role (`effect fill
+  no verdict on it. It fires on 5 published files (8 warnings), the
+  fifth being the procurement tender (one warning, on
+  `incidentNotificationBurden`, since 2.4.0-5).
+- 2.4.0 (2.4.0-2 to 2.4.0-6): an action fills a role (`effect fill
   <Role> with <Object>`, section 5.7); the validator error
   `fill-one-filler` and the warnings `W-fill-role-filled`,
   `W-fill-excluded-role` and `W-fill-not-modelled`. The validator has 79

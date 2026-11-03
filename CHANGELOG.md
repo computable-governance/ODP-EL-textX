@@ -5,7 +5,26 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
-## [Unreleased]
+## [2.4.0] - 2026-11-04
+
+An action that fills a role (`effect fill`), a validator warning for a burden
+with no root, and the procurement tender rewritten around a contractor role.
+An act with no fill line behaves as in 2.3.0, record and state alike. Apart
+from the tender, the 30 published specifications (the 14 shipped scenarios and
+the 16 examples in `tests/examples/`) give the same parse results, errors,
+warnings and seeded policy values as 2.3.0, except for the added warning. That
+warning fires on 5 of the 30 (8 warnings), one of them on the tender, which also
+parses with no errors and keeps its policy values; its other warnings change
+(see Added). No verifier code
+changed, and Kripke world and edge counts are unchanged on all 23 builds
+measured (static models of the tracked scenarios that parse, and hybrid models
+of the six API scenarios and the referral scenario at its deadline scale).
+Details per sub-change are in
+[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
+2.4.0-1 to 2.4.0-6).
+
+Thanks to Andy Bond for the procurement tender scenario
+(`scenarios/procurement_tender/`, PR 2).
 
 ### Added
 
@@ -14,10 +33,11 @@ adheres to _[Semantic Versioning][semver]_.
   `creates_burden_on_authority` or Delegation `transfers_token_group`
   creates it for a holder, so the pre-execution model has no obligation for
   it and the verifier gives no verdict on it. The specification still
-  validates (`.ok` unchanged). It fires on 4 of the 30 published
-  specifications (7 warnings): the ereferral model (4), the two
-  terms_of_engagement scenarios (1 each) and one standing-duty example (1);
-  the published-specs golden records them. Kripke world and edge counts
+  validates (`.ok` unchanged). It fires on 5 of the 30 published
+  specifications (8 warnings): the ereferral model (4), the two
+  terms_of_engagement scenarios (1 each), one standing-duty example (1)
+  and, since 2.4.0-5, the procurement tender (1, on
+  `incidentNotificationBurden`); the published-specs golden records them. Kripke world and edge counts
   are unchanged. See "Burdens the
   verifier does not model" in
   [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md) and
@@ -459,6 +479,8 @@ notes) is [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
   scope, and the `domain_scope` field on an Authorization is not checked.
 
 
+[2.4.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.4.0
+[2.3.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.3.0
 [2.2.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.2.0
 [2.1.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.1.0
 [2.0.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.0.0

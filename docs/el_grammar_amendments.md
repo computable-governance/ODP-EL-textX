@@ -12235,7 +12235,7 @@ Verifier parity: none.
 
 ## 2.4.0-1 — burden with no root: validator (`toolchain/el_validator.py`)
 
-**Status:** COMPLETE (unreleased). Type:
+**Status:** COMPLETE (2.4.0). Type:
 validator (one new warning).
 
 **Standard reference:** §7.8.7 (a token is created or transferred by a
@@ -12309,7 +12309,7 @@ Verifier parity: none (validator only).
 
 ## 2.4.0-2 — an action fills a role: grammar (`grammar/v2/el_grammar.tx`, `toolchain/el_domain.py`, `toolchain/el_parser.py`)
 
-**Status:** COMPLETE (unreleased). Type:
+**Status:** COMPLETE (2.4.0). Type:
 grammar (one rule) and parse object.
 
 **Standard reference:** §7.6.2 (assignment of objects to roles; the rules
@@ -12351,7 +12351,7 @@ Verifier parity: none (grammar only).
 
 ## 2.4.0-3 — an action fills a role: engine (`toolchain/el_engine.py`, `toolchain/el_kripke.py`)
 
-**Status:** COMPLETE (unreleased). Type:
+**Status:** COMPLETE (2.4.0). Type:
 engine.
 
 **Standard reference.**
@@ -12442,7 +12442,7 @@ fillers, over where it states none).
 
 ## 2.4.0-4 — an action fills a role: validator (`toolchain/el_validator.py`)
 
-**Status:** COMPLETE (unreleased). Type:
+**Status:** COMPLETE (2.4.0). Type:
 validator (one error, three warnings, four rules extended).
 
 **Standard reference:** §7.8.2 and its NOTE 5, §7.6.2 and its NOTE 2,
@@ -12488,7 +12488,7 @@ Verifier parity: none (validator only).
 
 ## 2.4.0-5 — the tender with a contractor role (`scenarios/procurement_tender/`)
 
-**Status:** COMPLETE (unreleased). Type:
+**Status:** COMPLETE (2.4.0). Type:
 scenario and tests.
 
 **Standard reference:** as 2.4.0-3.
@@ -12538,7 +12538,7 @@ Verifier parity: R27 (now exercised by a published specification).
 
 ## 2.4.0-6 — an action fills a role: docs (`docs/`, `CHANGELOG.md`, `CLAUDE.md`)
 
-**Status:** COMPLETE (unreleased). Type:
+**Status:** COMPLETE (2.4.0). Type:
 documentation.
 
 **Now.**
@@ -12549,7 +12549,7 @@ documentation.
   informative); the `on_join` row of the token-event cause table; the
   on_join hint of `W-burden-not-modelled`; rule counts 79 (46 errors, 33
   warnings) in the component overview, the validator section and the
-  component diagram; the unreleased rules listed; a Known Limitations
+  component diagram; the 2.4.0 rules listed; a Known Limitations
   bullet; a cross-reference from the `effect create` clause to on_join.
 - `docs/ENGINE_VERIFIER_PARITY.md`: the note under R20 moved below the
   table, so rows R26 and R27 render as rows. No row changed.
@@ -12558,7 +12558,7 @@ documentation.
 - `docs/CONCEPTS_INDEX.md`: notes under "Role cardinality" and
   "Separation of duties": checked for effect fills since 2.4.0-3, spec
   `fills` still unchecked. Both stay OPEN.
-- `CHANGELOG.md` (Unreleased): Added and Fixed.
+- `CHANGELOG.md` (2.4.0): Added and Fixed.
 - `CLAUDE.md`: the numbering sentence, the counts list, section 5.7 and
   section 13.4.
 
