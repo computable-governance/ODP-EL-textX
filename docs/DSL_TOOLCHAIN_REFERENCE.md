@@ -311,7 +311,8 @@ clocks.
 
 **A duration from activation.** `deadline: "21 days"` is one duration
 counted from the burden's activation: the first firing of its
-`triggered_by` event, an `activate` effect, or else the grant. It is
+`triggered_by` event, an `activate` effect (which acts on pending instances
+only), or else the grant. It is
 measured on the engine's step clock, `WorldState.tick`, where one step is
 one minute (units: second, rounded up to a whole minute, minute, hour,
 day, week, month (30 days), year (365 days); "working" or "business" days
@@ -797,7 +798,7 @@ names what it refers to:
 | cause | cause_ref | the change |
 |---|---|---|
 | `initial` | — | a grant in the build record |
-| `action` | the action | what `advance()` does by default: a create effect, a discharge by a destroy effect or by `for_action`, pend, activate, transfer, clone, claim |
+| `action` | the action | what `advance()` does by default: a create effect, a discharge by a destroy effect or by `for_action`, pend (active instances only), activate (pending instances only), transfer, clone, claim |
 | `event` | the event | a discharge by `discharged_by`, an activation by `triggered_by`, a standing duty's term ended by `ended_by`; from an emitting action or `fire_event()` |
 | `sibling` | the sibling discharged or claimed | a burden superseded in an `any_discharged` group, or lapsed when a sibling is claimed |
 | `deadline` | — | a duration deadline elapsed (`check_live_violations()`) |
@@ -1724,6 +1725,13 @@ python el_kripke.py    # runs synthetic consent scenario (§C.2 only)
 - Whether a token was in force at an occurrence is read from the token
   events; a history that does not reproduce the current state gives
   "unknown", and the declaration is accepted with a warning.
+
+**Closed and pended burdens:**
+- `discharge_burden()` moves a violated burden to discharged. Re-activating
+  a pended burden restarts its duration deadline, so an actor who may perform
+  both `effect pend` and `effect activate` can postpone a violation
+  indefinitely; a pend that keeps the remaining time is not built. Both are
+  open findings in [CONCEPTS_INDEX.md](CONCEPTS_INDEX.md).
 
 **Found by running contract clauses (v2.0.0 and 2.1.0):**
 

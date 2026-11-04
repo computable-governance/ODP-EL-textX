@@ -277,7 +277,8 @@ community types), AM-26 (TokenGroup arpeggio fix), AM-27 (SatisfactionCondition)
 The last AM entry is AM-115 (section 5.8). The 2.1.0 changes follow it,
 numbered 2.1.0-1 to 2.1.0-25, then the 2.2.0 changes, 2.2.0-1 to 2.2.0-13
 (section 7.4), then the 2.3.0 changes, 2.3.0-1 to 2.3.0-12, then the
-2.4.0 changes, 2.4.0-1 to 2.4.0-6.
+2.4.0 changes, 2.4.0-1 to 2.4.0-6, then the 2.4.1 changes, 2.4.1-1 and
+2.4.1-2.
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -439,7 +440,8 @@ Fully active: DeonticToken lifecycle, Burden/Permit/Embargo, Rule
 multi-hop chains). Rule (preconditions/effects) is active except for two
 effect limits: `effect destroy` does nothing on a permit or embargo and
 `effect create` always creates the token active (see Known Limitations in
-`docs/DSL_TOOLCHAIN_REFERENCE.md`).
+`docs/DSL_TOOLCHAIN_REFERENCE.md`). `effect activate` acts on pending
+instances only and `effect pend` on active instances only (2.4.1-1, 2.4.1-2).
 
 Policy values are typed and read by the engine (2.1.0, below): a
 comparison's policy limit, a standing duty's `ends_at` policy and (2.2.0)

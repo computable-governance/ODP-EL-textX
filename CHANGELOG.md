@@ -5,6 +5,30 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
+## [Unreleased]
+
+### Fixed
+
+- **`effect activate` no longer re-opens a closed burden.** This changes
+  behaviour. The effect now acts only on pending instances. Before, a violated
+  or discharged burden went back to active with a new activation tick and a
+  restarted deadline. Now its state, tick and deadline stay unchanged, the act
+  still returns ok, and a note line says so: `activate 'X' had no effect: 'H'
+  holds it violated`.
+- **`effect pend` moves only active instances.** This changes behaviour. Before,
+  a pend moved an instance in any state to pending, so a closed burden could be
+  pended and then activated. Now an instance in any other state is unchanged,
+  and the line `pended 'X'` is written only when an instance moved.
+- **The ereferral scenario shows the difference.** Repeating
+  `acknowledgeReferral` after `submitReferral`, `acknowledgeReferral` and
+  `scheduleAssessment` used to re-open the discharged `examinationBurden`
+  (state active, activation tick moved from 1 to 3). Now the burden stays
+  discharged and the act writes the note line.
+
+No verifier code changed. Verifier results are identical to 2.4.0 on the 30
+published specifications (29 static models built; `ecommerce_scenario.el` does
+not parse at either) and on the six API scenarios.
+
 ## [2.4.0] - 2026-11-04
 
 An action that fills a role (`effect fill`), a validator warning for a burden

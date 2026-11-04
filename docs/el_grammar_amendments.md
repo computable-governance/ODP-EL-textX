@@ -12620,9 +12620,14 @@ toolchain's reading, not the standard's.
 
 **Files changed:** `toolchain/el_engine.py`,
 `docs/ENGINE_VERIFIER_PARITY.md`,
-`tests/test_activate_effect_pending_only.py`.
+`tests/test_activate_effect_pending_only.py`,
+`tests/test_activate_effect_real_paths.py`.
 
-**Verification:** suite run by the author after review.
+**Verification:** new tests: `tests/test_activate_effect_pending_only.py` (29)
+and `tests/test_activate_effect_real_paths.py` (2). Full suite, run by the
+author: 2140 passed, 2 skipped, 1 deselected, 1 xfailed. Verifier results
+identical to 2.4.0 on the 30 published specifications (29 static models built;
+`ecommerce_scenario.el` does not parse at either) and on the six API scenarios.
 
 Verifier parity: R3 reworded (pending only; an instance in any other state
 is unchanged). Status and direction stay Absent and Under; no verifier code
@@ -12671,7 +12676,11 @@ this effect is not delegation.
 **Files changed:** `toolchain/el_engine.py`,
 `tests/test_pend_effect_active_only.py`.
 
-**Verification:** suite run by the author after review.
+**Verification:** new tests: `tests/test_pend_effect_active_only.py` (16). Full
+suite, run by the author: 2140 passed, 2 skipped, 1 deselected, 1 xfailed.
+Verifier results identical to 2.4.0 on the 30 published specifications (29
+static models built; `ecommerce_scenario.el` does not parse at either) and on
+the six API scenarios.
 
 Verifier parity: `docs/ENGINE_VERIFIER_PARITY.md` has no row for the pend
 effect and none is added. The verifier does not read the effect; no verifier

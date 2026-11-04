@@ -7324,9 +7324,35 @@ both builders) takes the first `fills` statement's object as its single
 holder. Compare the AM-105 finding on a burden created by several
 responses. Each role has one filler today.
 
-## `effect activate` revives a closed burden — OPEN FINDING (2026-11-04)
+## `effect activate` revives a closed burden — OPEN FINDING (2026-11-04), RESOLVED 2026-11-05
 
-**OPEN FINDING** — `effect activate` (`toolchain/el_engine.py:1548-1554`,
+**OPEN FINDING (2026-11-04), RESOLVED 2026-11-05 by 2.4.1-1 and 2.4.1-2.**
+`effect activate` now acts only on pending instances. An instance in any
+other state keeps its state, its activation tick and its deadline, and a
+closed instance gets a note line (`activate 'X' had no effect: 'H' holds it
+violated`). `effect pend` now acts only on active instances, so a pend
+followed by an activate cannot return a closed burden to active either.
+Full suite afterwards: 2140 passed, 2 skipped, 1 deselected, 1 xfailed.
+
+On the shipped ereferral scenario, repeating `acknowledgeReferral` after
+`submitReferral`, `acknowledgeReferral` and `scheduleAssessment` re-opened
+the discharged `examinationBurden` in 2.4.0: its state went back to active
+and `activated_at_tick` moved from 1 to 3. This was run and is covered by
+`tests/test_activate_effect_real_paths.py`. It could not make a violated
+burden there, because `examinationBurden` has no deadline.
+
+The hybrid model, before the fix, read a revived violated burden as PENDING
+while the engine said active. Read from the code, not run: a revived
+discharged burden would read DISCHARGED in the hybrid model while the engine
+said active. Not tested: the hybrid model after a no-op activate on a
+discharged burden.
+
+Only `toolchain/el_engine.py` changed in `toolchain/` and `grammar/`. Verifier
+results are identical to 2.4.0 on the 30 published specifications (29 static
+models built; `ecommerce_scenario.el` does not parse at either, for the known
+reason, see the AM-93 note) and on the six API scenarios. Original text:
+
+`effect activate` (`toolchain/el_engine.py:1548-1554`,
 as of `c716d9d`; line numbers will drift) activates any instance whose
 state is not already active, including a violated or discharged one.
 Probed 2026-11-04: a violated burden returned to active, its activation
@@ -7340,6 +7366,46 @@ AM-100 part 2 does in `_activate_triggered_tokens()`) left the full suite
 at baseline, so no test depends on the behaviour. The "activated" log line
 is also written when nothing changes. Not fixed; proposed as its own
 amendment.
+
+## `discharge_burden()` moves a violated burden to discharged — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — read from the code, not run. `discharge_burden()`
+(`toolchain/el_engine.py:3243-3249`, as of `c716d9d`; line numbers will
+drift) moves every instance of the burden whose state is not `discharged`
+to `discharged`, so a violated instance leaves `violated`. The call returns
+ok, writes the line `discharged burden 'X'` and lists X in the record's
+`discharged`. A standing duty is refused, and 2.4.1-1 and 2.4.1-2 do not
+change this path.
+
+The "`discharge_burden()` bypasses the strict guard with no authorisation"
+finding above, in its addendum, already notes that violated instances are
+included; it is about who may call it. This finding is about the closed
+state. `fire_violation_responses()` looks for instances in state `violated`,
+so a response that has not yet fired for the instance finds nothing to fire
+on, and the hybrid model then reads the burden as DISCHARGED. The call also
+goes against that function's docstring, which says 'violated' never reverts,
+and against the reading of Figure A.6 (ISO/IEC 15414:2015, Annex A, normative)
+that no transition leaves the end state. Not checked: whether a test depends
+on the behaviour. Not fixed.
+
+## `effect pend` then `effect activate` restarts a live burden's deadline — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — current behaviour. `effect pend` moves an active burden
+to pending, and `check_live_violations()` does not violate a pending burden.
+`effect activate` then stamps a new `activated_at_tick`
+(`_activate()`), and a duration deadline counts in full from that act. An
+actor who may perform both acts can repeat them before each deadline and
+postpone a violation indefinitely. One cycle is pinned by
+`test_pend_active_then_activate_restores_it`
+(`tests/test_pend_effect_active_only.py`); the repetition was not run.
+
+This concerns an eventual burden with a duration deadline. A strict burden
+is never violated by the clock, and a date deadline is judged against
+`as_at`, not from the activation tick. No file in `scenarios/` or
+`tests/examples/` has `effect pend`. The verifier does not read the effect and
+`docs/ENGINE_VERIFIER_PARITY.md` has no row for it. A design option is a pend
+that freezes the remaining time instead of restarting it; it is not built.
+Not fixed.
 
 ## An undeclared event name is a silent no-op that costs a tick — OPEN FINDING (2026-11-04)
 
