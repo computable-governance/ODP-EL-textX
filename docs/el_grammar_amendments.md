@@ -12610,9 +12610,11 @@ toolchain's reading, not the standard's.
 **Limit.**
 - `effect create` skips a holder that already has an instance in any state,
   so no action effect can reopen a closed burden for the same holder.
-- `effect pend` still has no state guard, so pending a closed instance and
-  then activating it still revives it; a guard is proposed as its own
-  amendment.
+- An act on an instance that is already active, or on a name with no
+  instance, writes no line and so does not appear in the token's
+  accountability chain.
+- An act that discharges X and also activates X writes the note
+  `activate 'X' had no effect: 'Specialist' holds it discharged`.
 - The world tick still advances on a no-op, so other open deadlines lose a
   step, as for any applied act.
 
@@ -12625,3 +12627,52 @@ toolchain's reading, not the standard's.
 Verifier parity: R3 reworded (pending only; an instance in any other state
 is unchanged). Status and direction stay Absent and Under; no verifier code
 changed.
+
+## 2.4.1-2 — `effect pend` acts only on an active instance (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine.
+
+**Before.** `advance()` Step 7b moved every instance of the name to pending,
+whatever its state. A violated or discharged burden became pending, and a
+later `effect activate` then returned it to active, which 2.4.1-1 alone did
+not prevent. The line "pended" was written even when nothing changed or no
+instance existed.
+
+**Now.** The effect pends only instances in state `active`, of every token
+kind, matched by name across all holders. An instance in any other state
+(pending, violated, discharged, claimable, superseded, lapsed, lifted) keeps
+its state and its `activated_at_tick`. The "pended" line is written only when
+an instance was pended. Step 7a runs first, so an act that discharges X and
+also has `effect pend X` leaves X discharged. A violated burden stays violated
+across a pend and an activate, in one act or in two. The act itself is
+unchanged: it returns ok, advances the world tick by one and adds no record
+field.
+
+**Clauses.** ISO/IEC 15414:2015:
+- Figure A.6 (Annex A, normative): delegate moves an Active token to Pending
+  and delegationFails returns it. There is no transition from the end state.
+- 7.8.7: a token is active or pending; pending masks the constraint it
+  carries.
+
+Treating the effect as a pause of a live token only is this toolchain's
+reading, not the standard's. The engine's delegation keeps tokens active, so
+this effect is not delegation.
+
+**Limit.**
+- Re-activation restarts the deadline clock: `effect activate` stamps a new
+  `activated_at_tick` on a pended instance, so its deadline counts in full
+  from that act.
+- A pend that changes nothing gets no note line, unlike `effect activate` on
+  a closed instance, so unless another line names the token the act does not
+  appear in the token's accountability chain.
+- The world tick still advances on a no-op, so other open deadlines move one
+  tick closer, as for any applied act.
+
+**Files changed:** `toolchain/el_engine.py`,
+`tests/test_pend_effect_active_only.py`.
+
+**Verification:** suite run by the author after review.
+
+Verifier parity: `docs/ENGINE_VERIFIER_PARITY.md` has no row for the pend
+effect and none is added. The verifier does not read the effect; no verifier
+code changed.

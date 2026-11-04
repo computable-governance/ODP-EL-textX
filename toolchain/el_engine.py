@@ -1535,11 +1535,14 @@ def advance(
                 pass
 
             elif op == "pend":
-                tokens = [
-                    _transition(t, "pending") if t.token_name == tok_ref.name else t
-                    for t in tokens
-                ]
-                effects_log.append(f"pended '{tok_ref.name}'")
+                # 2.4.1-2: active instances only, of every holder; an instance
+                # in any other state is unchanged. The "pended" line is written
+                # only if an instance was pended.
+                active = [t for t in tokens
+                          if t.token_name == tok_ref.name and t.state == "active"]
+                tokens = [_transition(t, "pending") if t in active else t for t in tokens]
+                if active:
+                    effects_log.append(f"pended '{tok_ref.name}'")
 
             elif op == "activate":
                 # AM-100: stamp activation, as for event-triggered activation
