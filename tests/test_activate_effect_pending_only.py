@@ -8,9 +8,10 @@ active with its activation tick moved and its deadline restarted, and the
 
 Now: only pending instances are activated, for every token kind, matched by
 name across all holders (as AM-100 part 2 does for events). An instance in
-any other state is left exactly as it was, and the line is written only when
-an instance was activated. The act itself still returns ok and advances the
-world tick by one.
+any other state is left exactly as it was, and the "activated" line is written
+only when an instance was activated. Each instance neither pending nor active
+gets a note line instead, without the word "activated". The act itself still
+returns ok and advances the world tick by one.
 
 Fixture: as tests/test_am100_engine_deadline_from_activation.py. Operator
 performs the acts; Colleague fills no role and only holds tokens.
@@ -363,3 +364,53 @@ def test_non_pending_states_unchanged(state, kind):
     assert _activated_lines(record) == []
     assert record.token_events == ()
     assert rt.current_state().tick == 1
+
+
+# ── The note line for a closed instance ──────────────────────────────────────
+
+@pytest.mark.parametrize("state, kind", [
+    ("violated", "burden"),
+    ("discharged", "burden"),
+    ("claimable", "burden"),
+    ("superseded", "burden"),
+    ("lapsed", "burden"),
+    ("lifted", "embargo"),
+])
+def test_closed_instance_gets_a_note_line_without_the_word_activated(state, kind):
+    name, action = _BY_KIND[kind]
+    rt = _runtime((name, "Operator", state))
+    before = _token(rt, name)
+    assert before.kind == kind
+
+    record = rt.advance(action, "Operator")
+
+    assert record.effects == (
+        f"activate '{name}' had no effect: 'Operator' holds it {state}",)
+    assert not any("activated" in line for line in record.effects)
+    assert record.outcome == "ok"
+    assert _token(rt, name) == before
+    assert rt.current_state().tick == 1
+
+
+def test_noop_act_stays_in_accountability_chain():
+    rt = _runtime(("followUpBurden", "Operator", "violated"))
+
+    record = rt.advance("openFollowUp", "Operator")
+
+    assert record.discharged == () and record.violations == ()
+    assert record in rt.accountability_chain("followUpBurden")
+
+
+def test_mixed_holders_activated_line_then_note_line():
+    rt = _runtime(("followUpBurden", "Operator", "violated"),
+                  ("followUpBurden", "Colleague"))
+    note = "activate 'followUpBurden' had no effect: 'Operator' holds it violated"
+
+    first = rt.advance("openFollowUp", "Operator")
+
+    assert first.effects == ("activated 'followUpBurden'", note)
+
+    # Colleague's instance is active now: no line for it, the note stays.
+    second = rt.advance("openFollowUp", "Operator")
+
+    assert second.effects == (note,)

@@ -12586,10 +12586,15 @@ existed.
 token kind, matched by name across all holders, as AM-100 part 2 does for
 events. An instance in any other state (active, violated, discharged,
 claimable, superseded, lapsed, lifted) keeps its state, its
-`activated_at_tick` and its deadline. The line is written only when an
-instance was activated, so there is none for a no-op or for a name with no
-instance. Step 7a runs first, so X in the act above stays discharged. The
-act itself is unchanged: it returns ok and advances the world tick by one.
+`activated_at_tick` and its deadline. The "activated" line is written only
+when an instance was activated. Each instance in a state other than pending
+or active gets a note line, after the "activated" line if there is one, in
+the form `activate 'X' had no effect: 'Specialist' holds it violated`. An
+instance already active and a name with no instance get no line. The note
+line adds no record field, and `Runtime.accountability_chain` finds it, so
+such an act stays in the token's chain. Step 7a runs first, so X in the act
+above stays discharged. The act itself is unchanged: it returns ok and
+advances the world tick by one.
 
 **Clauses.** ISO/IEC 15414:2015:
 - Figure A.6 (Annex A, normative): no transition leaves the end state. The
@@ -12610,7 +12615,6 @@ toolchain's reading, not the standard's.
   amendment.
 - The world tick still advances on a no-op, so other open deadlines lose a
   step, as for any applied act.
-- There is no line saying why nothing happened; one is proposed separately.
 
 **Files changed:** `toolchain/el_engine.py`,
 `docs/ENGINE_VERIFIER_PARITY.md`,
