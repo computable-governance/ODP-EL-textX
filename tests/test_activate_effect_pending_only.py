@@ -414,3 +414,41 @@ def test_mixed_holders_activated_line_then_note_line():
     second = rt.advance("openFollowUp", "Operator")
 
     assert second.effects == (note,)
+
+
+# ── What the accountability chain leaves out ─────────────────────────────────
+
+def test_already_active_noop_not_in_accountability_chain():
+    rt = _runtime(("followUpBurden", "Operator"))
+    first = rt.advance("openFollowUp", "Operator")
+
+    second = rt.advance("openFollowUp", "Operator")
+
+    assert second not in rt.accountability_chain("followUpBurden")
+    assert first in rt.accountability_chain("followUpBurden")
+    assert second.outcome == "ok"
+    assert second.effects == ()
+
+
+def test_no_instance_noop_not_in_accountability_chain():
+    rt = _runtime()
+
+    record = rt.advance("activateMissing", "Operator")
+
+    assert record not in rt.accountability_chain("neverGrantedBurden")
+    assert rt.accountability_chain("neverGrantedBurden") == []
+    assert record.outcome == "ok"
+    assert record.effects == ()
+
+
+def test_discharge_and_activate_note_text():
+    """Step 7a writes its own discharge line before the note."""
+    rt = _runtime(("closingBurden", "Operator"))
+
+    record = rt.advance("closeAndActivate", "Operator")
+
+    assert _token(rt, "closingBurden").state == "discharged"
+    assert record.effects == (
+        "discharged burden 'closingBurden'",
+        "activate 'closingBurden' had no effect: 'Operator' holds it discharged",
+    )
