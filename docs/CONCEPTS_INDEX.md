@@ -7324,6 +7324,55 @@ both builders) takes the first `fills` statement's object as its single
 holder. Compare the AM-105 finding on a burden created by several
 responses. Each role has one filler today.
 
+## `effect activate` revives a closed burden — OPEN FINDING (2026-11-04)
+
+**OPEN FINDING** — `effect activate` (`toolchain/el_engine.py:1548-1554`,
+as of `c716d9d`; line numbers will drift) activates any instance whose
+state is not already active, including a violated or discharged one.
+Probed 2026-11-04: a violated burden returned to active, its activation
+tick moved, its deadline restarted, and a second violation did not fire
+the violation response again because the response key had not changed.
+This conflicts with Figure A.6 of ISO/IEC 15414:2015 (Annex A, normative;
+no path from the end state back to Active) and with the
+`fire_violation_responses()` docstring (`el_engine.py:4124`), which says
+'violated' never reverts. A one-line change (require state pending, as
+AM-100 part 2 does in `_activate_triggered_tokens()`) left the full suite
+at baseline, so no test depends on the behaviour. The "activated" log line
+is also written when nothing changes. Not fixed; proposed as its own
+amendment.
+
+## An undeclared event name is a silent no-op that costs a tick — OPEN FINDING (2026-11-04)
+
+**OPEN FINDING** — `fire_event()` (`toolchain/el_engine.py:3270`, tick at
+`:3310`, as of `c716d9d`; line numbers will drift) with an unknown event
+name returns ok with no effects and still advances the tick by one, so
+every open deadline loses a step. (With a strict burden actionable, the
+call is blocked instead, `:3295-3299`.) A validator warning cannot catch
+it because the name is a runtime argument. Proposed: refuse an undeclared
+name as blocked, with no tick and a clear reason. Not checked: whether a
+test fires an undeclared name and what it expects, and the FHIR handler's
+`fired_no_match` path. Not fixed.
+
+## The FHIR event handler misreports a refused firing — OPEN FINDING (2026-11-04)
+
+**OPEN FINDING** — `handle_encounter_event()`
+(`toolchain/fhir_event_handler.py:392-393`, as of `c716d9d`; line numbers
+will drift) reads the transition's effects and does not check its outcome.
+A firing refused because a strict burden was open returned `fired_no_match`
+with the message that no pending token has `triggered_by`, while the
+transition's outcome was `blocked`. The incident is lost and the caller is
+told something else. The refusal is also global: an unrelated strict burden
+refuses the firing of any other burden's trigger. Not fixed.
+
+## No parity row for repeated firing — OPEN FINDING (2026-11-04)
+
+**OPEN FINDING** — `docs/ENGINE_VERIFIER_PARITY.md` has no row for a
+trigger event that fires more than once. The engine makes a second firing
+a deliberate no-op (AM-100 part 2; `toolchain/el_engine.py:1030`, as of
+`c716d9d`; line numbers will drift) and the static verifier models at most
+one firing per path; neither the validator nor the verifier says so.
+Parity rows for repeated firing are planned and not yet written up.
+
 ---
 
 ## Typed policy values (2.1.0)
