@@ -12569,3 +12569,55 @@ items); `scenarios/procurement_tender/README.md` (updated in 2.4.0-5).
 xfailed, 0 failures (unchanged; docs only).
 
 Verifier parity: none (docs only).
+
+## 2.4.1-1 — `effect activate` acts only on a pending instance (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: engine.
+
+**Before.** `advance()` Step 7b activated every instance of the name whose
+state was not already active. A violated or discharged burden returned to
+active, its activation tick moved and its deadline restarted; a claimable,
+superseded, lapsed or lifted instance was activated the same way. An act
+that discharged X and also had `effect activate X` revived X at once. The
+line "activated" was written even when nothing changed or no instance
+existed.
+
+**Now.** The effect activates only instances in state `pending`, of every
+token kind, matched by name across all holders, as AM-100 part 2 does for
+events. An instance in any other state (active, violated, discharged,
+claimable, superseded, lapsed, lifted) keeps its state, its
+`activated_at_tick` and its deadline. The line is written only when an
+instance was activated, so there is none for a no-op or for a name with no
+instance. Step 7a runs first, so X in the act above stays discharged. The
+act itself is unchanged: it returns ok and advances the world tick by one.
+
+**Clauses.** ISO/IEC 15414:2015:
+- Figure A.6 (Annex A, normative): no transition leaves the end state. The
+  figure has create, delegate, delegationFails and the exits done, remove
+  and timeout. It does not name discharged or violated.
+- 7.8.7: a token is active or pending.
+- 6.4.7 NOTE 2, by analogy only: changing a token is destroying it and
+  constructing a new one.
+
+Leaving a closed instance unchanged, rather than refusing the act, is this
+toolchain's reading, not the standard's.
+
+**Limit.**
+- `effect create` skips a holder that already has an instance in any state,
+  so no action effect can reopen a closed burden for the same holder.
+- `effect pend` still has no state guard, so pending a closed instance and
+  then activating it still revives it; a guard is proposed as its own
+  amendment.
+- The world tick still advances on a no-op, so other open deadlines lose a
+  step, as for any applied act.
+- There is no line saying why nothing happened; one is proposed separately.
+
+**Files changed:** `toolchain/el_engine.py`,
+`docs/ENGINE_VERIFIER_PARITY.md`,
+`tests/test_activate_effect_pending_only.py`.
+
+**Verification:** suite run by the author after review.
+
+Verifier parity: R3 reworded (pending only; an instance in any other state
+is unchanged). Status and direction stay Absent and Under; no verifier code
+changed.

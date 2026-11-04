@@ -1543,15 +1543,15 @@ def advance(
 
             elif op == "activate":
                 # AM-100: stamp activation, as for event-triggered activation
-                # (_activate_triggered_tokens()); an already-active token keeps
-                # its deadline clock.
-                tokens = [
-                    _activate(t, tick)
-                    if t.token_name == tok_ref.name and t.state != "active"
-                    else t
-                    for t in tokens
-                ]
-                effects_log.append(f"activated '{tok_ref.name}'")
+                # (_activate_triggered_tokens()). 2.4.1-1: pending instances
+                # only, of every holder, as AM-100 part 2 does for events; an
+                # instance in any other state keeps its state and deadline
+                # clock. The line is written only if an instance was activated.
+                pending = [t for t in tokens
+                           if t.token_name == tok_ref.name and t.state == "pending"]
+                tokens = [_activate(t, tick) if t in pending else t for t in tokens]
+                if pending:
+                    effects_log.append(f"activated '{tok_ref.name}'")
 
             elif op == "transfer":
                 # AM-85: from_role, when given, is resolved via role

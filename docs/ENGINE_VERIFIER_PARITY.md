@@ -7,7 +7,7 @@ abstracts it or leaves it out. **Update this table in the same commit as
 any change to an engine rule or a Kripke rule**, so that it does not drift
 from the code. Started in 2.1.0-5 with the rows about deadlines, the clock
 and policy values; preconditions added in 2.1.0-12, standing duties in
-2.1.0-17, policy-fed deadlines in 2.2.0-8, token events and violation records in 2.3.0 (rows R20 to R25), the permit check in 2.3.0-10 (row R26), role fills by an action in 2.4.0-3 (row R27). Other parts of the engine are not yet listed.
+2.1.0-17, policy-fed deadlines in 2.2.0-8, token events and violation records in 2.3.0 (rows R20 to R25), the permit check in 2.3.0-10 (row R26), role fills by an action in 2.4.0-3 (row R27), the `activate` effect's pending-only rule in 2.4.1-1 (row R3). Other parts of the engine are not yet listed.
 
 **Conventions**
 - *Static* is `build_kripke_model()` (before execution). *Hybrid* is
@@ -29,7 +29,7 @@ and policy values; preconditions added in 2.1.0-12, standing duties in
 |---|---|---|---|---|
 | R1 | A duration deadline is violated when the tick minus the activation tick reaches its steps (eventual burdens; `check_live_violations()`). The duration is a literal or, 2.2.0-7, a duration policy's declared value (`deadline: <Policy>`, read through `deadline_text()`) | T2 from activation, both builders; the deadline read through the same `deadline_text()` (2.2.0-8, R19) | Mirrored | — |
 | R2 | Activation by a `triggered_by` event (its first firing starts the deadline) | Hybrid: events activate every waiting token; static: obligations only | Hybrid mirrored; static abstracted | Under (static: event-activated permits and embargoes) |
-| R3 | Activation by an `activate` effect | none | Absent | Under (an obligation activated by an effect never activates in the model) |
+| R3 | Activation by an `activate` effect: pending only; an instance in any other state is unchanged (2.4.1-1) | none | Absent | Under (an obligation activated by an effect never activates in the model) |
 | R4 | Every applied act advances the tick by one; the model's acts take no time | Only the tick rule (T3) advances a step | Abstracted | Over (discharge before a deadline is easier in the model) and under (while a strict burden blocks the tick, the model cannot step) |
 | R5 | A deadline containing a calendar date has no duration magnitude, whatever follows the date (2.1.0-6; before, `"by 2026-11-30 end of day"` was read as 30 days) | The same predicate (`_has_deadline_magnitude()`) | Mirrored | — |
 | R6 | A date deadline on an eventual burden (a date alone, or a date and time with an offset) is judged against a caller-supplied `as_at` under a `DeadlineClock`: violated when `as_at` is at or after the due instant; without a clock or an `as_at` it is not judged (2.1.0-7) | none: a date deadline is not enforceable in the model | Absent | Under (no date violation path). It never makes `compelled` true: an eventual date burden is never reported compelled while it is pending (`tests/test_date_deadlines.py`) |
