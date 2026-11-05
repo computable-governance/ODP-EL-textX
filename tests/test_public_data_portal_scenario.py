@@ -40,7 +40,8 @@ def spec():
     # declarationDutyBurden (a role's holds only, GAP-6) is accepted too.
     # Any other warning is unexpected.
     others = [w for w in result.warnings
-              if not w.startswith(("[W-19]", "[W-20]", "[W-22]", "[W-burden-not-modelled]"))]
+              if not w.startswith(("[W-19]", "[W-20]", "[W-22]", "[W-burden-not-modelled]",
+                                   "[W-authorization-duration]"))]
     assert not others, others
     return result.model
 

@@ -229,6 +229,9 @@ Rules implemented
   W-fill-not-modelled  2.4.0-4: once per role an action fills: the
         verifier does not model the fill. Advisory.
                                                  §7.6.2 NOTE 2, §7.8.2
+  W-authorization-duration  2.5.0-1: an Authorization with a duration:
+        the duration is recorded and not enforced. Advisory.
+                                                     clause to be confirmed
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -483,6 +486,9 @@ def validate_spec(model) -> List[str]:
     errors.extend(_validate_fill_filled_role(model))
     errors.extend(_validate_fill_excluded_role(model))
     errors.extend(_validate_fill_not_modelled(model))
+
+    # 2.5.0-1 — an Authorization's duration is not enforced (clause to be confirmed)
+    errors.extend(_validate_authorization_duration(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1494,6 +1500,20 @@ def _validate_strict_precondition(model) -> List[str]:
                 f"they hold, so the status route may report it compelled while the engine "
                 f"refuses the discharge. {_TYPED_CITATION}")
     return warnings
+
+
+def _validate_authorization_duration(model) -> List[str]:
+    """[W-authorization-duration] (2.5.0-1): an Authorization with a
+    `duration` clause. The duration is recorded and not enforced: nothing
+    reads it, so it does not limit the permit granted. A permit's time limit
+    is the permit's own `deadline`. Advisory."""
+    return [
+        f"[W-authorization-duration] Authorization '{auth.name}' has duration "
+        f"'{auth.duration}': the duration is recorded and not enforced, so it does "
+        f"not limit the permit it grants. {_TYPED_CITATION}"
+        for auth in _collect(model, "Authorization")
+        if auth.duration
+    ]
 
 
 def _validate_standing_fields(model) -> List[str]:

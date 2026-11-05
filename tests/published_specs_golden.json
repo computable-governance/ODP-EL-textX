@@ -109,6 +109,10 @@
         [
           "W-20",
           "Strict burden 'ReferralSr001Obligation' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-authorization-duration",
+          "Authorization 'ConsentAiDiagnostic001Auth' has duration 'by 2026-05-20': the duration is recorded and not enforced, so it does not limit the permit it grants. (clause to be confirmed)"
         ]
       ],
       "policy_values": []
@@ -141,6 +145,10 @@
         [
           "W-24",
           "Eventual burden 'clinicalHandoverBurden' has no enforceable deadline ('referral episode') and no episode-conclusion path: it is never violated, at runtime or in the verifier. Give it a deadline with a time unit, or put it in a satisfaction group whose community opts in with on_objective_achieved. (§6.4.3, §7.8.7)"
+        ],
+        [
+          "W-authorization-duration",
+          "Authorization 'patientDataAuthorization' has duration 'referral episode': the duration is recorded and not enforced, so it does not limit the permit it grants. (clause to be confirmed)"
         ]
       ],
       "policy_values": [
@@ -224,6 +232,10 @@
         [
           "W-20",
           "Strict burden 'escalationNoticeBurden' is named by no ViolationResponse (on_violation_of). If its holder never discharges it, nothing responds. Not needed if the enforcement point discharges the burden atomically; otherwise add a violation_response. (§6.3.8, §7.8.6)"
+        ],
+        [
+          "W-authorization-duration",
+          "Authorization 'patientDataAuthorization' has duration 'referral episode': the duration is recorded and not enforced, so it does not limit the permit it grants. (clause to be confirmed)"
         ]
       ],
       "policy_values": []
@@ -241,6 +253,14 @@
         [
           "W-burden-not-modelled",
           "Burden 'declarationDutyBurden' has no root: no Commitment or other construct creates it for a holder, so the pre-execution model has no obligation for it and the verifier gives no verdict on it. Add a Commitment by the object accountable for it. Role 'declarerRole' holds it, but the runtime never grants a role's holds; give the role's filler a Commitment. (§7.8.7, §6.4.1, §7.10.3)"
+        ],
+        [
+          "W-authorization-duration",
+          "Authorization 'AgentAccessAuthorization' has duration '90 days': the duration is recorded and not enforced, so it does not limit the permit it grants. (clause to be confirmed)"
+        ],
+        [
+          "W-authorization-duration",
+          "Authorization 'PatientLookupAuthorization' has duration '90 days': the duration is recorded and not enforced, so it does not limit the permit it grants. (clause to be confirmed)"
         ]
       ],
       "policy_values": [
@@ -273,6 +293,14 @@
         [
           "W-burden-not-modelled",
           "Burden 'declarationDutyBurden' has no root: no Commitment or other construct creates it for a holder, so the pre-execution model has no obligation for it and the verifier gives no verdict on it. Add a Commitment by the object accountable for it. Role 'declarerRole' holds it, but the runtime never grants a role's holds; give the role's filler a Commitment. (§7.8.7, §6.4.1, §7.10.3)"
+        ],
+        [
+          "W-authorization-duration",
+          "Authorization 'DatasetReadAuthorization' has duration '90 days': the duration is recorded and not enforced, so it does not limit the permit it grants. (clause to be confirmed)"
+        ],
+        [
+          "W-authorization-duration",
+          "Authorization 'AggregateQueryAuthorization' has duration '90 days': the duration is recorded and not enforced, so it does not limit the permit it grants. (clause to be confirmed)"
         ]
       ],
       "policy_values": [

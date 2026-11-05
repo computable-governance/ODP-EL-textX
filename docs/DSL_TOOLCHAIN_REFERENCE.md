@@ -12,7 +12,7 @@ ComputableGovernance stack. Intended as project context for future sessions.
 ```
 el_grammar.tx     — textX grammar defining the DSL syntax
 el_parser.py      — loads grammar, parses .el files, invokes validator
-el_validator.py   — 79 rules (46 errors, 33 warnings) checked at specification time
+el_validator.py   — 80 rules (46 errors, 34 warnings) checked at specification time
 el_reasoner.py    — governance queries over the static model
 el_kripke.py      — Layer 4 Kripke semantics (modal obligation verification)
 example.el        — payment processing scenario exercising all constructs
@@ -25,7 +25,7 @@ example.el        — payment processing scenario exercising all constructs
 ### What it does
 
 Runs at **specification time**, before any execution. Takes a parsed DSL-EL
-model and checks it against 79 rules: 46 errors and 33 warnings (tags
+model and checks it against 80 rules: 46 errors and 34 warnings (tags
 beginning `[W-`). Each rule in the table below is traced to a clause of
 ISO/IEC 15414:2015; the rules added in 2.1.0 and 2.2.0 end "(clause to be
 confirmed)", and the 2.3.0 ones cite their clauses. Analogous to a compiler's semantic phase — the grammar
@@ -1386,7 +1386,7 @@ if conflicts:
 Specification (.el file)
         │
         ▼
-   el_parser.py  ──► el_validator.py (79 rules)
+   el_parser.py  ──► el_validator.py (80 rules)
         │                    │
         │            errors and warnings
         │

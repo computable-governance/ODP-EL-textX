@@ -196,9 +196,12 @@ def _without_strict_gaps(warnings):
     2.1.0-14's [W-strict-precondition] (referral_scenario.el's
     referralInitiationBurden: a strict burden whose discharging action has a
     precondition the verifier assumes holds — a known gap, present since
-    v2.0.0, same treatment)."""
+    v2.0.0, same treatment), and 2.5.0-1's [W-authorization-duration]
+    (referral_scenario.el's patientDataAuthorization: a duration that is
+    recorded and not enforced, same treatment)."""
     return [w for w in warnings
-            if not w.startswith(("[W-19]", "[W-20]", "[W-24]", "[W-strict-precondition]"))]
+            if not w.startswith(("[W-19]", "[W-20]", "[W-24]", "[W-strict-precondition]",
+                                 "[W-authorization-duration]"))]
 
 
 # ── Test 6: el_reasoner.py's CLI prints warnings to stderr, exit status ok ─

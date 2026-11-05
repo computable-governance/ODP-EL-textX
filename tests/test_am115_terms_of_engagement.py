@@ -67,13 +67,15 @@ def _refused(name):
 
 
 @pytest.mark.parametrize("name", sorted(_SCENARIOS))
-def test_scenarios_validate_with_only_the_burden_not_modelled_warning(name):
+def test_scenarios_validate_with_the_burden_not_modelled_and_duration_warnings(name):
     # declarationDutyBurden is held by a role only and never granted (GAP-6).
+    # 2.5.0-1: each of the two 90-day Authorizations adds a duration warning.
     result = _quiet(parse, _SCENARIOS[name][1])
     assert result.ok, result.errors
-    assert len(result.warnings) == 1
+    assert len(result.warnings) == 3
     assert result.warnings[0].startswith(
         "[W-burden-not-modelled] Burden 'declarationDutyBurden'")
+    assert all(w.startswith("[W-authorization-duration] ") for w in result.warnings[1:])
 
 
 @pytest.mark.parametrize("name", sorted(_SCENARIOS))
