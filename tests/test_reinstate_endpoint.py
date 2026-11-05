@@ -10,8 +10,10 @@ in reverse (see tests/test_revocation_endpoint.py, whose structure this file
 follows).
 
 ReinstateAuthorizationResponse deliberately has no action_taken discriminator
-(unlike ConsentEventResponse): the URL itself fixes the semantic, outcome is
-always "ok", and every field is always populated. The already-active vs.
+(unlike ConsentEventResponse): the URL itself fixes the semantic, and every
+field is always populated. Outcome is "ok", or "blocked" when the reinstate is
+refused (a strict burden is open, or every instance of the permit is expired),
+with empty effects. With outcome "ok", the already-active vs.
 genuinely-reinstated distinction is carried entirely by effects being empty
 vs. non-empty — asserted explicitly below.
 

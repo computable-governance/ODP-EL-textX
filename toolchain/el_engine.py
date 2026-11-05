@@ -2797,6 +2797,12 @@ def revoke_authorization(
        former holder.
     3. Returns a TransitionRecord documenting the revocation for the ledger.
 
+    2.5.0-1: 'expired' is final for that instance. After the strict guard,
+    if every instance of the permit is expired, the revoke changes nothing:
+    outcome 'ok', the input state with its tick, no embargo, no token events
+    and one note line per instance. With other instances beside them, the
+    expired ones are skipped (_apply_revocation()).
+
     Raises KeyError if authorization_name is not declared, or has no
     on_revocation embargo (AM-31-V2 catches this at spec-validation time;
     this is a runtime defensive check).
@@ -2820,6 +2826,19 @@ def revoke_authorization(
         reason = _strict_block_reason(blocking, "before the authorization can be revoked")
         return _blocked(state, auth.authority.name, f"revoke:{authorization_name}", reason, tick)
 
+    instances = [t for t in state.tokens
+                 if t.token_name == auth.permit.name and t.kind == "permit"]
+    if instances and all(t.state == "expired" for t in instances):
+        return state, TransitionRecord(
+            tick=tick,
+            actor_name=auth.authority.name,
+            action_name=f"revoke:{authorization_name}",
+            outcome="ok",
+            discharged=(),
+            effects=tuple(_revoke_note_lines(instances)),
+            violations=(),
+        )
+
     tokens, effects_log = _apply_revocation(state.tokens, spec, auth, tick)
 
     new_state = state.with_tokens(tokens).with_tick(tick + 1)
@@ -2837,6 +2856,16 @@ def revoke_authorization(
     return new_state, record
 
 
+def _revoke_note_lines(instances) -> List[str]:
+    """2.5.0-1: one line for each expired instance a revoke leaves alone, in
+    the wording of `effect activate` (2.4.1-1)."""
+    return [
+        f"revoke '{t.token_name}' had no effect: '{t.holder}' holds it expired"
+        for t in instances
+        if t.state == "expired"
+    ]
+
+
 def _apply_revocation(
     tokens_in, spec, auth, tick: int
 ) -> Tuple[List[TokenInstance], List[str]]:
@@ -2850,23 +2879,29 @@ def _apply_revocation(
     fire_violation_responses(): a response is an institutional act, not
     an ordinary governed action, so it may revoke while a strict burden
     is actionable. Step 3.5 is unchanged for advance().
+
+    2.5.0-1: an expired instance is skipped and gets a note line, on the
+    direct route and on the response routes. The test is the state, not
+    _permit_usable(): a response's revoke ignores time, so an active permit
+    past its limit is still revoked. A new embargo goes to the first holder
+    not expired, in any state; an embargo that already exists keeps its
+    holder.
     """
     permit_name = auth.permit.name
     embargo_name = auth.on_revocation_embargo
     effects_log: List[str] = []
 
     # 1 — supersede the granted permit(s)
-    holders = [
-        t.holder for t in tokens_in
-        if t.token_name == permit_name and t.kind == "permit"
-    ]
+    instances = [t for t in tokens_in if t.token_name == permit_name and t.kind == "permit"]
+    holders = [t.holder for t in instances if t.state != "expired"]
     tokens = [
         _transition(t, "superseded")
-        if t.token_name == permit_name and t.kind == "permit"
+        if t.token_name == permit_name and t.kind == "permit" and t.state != "expired"
         else t
         for t in tokens_in
     ]
     effects_log.append(f"superseded permit '{permit_name}'")
+    effects_log.extend(_revoke_note_lines(instances))
 
     # 2 — activate the on_revocation embargo
     if any(t.token_name == embargo_name for t in tokens):
@@ -2904,6 +2939,15 @@ def reinstate_authorization(
     3. Returns a TransitionRecord documenting the reinstatement for the
        ledger.
 
+    2.5.0-1: 'expired' is final for that instance; only a new grant brings
+    it back. After the strict guard, if every instance of the permit is
+    expired, the reinstate is refused: outcome 'blocked', a reason naming
+    the expiry, empty effects, the input state with its tick, the embargo
+    untouched. With other instances beside them, the expired ones are
+    skipped with no note line, and the first instance not expired decides
+    as above. Step 2 still lifts an active embargo. So with several holders
+    the result depends on list order (docs/CONCEPTS_INDEX.md).
+
     Raises KeyError if authorization_name is not declared, or has no
     on_revocation embargo — same defensive check as revoke_authorization().
     """
@@ -2928,27 +2972,30 @@ def reinstate_authorization(
         reason = _strict_block_reason(blocking, "before the authorization can be reinstated")
         return _blocked(state, auth.authority.name, f"reinstate:{authorization_name}", reason, tick)
 
+    instances = [t for t in state.tokens if t.token_name == permit_name and t.kind == "permit"]
+    not_expired = [t for t in instances if t.state != "expired"]
+    if instances and not not_expired:
+        reason = f"permit '{permit_name}' has expired; only a new grant restores it"
+        return _blocked(state, auth.authority.name, f"reinstate:{authorization_name}", reason, tick)
+
     effects_log: list[str] = []
 
     # 1 — (re-)activate the permit. Only append to effects_log when a real
     # state change happens — mirrors fire_event()'s convention (empty
-    # effects means nothing was activated), which handle_consent_event()
-    # relies on to distinguish "already_active" from "reinstated" the same
-    # way handle_encounter_event() distinguishes "fired" from
-    # "fired_no_match" by inspecting TransitionRecord.effects.
-    existing_permit = next(
-        (t for t in state.tokens if t.token_name == permit_name and t.kind == "permit"),
-        None,
-    )
-    if existing_permit is not None and existing_permit.state == "active":
+    # effects means nothing was activated). With an 'ok' outcome,
+    # handle_consent_event() reads that to distinguish "already_active"
+    # from "reinstated"; a refusal is outcome 'blocked', returned above,
+    # and also has empty effects, so effects alone do not say which.
+    if not_expired and not_expired[0].state == "active":
         tokens = list(state.tokens)
-    elif existing_permit is not None:
+    elif not_expired:
         # 2.5.0-1: _activate() keeps a stamp and stamps a permit that was
         # never active. Another holder's instance that is already active
-        # keeps its clock, so it is left as it is.
+        # keeps its clock, so it is left as it is. An expired one is final.
         tokens = [
             _activate(t, tick)
-            if t.token_name == permit_name and t.kind == "permit" and t.state != "active"
+            if t.token_name == permit_name and t.kind == "permit"
+            and t.state not in ("active", "expired")
             else t
             for t in state.tokens
         ]

@@ -15,6 +15,12 @@ states it selects and those it leaves alone, a sibling discharged or claimed and
 the five states other than pending. Tests that are not table cells are in
 tests/test_permit_sweep.py.
 
+The final section covers the acts around an expired permit (step A6): a direct
+revoke and `effect create` in all six states, and a reinstate in active,
+claimable, expired, superseded and lapsed. Tests with several holders and new
+grants are in tests/test_permit_expired_final.py; consent events on an expired
+permit are in tests/test_fhir_event_handler.py.
+
 Fixture: as tests/test_permit_clock.py. Operator performs the acts and holds
 the permit.
 """
@@ -55,6 +61,11 @@ community ProbeCommunity
                 action activateTimed {
                     actor: operatorRole
                     effect activate timedPermit
+                }
+
+                action createTimed {
+                    actor: operatorRole
+                    effect create timedPermit
                 }
 
                 action unrelatedAction {
@@ -585,3 +596,109 @@ def test_event_activation_in_each_other_state(permit_state):
     assert record.outcome == "ok"
     assert _token(rt, "timedPermit").state == permit_state
     assert record.effects == ()
+
+
+# ── A direct revoke, a reinstate and effect create, by state (step A6) ───────
+
+REVOKED_LINES = ("superseded permit 'timedPermit'", "activated embargo 'afterRevokeEmbargo'")
+REINSTATED_LINES = ("activated permit 'timedPermit'", "lifted embargo 'afterRevokeEmbargo'")
+
+
+def _seed_embargo(rt, embargo_state):
+    """The on_revocation embargo, already granted in embargo_state."""
+    embargo = token_from_spec(rt._spec, "afterRevokeEmbargo", "Operator", GRANT_TICK)
+    rt._state = grant_token(rt.current_state(), replace(embargo, state=embargo_state))
+
+
+def _embargo_states(rt):
+    return [t.state for t in rt.current_state().tokens if t.token_name == "afterRevokeEmbargo"]
+
+
+def _permit_events(record):
+    return [e for e in record.token_events if e.token_name == "timedPermit"]
+
+
+# Direct revoke
+
+@pytest.mark.parametrize("permit_state", ALL_STATES)
+def test_direct_revoke_in_each_state(permit_state):
+    rt = _runtime(permit_state)
+    _clock_to(rt, PAST_THE_LIMIT)
+    # In superseded the embargo is active again, even from lifted.
+    if permit_state == "superseded":
+        _seed_embargo(rt, "lifted")
+
+    record = rt.revoke_authorization("TimedAuth")
+
+    assert record.outcome == "ok"
+    if permit_state == "expired":
+        assert _permit(rt).state == "expired"
+        assert _permit(rt).activated_at_tick is None
+        assert _embargo_states(rt) == []
+        assert rt.current_state().tick == PAST_THE_LIMIT
+        assert record.token_events == ()
+        assert record.effects == (
+            "revoke 'timedPermit' had no effect: 'Operator' holds it expired",)
+        return
+    assert _permit(rt).state == "superseded"
+    # An active permit has been active since grant, so it takes that stamp.
+    assert _permit(rt).activated_at_tick == (GRANT_TICK if permit_state == "active" else None)
+    assert _embargo_states(rt) == ["active"]
+    assert rt.current_state().tick == PAST_THE_LIMIT + 1
+    assert record.effects == REVOKED_LINES
+    if permit_state == "superseded":
+        assert _permit_events(record) == []
+    else:
+        assert [e.event for e in _permit_events(record)] == ["superseded"]
+
+
+# Reinstate
+
+@pytest.mark.parametrize("permit_state", [
+    "active", "claimable", "expired", "superseded", "lapsed",
+])
+def test_reinstate_in_each_state(permit_state):
+    rt = _runtime(permit_state)
+    _clock_to(rt, PAST_THE_LIMIT)
+    _seed_embargo(rt, "active")
+
+    record = rt.reinstate_authorization("TimedAuth")
+
+    if permit_state == "expired":
+        assert record.outcome == "blocked"
+        assert record.reason == "permit 'timedPermit' has expired; only a new grant restores it"
+        assert record.effects == ()
+        assert record.token_events == ()
+        assert record.blocked_by is None
+        assert _permit(rt).state == "expired"
+        assert _embargo_states(rt) == ["active"]
+        assert rt.current_state().tick == PAST_THE_LIMIT
+        return
+    assert record.outcome == "ok"
+    assert _permit(rt).state == "active"
+    assert _embargo_states(rt) == ["lifted"]
+    assert rt.current_state().tick == PAST_THE_LIMIT + 1
+    if permit_state == "active":
+        assert _permit(rt).activated_at_tick is None
+        assert record.effects == ("lifted embargo 'afterRevokeEmbargo'",)
+    else:
+        # Never active before, so this is its first activation.
+        assert _permit(rt).activated_at_tick == PAST_THE_LIMIT
+        assert record.effects == REINSTATED_LINES
+
+
+# effect create
+
+@pytest.mark.parametrize("permit_state", ALL_STATES)
+def test_effect_create_in_each_state(permit_state):
+    rt = _runtime(permit_state)
+    _clock_to(rt, PAST_THE_LIMIT)
+    before = _permit(rt)
+
+    record = rt.advance("createTimed", "Operator")
+
+    assert record.outcome == "ok"
+    assert [t for t in rt.current_state().tokens if t.token_name == "timedPermit"] == [before]
+    assert record.effects == ()
+    assert record.token_events == ()
+    assert rt.current_state().tick == PAST_THE_LIMIT + 1
