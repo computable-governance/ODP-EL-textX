@@ -7518,6 +7518,37 @@ fresh active FHIR Consent is refused, and `effect create` skips a holder who alr
 has an instance. `effect create` for another holder makes that holder a new instance
 and does nothing for this one. A route for a new grant is not designed. Not scheduled.
 
+## A response's `revokes:` leaves the static status route saying `compelled: true` — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — Take a strict burden whose discharging action requires a permit
+with no time limit, and a ViolationResponse whose `revokes:` withdraws that permit's
+Authorization. After the response fires, the engine refuses the discharge ("required
+permit 'gate' not held by actor"). The status route does not withhold `compelled` for
+this burden, because it withholds only for a permit with a time limit (2.5.0-1,
+parity row R28).
+
+| Mode | `compelled` | Other fields | Right? |
+|---|---|---|---|
+| Static (`mode=spec`) | true, before and after the revocation | `detectable` true, witness present | **No, this is the unsafe claim.** The model has no such path: the static builder has no T7 (R30) |
+| Hybrid (default) | false, before and after the revocation | After: `detectable` false, counterexample present | Yes, after the revocation |
+
+Probed on one specification, with a burden triggered by an event. Step B5 will extend
+`_compelled_withheld()` to a permit named by `suspends:` or `expires:`, but not to one
+named by `revokes:` (ruling D14: this gap is recorded, not changed). Not scheduled.
+
+## The UI bridge's `POST /verify` still reports the claim the status route withholds — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — `POST /verify` in `computable-governance-ui` calls
+`check_obligation()` directly (`platform/el_api.py:301-306`, as of `c168bf7`; line
+numbers will drift), so the 2.5.0-1 withholding on `GET /obligations/{token}/status`
+does not reach it. For a strict burden whose discharging action needs a permit with a
+time limit, it returns `af: true`, and `platform/simulator-shell.js:215-222` shows
+"AF ✓ obligation guaranteed".
+
+The display has only two outcomes, so a future null `af` would wrongly show "AF ✗
+enforcement gap detected". Any change there must handle null. No published
+specification has such a burden today. Not scheduled; belongs to the UI repository.
+
 ---
 
 ## Typed policy values (2.1.0)

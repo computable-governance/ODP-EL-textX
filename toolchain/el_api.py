@@ -44,6 +44,7 @@ from el_engine import DeadlineClock, not_judged_date_burdens  # 2.1.0-9
 from el_engine import discharging_actions, precondition_text  # 2.1.0-14
 from el_engine import _standing_names  # 2.1.0-20
 from el_engine import _permit_usable  # 2.5.0-1
+from el_engine import deadline_text, _has_date_shape, _has_deadline_magnitude, _spec_token  # 2.5.0-1
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -537,7 +538,9 @@ class ObligationStatusResponse(BaseModel):
     holder: str
     chain: List[str]
     obligation_text: str
-    # 2.1.0-20: null for a standing duty (the verifier does not model it)
+    # 2.1.0-20: null for a standing duty (the verifier does not model it).
+    # 2.5.0-1: null for a strict burden any of whose discharging actions needs
+    # a permit with a duration or date limit (the model has no permit time, R28).
     compelled: Optional[bool]     # AF satisfied — architecturally guaranteed
     detectable: Optional[bool]    # EF satisfied — possible on at least one path
     # AM-104: which property `compelled` reports — "AF" from w0, or
@@ -547,7 +550,8 @@ class ObligationStatusResponse(BaseModel):
     # "not triggered within horizon" (bounded response only) / "not
     # resolved within horizon" (bounded response, and since AM-107 AF too:
     # the answer depends on what happens after the horizon). Never set
-    # when compelled is True.
+    # when compelled is True. When compelled is null: "standing duty: not
+    # modelled" (2.1.0-20) or "permit time limit: not modelled" (2.5.0-1).
     status: Optional[str] = None
     horizon: int                  # AM-104: steps explored beyond the anchored world
     # AM-110: deadline scale factor k the model was built with (1 = unscaled;
@@ -566,7 +570,7 @@ class ObligationStatusResponse(BaseModel):
     # the model, so status says "standing duty: not modelled" and no verdict
     # or path is given.
     standing: bool = False
-    counterexample_path: Optional[List[PathStep]] = None  # present iff not compelled
+    counterexample_path: Optional[List[PathStep]] = None  # present iff AF failed
     witness_path: Optional[List[PathStep]] = None          # present iff detectable
 
 
@@ -996,7 +1000,13 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         "as '<action>: <precondition>'. The verifier assumes they all hold: "
         "for a strict burden 'compelled' can be true while the engine "
         "refuses the discharge because a precondition is false or not "
-        "established. Empty when there are none."
+        "established. Empty when there are none. 2.5.0-1: for a strict burden "
+        "any of whose discharging actions requires a permit with a duration "
+        "or date limit, in both modes and elapsed or not, 'compelled' is null "
+        "and 'status' is 'permit time limit: not modelled': the model has no "
+        "permit time, so it can offer a discharge the engine refuses. "
+        "'detectable', 'modal_operator' and the paths stay as computed, so "
+        "they can still show a refused path."
     ),
 )
 def get_obligation_status(
@@ -1067,15 +1077,18 @@ def get_obligation_status(
             standing=True,
         )
 
+    # 2.5.0-1: the model has no permit time (parity row R28), so `compelled`
+    # is withheld for such a burden. Everything else stays as computed.
+    withheld = _compelled_withheld(source_spec, token_name)
     return ObligationStatusResponse(
         token_name=token_name,
         holder=af_verdict.holder,
         chain=af_verdict.chain,
         obligation_text=af_verdict.obligation_text,
-        compelled=af_verdict.satisfied,
+        compelled=None if withheld else af_verdict.satisfied,
         detectable=ef_verdict.satisfied,
         modal_operator=af_verdict.modal_operator,
-        status=af_verdict.status,
+        status=withheld or af_verdict.status,
         horizon=_KRIPKE_HORIZON,
         deadline_scale=af_verdict.deadline_scale,
         mode=mode,
@@ -1520,6 +1533,35 @@ def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthor
 
 
 STANDING_NOT_MODELLED = "standing duty: not modelled"
+PERMIT_TIME_NOT_MODELLED = "permit time limit: not modelled"  # 2.5.0-1
+
+
+def _permit_has_time_limit(permit) -> bool:
+    """2.5.0-1: the permit's declaration gives a limit the engine can apply: a
+    duration with a magnitude or a date, literal or policy-fed. A limit with no
+    magnitude ("thirty days", "referral episode") never elapses, so it does not
+    count. Reads the declaration only; no judgement of time."""
+    limit = deadline_text(permit)
+    return _has_date_shape(limit) or _has_deadline_magnitude(limit)
+
+
+def _compelled_withheld(spec, token_name: str) -> Optional[str]:
+    """2.5.0-1 (parity row R28): why the status route gives no `compelled` for
+    this burden, or None. Set for a strict burden when any discharging action
+    requires a permit with a time limit, whatever the verifier's answer and the
+    burden's state, so the answer depends only on the specification.
+
+    `_spec_token` reads top-level tokens only. An inline burden gets 404 from
+    the route today, so it does not reach this check."""
+    token = _spec_token(spec, token_name)
+    if token is None or token.discharge_mode != "strict":
+        return None
+    for action in discharging_actions(spec, token_name):
+        for req in action.deontic_requirements:
+            if req.kind == "requires_permit" and req.token \
+                    and _permit_has_time_limit(req.token):
+                return PERMIT_TIME_NOT_MODELLED
+    return None
 
 
 def _standing_discharge_label(label: str, standing: set) -> bool:

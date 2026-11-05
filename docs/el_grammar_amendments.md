@@ -12983,3 +12983,63 @@ unchanged. The validator has 81 rules: 46 errors and 35 warnings.
 suite, run by the author: 2292 passed, 2 skipped, 1 deselected, 1 xfailed.
 
 Verifier parity: no change (static warning only).
+
+### 2.5.0-1 — the status route withholds `compelled` for a permit with a time limit (`toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED. Type: API response change, plus parity rows and open findings.
+No grammar, engine, verifier or validator change, and the golden file is unchanged.
+
+**Before.** The verifier has no permit time. For a strict burden whose discharge needs
+a permit with a time limit, `GET /obligations/{token}/status` could say `compelled:
+true` after the permit's time was up, while the engine refused the discharge. The
+burden was then stuck, and the route called it guaranteed.
+
+**Now.** For a strict burden any of whose discharging actions requires a permit with a
+duration or date limit, literal or policy-fed, the route gives `compelled: null` and
+status "permit time limit: not modelled", in both modes. The test reads only the
+specification: `_compelled_withheld()` makes no time judgement and does not call
+`_permit_usable()`. Every other field stays as computed, and there is no new field.
+
+**Rulings.**
+- Q1: withhold unconditionally, whether the verifier says true or false.
+- Q2: keep `counterexample_path` and `witness_path` as computed.
+- Q3: no state test, so a burden already discharged is withheld too.
+- Q4: withhold if any discharging action needs a timed permit, not only if all do.
+- Q5: a limit with no measurable magnitude ("thirty days", "referral episode") is not
+  withheld; `compelled` keeps the verifier's value, and `[W-strict-timed-permit]` stays
+  as it is.
+- Q6: `status` is overwritten with a constant; `modal_operator` and `detectable` stay.
+- Q7: the `revokes:` gap is recorded now as an open finding in `docs/CONCEPTS_INDEX.md`.
+- Q8: `POST /verify` in `computable-governance-ui` is recorded as an open finding; that
+  repository is not changed.
+- Q9: R28 and R29 use the Phase 1 wording: since the expired-permit step, only a pending
+  anchor is falsely unreachable; an expired one is correct apart from a new grant.
+
+**Limit.**
+- The verifier still has no permit time. `detectable`, the witness and the recommended
+  action can still show the refused path, so `detectable` can be falsely true.
+- The route can over-withhold: with a free alternative action the holder can still
+  discharge, and a date limit with no clock never bites.
+- It does not close R8 (declarations) or R11 (preconditions): `compelled` can still be
+  true there.
+- An untimed permit withdrawn by a response's `revokes:` is not covered (Q7).
+- A burden declared inline in a role gets 404 from the route, as before, so this test
+  does not reach it: `_spec_token()` reads top-level tokens only.
+- Not exercised: federation-built runtimes, a permit granted by `effect fill`, and
+  `Authorization.duration` (nothing reads it, so it is not a limit here).
+- The last Limit line of the `[W-strict-timed-permit]` entry above is now out of date
+  on the status route; it is left as the record of that step.
+
+**What it means for the demo.** Nothing changes on screen. No published or API scenario
+has such a burden, and no widget calls this route. The UI bridge's `POST /verify` would
+still say "obligation guaranteed" for such a specification (Q8).
+
+**Parity.** R28's last sentence replaced; new row R29 (a pending or expired permit at
+the anchor); the "reserved" clause in the header removed.
+
+**Files changed:** `toolchain/el_api.py`, `tests/test_status_timed_permit.py` (new),
+`docs/ENGINE_VERIFIER_PARITY.md`, `docs/el_grammar_amendments.md`,
+`docs/CONCEPTS_INDEX.md`.
+
+**Verification:** 10 new test cases in `tests/test_status_timed_permit.py`. Full suite,
+run by the author: 2302 passed, 2 skipped, 1 deselected, 1 xfailed.
