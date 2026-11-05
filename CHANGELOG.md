@@ -5,6 +5,82 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
+## [Unreleased]
+
+Permit time limits (2.5.0-1). A permit's `deadline` is now enforced, and a
+permit whose time is up moves to a new state, `expired`. No verifier code
+changed. Details are in
+[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entry 2.5.0-1)
+and in "Permit time limits (2.5.0)" in
+[docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md).
+
+### Added
+
+- **A permit's time limit is enforced.** A permit's `deadline` (a duration, a
+  date or instant, or a duration policy) is now a time limit. A duration limit
+  is checked at use and at the sweep (`check_live_violations()`), counted in
+  steps from the instance's first activation. A date or instant limit is
+  checked at the sweep only, against the caller's `as_at`, and only when the
+  runtime has a `DeadlineClock`.
+- **New permit state `expired`.** The sweep moves a permit whose time is up to
+  `expired`, with the line `expired permit 'P' held by 'H' (...)` and one
+  token event with cause `deadline`. `expired` is final for that instance:
+  only a new grant (a new instance) brings the permit back. It is not
+  `lapsed`, which is a claimable token whose sibling was claimed.
+- **Validator warning `[W-authorization-duration]`.** An Authorization's
+  `duration` is recorded and not enforced, so it does not limit the permit it
+  grants. It fires 7 times on the published specifications; the
+  published-specs golden records them.
+- **Validator warning `[W-strict-timed-permit]`.** A strict burden whose
+  discharge needs a permit with a time limit can get stuck once the time is
+  up. It fires on none of the published specifications. The validator now
+  has 81 rules: 46 errors and 35 warnings.
+
+### Changed
+
+- **A use past the limit is refused.** This changes behaviour. The act is
+  `blocked` with the reason `required permit 'P' time has elapsed for actor`,
+  and the permit's state is unchanged (it stays `active` until the sweep).
+- **The sweep moves the tick when it expires a permit.** A sweep that only
+  expires permits moves the tick once; its outcome stays `ok`.
+- **Revoke and reinstate on an expired permit.** This changes behaviour. A
+  reinstate of an Authorization whose permit instances are all expired is
+  refused (outcome `blocked`, reason `permit 'P' has expired; only a new grant
+  restores it`). A revoke of one changes nothing: outcome `ok`, a note line
+  `revoke 'P' had no effect: 'H' holds it expired`, no embargo, no tick.
+  Beside other instances, revoke and reinstate skip the expired ones.
+- **The status route withholds `compelled` for a strict burden gated on a
+  timed permit.** `GET /obligations/{token_name}/status` answers `compelled:
+  null` with status `permit time limit: not modelled`, in both modes, for a
+  strict burden any of whose discharging actions requires a permit with a
+  time limit (parity row R28): the model has no permit time, so it can offer
+  a discharge the engine refuses. Other strict burdens are unchanged.
+
+### Fixed
+
+- **The FHIR consent handler reports a refused event as refused.** Before, it
+  never read the engine's outcome, so a refused event was reported as
+  `already_active` (status active) or `revoked` (status inactive). Now a
+  refusal reports the new label `blocked`, with the engine's reason in the
+  message, and an inactive event on a permit whose instances are all expired
+  reports the new label `already_expired`. `POST /fhir/consent-events` stamps
+  provenance on a token for neither label.
+
+### Known limits
+
+- No route re-grants a permit; a clone or a transfer keeps the old start tick.
+- A strict burden gated on a timed permit can get stuck once the time is up
+  (the validator warns), and a limit with no measurable magnitude (for example
+  `"thirty days"`) never elapses.
+
+### Documentation
+
+- New Reference section "Permit time limits (2.5.0)" in
+  [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md); parity
+  rows R26, R28, R29 and R30 in
+  [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md); the
+  Concepts Index and `CLAUDE.md` updated.
+
 ## [2.4.1] - 2026-11-05
 
 ### Fixed
