@@ -482,17 +482,23 @@ def _permit_clock_start(tok: TokenInstance) -> Optional[int]:
     return tok.granted_at_tick if tok.state == "active" else None
 
 
-def _permit_usable(tok: TokenInstance, tick: int) -> bool:
-    """2.5.0-1: the permit is active and its time has not elapsed at `tick`.
-    Elapsed means the instance's deadline is a duration with a measurable
-    magnitude and the tick has reached that many ticks from its clock start.
-    A date deadline, a deadline with no magnitude and no deadline never count
-    as elapsed. Reads the instance only and writes nothing."""
-    if tok.state != "active":
-        return False
+def _permit_elapsed(tok: TokenInstance, tick: int) -> bool:
+    """2.5.0-1: the permit's time has elapsed at `tick`, whether or not it is
+    active. Elapsed means the instance's deadline is a duration with a
+    measurable magnitude and the tick has reached that many ticks from its
+    clock start. A date deadline, a deadline with no magnitude, no deadline
+    and no clock never count as elapsed. Reads the instance only and writes
+    nothing."""
     if _has_date_shape(tok.deadline) or not _has_deadline_magnitude(tok.deadline):
-        return True
-    return tick - _permit_clock_start(tok) < _parse_deadline_steps(tok.deadline)
+        return False
+    start = _permit_clock_start(tok)
+    return start is not None and tick - start >= _parse_deadline_steps(tok.deadline)
+
+
+def _permit_usable(tok: TokenInstance, tick: int) -> bool:
+    """2.5.0-1: the permit is active and its time has not elapsed at `tick`
+    (_permit_elapsed()). Reads the instance only and writes nothing."""
+    return tok.state == "active" and not _permit_elapsed(tok, tick)
 
 
 def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:

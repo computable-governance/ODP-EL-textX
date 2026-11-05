@@ -12697,12 +12697,13 @@ A permit that was not active and had no stamp could have been active since
 grant or never active: the two cases looked the same. A permit's deadline had no
 effect: an active permit could be used however long ago its time had run out.
 
-**Now.** A permit's time limit is enforced at use, and `GET available-actions`
-(`toolchain/el_api.py`) leaves out an active permit past its limit. Nothing
-else acts on the limit yet: the history queries and the other displays do not
-read it, and there is no sweep and no expired state. A permit past its limit is
-refused whatever its state record says, until a later change writes the state:
-the record still says active, and the refusal changes nothing.
+**Now.** A permit's time limit is enforced at use, `GET available-actions`
+(`toolchain/el_api.py`) leaves out an active permit past its limit, and
+`Runtime.in_force_at()`, and so `declare_breach`, applies the limit. Nothing else
+acts on the limit yet: the other displays and the sweep do not read it, and there
+is no expired state. A permit past its limit is refused whatever its state record
+says, until a later change writes the state: the record still says active, and the
+refusal changes nothing.
 
 An action that requires a permit, and a declaration that does, is refused when
 the actor has no usable instance (`_permit_usable()`). An instance is usable if
@@ -12726,6 +12727,23 @@ A response's revoke (`revokes:`) ignores a permit's time limit, because a sancti
 must not depend on whether a sweep ran first. It supersedes an active permit and
 activates the `on_revocation` embargo even if the permit's time has elapsed. For a
 permit that is not active it logs `not revoked` and activates no embargo, as before.
+
+`Runtime.in_force_at(permit, holder, t)` answers True only if the token events show
+the permit active at tick t and it had not elapsed at t (`_permit_elapsed()`, the
+test `_permit_usable()` also uses).
+- The clock start and the deadline come from the holder's current instance with the
+  same name, kind and grant tick. Instances with the same four values cannot be told
+  apart, so any of them not elapsed is enough.
+- The answer is unknown (`None`) only when that current instance is gone (the holder
+  transferred the permit away) and the specification gives the permit a duration
+  with a measurable magnitude. With no such limit in the specification, the answer
+  comes from the token events alone.
+- `Runtime.token_states_at()` stays the raw record of states: an elapsed permit still
+  reads `active` there.
+- In `declare_breach`, a `permit_requirement` declaration is now accepted for a permit
+  that had elapsed at the occurrence, and a `permit` declaration is refused with the
+  existing reason for a permit not in force. An unknown answer is accepted with a
+  warning, as for any unknown history.
 
 The verifier does not model a permit's time and still offers the exercise (parity
 row R28).

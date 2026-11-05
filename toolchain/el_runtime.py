@@ -14,7 +14,11 @@ from typing import List, Optional, Tuple
 
 from el_engine import (
     DeadlineClock,
+    _has_date_shape,
+    _has_deadline_magnitude,
+    _permit_elapsed,
     _require_aware,
+    _spec_deadline,
     _token_events,
     WorldState,
     TokenInstance,
@@ -514,11 +518,43 @@ class Runtime:
                                                     key=lambda ks: (ks[0][1], ks[1])))
 
     def in_force_at(self, token_name: str, holder: str, tick: int) -> Optional[bool]:
-        """Whether `holder` held `token_name` active when an act at `tick`
-        was judged (token_states_at()): True or False, or None when that is
-        unknown."""
+        """Whether `holder` held `token_name` in force when an act at `tick`
+        was judged: True or False, or None when that is unknown. In force
+        means active (token_states_at()) and, for a permit, not elapsed at
+        `tick` (2.5.0-1). A holder with several active instances is in force
+        if any of them is."""
         states = self.token_states_at(token_name, holder, tick)
-        return None if states is None else "active" in states
+        if states is None:
+            return None
+        if "active" not in states:
+            return False
+        answers = [self._active_instance_in_force(token_name, holder, key, tick)
+                   for key, state in self._fold_instances(token_name, holder, tick)
+                   if state == "active"]
+        if True in answers:
+            return True
+        return None if None in answers else False
+
+    def _active_instance_in_force(self, token_name: str, holder: str,
+                                  key: Tuple[str, int], tick: int) -> Optional[bool]:
+        """For an instance the fold shows active at `tick`, identified by
+        `key` (kind, grant tick): whether it was also in force. A burden or
+        an embargo was. A permit's clock start and deadline come from the
+        holder's current instance with the same key; instances with the same
+        key cannot be told apart, so any of them not elapsed is enough. With
+        no current instance (the holder transferred it away), None if the
+        specification gives the permit a duration with a measurable
+        magnitude, and True if it does not."""
+        kind, granted_at_tick = key
+        if kind != "permit":
+            return True
+        current = [t for t in self._state.tokens
+                   if t.token_name == token_name and t.holder == holder
+                   and t.kind == kind and t.granted_at_tick == granted_at_tick]
+        if current:
+            return any(not _permit_elapsed(t, tick) for t in current)
+        deadline = _spec_deadline(self._spec, token_name)
+        return None if _has_deadline_magnitude(deadline) and not _has_date_shape(deadline) else True
 
     def current_state(self) -> WorldState:
         """Return the current immutable WorldState."""
