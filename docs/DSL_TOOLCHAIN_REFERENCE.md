@@ -414,12 +414,15 @@ burdens are not judged in 2.1.0.
 is refused. A trailing `Z` is accepted. 422 for a value that cannot be
 parsed, has no offset, or is earlier than the last accepted one (nothing is
 ledgered). The response adds `as_at` (echoed, or null) and `not_judged:
-[{token, holder, reason}]`. Each scenario's clock is in
+[{token, holder, reason}]`, which also lists a date-form permit that cannot
+be judged, for example for lack of a clock. Each scenario's clock is in
 `el_api._SCENARIO_CLOCK`. No shipped scenario has a clock, and no burden
 in a shipped scenario has a date deadline (one permit in
-`scenarios/fhir/generated_governance.el` has `deadline: "by 2026-05-20"`;
-`check_live_violations()` judges burdens only, so it is never judged, as
-in v2.0.0).
+`scenarios/fhir/generated_governance.el` has `deadline: "by 2026-05-20"`).
+A permit is judged at the sweep: a duration limit by ticks from its first
+activation, a date limit only with a clock and an `as_at`. No shipped
+scenario supplies a clock, so the one published date-form permit is not
+judged.
 
 **Verifier.** The verifier does not model date deadlines
 (`docs/ENGINE_VERIFIER_PARITY.md`, rows R5 to R7): it never proves anything
@@ -594,7 +597,9 @@ action has a precondition, plain or a comparison.
 **Verifier.** The verifier assumes every precondition holds
 (`docs/ENGINE_VERIFIER_PARITY.md`, R11). For a strict burden whose
 discharging action has a precondition, `GET /obligations/{token}/status`
-may report `compelled: true` while the engine refuses the discharge; its
+may report `compelled: true` while the engine refuses the discharge (unlike
+a strict burden gated on a timed permit, where `compelled` is withheld, a
+precondition keeps `compelled` true; parity row R11); its
 field `assumes_preconditions` lists the assumed preconditions as
 `<action>: <precondition>`.
 
@@ -785,7 +790,7 @@ outcomes and token states are unchanged; the events describe them in data.
 
 | field | meaning |
 |---|---|
-| `event` | `granted` (a new instance), `removed` (the instance left its holder: a transfer or a delegation reassignment, followed by a `granted` for the new holder), or the new state (`active`, `pending`, `discharged`, `violated`, `superseded`, `lifted`, `lapsed`, ...) |
+| `event` | `granted` (a new instance), `removed` (the instance left its holder: a transfer or a delegation reassignment, followed by a `granted` for the new holder), or the new state (`active`, `pending`, `discharged`, `violated`, `superseded`, `lifted`, `lapsed`, `expired` (the sweep writes it for a permit whose time limit is up), ...) |
 | `token_name`, `token_kind`, `holder`, `granted_at_tick` | the instance |
 | `from_state`, `to_state` | the state before and after (`None` before a grant, after a removal) |
 | `tick` | the record's tick |
@@ -801,7 +806,7 @@ names what it refers to:
 | `action` | the action | what `advance()` does by default: a create effect, a discharge by a destroy effect or by `for_action`, pend (active instances only), activate (pending instances only), transfer, clone, claim |
 | `event` | the event | a discharge by `discharged_by`, an activation by `triggered_by`, a standing duty's term ended by `ended_by`; from an emitting action or `fire_event()` |
 | `sibling` | the sibling discharged or claimed | a burden superseded in an `any_discharged` group, or lapsed when a sibling is claimed |
-| `deadline` | — | a duration deadline elapsed (`check_live_violations()`) |
+| `deadline` | — | a duration deadline elapsed (`check_live_violations()`), or a permit's time limit is up, in either form. A date-form burden uses `date_due`; a date-form permit uses `deadline` |
 | `date_due` | — | a date deadline judged due |
 | `episode_concluded` | — | a deadline with no magnitude, its episode concluded |
 | `standing_breach` | — | a standing duty's keeps judged false |
@@ -841,7 +846,11 @@ Both read only the token events of `history()`, never the effect text.
   advances the tick, so an act and its events never share a tick with a
   later act. A date or `as_at` is not a tick; to ask about a wall-clock
   moment, find the record judged at it first.
-- **In force** means `active`, for a permit, an embargo or a burden. A
+- **In force** means `active`, for an embargo or a burden; for a permit,
+  active and not past a duration limit (read from the holder's current
+  instance; unknown when there is no current instance and the limit is a
+  measurable duration); a date limit counts only once the sweep writes
+  `expired`. `token_states_at()` stays the raw fold of states. A
   holder with several instances is in force if any of them is.
 - **Never held**, with a complete history: `False` (and `()`).
 - **`None` when the history is missing or does not reproduce the current
@@ -863,7 +872,9 @@ unchanged.
 - **Step 6, a permit:** the required permit the actor does not hold
   active: the actor's latest instance of it (for example `superseded` after
   a revocation), or, if the actor never held it, `state` and
-  `granted_at_tick` `None`.
+  `granted_at_tick` `None`. Or the actor holds it active past a duration
+  limit; the reason says the time has elapsed and the state stays active
+  (only the sweep writes `expired`). A date limit is not checked at use.
 - **`declare_violation()`:** the same, for its embargo and permit checks,
   for the refusal it reports (the first candidate declaring action's).
 - **Every other refusal leaves it `None`:** enrolment, role, a declaration
@@ -890,11 +901,11 @@ two instances with the same four values (a token cloned to a holder who
 already holds it from the same tick) are matched in list order.
 
 **Open findings now visible in the events.** A revocation supersedes every
-instance of the Authorization's permit, whoever holds it, and a
+instance of the Authorization's permit that is not expired, whoever holds it, and a
 reinstatement lifts every instance of its embargo (see
 `docs/CONCEPTS_INDEX.md`, "Revocation supersedes a permit by name for every
 holder"). The events record this as it happens: a revocation lists a
-`superseded` event for each holder of the permit, including holders the
+`superseded` event for each holder whose instance is not expired, including holders the
 Authorization does not name.
 
 A response's revocation of an embargo that is already active produces no
@@ -1481,8 +1492,8 @@ detail and the guards:
 | T2b | Episode Conclusion (Violate) | an eventual obligation with no enforceable deadline, once its token group is settled without it (the members' states already satisfy the group's condition) → VIOLATED | both |
 | T3  | Tick | time passes (suppressed while a strict obligation is pending and its holder is active) | both |
 | T4  | Delegation Revoke | a revocable burden-transferring delegation is revoked; the burden falls back to the delegator | hybrid |
-| T5  | Exercise | a usable permit's action occurs, firing the event it emits, if any | both |
-| T6  | Examine (permit-gated discharge) | an obligation whose action requires a permit is discharged while the permit is active | both |
+| T5  | Exercise | a usable permit's action occurs, firing the event it emits, if any (the verifier's "usable" has no time, unlike the engine's use check, so an elapsed permit not yet written `expired` still offers the exercise; parity row R28) | both |
+| T6  | Examine (permit-gated discharge) | an obligation whose action requires a permit is discharged while the permit is active (with no time, as in T5; parity row R28) | both |
 | T7  | Authorization Revoke | the granted permit is superseded and the revocation embargo activated | hybrid |
 | T8  | Authorization Reinstate | the permit is reactivated and the revocation embargo lifted | hybrid |
 | T9  | Transfer | an action's `effect transfer` moves a burden to the actor filling the target role | hybrid |
@@ -1746,7 +1757,8 @@ same results as on 2.1.0.
 - **`effect destroy` acts on burdens only.** v2.0.0 and 2.1.0, the same:
   aimed at a permit or an embargo, the action returns ok, the token stays
   active, the ledger has no effect line and the validator gives no
-  warning. After `endSiteAccess` the permit's action still runs; after
+  warning. On a permit it does nothing whether or not the permit has
+  expired. After `endSiteAccess` the permit's action still runs; after
   `liftRemovalEmbargo` the embargo still blocks. Aimed at a burden, it ends
   it, but the ledger reads `discharged burden 'siteCleanupBurden'`, as if
   the work had been done.
