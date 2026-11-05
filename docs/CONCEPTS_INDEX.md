@@ -1922,6 +1922,8 @@ via `grep -n "AM-34" toolchain/fhir_event_handler.py`, zero matches).
 
 **OPEN FINDING**: `ObligationState.EXPIRED` is declared in `el_kripke.py` and priced in the utility function (0.0, neutral) and world-labelling function ("expired"), but is never produced by any transition rule in the current Kripke world-construction code — it is a reserved-but-unreachable state. Comment at declaration site says "context no longer applies (actor left community etc.)", suggesting it's intended for future revocation/context-loss handling (connects to deferred R30 Option B — live Consent revocation via FHIR). Until wired into an actual transition, any paper/reviewer-facing description of the reachable state space for this scenario should state {PENDING, DISCHARGED, VIOLATED} as reachable and EXPIRED as reserved, not omit it or claim it's fully implemented.
 
+**Not the engine's `expired` (2.5.0-1):** the engine's permit state `expired` is a different thing: a runtime token state that the sweep writes for a permit whose time limit is up. `ObligationState.EXPIRED` is a verifier state for an obligation (a burden), and no Kripke rule produces it; no Kripke rule writes the permit state `expired` either (see "Permit time limits (2.5.0)" in `docs/DSL_TOOLCHAIN_REFERENCE.md`).
+
 ---
 
 ## Layer 4 discharge has no negative preconditions; strict-mode AF may be structurally guaranteed
@@ -2529,6 +2531,8 @@ availability of a longer working block.
 **Related:** the `ObligationState.EXPIRED` "reserved but unreachable"
 finding, already noting this general territory (runtime events not
 wired into obligation-state handling) was anticipated but left unbuilt.
+That `EXPIRED` is not the engine's permit state `expired` (2.5.0-1),
+which the sweep writes for a permit whose time limit is up.
 
 **Status: RESOLVED (2026-08-13).** Option 1 (extend hybrid mode) was chosen
 and implemented as R30 Option B: live grant/reinstate, wired end-to-end
@@ -4602,10 +4606,13 @@ unusable as no digit at all); treating "has digits somewhere" as
 sufficient would have left that shape of deadline exploitable by the same
 bug. Confirmed this makes no behavioural difference across any deadline
 declared today — `"by 2026-05-20"` is declared on a `permit`, not a
-`burden`, so `check_live_violations()` (which only ever sweeps burdens)
-was never going to touch it regardless — but the function is written to
-get the general case right rather than the case that happens not to
-matter yet.
+`burden`, so `check_live_violations()` (at that date it swept only
+burdens) was never going to touch it regardless — but the function is
+written to get the general case right rather than the case that happens
+not to matter yet. Since 2.5.0-1 (2026-11-05) the sweep also judges a
+permit's time limit: a duration limit with a magnitude once the permit
+has been active, and a date-form limit when the runtime has a
+`DeadlineClock` and the caller supplies `as_at`.
 
 Kripke verifier (`el_kripke.py`) behaviour is unchanged — this fix is
 scoped to `check_live_violations()`'s live tick-sweep only, per its own
@@ -4634,6 +4641,15 @@ case). Full suite: 223/223 before this change (the `5b21dc9` baseline),
 throughout (never violate, at any tick tested), while
 `referralResponseBurden`/`assessmentSchedulingBurden` violate exactly as
 `5b21dc9` already established (elapsed ≥ 40 / ≥ 112 respectively).
+
+**Update (2.5.0-1), permits:** a permit's time limit with no magnitude
+(`"thirty days"`, `"referral episode"`) never elapses: the use check and
+the sweep both leave it alone. For a strict burden whose discharging
+action requires such a permit, `[W-strict-timed-permit]` still fires (it
+reads any limit text), but the status route does not withhold
+`compelled` (it withholds only for a limit with a magnitude or a date;
+parity row R28). See "Permit time limits (2.5.0)" in
+`docs/DSL_TOOLCHAIN_REFERENCE.md`.
 
 ---
 
@@ -6246,6 +6262,13 @@ response fired, within the deadline) is not yet checked; see "Deployment
 property for strict burdens is unchecked" below. The distinction the
 paper wording should draw stands.
 
+**Update (2.5.0-1):** the status route now withholds the AF claim for one
+case: a strict burden any of whose discharging actions requires a permit
+with a time limit gets `compelled: null` and status "permit time limit:
+not modelled", in both modes (parity row R28; see "Permit time limits
+(2.5.0)" in `docs/DSL_TOOLCHAIN_REFERENCE.md`). Other strict burdens keep
+`compelled` as computed, including those a declaration can violate (R8).
+
 **Note (AM-106, 2026-09-26):** T2 can violate a `strict` burden in both
 Kripke builders — neither excludes strict burdens — while the engine
 never clock-violates one (`check_live_violations()` skips them). It
@@ -6313,7 +6336,9 @@ this deadlock a new way in. If a strict burden's discharging action requires
 a permit whose time is up when the burden becomes active, the holder's
 discharge is refused and `advance_clock()` is blocked. The validator warns
 (`[W-strict-timed-permit]`); nothing prevents it. The exits are the same as
-above.
+above. For such a burden the status route answers `compelled: null` and
+status "permit time limit: not modelled", in both modes (parity row R28;
+see "Permit time limits (2.5.0)" in `docs/DSL_TOOLCHAIN_REFERENCE.md`).
 
 **OPEN FINDING** — found during AM-103 Phase 1. If the holder of an
 actionable strict burden cannot perform its discharging action, nothing
@@ -6896,6 +6921,15 @@ the obligation failing on the branch where the permit should have been
 activated. No tracked scenario uses an event-triggered permit today. Not
 scheduled.
 
+**Update (2.5.0-1, parity row R29):** in the hybrid model, a reinstate and
+an `activate` effect do not restore a pending permit, as R29 says. The
+event route does: an action that emits the permit's triggering event
+restores a pending permit (`_fire_event()` in `toolchain/el_kripke.py`,
+T11), so R29's "falsely unreachable" does not apply to it there. An
+event that no action emits does not restore it. An expired permit at the
+anchor has no edge that changes it. Not verified: R29's clause on the
+static model and its sentence on AF.
+
 ## Deadline unit table reverses real-time order — OPEN FINDING (2026-09-27), RESOLVED (2026-09-27)
 
 **OPEN FINDING (2026-09-27, high priority), RESOLVED 2026-09-27 by
@@ -7184,7 +7218,9 @@ any permit token whose `for_action` it is; or a validator warning for a
 permit/embargo `for_action` no role declares. Not scheduled.
 Consequence for refused attempts (2.3.0-8): such an action is never
 refused for a missing permit, so no `permit_requirement` refused attempt
-is recorded for it.
+is recorded for it. Consequence for permit time limits (2.5.0-1): the
+time check is part of Step 6, so a permit's time limit has no effect on
+an undeclared action either.
 
 ## Static builder: a specification with no `fills` statement stays unrestricted — OPEN FINDING (2026-09-27)
 
@@ -7532,9 +7568,9 @@ parity row R28).
 | Static (`mode=spec`) | true, before and after the revocation | `detectable` true, witness present | **No, this is the unsafe claim.** The model has no such path: the static builder has no T7 (R30) |
 | Hybrid (default) | false, before and after the revocation | After: `detectable` false, counterexample present | Yes, after the revocation |
 
-Probed on one specification, with a burden triggered by an event. Step B5 will extend
-`_compelled_withheld()` to a permit named by `suspends:` or `expires:`, but not to one
-named by `revokes:` (ruling D14: this gap is recorded, not changed). Not scheduled.
+Probed on one specification, with a burden triggered by an event. The withholding
+does not cover a permit withdrawn by `revokes:`. This gap is recorded, not changed.
+Not scheduled.
 
 ## The UI bridge's `POST /verify` still reports the claim the status route withholds — OPEN FINDING (2026-11-05)
 
