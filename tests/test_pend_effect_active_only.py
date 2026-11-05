@@ -12,7 +12,8 @@ and the "pended" line is written only when an instance was pended. There is no
 note line. The act itself still returns ok and advances the world tick by one.
 
 A pended instance that is activated again gets a new activation tick, so its
-deadline restarts.
+deadline restarts. 2.5.0-1: except a permit, which keeps its first activation
+stamp (tests/test_permit_clock.py).
 
 Fixture: as tests/test_activate_effect_pending_only.py. Operator performs the
 acts; Colleague fills no role and only holds tokens.
@@ -298,7 +299,8 @@ def test_pend_active_then_activate_restores_it(kind):
     assert [(e.token_name, e.from_state, e.to_state) for e in pended.token_events] == [
         (name, "active", "pending")]
     assert _token(rt, name).state == "pending"
-    assert _token(rt, name).activated_at_tick is None
+    # 2.5.0-1: a permit leaving active records that it was active since grant.
+    assert _token(rt, name).activated_at_tick == (0 if kind == "permit" else None)
     _clock_to(rt, 20)
 
     activated = rt.advance(activate, "Operator")
@@ -308,7 +310,7 @@ def test_pend_active_then_activate_restores_it(kind):
     tok = _token(rt, name)
     assert tok.kind == kind
     assert tok.state == "active"
-    assert tok.activated_at_tick == 20
+    assert tok.activated_at_tick == (0 if kind == "permit" else 20)
     assert tok.granted_at_tick == 0
 
     if kind == "burden":

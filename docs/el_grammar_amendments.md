@@ -12666,7 +12666,8 @@ this effect is not delegation.
 **Limit.**
 - Re-activation restarts the deadline clock: `effect activate` stamps a new
   `activated_at_tick` on a pended instance, so its deadline counts in full
-  from that act.
+  from that act. **Update (2.5.0-1):** for a permit this restart is
+  superseded: a restore keeps the first activation stamp.
 - A pend that changes nothing gets no note line, unlike `effect activate` on
   a closed instance, so unless another line names the token the act does not
   appear in the token's accountability chain.
@@ -12685,3 +12686,33 @@ the six API scenarios.
 Verifier parity: `docs/ENGINE_VERIFIER_PARITY.md` has no row for the pend
 effect and none is added. The verifier does not read the effect; no verifier
 code changed.
+
+## 2.5.0-1 — permits can have a time limit (`toolchain/el_engine.py`)
+
+**Status:** PARTIALLY IMPLEMENTED. Type: engine.
+
+**Before.** `effect activate` and event activation gave a pending permit a new
+`activated_at_tick`, so a restore restarted its clock. Reinstate wrote no stamp.
+A permit that was not active and had no stamp could have been active since
+grant or never active: the two cases looked the same.
+
+**Now.** The engine records when a permit's clock starts. Nothing reads the
+clock yet: there is no use check, no sweep and no expired state, and no act is
+refused because of it.
+
+A permit's clock runs from its activation tick, and it keeps running while the
+permit is pending.
+- A permit with no stamp that leaves active takes its grant tick as its stamp
+  (`_transition()`), which records that it was active since grant.
+- `effect activate`, event activation and reinstate of an existing instance
+  keep a stamp they find, so a restore never overwrites the first activation.
+  With no stamp the permit was never active, and they stamp the current tick.
+- Reinstate leaves another holder's instance that is already active as it was.
+- Reinstate's first-time grant writes no stamp: the permit is granted now, so
+  its grant tick is its activation tick.
+- `_permit_clock_start()` returns the stamp if there is one, else the grant tick
+  if the permit is active, else None: a permit that was never active has no
+  clock. Only the tests call it so far.
+
+Burdens and embargoes are unchanged and still restamp on restore. The open
+finding on a burden's restarted deadline in `docs/CONCEPTS_INDEX.md` stays open.

@@ -66,11 +66,17 @@ class TokenInstance:
                                      # strict finding's convergence addendum (2026-08-20)
     deadline: Optional[str] = None
     for_action: Optional[str] = None  # informational — see AM-01
-    activated_at_tick: Optional[int] = None  # AM-100: tick at which a pending token became
-                                     # active (event trigger or `activate` effect); None
-                                     # means active since grant. Deadlines count from here
-                                     # -- see _activation_tick(). granted_at_tick is kept
-                                     # unchanged as grant provenance.
+    activated_at_tick: Optional[int] = None  # granted_at_tick is kept unchanged as grant
+                                     # provenance; this field records activation.
+                                     # Burden or embargo (AM-100): the tick of its latest
+                                     # activation by an event trigger or `activate` effect,
+                                     # overwritten by each restore; None means no such
+                                     # activation since grant. A burden's deadline counts
+                                     # from here -- see _activation_tick().
+                                     # Permit (2.5.0-1): the tick of its first activation,
+                                     # never overwritten. None on an active permit means
+                                     # active since grant; None in any other state means it
+                                     # has never been active -- see _permit_clock_start().
 
 
 @dataclass(frozen=True)
@@ -422,6 +428,14 @@ def _actor_holds_permit(state: WorldState, actor_name: str, token_name: str) -> 
 
 
 def _transition(tok: TokenInstance, new_state: str) -> TokenInstance:
+    """Every change of an existing instance's state passes through here.
+    2.5.0-1: a permit with no stamp that leaves 'active' has been active
+    since grant, so it takes its grant tick as its stamp; afterwards a
+    permit that is not active and has no stamp has never been active."""
+    activated_at_tick = tok.activated_at_tick
+    if (tok.kind == "permit" and activated_at_tick is None
+            and tok.state == "active" and new_state != "active"):
+        activated_at_tick = tok.granted_at_tick
     return TokenInstance(
         token_name=tok.token_name,
         kind=tok.kind,
@@ -432,7 +446,7 @@ def _transition(tok: TokenInstance, new_state: str) -> TokenInstance:
         granted_at_tick=tok.granted_at_tick,
         deadline=tok.deadline,
         for_action=tok.for_action,
-        activated_at_tick=tok.activated_at_tick,
+        activated_at_tick=activated_at_tick,
     )
 
 
@@ -440,14 +454,31 @@ def _activate(tok: TokenInstance, tick: int) -> TokenInstance:
     """AM-100: pending -> active, stamping activated_at_tick so the
     token's deadline counts from now rather than from its grant. The
     live-engine counterpart of the static Kripke builder's
-    World.activation_steps (AM-99a part 1)."""
-    return replace(_transition(tok, "active"), activated_at_tick=tick)
+    World.activation_steps (AM-99a part 1).
+
+    2.5.0-1: a permit keeps a stamp it already has, so its clock runs on
+    from its first activation; with no stamp it was never active, and
+    this is its first activation."""
+    activated = _transition(tok, "active")
+    if tok.kind == "permit" and tok.activated_at_tick is not None:
+        return activated
+    return replace(activated, activated_at_tick=tick)
 
 
 def _activation_tick(tok: TokenInstance) -> int:
     """AM-100: the tick a token's deadline counts from — its activation
     tick if it was activated after grant, otherwise its grant tick."""
     return tok.granted_at_tick if tok.activated_at_tick is None else tok.activated_at_tick
+
+
+def _permit_clock_start(tok: TokenInstance) -> Optional[int]:
+    """2.5.0-1: the tick a permit's clock runs from — its first activation,
+    or its grant tick if it has been active since grant. None if it has
+    never been active: it has no clock. Permits only; a burden's deadline
+    counts from _activation_tick()."""
+    if tok.activated_at_tick is not None:
+        return tok.activated_at_tick
+    return tok.granted_at_tick if tok.state == "active" else None
 
 
 def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
@@ -1026,6 +1057,7 @@ def _activate_triggered_tokens(spec, tokens: list, event_name: str,
 
     AM-100: activated tokens are stamped with `tick` (activated_at_tick), so
     check_live_violations() counts their deadline from activation, not grant.
+    2.5.0-1: a permit keeps a stamp it already has (_activate()).
 
     AM-100 part 2: only 'pending' tokens are activated, mirroring the static
     Kripke builder's P6a/T11 (only WAITING obligations activate). Any other
@@ -1552,7 +1584,8 @@ def advance(
                 # clock. The "activated" line is written only if an instance
                 # was activated; after it, each instance neither pending nor
                 # active gets a note line, which keeps a no-op act in the
-                # token's accountability chain.
+                # token's accountability chain. 2.5.0-1: a permit keeps a
+                # stamp it already has (_activate()).
                 pending = [t for t in tokens
                            if t.token_name == tok_ref.name and t.state == "pending"]
                 tokens = [_activate(t, tick) if t in pending else t for t in tokens]
@@ -2862,9 +2895,12 @@ def reinstate_authorization(
     if existing_permit is not None and existing_permit.state == "active":
         tokens = list(state.tokens)
     elif existing_permit is not None:
+        # 2.5.0-1: _activate() keeps a stamp and stamps a permit that was
+        # never active. Another holder's instance that is already active
+        # keeps its clock, so it is left as it is.
         tokens = [
-            _transition(t, "active")
-            if t.token_name == permit_name and t.kind == "permit"
+            _activate(t, tick)
+            if t.token_name == permit_name and t.kind == "permit" and t.state != "active"
             else t
             for t in state.tokens
         ]
