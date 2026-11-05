@@ -4906,7 +4906,24 @@ need for reusing a role name across communities actually arises.
 
 ---
 
-## `handle_consent_event()`'s `status=="inactive"` branch mislabels a blocked revocation as "revoked" — OPEN FINDING (2026-09-04)
+## `handle_consent_event()`'s `status=="inactive"` branch mislabels a blocked revocation as "revoked" — OPEN FINDING (2026-09-04), RESOLVED 2026-11-05
+
+**OPEN FINDING (2026-09-04), RESOLVED 2026-11-05 by 2.5.0-1.** The handler
+now tests `tr.outcome == "blocked"` before `tr.effects`, on both branches, and
+reports `action_taken="blocked"` with the engine's reason in the message. The
+active branch had the same fault, unlogged: it reported `already_active` on a
+refused reinstate. A consent test now asserts the label, and
+`POST /fhir/consent-events` no longer stamps provenance on a refused event.
+`handle_encounter_event()` has the same fault and is not changed (open finding
+below, "The FHIR event handler misreports a refused firing").
+
+**A test passed only because of this fault.**
+`test_consent_active_reinstate_stamps_provenance_under_permit_token` passed at
+`aab0318` only because both its events were refused: the AM-76 fixture fix added
+a discharge of `referralInitiationBurden` to the other tests in the file and
+missed this one, and the route stamped provenance on the refused events. The
+`blocked` label (ruling A6-1 (b)) exposed it, and the test now discharges the
+burden first. The text below is the finding as logged.
 
 **Found while landing AM-76** (`docs/el_grammar_amendments.md`), which
 closed the `discharge_mode: strict` live-enforcement gap across
@@ -6498,6 +6515,17 @@ a world, so a per-holder revocation needs per-holder permit state there
 too. The `on_revocation` embargo already goes to the former holder, but
 only `holders[0]` when several hold the permit. Not scheduled.
 
+**Update (2.5.0-1).** An expired instance is now skipped, so "every permit
+instance" reads "every instance not expired". A new embargo goes to the first
+holder not expired, in any state; an embargo that already exists keeps its
+holder, so a holder can be revoked and not embargoed. The bystander effect is
+sharper: revoking the Authorization granted to A, whose instance is expired,
+hits only bystander B, and B takes the embargo. A's instance does not move,
+while a response's line still reads `revoked 'TimedAuth' (to 'HolderA')`.
+Reinstating with A expired and B superseded revives B and leaves A expired. The
+verifier's anchor keeps one state per permit name (parity row R30). Run on the
+engine; still not scheduled.
+
 ## terminate responses do not cover `to_role` Authorizations — OPEN FINDING (2026-09-26)
 
 **OPEN FINDING** — AM-104's terminate revokes only Authorizations whose
@@ -7438,6 +7466,50 @@ a deliberate no-op (AM-100 part 2; `toolchain/el_engine.py:1030`, as of
 `c716d9d`; line numbers will drift) and the static verifier models at most
 one firing per path; neither the validator nor the verifier says so.
 Parity rows for repeated firing are planned and not yet written up.
+
+## Direct and response revokes differ on an expired permit — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — A direct revoke (`revoke_authorization()`) and a response's
+revoke (`_revoke_for_response()`, reached by `revokes:` and `terminate`) treat a
+permit with no active instance differently (2.5.0-1).
+
+| Instances | Direct | Response |
+|---|---|---|
+| Every instance expired | `ok`, a `had no effect` line each, no tick, no embargo | `not revoked` line, no embargo; the response fires and its tick moves |
+| Pending, claimable or lapsed | `superseded`, embargo active | `not revoked` line, no embargo |
+| A expired, B superseded | Embargo goes to B | `not revoked` line, no embargo |
+
+The direct route's other states were kept as they were on purpose. Whether the
+two routes should agree is not decided. Not scheduled.
+
+## A reinstate with several holders depends on list order — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — `reinstate_authorization()` skips expired instances, and the
+first instance not expired decides for the rest (2.5.0-1), as the first instance
+did before. If it is active, nothing moves, so with A expired, B active and C
+superseded, C stays superseded. With C listed before B, C goes active. Left as it
+is: with no expired instance the result is the same as before. Depends on the
+per-holder revocation finding above. Not scheduled.
+
+## A response's `creates_burden` reads a permit's state, not its time — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — With an active, elapsed permit not yet swept, a response's
+`creates_burden` naming it writes `already holds active ... not granted again`
+and grants nothing, while the use check refuses the permit. After a sweep the same
+response grants a new instance with a new clock. So whether the holder gets a new
+clock depends on whether a sweep ran first. This matches a response's revoke, which
+also ignores time. Pinned for the expired case by
+`tests/test_permit_expired_final.py`. Not scheduled.
+
+## An expired permit has one live way back — OPEN FINDING (2026-11-05)
+
+**OPEN FINDING** — `expired` is final and only a new grant brings the permit back
+(2.5.0-1), but `grant_token` has no Runtime method or API route: only scenario
+builders and tests call it. So for a holder with an expired instance, the only live
+new grant is a response's `creates_burden`, which needs a violation to fire. A
+fresh active FHIR Consent is refused, and `effect create` skips a holder who already
+has an instance. `effect create` for another holder makes that holder a new instance
+and does nothing for this one. A route for a new grant is not designed. Not scheduled.
 
 ---
 

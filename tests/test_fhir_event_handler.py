@@ -19,9 +19,12 @@ Follows the fixture pattern of tests/test_referral_revocation.py: fresh
 el_api import per test, explicitly switched to the "referral" scenario.
 """
 import importlib
+from dataclasses import replace
 
 import pytest
 from fastapi import HTTPException
+
+from el_engine import grant_token, token_from_spec
 
 
 @pytest.fixture
@@ -82,13 +85,9 @@ def test_consent_inactive_revocation_blocked_while_strict_burden_outstanding(api
     actually targets; this is the one test that asserts the guard itself,
     on its own merits, rather than routing around it as a fixture hazard.
 
-    Deliberately does not assert on resp.action_taken: handle_consent_event()
-    unconditionally reports "revoked" for status=="inactive" regardless of
-    whether the underlying revoke_authorization() call actually succeeded
-    or was blocked -- a separate, not-yet-fixed mislabeling (see
-    docs/CONCEPTS_INDEX.md, logged alongside AM-76). Ground truth here is
-    resp.outcome, the ledger's reason string, and the unchanged token
-    state -- not the label.
+    The label is "blocked" (2.5.0-1; before it the handler reported "revoked"
+    whether or not the revoke was refused). Ground truth is still resp.outcome,
+    the ledger's reason string, and the unchanged token state.
     """
     before = _permit_states(api._runtime)
     assert before[("patientRecordAccessPermitByAuthorization", "SpecialistAIAgent")] == "active"
@@ -97,6 +96,7 @@ def test_consent_inactive_revocation_blocked_while_strict_burden_outstanding(api
     resp = api.consent_event(consent)
 
     assert resp.outcome == "blocked"
+    assert resp.action_taken == "blocked"
 
     ledger_reason = api._runtime._ledger[-1].reason
     assert "referralInitiationBurden" in ledger_reason
@@ -208,11 +208,120 @@ def test_consent_active_reinstates_after_revoke_and_lifts_embargo(api):
     assert embargo_after and embargo_after[0].state == "lifted"
 
 
+# ── 2.5.0-1: an expired permit, and a refused event ──────────────────────────
+
+_AUTH_PERMIT = "patientRecordAccessPermitByAuthorization"
+_EXPIRY_REASON = f"permit '{_AUTH_PERMIT}' has expired; only a new grant restores it"
+
+
+def _seed_permit(api, permit_state):
+    """Puts the Authorization's permit in a state only a run can produce."""
+    runtime = api._runtime
+    runtime._state = runtime._state.with_tokens(tuple(
+        replace(t, state=permit_state) if t.token_name == _AUTH_PERMIT else t
+        for t in runtime.current_state().tokens
+    ))
+
+
+def _seed_embargo(api, embargo_state):
+    runtime = api._runtime
+    embargo = token_from_spec(runtime._spec, "patientRecordAccessEmbargo",
+                              "SpecialistAIAgent", runtime.current_state().tick)
+    runtime._state = grant_token(runtime.current_state(), replace(embargo, state=embargo_state))
+
+
+def _embargo_states(api):
+    return [t.state for t in api._runtime.current_state().tokens
+            if t.token_name == "patientRecordAccessEmbargo"]
+
+
+def test_consent_event_on_an_expired_permit(api):
+    """A fresh active Consent does not restore an expired permit: refused, not
+    "already_active", and nothing moves."""
+    api._runtime.discharge_burden("referralInitiationBurden")
+    _seed_permit(api, "expired")
+    _seed_embargo(api, "active")
+    before = api._runtime.current_state()
+
+    resp = api.consent_event(
+        {"resourceType": "Consent", "id": "consent-expired", "status": "active"}
+    )
+
+    assert resp.action_taken == "blocked"
+    assert resp.outcome == "blocked"
+    assert resp.effects == []
+    assert _EXPIRY_REASON in resp.message
+    assert api._runtime.current_state() == before
+    assert api._runtime._ledger[-1].reason == _EXPIRY_REASON
+    assert _AUTH_PERMIT not in api._fhir_provenance_by_token
+
+
+def test_consent_inactive_on_an_expired_permit(api):
+    """Nothing to revoke: not a refusal and not "revoked". The state's tick does
+    not move and no embargo follows."""
+    api._runtime.discharge_burden("referralInitiationBurden")
+    _seed_permit(api, "expired")
+    before = api._runtime.current_state()
+    note = f"revoke '{_AUTH_PERMIT}' had no effect: 'SpecialistAIAgent' holds it expired"
+
+    resp = api.consent_event(
+        {"resourceType": "Consent", "id": "consent-expired-off", "status": "inactive"}
+    )
+
+    assert resp.action_taken == "already_expired"
+    assert resp.outcome == "ok"
+    assert resp.effects == [note]
+    assert "already expired" in resp.message
+    assert note in resp.message
+    assert api._runtime.current_state() == before
+    assert _embargo_states(api) == []
+    assert "patientRecordAccessEmbargo" not in api._fhir_provenance_by_token
+
+
+@pytest.mark.parametrize("permit_state", ["superseded", "expired"])
+def test_consent_active_under_a_strict_freeze_reports_blocked(api, permit_state):
+    """The strict guard comes first, so an expired permit gets the strict
+    refusal too. Either way the permit is not active, so "already_active"
+    would be false."""
+    _seed_permit(api, permit_state)
+    before = api._runtime.current_state()
+
+    resp = api.consent_event(
+        {"resourceType": "Consent", "id": "consent-frozen", "status": "active"}
+    )
+
+    assert resp.action_taken == "blocked"
+    assert resp.outcome == "blocked"
+    assert resp.effects == []
+    assert "referralInitiationBurden" in resp.message
+    assert "before the authorization can be reinstated" in resp.message
+    assert api._runtime.current_state() == before
+
+
+def test_consent_inactive_under_a_strict_freeze_reports_blocked(api):
+    """On an expired permit, too, the strict guard answers first: the strict
+    refusal, not "already_expired" and no note line."""
+    _seed_permit(api, "expired")
+    before = api._runtime.current_state()
+
+    resp = api.consent_event(
+        {"resourceType": "Consent", "id": "consent-frozen-off", "status": "inactive"}
+    )
+
+    assert resp.action_taken == "blocked"
+    assert resp.outcome == "blocked"
+    assert resp.effects == []
+    assert "referralInitiationBurden" in resp.message
+    assert "before the authorization can be revoked" in resp.message
+    assert api._runtime.current_state() == before
+
+
 def test_consent_active_reinstate_stamps_provenance_under_permit_token(api):
     """Mirrors test_consent_inactive_triggers_revocation_with_provenance,
     but for the reverse direction: reinstate stamps fhir_provenance under
     the permit token name, not the embargo — the embargo is what gets
     stamped on revoke, so the two directions must key differently."""
+    api._runtime.discharge_burden("referralInitiationBurden")
     api.consent_event({"resourceType": "Consent", "id": "consent-revoke-2", "status": "inactive"})
     assert api._fhir_provenance_by_token["patientRecordAccessEmbargo"] == "consent-revoke-2"
 

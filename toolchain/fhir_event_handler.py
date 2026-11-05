@@ -22,7 +22,9 @@ R31 — Consent.status: active -> inactive (implemented here in full).
   engine path already exercised by POST /authorizations/{name}/revoke in
   el_api.py. This supersedes patientRecordAccessPermitByAuthorization and
   activates patientRecordAccessEmbargo (see AM-31, AM-31b). The FHIR
-  Consent.id is carried through as fhir_provenance on the result.
+  Consent.id is carried through as fhir_provenance on the result. A refused
+  revoke reports "blocked", and a revoke of a permit already expired, which
+  changes nothing, reports "already_expired" (2.5.0-1).
 
 R30 — Consent.status: active (Option B, live grant/reinstate; implemented
   here in full, 2026-08-13).
@@ -38,7 +40,10 @@ R30 — Consent.status: active (Option B, live grant/reinstate; implemented
   authorization, it is transitioned to 'lifted' — a state distinct from
   'superseded' (which means a Permit lost governance to an Embargo, the
   opposite relationship). The FHIR Consent.id is carried through as
-  fhir_provenance on the result, mirroring R31.
+  fhir_provenance on the result, mirroring R31. A refused reinstate, under
+  a strict burden or of a permit expired for every holder, reports
+  "blocked" (2.5.0-1): a fresh active Consent does not restore an expired
+  permit.
   A FHIR Consent bundle with status="active" received BEFORE runtime
   construction still determines the initial authorization state via
   build_from_spec()/build_from_federation() or the hand-written scenario
@@ -186,11 +191,11 @@ class ConsentEventResult:
     """Outcome of feeding one FHIR Consent resource to handle_consent_event()."""
     fhir_consent_id: str
     fhir_status: str
-    action_taken: str              # "revoked" | "reinstated" | "already_active" | "no_op"
-    message: str
+    action_taken: str              # "revoked" | "reinstated" | "already_active" | "already_expired" | "blocked" | "no_op"
+    message: str                   # for "blocked", carries the engine's reason
     fhir_provenance: str           # == fhir_consent_id; carried for API-layer stamping
-    authorization_name: Optional[str] = None   # set when action_taken in ("revoked", "reinstated", "already_active")
-    transition: Optional[TransitionRecord] = None   # set when action_taken in ("revoked", "reinstated", "already_active")
+    authorization_name: Optional[str] = None   # set unless action_taken == "no_op"
+    transition: Optional[TransitionRecord] = None   # set unless action_taken == "no_op"
 
 
 @dataclass(frozen=True)
@@ -252,6 +257,25 @@ class EncounterEventResult:
     transition: Optional[TransitionRecord] = None    # None only when action_taken == "no_op"
 
 
+def _blocked_consent_result(
+    consent_id: str, status: str, authorization_name: str, tr: TransitionRecord,
+) -> ConsentEventResult:
+    """2.5.0-1: the result of a Consent event the engine refused. Nothing
+    changed; the message carries the engine's reason."""
+    return ConsentEventResult(
+        fhir_consent_id=consent_id,
+        fhir_status=status,
+        action_taken="blocked",
+        message=(
+            f"Consent '{consent_id}' status={status}: authorization "
+            f"'{authorization_name}' unchanged, refused: {tr.reason}"
+        ),
+        fhir_provenance=consent_id,
+        authorization_name=authorization_name,
+        transition=tr,
+    )
+
+
 def handle_consent_event(
     consent: dict,
     runtime: Runtime,
@@ -260,9 +284,16 @@ def handle_consent_event(
     """
     Apply a FHIR R4 Consent resource event to `runtime`.
 
+    2.5.0-1: on both branches below, outcome "blocked" is tested first and
+    reports action_taken "blocked", with the engine's reason in the message.
+    The engine refuses during a strict freeze, and refuses a reinstate when
+    every instance of the permit is expired.
+
     status == "inactive" (R31): revokes `authorization_name` via
       Runtime.revoke_authorization(), which supersedes the permit it
-      grants and activates its on_revocation embargo.
+      grants and activates its on_revocation embargo. If every instance
+      is expired the revoke changes nothing and the state's tick does not
+      move; that reports "already_expired", with the engine's note lines.
     status == "active" (R30 Option B): (re-)establishes `authorization_name`
       via Runtime.reinstate_authorization(). reinstate_authorization()
       never raises for an already-active permit, so this branch inspects
@@ -278,9 +309,9 @@ def handle_consent_event(
       "already_active" the same full response shape as "reinstated"
       (tick/authority/outcome all populated) was made on its own merits
       (a real TransitionRecord exists either way), not against precedent.
-      Both outcomes carry the real transition on the result; only the
-      true no-op below (status not "active"/"inactive") leaves transition
-      as None.
+      Every label on these two branches carries the real transition on
+      the result; only the true no-op below (status not
+      "active"/"inactive") leaves transition as None.
     any other status: no-op; not a recognised event by this handler.
 
     Raises ValueError if the Consent resource is missing 'id' or 'status'.
@@ -299,6 +330,23 @@ def handle_consent_event(
 
     if status == "inactive":
         tr = runtime.revoke_authorization(authorization_name)
+        if tr.outcome == "blocked":
+            return _blocked_consent_result(consent_id, status, authorization_name, tr)
+        # An applied revoke moves the state past the record's tick.
+        if runtime.current_state().tick == tr.tick:
+            return ConsentEventResult(
+                fhir_consent_id=consent_id,
+                fhir_status=status,
+                action_taken="already_expired",
+                message=(
+                    f"Consent '{consent_id}' status=inactive: the permit of "
+                    f"authorization '{authorization_name}' is already expired "
+                    f"— nothing changed; {'; '.join(tr.effects)}."
+                ),
+                fhir_provenance=consent_id,
+                authorization_name=authorization_name,
+                transition=tr,
+            )
         return ConsentEventResult(
             fhir_consent_id=consent_id,
             fhir_status=status,
@@ -314,6 +362,8 @@ def handle_consent_event(
 
     if status == "active":
         tr = runtime.reinstate_authorization(authorization_name)
+        if tr.outcome == "blocked":
+            return _blocked_consent_result(consent_id, status, authorization_name, tr)
         if tr.effects:
             return ConsentEventResult(
                 fhir_consent_id=consent_id,

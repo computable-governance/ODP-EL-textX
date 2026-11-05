@@ -12703,8 +12703,9 @@ the sweep never touched a permit.
 `Runtime.in_force_at()`, and so `declare_breach`, applies the limit, and the sweep
 writes the new state `expired`. The other displays do not read the limit yet. A
 permit past its limit is refused whatever its state record says: until a sweep, the
-record still says active, and the refusal changes nothing. `expired` is not yet
-final: a direct revoke or a reinstate still moves an expired permit.
+record still says active, and the refusal changes nothing. `expired` is final for
+that instance: a direct revoke or a reinstate does not move it, and only a new grant
+brings the permit back (see "`expired` is final" below).
 
 The sweep (`check_live_violations()`) moves an active or pending permit whose time
 is up to `expired`, whatever its `discharge_mode`. Other states do not change.
@@ -12752,8 +12753,9 @@ it is active and its time has not elapsed.
   its true state: `active` for an elapsed permit, `expired` once swept. Through
   `Runtime.advance()` the refused attempt is recorded as a `permit_requirement`
   violation, as for any permit refusal.
-- A restore or reinstate past the limit goes through and the permit becomes
-  active; the use check then refuses it. A clone or a transfer carries the clock,
+- A restore or reinstate past the limit of a permit not yet swept goes through and
+  the permit becomes active; the use check then refuses it. Once swept, the permit
+  is `expired` and a reinstate is refused. A clone or a transfer carries the clock,
   so the new holder's permit has elapsed too.
 
 A response's revoke (`revokes:`) does not read a permit's time limit, only its
@@ -12800,3 +12802,102 @@ permit is pending.
 
 Burdens and embargoes are unchanged and still restamp on restore. The open
 finding on a burden's restarted deadline in `docs/CONCEPTS_INDEX.md` stays open.
+
+**`expired` is final.** An expired instance stays expired; only a new grant brings
+the permit back, and that grant starts a new clock. The clock also keeps running
+while a permit is suspended. "Final" is this toolchain's decision: no clause of the
+standard is cited for it, and no validator rule is added.
+
+Before, a direct revoke moved an expired permit to `superseded`, and a reinstate
+revived it with a new stamp. Both now act as follows. The strict guard stays first in
+both routes, so during a strict freeze an expired permit gets the strict refusal and
+no note line.
+
+*Every instance expired.*
+- A direct revoke returns outcome `ok` with one note line per instance, `revoke 'X'
+  had no effect: 'H' holds it expired` (the wording of `effect activate`, 2.4.1-1).
+  No state, no tick, no embargo, no token events.
+- A reinstate is refused: outcome `blocked`, the reason `permit 'X' has expired; only
+  a new grant restores it`, empty effects, the input state and its tick, the embargo
+  untouched, `blocked_by` empty.
+- A permit with no instance at all keeps today's first-time grant and revoke fallback.
+
+*Expired instances beside others.*
+- A revoke skips the expired ones, with one note line for each. A new embargo goes to
+  the first holder not expired, in any state; an embargo that already exists keeps its
+  holder. The skip lives in `_apply_revocation()`, so it also applies to a response's
+  `revokes:` and `terminate`; the terminate branch itself is not edited. It tests
+  `state == "expired"`, not `_permit_usable()`, because a response's revoke ignores
+  time: an active permit past its limit is still revoked.
+- A reinstate skips the expired ones, with no note line, since a line in `effects`
+  would read as a real reinstate. The first instance not expired decides as before,
+  and an active embargo is still lifted.
+
+*Other states are unchanged.* A direct revoke moves pending, claimable and lapsed to
+`superseded` with the embargo active. On `superseded` it writes no permit event, the
+tick moves on, and the embargo is active again.
+
+*With every instance expired, the response routes stop earlier.*
+`_revoke_for_response()` finds no active instance and writes `not revoked`, so
+`_apply_revocation()` is not called: no `superseded permit` line and no embargo. The
+response still fires and its tick still moves.
+
+*New grants and copies, no code change.*
+- `grant_token` and a response's `creates_burden` make a new instance with a new
+  clock beside the expired one.
+- `effect create` for the same holder is skipped, whatever the state.
+- A clone or a transfer carries the state and the clock, so it is not a new grant.
+- `effect destroy` does nothing on a permit, expired or not (known limit), and
+  `revoke_delegation` and `reinstate_delegation` raise `KeyError` for a
+  `transfers_token_group` delegation whatever the state.
+
+*FHIR Consent handler (Layer 1).* `handle_consent_event()` read `tr.effects` and never
+`tr.outcome`, so a refusal was misreported: `already_active` on the active branch and
+`revoked` on the inactive branch. It now tests `tr.outcome == "blocked"` first on both
+branches.
+- A refusal reports the new label `blocked`, with the engine's reason in the message.
+- An inactive event on a permit with every instance expired reports the new label
+  `already_expired`, with the note lines in the message. The test is that the state's
+  tick did not move past the record's tick.
+- No API response model gains a field: the reason reaches the caller only inside the
+  message.
+- `POST /fhir/consent-events` carries outcome and effects for both labels and stamps
+  neither on a token. `already_active` still stamps, as before.
+
+This closes the open finding on the inactive branch (`docs/CONCEPTS_INDEX.md`). The
+same fault in `handle_encounter_event()` stays open.
+
+*A test that passed only because of the fault.*
+`test_consent_active_reinstate_stamps_provenance_under_permit_token` passed at
+`aab0318` only because both its events were refused. The AM-76 fixture fix added a
+discharge of `referralInitiationBurden` to the other tests in that file and missed this
+one, so neither the revoke nor the reinstate happened, and the route stamped provenance
+on the refused events anyway. The handler's `blocked` label (ruling A6-1 (b)) exposed
+it: the route picks the token to stamp from the label. The test now discharges the
+burden first and does the revoke and the reinstate its docstring describes.
+
+**Limit.**
+- With several holders a reinstate depends on list order, and revocation by name still
+  reaches every holder not expired, so revoking the Authorization granted to an agent
+  whose copy is expired hits only the other holder (open findings in
+  `docs/CONCEPTS_INDEX.md`).
+- The direct and response routes differ on an expired permit. `creates_burden` reads
+  the state, not the time. `grant_token` has no live route. All three are open findings.
+- A revoke that changes nothing still adds a ledger record, at the same tick.
+- No shipped API scenario has a permit with a time limit, so `POST /fhir/consent-events`
+  reaches this rule only from a seeded state or a direct handler call.
+
+**Files changed:** `toolchain/el_engine.py`, `toolchain/fhir_event_handler.py`,
+`toolchain/el_api.py`, `tests/test_permit_transition_table.py`,
+`tests/test_permit_expired_final.py`, `tests/test_fhir_event_handler.py`,
+`tests/test_reinstate_endpoint.py`, `docs/el_grammar_amendments.md`,
+`docs/ENGINE_VERIFIER_PARITY.md`, `docs/CONCEPTS_INDEX.md`.
+
+**Verification:** 29 new test cases: 17 in `tests/test_permit_transition_table.py`, 7
+in `tests/test_permit_expired_final.py`, 5 in `tests/test_fhir_event_handler.py`. Full
+suite, run by the author: 2281 passed, 2 skipped, 1 deselected, 1 xfailed.
+
+Verifier parity: new row R30 in `docs/ENGINE_VERIFIER_PARITY.md`. For a single holder
+the engine now matches T7 and T8, which never touched an expired permit; no verifier
+code changed. With several holders the anchor keeps one state per permit name, which
+leaves an Under case (row R30).

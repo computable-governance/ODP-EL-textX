@@ -729,9 +729,9 @@ class ConsentEventResponse(BaseModel):
     fhir_consent_id: str
     fhir_status: str
     fhir_provenance: str
-    action_taken: str              # "revoked" | "reinstated" | "already_active" | "no_op"
-    message: str
-    # populated only when action_taken in ("revoked", "reinstated", "already_active") (mirrors RevokeAuthorizationResponse)
+    action_taken: str              # "revoked" | "reinstated" | "already_active" | "already_expired" | "blocked" | "no_op"
+    message: str                   # for "blocked", carries the engine's reason
+    # populated unless action_taken == "no_op" (mirrors RevokeAuthorizationResponse)
     tick: Optional[int] = None
     authority: Optional[str] = None
     authorization_name: Optional[str] = None
@@ -1781,7 +1781,10 @@ def advance_clock_endpoint(body: AdvanceClockRequest) -> AdvanceClockResponse:
         "(R30 Option B) (re-)establishes it via Runtime.reinstate_authorization() "
         "— (re-)activates the permit, lifting its on_revocation embargo if one "
         "is currently active. Both stamp the Consent.id as fhir_provenance on "
-        "the result; see fhir_event_handler.py's module docstring (AM-34). 400 "
+        "the result; see fhir_event_handler.py's module docstring (AM-34). A "
+        "refused event reports action_taken='blocked', with the reason in "
+        "message; an inactive event on a permit already expired reports "
+        "'already_expired'. Neither is stamped on a token. 400 "
         "if the Consent resource is missing id/status, or the target "
         "authorization has no on_revocation embargo. 404 if the target "
         "authorization is not declared in the active spec at all."
@@ -1815,7 +1818,8 @@ def consent_event(consent: dict) -> ConsentEventResponse:
             detail=f"Consent event could not be applied: {e}",
         )
 
-    if result.action_taken not in ("revoked", "reinstated", "already_active"):
+    if result.action_taken not in ("revoked", "reinstated", "already_active",
+                                   "already_expired", "blocked"):
         return ConsentEventResponse(
             fhir_consent_id=result.fhir_consent_id,
             fhir_status=result.fhir_status,
@@ -1830,7 +1834,8 @@ def consent_event(consent: dict) -> ConsentEventResponse:
     # (the token this event targets, whether or not it actually changed
     # state). The plain POST /authorizations/{name}/revoke path never
     # writes here, so a non-FHIR revoke/reinstate shows no provenance
-    # (by design).
+    # (by design). 2.5.0-1: a refused event, or one on a permit already
+    # expired, is attributed to no token.
     auth_el = next(
         (el for el in _runtime._spec.elements
          if type(el).__name__ == "Authorization" and el.name == result.authorization_name),
@@ -1840,7 +1845,7 @@ def consent_event(consent: dict) -> ConsentEventResponse:
         target_token_name = getattr(auth_el, "on_revocation_embargo", "") if auth_el else ""
     else:
         target_token_name = auth_el.permit.name if auth_el else ""
-    if target_token_name:
+    if target_token_name and result.action_taken not in ("already_expired", "blocked"):
         _fhir_provenance_by_token[target_token_name] = result.fhir_provenance
 
     tr = result.transition
