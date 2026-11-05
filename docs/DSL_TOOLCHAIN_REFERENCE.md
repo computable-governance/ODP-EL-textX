@@ -1303,7 +1303,13 @@ permit timedPermit {
 }
 ```
 
-**When the limit is checked.**
+**When the limit is checked.** The use check is the test the engine runs
+when an actor tries an action that needs a permit (`advance()` Step 6): it
+refuses the action if the permit's time has run out, and leaves the
+permit's state and the tick as they are. The sweep is the engine's pass
+over live state, run when a caller asks for it (`check_live_violations()`,
+or `POST /check-violations`), and it is the only place that writes a
+permit as `expired`.
 - **At use** (`advance()` Step 6, and `declare_violation()`, which shares
   it): a duration limit only. The actor must hold an instance of the
   permit that is active and whose time has not elapsed. A date or instant
