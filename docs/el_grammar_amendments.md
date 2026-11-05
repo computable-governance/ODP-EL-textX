@@ -12697,11 +12697,12 @@ A permit that was not active and had no stamp could have been active since
 grant or never active: the two cases looked the same. A permit's deadline had no
 effect: an active permit could be used however long ago its time had run out.
 
-**Now.** A permit's time limit is enforced at use, and nothing else acts on it
-yet: there is no sweep and no expired state, and the displays and history queries
-do not read it. A permit past its limit is refused whatever its state record
-says, until a later change writes the state: the record still says active, and
-the refusal changes nothing.
+**Now.** A permit's time limit is enforced at use, and `GET available-actions`
+(`toolchain/el_api.py`) leaves out an active permit past its limit. Nothing
+else acts on the limit yet: the history queries and the other displays do not
+read it, and there is no sweep and no expired state. A permit past its limit is
+refused whatever its state record says, until a later change writes the state:
+the record still says active, and the refusal changes nothing.
 
 An action that requires a permit, and a declaration that does, is refused when
 the actor has no usable instance (`_permit_usable()`). An instance is usable if
@@ -12720,6 +12721,11 @@ it is active and its time has not elapsed.
 - A restore or reinstate past the limit goes through and the permit becomes
   active; the use check then refuses it. A clone or a transfer carries the clock,
   so the new holder's permit has elapsed too.
+
+A response's revoke (`revokes:`) ignores a permit's time limit, because a sanction
+must not depend on whether a sweep ran first. It supersedes an active permit and
+activates the `on_revocation` embargo even if the permit's time has elapsed. For a
+permit that is not active it logs `not revoked` and activates no embargo, as before.
 
 The verifier does not model a permit's time and still offers the exercise (parity
 row R28).

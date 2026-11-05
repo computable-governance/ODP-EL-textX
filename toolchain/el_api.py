@@ -43,6 +43,7 @@ from el_engine import _declaration_action_names  # AM-115
 from el_engine import DeadlineClock, not_judged_date_burdens  # 2.1.0-9
 from el_engine import discharging_actions, precondition_text  # 2.1.0-14
 from el_engine import _standing_names  # 2.1.0-20
+from el_engine import _permit_usable  # 2.5.0-1
 from el_kripke import (
     build_kripke_from_runtime,
     build_kripke_model,
@@ -804,9 +805,10 @@ class ScenarioListResponse(BaseModel):
         "burden requires it, but the actor fills no role declaring the action, so "
         "the engine's Step 2 would refuse it — AM-114), 'obligated_blocked' (an "
         "active burden requires it, but an active embargo the actor holds covers "
-        "it, so the engine's Step 5 would refuse it) or 'permitted' (a permit "
-        "grants it, the actor fills a role declaring it, and no embargo blocks "
-        "it). Reads directly from the current Layer 3 runtime state — no Kripke "
+        "it, so the engine's Step 5 would refuse it) or 'permitted' (an active "
+        "permit within its time limit grants it, the actor fills a role "
+        "declaring it, and no embargo blocks it). Reads directly from the current "
+        "Layer 3 runtime state — no Kripke "
         "model is needed for this endpoint."
     ),
 )
@@ -874,7 +876,11 @@ def get_available_actions(actor_name: str) -> AvailableActionsResponse:
             # a declaration; it is made through declare_violation().
             if tok.for_action in declaration_actions:
                 continue
-            if not _is_embargoed(tok.for_action) and not out_of_role:
+            # 2.5.0-1: an active permit past its time limit is not listed,
+            # since the use check refuses it; a date-form limit is not judged
+            # here, as at use.
+            if (_permit_usable(tok, state.tick)
+                    and not _is_embargoed(tok.for_action) and not out_of_role):
                 actions.append(AvailableAction(
                     action=tok.for_action,
                     reason="permitted",
