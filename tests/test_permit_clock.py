@@ -10,8 +10,8 @@ Now: a permit with no stamp that leaves active takes its grant tick as its
 stamp, every restore keeps a stamp it finds, and a permit with no stamp gets
 one on its first activation by any route. So a permit that is not active and
 has no stamp has never been active, and has no clock (_permit_clock_start()).
-Burdens and embargoes keep restamping on restore. Nothing reads a permit's
-clock yet.
+Burdens and embargoes keep restamping on restore. The use check reads a
+permit's clock (_permit_usable()), and nothing else does yet.
 
 Fixture: as tests/test_activate_effect_pending_only.py. Operator performs the
 acts and holds the tokens under test; Colleague fills no role and only holds

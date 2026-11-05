@@ -418,11 +418,12 @@ def _embargo_covers(
 
 
 def _actor_holds_permit(state: WorldState, actor_name: str, token_name: str) -> bool:
+    """2.5.0-1: the actor can use the permit now (_permit_usable())."""
     return any(
         t.holder == actor_name
         and t.token_name == token_name
         and t.kind == "permit"
-        and t.state == "active"
+        and _permit_usable(t, state.tick)
         for t in state.tokens
     )
 
@@ -479,6 +480,19 @@ def _permit_clock_start(tok: TokenInstance) -> Optional[int]:
     if tok.activated_at_tick is not None:
         return tok.activated_at_tick
     return tok.granted_at_tick if tok.state == "active" else None
+
+
+def _permit_usable(tok: TokenInstance, tick: int) -> bool:
+    """2.5.0-1: the permit is active and its time has not elapsed at `tick`.
+    Elapsed means the instance's deadline is a duration with a measurable
+    magnitude and the tick has reached that many ticks from its clock start.
+    A date deadline, a deadline with no magnitude and no deadline never count
+    as elapsed. Reads the instance only and writes nothing."""
+    if tok.state != "active":
+        return False
+    if _has_date_shape(tok.deadline) or not _has_deadline_magnitude(tok.deadline):
+        return True
+    return tick - _permit_clock_start(tok) < _parse_deadline_steps(tok.deadline)
 
 
 def _reassign_holder(tok: TokenInstance, new_holder: str) -> TokenInstance:
@@ -779,8 +793,9 @@ def _deontic_refusal(spec, state: WorldState, actor_name: str, action_name: str,
     the refusal reason and the token behind it, or (None, None). Step 5:
     an active embargo held by the actor that covers action_name
     (_embargo_coverage()). Step 6: a permit grammar_action requires that the
-    actor does not hold active; skipped when grammar_action is None (an
-    undeclared action)."""
+    actor cannot use now (_permit_usable()); skipped when grammar_action is
+    None (an undeclared action). 2.5.0-1: the reason says the time has elapsed
+    when the actor has the permit active but no instance of it is usable."""
     coverage = _embargo_coverage(spec)
     for tok in state.tokens:
         if (tok.holder == actor_name
@@ -793,6 +808,13 @@ def _deontic_refusal(spec, state: WorldState, actor_name: str, action_name: str,
             if req.kind == "requires_permit" and req.token:
                 permit_name = req.token.name
                 if not _actor_holds_permit(state, actor_name, permit_name):
+                    # No instance is usable, so every active instance of the permit has elapsed.
+                    active = [t for t in state.tokens
+                              if t.holder == actor_name and t.token_name == permit_name
+                              and t.kind == "permit" and t.state == "active"]
+                    if active:
+                        return (f"required permit '{permit_name}' time has elapsed for actor",
+                                _token_ref(max(active, key=lambda t: t.granted_at_tick)))
                     return (f"required permit '{permit_name}' not held by actor",
                             _missing_permit_ref(state, actor_name, permit_name))
     return None, None

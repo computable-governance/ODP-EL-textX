@@ -12694,11 +12694,35 @@ code changed.
 **Before.** `effect activate` and event activation gave a pending permit a new
 `activated_at_tick`, so a restore restarted its clock. Reinstate wrote no stamp.
 A permit that was not active and had no stamp could have been active since
-grant or never active: the two cases looked the same.
+grant or never active: the two cases looked the same. A permit's deadline had no
+effect: an active permit could be used however long ago its time had run out.
 
-**Now.** The engine records when a permit's clock starts. Nothing reads the
-clock yet: there is no use check, no sweep and no expired state, and no act is
-refused because of it.
+**Now.** A permit's time limit is enforced at use, and nothing else acts on it
+yet: there is no sweep and no expired state, and the displays and history queries
+do not read it. A permit past its limit is refused whatever its state record
+says, until a later change writes the state: the record still says active, and
+the refusal changes nothing.
+
+An action that requires a permit, and a declaration that does, is refused when
+the actor has no usable instance (`_permit_usable()`). An instance is usable if
+it is active and its time has not elapsed.
+- Elapsed means the instance's deadline is a duration with a measurable magnitude
+  and the tick minus the clock start has reached that duration. One instance
+  usable is enough: another that has elapsed does not refuse the act.
+- A date-form limit is not judged at use. A deadline with no measurable magnitude
+  (`"thirty days"`, `"referral episode"`) and no deadline never count as elapsed.
+- The reason for an active permit past its limit is `required permit '<name>' time
+  has elapsed for actor`. For a permit that is not active, the reason stays
+  `required permit '<name>' not held by actor`. `blocked_by` names the instance in
+  its true state, `active` for an elapsed permit. Through `Runtime.advance()` the
+  refused attempt is recorded as a `permit_requirement` violation, as for any
+  permit refusal.
+- A restore or reinstate past the limit goes through and the permit becomes
+  active; the use check then refuses it. A clone or a transfer carries the clock,
+  so the new holder's permit has elapsed too.
+
+The verifier does not model a permit's time and still offers the exercise (parity
+row R28).
 
 A permit's clock runs from its activation tick, and it keeps running while the
 permit is pending.
@@ -12712,7 +12736,7 @@ permit is pending.
   its grant tick is its activation tick.
 - `_permit_clock_start()` returns the stamp if there is one, else the grant tick
   if the permit is active, else None: a permit that was never active has no
-  clock. Only the tests call it so far.
+  clock.
 
 Burdens and embargoes are unchanged and still restamp on restore. The open
 finding on a burden's restarted deadline in `docs/CONCEPTS_INDEX.md` stays open.
