@@ -12945,3 +12945,41 @@ fixture of `tests/test_public_data_portal_scenario.py`.
 Full suite, run by the author: 2284 passed, 2 skipped, 1 deselected, 1 xfailed.
 
 Verifier parity: no change (static warning only).
+
+### 2.5.0-1 — `[W-strict-timed-permit]`: validator warning (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator warning. Printed tag `[W-strict-timed-permit]`,
+slot W-31.
+
+**Before.** A strict burden's discharging action could require a permit with a time
+limit, and nothing pointed out the risk. Now that the limit is enforced, the holder's
+discharge is refused once the permit's time is up, and a strict burden is never
+violated by the clock, so the burden can get stuck.
+
+**Now.** For each strict burden, top-level or inline in a role, and each of its
+discharging actions (by `for_action`, a `destroy` effect or `discharged_by`), every
+required permit with a time limit gets one warning. It names the burden, the action
+and the permit, quotes the limit, and ends "(clause to be confirmed)". A policy-fed
+limit is quoted at the policy's declared value. An eventual burden, or a permit with no
+time limit, gets none. Nothing else changes (ruling D13).
+
+**Limit.**
+- No ISO clause is cited yet.
+- The warning does not check whether the limit can elapse. A deadline with no
+  measurable magnitude ("thirty days") never elapses and still fires it.
+- It does not check whether a declaration exists for the burden, so it also fires when
+  `declare_violation()` could end the freeze.
+- The engine does not prevent the deadlock, and the status route does not yet take the
+  time limit into account.
+
+**Published specifications.** None fires it, and `tests/published_specs_golden.json` is
+unchanged. The validator has 81 rules: 46 errors and 35 warnings.
+
+**Files changed:** `toolchain/el_validator.py`,
+`tests/test_strict_timed_permit_warning.py` (new), `docs/el_grammar_amendments.md`,
+`docs/CONCEPTS_INDEX.md`, `docs/DSL_TOOLCHAIN_REFERENCE.md`.
+
+**Verification:** 8 new test cases in `tests/test_strict_timed_permit_warning.py`. Full
+suite, run by the author: 2292 passed, 2 skipped, 1 deselected, 1 xfailed.
+
+Verifier parity: no change (static warning only).

@@ -232,6 +232,10 @@ Rules implemented
   W-authorization-duration  2.5.0-1: an Authorization with a duration:
         the duration is recorded and not enforced. Advisory.
                                                      clause to be confirmed
+  W-strict-timed-permit  2.5.0-1: a strict Burden whose discharging action
+        requires a permit with a time limit: once the permit's time is up
+        the discharge can be refused and the burden stuck. Advisory.
+                                                     clause to be confirmed
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -489,6 +493,9 @@ def validate_spec(model) -> List[str]:
 
     # 2.5.0-1 — an Authorization's duration is not enforced (clause to be confirmed)
     errors.extend(_validate_authorization_duration(model))
+
+    # 2.5.0-1 — strict burden discharged only under a timed permit (clause to be confirmed)
+    errors.extend(_validate_strict_timed_permit(model))
 
     # V-17 — Burden/Embargo for_action conflict (§6.4.3, §6.4.4)
     errors.extend(_validate_burden_embargo_conflict(model))
@@ -1514,6 +1521,40 @@ def _validate_authorization_duration(model) -> List[str]:
         for auth in _collect(model, "Authorization")
         if auth.duration
     ]
+
+
+def _validate_strict_timed_permit(model) -> List[str]:
+    """[W-strict-timed-permit] (2.5.0-1): a strict Burden (top-level or
+    role-scoped) whose discharging action (el_engine.discharging_actions())
+    requires a permit with a time limit (el_engine.deadline_text()). A permit's
+    time limit is enforced, and a strict burden is never violated by the clock,
+    so once the permit's time is up the discharge can be refused and the burden
+    stuck, as in the open finding on a blocked strict discharge. Advisory."""
+    from el_engine import deadline_text, discharging_actions
+
+    burdens = [t for t in _collect(model, "DeonticToken") if getattr(t, "kind", None) == "burden"]
+    for el in model.elements:
+        if _cls(el) in ("Community", "Domain", "Federation"):
+            for role in getattr(el, "roles", []) or []:
+                burdens.extend(t for t in getattr(role, "holds_tokens", []) or []
+                               if _cls(t) == "InlineToken" and getattr(t, "kind", None) == "burden")
+    warnings: List[str] = []
+    for tok in burdens:
+        if getattr(tok, "discharge_mode", None) != "strict":
+            continue
+        for action in discharging_actions(model, tok.name):
+            for req in action.deontic_requirements:
+                if req.kind != "requires_permit" or not req.token:
+                    continue
+                limit = deadline_text(req.token)
+                if limit:
+                    warnings.append(
+                        f"[W-strict-timed-permit] Strict burden '{tok.name}' is discharged by "
+                        f"action '{action.name}', which requires permit '{req.token.name}' with "
+                        f"a time limit ('{limit}'): once the permit's time is up the discharge "
+                        f"can be refused, and a strict burden is never violated by the clock, "
+                        f"so it can get stuck. {_TYPED_CITATION}")
+    return warnings
 
 
 def _validate_standing_fields(model) -> List[str]:

@@ -6308,6 +6308,13 @@ it (`declares_violation_of`), performed by an authorised declarer
 (`declare_violation()`). The two AM-103 fixtures have neither, so their
 pinned behaviour (`discharge_burden()` the only exit) is unchanged.
 
+**Update (2.5.0-1, known limit):** enforcing a permit's time limit gives
+this deadlock a new way in. If a strict burden's discharging action requires
+a permit whose time is up when the burden becomes active, the holder's
+discharge is refused and `advance_clock()` is blocked. The validator warns
+(`[W-strict-timed-permit]`); nothing prevents it. The exits are the same as
+above.
+
 **OPEN FINDING** — found during AM-103 Phase 1. If the holder of an
 actionable strict burden cannot perform its discharging action, nothing
 but an external `discharge_burden()` call ever ends the freeze. Two
