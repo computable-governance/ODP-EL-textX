@@ -205,6 +205,9 @@ Note the asymmetry: the engine has no `WAITING`/`EXPIRED`; the Kripke layer
 has no distinct `active`. Any new state introduced by this feature must be
 declared in **both** layers or explicitly scoped to one (§5.3).
 
+Note (2026-11-05): since 2.5.0-1 the engine has an `expired` state, for
+permits only; the rest of this snapshot is unchanged.
+
 **The claiming scenario is the mirror image of an existing committed file.**
 `specialist_pool_scenario.el` is a *discharge*-side pool: two equivalent
 peers, `any_discharged(consultResponseGroup)`, both burdens start `active`,

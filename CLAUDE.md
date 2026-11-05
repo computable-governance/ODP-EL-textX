@@ -278,7 +278,10 @@ The last AM entry is AM-115 (section 5.8). The 2.1.0 changes follow it,
 numbered 2.1.0-1 to 2.1.0-25, then the 2.2.0 changes, 2.2.0-1 to 2.2.0-13
 (section 7.4), then the 2.3.0 changes, 2.3.0-1 to 2.3.0-12, then the
 2.4.0 changes, 2.4.0-1 to 2.4.0-6, then the 2.4.1 changes, 2.4.1-1 and
-2.4.1-2.
+2.4.1-2, then 2.5.0-1: a permit can carry a time limit; a new permit state,
+`expired`, is written by the sweep; a use past the limit is refused; the
+status route withholds `compelled` for a strict burden gated on a timed
+permit; two new validator warnings.
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -442,6 +445,7 @@ effect limits: `effect destroy` does nothing on a permit or embargo and
 `effect create` always creates the token active (see Known Limitations in
 `docs/DSL_TOOLCHAIN_REFERENCE.md`). `effect activate` acts on pending
 instances only and `effect pend` on active instances only (2.4.1-1, 2.4.1-2).
+A permit's time limit is enforced at use and written by the sweep (2.5.0-1).
 
 Policy values are typed and read by the engine (2.1.0, below): a
 comparison's policy limit, a standing duty's `ends_at` policy and (2.2.0)
@@ -497,9 +501,9 @@ PolicyEnvelope is checked by the validator only (`envelope-membership`,
   one `[W-strict-precondition]`.
 - **Engine and verifier parity.** `docs/ENGINE_VERIFIER_PARITY.md` sets
   each engine rule beside the Kripke rule that models it. It is partial:
-  it lists only the rows added in 2.1.0 and 2.2.0 (R1 to R18: deadlines,
+  it has rows R1 to R30 (R1 to R18: deadlines,
   the clock, policy values, preconditions, standing duties; R19:
-  policy-fed deadlines).
+  policy-fed deadlines; R20 to R30: later changes, listed in its header).
 
 **2.2.0 additions** (entries 2.2.0-1 to 2.2.0-13 in
 `docs/el_grammar_amendments.md`; full text in the same sections of
@@ -548,8 +552,9 @@ intended change):
 - 2.4.0 (2.4.0-2 to 2.4.0-6): an action fills a role (`effect fill
   <Role> with <Object>`, section 5.7); the validator error
   `fill-one-filler` and the warnings `W-fill-role-filled`,
-  `W-fill-excluded-role` and `W-fill-not-modelled`. The validator has 79
-  rules: 46 errors and 33 warnings.
+  `W-fill-excluded-role` and `W-fill-not-modelled`. The validator has 81
+  rules: 46 errors and 35 warnings. The two added in 2.5.0-1 are
+  `[W-authorization-duration]` and `[W-strict-timed-permit]`.
 
 Partly implemented: Federation (specifications parse and validate; the
 loader covers Domain members only, see section 7.3 item 3).

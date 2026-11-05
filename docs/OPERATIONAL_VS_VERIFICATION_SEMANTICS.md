@@ -36,6 +36,8 @@ Both layers interpret the same abstract object: the ISO/IEC 15414 §7.8.7 /
 Annex A deontic token lifecycle (`pending → active → discharged / violated
 / expired`), driven by the same grammar constructs —
 `DeonticToken`, `EventDecl`, `triggered_by`, `discharged_by` (AM-22). The
+engine now writes `expired`, for permits only, when a permit's time limit
+has run out (2.5.0-1). The
 grammar is the shared specification both semantics are interpretations
 *of*. Concretely:
 
