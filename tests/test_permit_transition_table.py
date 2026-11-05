@@ -9,14 +9,21 @@ response's revoke, which ignores the time limit: fired on a violated burden at
 tick 20 in each of the six states, and at tick 4 on an active permit within the
 limit. That makes seven cells, since active splits into elapsed and not elapsed.
 
+The last section covers the sweep and the acts around it: the sweep in the
+states it selects and those it leaves alone, a sibling discharged or claimed and
+`effect pend` in all six states, and `effect activate` and event activation in
+the five states other than pending. Tests that are not table cells are in
+tests/test_permit_sweep.py.
+
 Fixture: as tests/test_permit_clock.py. Operator performs the acts and holds
 the permit.
 """
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from el_engine import enroll, grant_token, initial_state, token_from_spec
+from el_engine import DeadlineClock, enroll, grant_token, initial_state, token_from_spec
 from el_parser import parse_string
 from el_runtime import Runtime
 
@@ -250,3 +257,331 @@ def test_response_does_not_revoke_a_permit_that_is_not_active(permit_state):
             in record.effects)
     assert _permit(rt).state == permit_state
     assert not _embargo_active(rt)
+
+
+def test_response_revoke_of_an_elapsed_permit_depends_on_which_came_first():
+    # Before the sweep the record says active, so the revoke applies. After it
+    # the permit is expired, so it is not revoked and no embargo follows.
+    revoked_first = _responding_runtime()
+    _clock_to(revoked_first, PAST_THE_LIMIT)
+    fired = revoked_first.fire_violation_responses()
+    assert "revoked 'TimedAuth' (to 'Operator')" in fired.effects
+    assert _permit(revoked_first).state == "superseded"
+    assert _embargo_active(revoked_first)
+    swept = revoked_first.check_live_violations()
+    assert swept.token_events == ()
+    assert _permit(revoked_first).state == "superseded"
+
+    swept_first = _responding_runtime()
+    _clock_to(swept_first, PAST_THE_LIMIT)
+    swept_first.check_live_violations()
+    assert _permit(swept_first).state == "expired"
+    fired = swept_first.fire_violation_responses()
+    assert fired.fired_responses == ("RevokeOnBreach",)
+    assert ("not revoked 'TimedAuth': permit 'timedPermit' is not active"
+            in fired.effects)
+    assert _permit(swept_first).state == "expired"
+    assert not _embargo_active(swept_first)
+
+
+# ── The sweep and the other acts, by state (step A5) ─────────────────────────
+#
+# A second probe: timedPermit also has an event trigger and sits in a group
+# with one burden to discharge and one to claim; datedPermit has a date limit.
+
+_SWEEP_PROBE = """
+enterprise specification PermitSweepTableProbe
+
+party Operator
+
+community ProbeCommunity
+    description: "Single role that uses, suspends and restores the permits"
+    {
+        objective: "Exercise the sweep by state"
+            satisfaction: any_discharged(siblingGroup)
+
+        event wakeEvent
+
+        role operatorRole
+            description: "Performs the acts"
+            {
+                action useTimed {
+                    actor: operatorRole
+                    requires_permit timedPermit
+                }
+
+                action useDated {
+                    actor: operatorRole
+                    requires_permit datedPermit
+                }
+
+                action pendTimed {
+                    actor: operatorRole
+                    effect pend timedPermit
+                }
+
+                action activateTimed {
+                    actor: operatorRole
+                    effect activate timedPermit
+                }
+
+                action dischargeSibling {
+                    actor: operatorRole
+                }
+
+                action claimSibling {
+                    actor: operatorRole
+                }
+            }
+    }
+
+permit timedPermit {
+    for_action: "useTimed"
+    state: active
+    deadline: "5 minutes"
+    triggered_by: wakeEvent
+}
+
+permit datedPermit {
+    for_action: "useDated"
+    state: active
+    deadline: "by 2026-05-20"
+}
+
+burden activeSibling {
+    for_action: "dischargeSibling"
+    state: active
+    discharge_mode: eventual
+}
+
+burden claimableSibling {
+    for_action: "claimSibling"
+    state: claimable
+    discharge_mode: eventual
+}
+
+token_group siblingGroup {
+    member: activeSibling
+    member: claimableSibling
+    member: timedPermit
+}
+
+commitment activeSiblingCommitment {
+    by: Operator
+    obligation: "Backs the group member activeSibling"
+    creates_burden: activeSibling
+}
+
+commitment claimableSiblingCommitment {
+    by: Operator
+    obligation: "Backs the group member claimableSibling"
+    creates_burden: claimableSibling
+}
+
+commitment timedPermitCommitment {
+    by: Operator
+    obligation: "Backs the group member timedPermit"
+    creates_burden: timedPermit
+}
+"""
+
+CLOCK = DeadlineClock(utc_offset=timezone(timedelta(hours=10)))
+BEFORE_THE_DATE = datetime(2026, 5, 20, 12, 0, tzinfo=timezone(timedelta(hours=10)))
+PAST_THE_DATE = datetime(2026, 5, 21, 0, 0, tzinfo=timezone(timedelta(hours=10)))
+ALL_STATES = ["active", "pending", "claimable", "expired", "superseded", "lapsed"]
+NOT_PENDING = ["active", "claimable", "expired", "superseded", "lapsed"]
+NOT_SWEPT = ["claimable", "expired", "superseded", "lapsed"]
+
+
+def _sweep_runtime(*seeded, siblings=False) -> Runtime:
+    """Operator holds each (permit name, state) from GRANT_TICK; state None
+    keeps the declared state. siblings also grants the group's two burdens."""
+    result = parse_string(_SWEEP_PROBE, validate=True)
+    assert result.ok, result.errors
+    spec = result.model
+    state = enroll(initial_state(), "Operator", role_name="operatorRole")
+    state = state.with_tick(GRANT_TICK)
+    for name, permit_state in seeded:
+        token = token_from_spec(spec, name, "Operator", GRANT_TICK)
+        if permit_state:
+            token = replace(token, state=permit_state)
+        state = grant_token(state, token)
+    if siblings:
+        for name in ("activeSibling", "claimableSibling"):
+            state = grant_token(state, token_from_spec(spec, name, "Operator", GRANT_TICK))
+    return Runtime(state, spec, clock=CLOCK)
+
+
+def _token(rt, name):
+    return next(t for t in rt.current_state().tokens if t.token_name == name)
+
+
+# Sweep
+
+def test_sweep_expires_an_active_permit_past_its_duration():
+    rt = _sweep_runtime(("timedPermit", None))
+    _clock_to(rt, PAST_THE_LIMIT)
+
+    rt.check_live_violations()
+
+    assert _token(rt, "timedPermit").state == "expired"
+    assert rt.current_state().tick == PAST_THE_LIMIT + 1
+
+
+def test_sweep_expires_an_active_permit_past_its_date():
+    rt = _sweep_runtime(("datedPermit", None))
+
+    rt.check_live_violations(as_at=PAST_THE_DATE)
+
+    assert _token(rt, "datedPermit").state == "expired"
+    assert rt.current_state().tick == GRANT_TICK + 1
+
+
+def test_sweep_leaves_an_active_permit_not_yet_due():
+    rt = _sweep_runtime(("timedPermit", None), ("datedPermit", None))
+    _clock_to(rt, GRANT_TICK + 4)
+
+    record = rt.check_live_violations(as_at=BEFORE_THE_DATE)
+
+    assert _token(rt, "timedPermit").state == "active"
+    assert _token(rt, "datedPermit").state == "active"
+    assert record.effects == ()
+    assert rt.current_state().tick == GRANT_TICK + 4
+
+
+def test_sweep_expires_a_pending_permit_whose_clock_ran_on():
+    # Active since grant, then pended: the clock counts from grant and keeps
+    # running while pending. One step before the limit, then at it.
+    rt = _sweep_runtime(("timedPermit", None))
+    assert rt.advance("pendTimed", "Operator").outcome == "ok"
+    _clock_to(rt, GRANT_TICK + 4)
+
+    rt.check_live_violations()
+    assert _token(rt, "timedPermit").state == "pending"
+
+    _clock_to(rt, GRANT_TICK + 5)
+    rt.check_live_violations()
+    assert _token(rt, "timedPermit").state == "expired"
+
+
+def test_sweep_leaves_a_never_active_pending_permit_until_its_clock_starts():
+    # R-a: never active, so no clock. Time then counts from its first activation.
+    rt = _sweep_runtime(("timedPermit", "pending"))
+    _clock_to(rt, PAST_THE_LIMIT)
+
+    record = rt.check_live_violations()
+
+    assert _token(rt, "timedPermit").state == "pending"
+    assert record.effects == ()
+    assert rt.current_state().tick == PAST_THE_LIMIT
+
+    assert rt.advance("activateTimed", "Operator").outcome == "ok"
+    assert _token(rt, "timedPermit").activated_at_tick == PAST_THE_LIMIT
+    _clock_to(rt, PAST_THE_LIMIT + 4)
+    rt.check_live_violations()
+    assert _token(rt, "timedPermit").state == "active"
+    _clock_to(rt, PAST_THE_LIMIT + 5)
+    rt.check_live_violations()
+    assert _token(rt, "timedPermit").state == "expired"
+
+
+def test_sweep_expires_a_never_active_pending_permit_past_its_date():
+    rt = _sweep_runtime(("datedPermit", "pending"))
+
+    rt.check_live_violations(as_at=PAST_THE_DATE)
+
+    assert _token(rt, "datedPermit").state == "expired"
+    assert _token(rt, "datedPermit").activated_at_tick is None
+
+
+@pytest.mark.parametrize("permit_state", NOT_SWEPT)
+def test_sweep_leaves_other_states_alone(permit_state):
+    rt = _sweep_runtime(("timedPermit", permit_state), ("datedPermit", permit_state))
+    _clock_to(rt, PAST_THE_LIMIT)
+
+    record = rt.check_live_violations(as_at=PAST_THE_DATE)
+
+    assert _token(rt, "timedPermit").state == permit_state
+    assert _token(rt, "datedPermit").state == permit_state
+    assert record.effects == () and record.token_events == ()
+    assert rt.current_state().tick == PAST_THE_LIMIT
+
+
+# Sibling rules
+
+@pytest.mark.parametrize("permit_state", ALL_STATES)
+def test_sibling_discharged_in_each_state(permit_state):
+    rt = _sweep_runtime(("timedPermit", permit_state), siblings=True)
+
+    record = rt.advance("dischargeSibling", "Operator")
+
+    assert record.discharged == ("activeSibling",)
+    if permit_state == "active":
+        assert _token(rt, "timedPermit").state == "superseded"
+        event = next(e for e in record.token_events if e.token_name == "timedPermit")
+        assert (event.cause, event.cause_ref) == ("sibling", "activeSibling")
+    else:
+        assert _token(rt, "timedPermit").state == permit_state
+        assert not [e for e in record.token_events if e.token_name == "timedPermit"]
+
+
+@pytest.mark.parametrize("permit_state", ALL_STATES)
+def test_sibling_claimed_in_each_state(permit_state):
+    rt = _sweep_runtime(("timedPermit", permit_state), siblings=True)
+
+    record = rt.claim("claimableSibling", "Operator")
+
+    assert record.outcome == "ok"
+    assert _token(rt, "claimableSibling").state == "active"
+    if permit_state == "claimable":
+        assert _token(rt, "timedPermit").state == "lapsed"
+        event = next(e for e in record.token_events if e.token_name == "timedPermit")
+        assert (event.cause, event.cause_ref) == ("sibling", "claimableSibling")
+    else:
+        assert _token(rt, "timedPermit").state == permit_state
+        assert not [e for e in record.token_events if e.token_name == "timedPermit"]
+
+
+# effect pend
+
+@pytest.mark.parametrize("permit_state", ALL_STATES)
+def test_effect_pend_in_each_state(permit_state):
+    rt = _sweep_runtime(("timedPermit", permit_state))
+
+    record = rt.advance("pendTimed", "Operator")
+
+    assert record.outcome == "ok"
+    if permit_state == "active":
+        assert _token(rt, "timedPermit").state == "pending"
+        assert record.effects == ("pended 'timedPermit'",)
+    else:
+        assert _token(rt, "timedPermit").state == permit_state
+        assert record.effects == ()
+
+
+# effect activate and event activation, in the states other than pending
+
+@pytest.mark.parametrize("permit_state", NOT_PENDING)
+def test_effect_activate_in_each_other_state(permit_state):
+    rt = _sweep_runtime(("timedPermit", permit_state))
+
+    record = rt.advance("activateTimed", "Operator")
+
+    assert record.outcome == "ok"
+    assert _token(rt, "timedPermit").state == permit_state
+    if permit_state == "active":
+        assert record.effects == ()
+    else:
+        assert record.effects == (
+            f"activate 'timedPermit' had no effect: 'Operator' holds it {permit_state}",)
+
+
+@pytest.mark.parametrize("permit_state", NOT_PENDING)
+def test_event_activation_in_each_other_state(permit_state):
+    rt = _sweep_runtime(("timedPermit", permit_state))
+
+    record = rt.fire_event("wakeEvent")
+
+    assert record.outcome == "ok"
+    assert _token(rt, "timedPermit").state == permit_state
+    assert record.effects == ()

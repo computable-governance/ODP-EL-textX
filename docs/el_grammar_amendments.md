@@ -12695,15 +12695,47 @@ code changed.
 `activated_at_tick`, so a restore restarted its clock. Reinstate wrote no stamp.
 A permit that was not active and had no stamp could have been active since
 grant or never active: the two cases looked the same. A permit's deadline had no
-effect: an active permit could be used however long ago its time had run out.
+effect: an active permit could be used however long ago its time had run out, and
+the sweep never touched a permit.
 
 **Now.** A permit's time limit is enforced at use, `GET available-actions`
-(`toolchain/el_api.py`) leaves out an active permit past its limit, and
-`Runtime.in_force_at()`, and so `declare_breach`, applies the limit. Nothing else
-acts on the limit yet: the other displays and the sweep do not read it, and there
-is no expired state. A permit past its limit is refused whatever its state record
-says, until a later change writes the state: the record still says active, and the
-refusal changes nothing.
+(`toolchain/el_api.py`) leaves out an active permit past its limit,
+`Runtime.in_force_at()`, and so `declare_breach`, applies the limit, and the sweep
+writes the new state `expired`. The other displays do not read the limit yet. A
+permit past its limit is refused whatever its state record says: until a sweep, the
+record still says active, and the refusal changes nothing. `expired` is not yet
+final: a direct revoke or a reinstate still moves an expired permit.
+
+The sweep (`check_live_violations()`) moves an active or pending permit whose time
+is up to `expired`, whatever its `discharge_mode`. Other states do not change.
+- A duration is judged by `_permit_elapsed()`, the test the use check shares, on the
+  instance's deadline. A permit that was never active has no clock, so the sweep
+  leaves it alone. A deadline with no measurable magnitude never elapses and gets
+  no warning.
+- A date-form limit is judged only here, against `as_at` under the runtime's clock
+  (`_date_verdict()`). It does not depend on activation, so a pending permit that
+  was never active expires too.
+- The token event is named `expired` with the cause `deadline`, for both forms. A
+  burden's date form has the cause `date_due`; a permit's does not. One effect line
+  is written for each expiry, and the API shows an expiry only there.
+- An expiry is not a violation. It adds nothing to `violations` or `discharged`,
+  leaves the outcome `ok` unless a burden was violated in the same sweep, and fires
+  no response.
+- The tick advances once if at least one permit expired, however many did, and not
+  otherwise. A sweep that only expires a permit therefore moves every burden's
+  elapsed time on by one, and it does so during a strict freeze too (the sweep has
+  no strict guard), as a burden's violation already does.
+- `not_judged_date_burdens()`, the sweep's "not judged" lines and the `not_judged`
+  list of `POST /check-violations` also name each active or pending date-form permit
+  that cannot be judged, for every reason a burden is listed for. The function keeps
+  its name, so the API does not change. The validator's date warnings stay
+  burden-only.
+- The sibling rules do not read the time limit, so for an elapsed, unswept permit
+  the first event wins and the cause says which: a discharged sibling gives
+  `superseded`, cause `sibling`, and the sweep then leaves it; a sweep gives
+  `expired`, cause `deadline`, and the sibling then leaves it.
+- `expired` is not `lapsed`, which still means a sibling was claimed first, and it
+  is not the verifier's `ObligationState.EXPIRED`, which nothing produces.
 
 An action that requires a permit, and a declaration that does, is refused when
 the actor has no usable instance (`_permit_usable()`). An instance is usable if
@@ -12711,22 +12743,26 @@ it is active and its time has not elapsed.
 - Elapsed means the instance's deadline is a duration with a measurable magnitude
   and the tick minus the clock start has reached that duration. One instance
   usable is enough: another that has elapsed does not refuse the act.
-- A date-form limit is not judged at use. A deadline with no measurable magnitude
+- A date-form limit is not judged at use, only at the sweep, so the permit stays
+  usable until a sweep expires it. A deadline with no measurable magnitude
   (`"thirty days"`, `"referral episode"`) and no deadline never count as elapsed.
 - The reason for an active permit past its limit is `required permit '<name>' time
   has elapsed for actor`. For a permit that is not active, the reason stays
   `required permit '<name>' not held by actor`. `blocked_by` names the instance in
-  its true state, `active` for an elapsed permit. Through `Runtime.advance()` the
-  refused attempt is recorded as a `permit_requirement` violation, as for any
-  permit refusal.
+  its true state: `active` for an elapsed permit, `expired` once swept. Through
+  `Runtime.advance()` the refused attempt is recorded as a `permit_requirement`
+  violation, as for any permit refusal.
 - A restore or reinstate past the limit goes through and the permit becomes
   active; the use check then refuses it. A clone or a transfer carries the clock,
   so the new holder's permit has elapsed too.
 
-A response's revoke (`revokes:`) ignores a permit's time limit, because a sanction
-must not depend on whether a sweep ran first. It supersedes an active permit and
-activates the `on_revocation` embargo even if the permit's time has elapsed. For a
-permit that is not active it logs `not revoked` and activates no embargo, as before.
+A response's revoke (`revokes:`) does not read a permit's time limit, only its
+state. It supersedes an active permit and activates the `on_revocation` embargo
+even if the permit's time has elapsed. For a permit that is not active it logs `not
+revoked` and activates no embargo, as before. So for an elapsed permit the result
+depends on which came first. Before the sweep the record says active: the permit is
+revoked and the embargo goes active. After the sweep the permit is `expired`: it is
+not revoked and no embargo follows.
 
 `Runtime.in_force_at(permit, holder, t)` answers True only if the token events show
 the permit active at tick t and it had not elapsed at t (`_permit_elapsed()`, the
@@ -12739,7 +12775,7 @@ test `_permit_usable()` also uses).
   with a measurable magnitude. With no such limit in the specification, the answer
   comes from the token events alone.
 - `Runtime.token_states_at()` stays the raw record of states: an elapsed permit still
-  reads `active` there.
+  reads `active` there until a sweep writes `expired`.
 - In `declare_breach`, a `permit_requirement` declaration is now accepted for a permit
   that had elapsed at the occurrence, and a `permit` declaration is refused with the
   existing reason for a permit not in force. An unknown answer is accepted with a

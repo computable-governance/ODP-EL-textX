@@ -398,7 +398,11 @@ class Runtime:
 
         2.1.0-18: `facts` are the values reported for the standing duties'
         keeps conditions at this check; they are passed through, not
-        stored."""
+        stored.
+
+        2.5.0-1: also moves active and pending permits whose time is up to
+        'expired'. An expiry is not a violation; the tick advances once if
+        any permit expired."""
         self._check_as_at(as_at)
         new_state, record = _engine_check_live_violations(
             self._state, self._spec, self._clock, as_at, facts,   # 2.1.0-18: facts not stored

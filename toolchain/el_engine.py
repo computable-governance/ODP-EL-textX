@@ -49,6 +49,7 @@ class TokenInstance:
     holder: str                     # actor name
     state: str                      # 'active' | 'pending' | 'discharged' | 'violated' | 'superseded'
                                      # | 'claimable' | 'lapsed'  (AM-62 — see DN_003)
+                                     # | 'expired'  (2.5.0-1: permits only)
                                      # NOTE: 'superseded' has two unrelated live meanings:
                                      # (1) a Permit that lost governance to an Embargo via
                                      #     revoke_authorization() (AM-31); (2) AM-57: a Burden
@@ -59,6 +60,9 @@ class TokenInstance:
                                      # a lapsed sibling made no decision and was overtaken by a
                                      # peer CLAIMING first; superseded fires on a peer's
                                      # DISCHARGE. Do not conflate these either.
+                                     # NOTE: 'expired' means a permit's time ran out, written
+                                     # by check_live_violations(); it is not 'lapsed', and not
+                                     # the verifier's ObligationState.EXPIRED (never produced).
     discharge_mode: str             # 'eventual' | 'strict'
     priority: str                   # 'critical' | 'high' | 'normal' | 'low'
     granted_at_tick: int            # tick at which this instance was created; required, no
@@ -2206,6 +2210,13 @@ def _swept_by_deadline(tok: TokenInstance) -> bool:
     return tok.kind == "burden" and tok.state == "active" and tok.discharge_mode == "eventual"
 
 
+def _swept_permit(tok: TokenInstance) -> bool:
+    """2.5.0-1: the permits check_live_violations() judges by their time
+    limit: active or pending, whatever the discharge_mode. Shared with
+    not_judged_date_burdens() so the two always select the same permits."""
+    return tok.kind == "permit" and tok.state in ("active", "pending")
+
+
 def _has_date_shape(deadline: Optional[str]) -> bool:
     """2.1.0-7: the deadline contains a calendar date (a date burden)."""
     return bool(deadline) and bool(_DATE_SHAPE_RE.search(deadline))
@@ -2289,6 +2300,10 @@ def not_judged_date_burdens(state: WorldState, spec,
     reasons appear as "not judged" lines in that sweep's effects. A burden
     not judged is never violated by the sweep, so the list is the same
     before and after it.
+
+    2.5.0-1: then the same for every active or pending permit whose own
+    deadline contains a date, for the same reasons. The name is kept so the
+    API does not change. A permit not judged is never expired by the sweep.
     """
     _require_aware(as_at)
     out: List[Tuple[str, str, str]] = []
@@ -2302,6 +2317,11 @@ def not_judged_date_burdens(state: WorldState, spec,
         _, reason = _date_verdict(deadline, clock, as_at)
         if reason is not None:
             out.append((tok.token_name, tok.holder, reason))
+    for tok in state.tokens:
+        if _swept_permit(tok) and _has_date_shape(tok.deadline):
+            _, reason = _date_verdict(tok.deadline, clock, as_at)
+            if reason is not None:
+                out.append((tok.token_name, tok.holder, reason))
     return out
 
 
@@ -3839,6 +3859,12 @@ def check_live_violations(
     text: the comparison, the reason, or the end), so callers need not read
     the effect lines. The return value is unchanged.
 
+    2.5.0-1: and move every active or pending permit whose time is up to
+    'expired', in its own pass (_expire_permits()). An expiry is not a
+    violation: the outcome, violations and discharged do not count it, and
+    no ViolationResponse fires on it. Its token event is named 'expired' with
+    the cause 'deadline', for both forms of deadline.
+
     2.1.0-7: a Burden whose deadline contains a calendar date is a date
     burden. It is judged only against `as_at` (timezone-aware, ValueError
     otherwise), never against the tick: with a clock, an as_at and a date
@@ -3933,6 +3959,9 @@ def check_live_violations(
     same as a real mutation, every unrelated poll would bring every other
     live Burden's elapsed-vs-deadline count closer to violation,
     independent of any real actor action. Confirmed deliberate 2026-08-20.
+    2.5.0-1: the tick also advances, once, when at least one permit expires,
+    however many do: token_states_at() relies on every act that changes a
+    token advancing the tick.
     """
     _require_aware(as_at)  # 2.1.0-7
     tick = state.tick
@@ -4028,10 +4057,12 @@ def check_live_violations(
                 + _policy_deadline_note(spec_tok)   # 2.2.0-7
             )
 
+    expired_any = _expire_permits(tokens, spec, tick, clock, as_at, effects_log)  # 2.5.0-1
+
     # Tick only advances when something actually happened — deliberate
     # departure from reinstate_authorization()'s "always advance, even on
     # a no-op" precedent; see docstring above.
-    new_tick = tick + 1 if (violated_names or met_names) else tick   # 2.1.0-18: or met
+    new_tick = tick + 1 if (violated_names or met_names or expired_any) else tick   # 2.1.0-18: or met
     new_state = state.with_tokens(tokens).with_tick(new_tick)
     record = TransitionRecord(
         tick=tick,
@@ -4045,6 +4076,48 @@ def check_live_violations(
                                    "deadline", None, causes),
     )
     return new_state, record
+
+
+def _expire_permits(tokens: List[TokenInstance], spec, tick: int,
+                    clock: Optional[DeadlineClock], as_at: Optional[datetime],
+                    effects_log: List[str]) -> bool:
+    """2.5.0-1: the sweep's permit pass. Moves each selected permit
+    (_swept_permit()) whose time is up to 'expired', in `tokens`, and adds one
+    line to effects_log for each permit expired or not judged. True if any
+    expired.
+
+    A deadline with a date shape is judged here only, against as_at
+    (_date_verdict()); it does not depend on activation, so it also expires a
+    pending permit that was never active. Any other deadline is judged by
+    _permit_elapsed(), the test the use check shares, so a never-active
+    permit (no clock) and a deadline with no magnitude are left alone. Reads
+    the instance's deadline, as that test does."""
+    expired_any = False
+    for i, tok in enumerate(tokens):
+        if not _swept_permit(tok):
+            continue
+        if _has_date_shape(tok.deadline):
+            due, not_judged = _date_verdict(tok.deadline, clock, as_at)
+            if not_judged is not None:
+                effects_log.append(
+                    f"not judged '{tok.token_name}' held by '{tok.holder}': {not_judged}"
+                )
+                continue
+            if as_at < due:
+                continue
+            detail = f"due {due.isoformat()}; as_at {as_at.isoformat()}"
+        elif _permit_elapsed(tok, tick):
+            detail = (f"elapsed {tick - _permit_clock_start(tok)} >= deadline "
+                      f"{_parse_deadline_steps(tok.deadline)} steps")
+        else:
+            continue
+        tokens[i] = _transition(tok, "expired")
+        expired_any = True
+        effects_log.append(
+            f"expired permit '{tok.token_name}' held by '{tok.holder}' ({detail})"
+            + _policy_deadline_note(_spec_token(spec, tok.token_name))
+        )
+    return expired_any
 
 
 def _judge_standing(el, tok: TokenInstance, clock: Optional[DeadlineClock],

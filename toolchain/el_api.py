@@ -682,7 +682,8 @@ class StandingVerdict(BaseModel):
 
 
 class NotJudgedEntry(BaseModel):
-    """2.1.0-9: an active eventual burden whose date deadline was not judged."""
+    """2.1.0-9: an active eventual burden whose date deadline was not judged.
+    2.5.0-1: or an active or pending permit whose date deadline was not judged."""
     token: str
     holder: str
     reason: str
@@ -1570,7 +1571,7 @@ def _parse_as_at(text: str) -> datetime:
 @app.post(
     "/check-violations",
     response_model=CheckViolationsResponse,
-    summary="Sweep active, discharge_mode: eventual Burdens for elapsed deadlines",
+    summary="Sweep eventual Burdens and time-limited Permits for elapsed deadlines",
     description=(
         "Calls Runtime.check_live_violations() to detect and transition to "
         "'violated' any active, discharge_mode: eventual Burden whose elapsed "
@@ -1603,7 +1604,12 @@ def _parse_as_at(text: str) -> datetime:
         "adapter reports for standing duties' keeps conditions, as text "
         "(\"25000000.00 AUD\", \"8.5%\"; a JSON number is not established). "
         "The response lists each standing duty judged under 'standing' with "
-        "its verdict: kept, breached, met or not judged."
+        "its verdict: kept, breached, met or not judged. 2.5.0-1: an active or "
+        "pending permit whose time is up moves to 'expired'. A duration counts "
+        "from the permit's first activation, so a permit never active is left "
+        "alone; a date is judged as for a burden. An expiry is not a violation: "
+        "it appears under 'effects' only, and the tick advances once if any "
+        "permit expired. 'not_judged' also lists a date permit not judged."
     ),
 )
 def check_violations_endpoint(as_at: Optional[str] = None,
