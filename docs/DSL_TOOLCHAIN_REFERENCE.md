@@ -741,6 +741,9 @@ R18). The toolchain withholds its claims about them:
   on the model without those discharge edges (2.1.0-23). When the only
   other edge is the tick, the recommendation is `tick`.
 
+The status route also answers `compelled: null` for a strict burden gated
+on a permit with a time limit; see "Permit time limits (2.5.0)".
+
 Other routes are unaffected: the objective score and reachability read
 satisfaction groups, which never contain a standing duty; available
 actions list obligations by their `for_action`, which a standing duty
@@ -1281,6 +1284,269 @@ six choices are ours:
   the original pending); Annex B.1.5.7 (agreeing to purchase from a new
   supplier leads to a fill) and B.2.4 (filling the borrower role yields a
   burden and a permit).
+
+---
+
+## Permit time limits (2.5.0)
+
+A permit may carry a time limit in its `deadline` (2.5.0-1): a duration
+(`deadline: "5 minutes"`), a date or instant (`deadline: "by
+2026-05-20"`), or a duration policy (`deadline: <Policy>`). The engine
+refuses a use past the limit, and the sweep moves the permit to a new
+state, `expired`.
+
+```
+permit timedPermit {
+    for_action: "useTimed"
+    state: active
+    deadline: "5 minutes"
+}
+```
+
+**When the limit is checked.**
+- **At use** (`advance()` Step 6, and `declare_violation()`, which shares
+  it): a duration limit only. The actor must hold an instance of the
+  permit that is active and whose time has not elapsed. A date or instant
+  limit is not checked at use.
+- **At the sweep** (`check_live_violations()`): both forms. A duration
+  limit is judged by the same test as the use check. A date or instant
+  limit is judged against the caller's `as_at`, and only when the runtime
+  has a `DeadlineClock`; otherwise the sweep writes a `not judged` line
+  and leaves the permit as it is. The sweep reads active and pending
+  permits only.
+- A limit with no measurable magnitude (for example `"thirty days"`, or
+  `"referral episode"`) never elapses.
+
+**The start tick.** A duration limit counts steps from the permit
+instance's start tick. (The runtime's `DeadlineClock`, which judges date
+limits, is a different thing.)
+- The start tick is the tick of the instance's first activation: its
+  grant tick if it is granted active, otherwise the tick at which it is
+  first activated. A permit that has never been active has no start tick,
+  so a duration limit never elapses for it. A date limit does not use the
+  start tick: the sweep can expire a pending permit that was never active.
+- A restore never changes the start tick. `effect activate`, the permit's
+  triggering event and a reinstate all keep it.
+- Steps keep counting from the start tick while the permit is not active:
+  `pending` after `effect pend`, or `superseded` after a revoke. A pending
+  permit can expire at the sweep (the sweep leaves a superseded one
+  alone), and a permit restored after its time is up is still refused at
+  use.
+- Only a new grant gives a new start tick: a new instance, granted at the
+  current tick. A clone or a transfer copies the instance with its state
+  and its start tick, so it is not a new grant.
+
+**`expired` is final for that instance.**
+- A reinstate of an Authorization whose permit instances are all expired
+  is refused: outcome `blocked`, reason `permit 'P' has expired; only a
+  new grant restores it`, no tick.
+- A revoke of one whose permit instances are all expired changes nothing:
+  outcome `ok`, one line per instance (`revoke 'P' had no effect: 'H'
+  holds it expired`), no embargo, no token event, no tick.
+- Beside other instances, the expired ones are skipped: a revoke
+  supersedes the others, and in a reinstate the first instance not
+  expired decides.
+
+**A refused use.** The act is `blocked`, with the reason `required permit
+'P' time has elapsed for actor` and `blocked_by` naming the instance.
+`Runtime.advance()` records it as a refused attempt, as for any Step 6
+refusal (see "Violation records"). The permit's state is unchanged: it
+stays `active` until the sweep writes `expired`. The tick does not move.
+
+**The sweep.** Each expired permit adds one line, `expired permit 'P'
+held by 'H' (elapsed 5 >= deadline 5 steps)` (a date limit gives `due
+...; as_at ...`), and one `expired` token event with cause `deadline`, by
+`system`. A sweep that only expired permits moves the tick once and its
+outcome stays `ok`.
+
+**`expired` is not `lapsed`.** `expired` is the engine's permit state for
+a time limit that is up (ledger cause `deadline`). `lapsed` is a
+claimable token whose sibling in an `any_discharged` group was claimed
+(cause `sibling`). The two are unrelated.
+
+### Permit states
+
+```mermaid
+stateDiagram-v2
+    [*] --> active : grant (declared active), effect create, first reinstate
+    [*] --> pending : grant (declared pending)
+    [*] --> claimable : grant (declared claimable)
+    active --> pending : effect pend
+    pending --> active : effect activate, triggering event, or reinstate
+    claimable --> active : reinstate
+    lapsed --> active : reinstate
+    superseded --> active : reinstate
+    active --> superseded : revoke
+    pending --> superseded : revoke
+    claimable --> superseded : revoke
+    lapsed --> superseded : revoke
+    active --> superseded : sibling discharged (any_discharged group)
+    claimable --> lapsed : sibling claimed (any_discharged group)
+    active --> expired : sweep, time limit up
+    pending --> expired : sweep, time limit up
+    note right of expired
+        Final for this instance.
+        Only a new grant gives a new instance.
+    end note
+```
+
+A revoke here is a direct revoke or a ViolationResponse's `revokes:`; a
+response revokes only when some instance of the permit is active. No act
+moves a permit into `claimable`: it is there only if the author declares
+it, and `claim()` claims burdens only. A clone or a transfer copies an
+instance in its state, whatever that state is.
+
+### Timelines
+
+The permit `P` has `deadline: "5 minutes"` (5 steps) and is granted
+active to `H` at tick 3, so its start tick is 3.
+
+**(a) A use refused past the limit.**
+
+```mermaid
+sequenceDiagram
+    participant H as Holder H
+    participant RT as Runtime
+    Note over RT: tick 8, P active, start tick 3
+    H->>RT: advance("useP", "H")
+    RT-->>H: blocked, "required permit 'P' time has elapsed for actor"
+    Note over RT: refused attempt recorded, P still active, tick still 8
+```
+
+**(b) The sweep expires the permit.**
+
+```mermaid
+sequenceDiagram
+    participant S as system
+    participant RT as Runtime
+    participant L as Ledger
+    Note over RT: tick 8, P active, start tick 3
+    S->>RT: check_live_violations()
+    RT->>RT: P active to expired (elapsed 5 >= deadline 5 steps)
+    RT->>L: token event expired, cause deadline, by system
+    RT-->>S: outcome ok, tick 8 to 9
+```
+
+**(c) A reinstate blocked on an expired permit.**
+
+```mermaid
+sequenceDiagram
+    participant A as Authority
+    participant RT as Runtime
+    Note over RT: tick 9, P expired (its only instance)
+    A->>RT: reinstate_authorization("AuthP")
+    RT-->>A: blocked, "permit 'P' has expired, only a new grant restores it"
+    Note over RT: P still expired, no embargo lifted, tick still 9
+    A->>RT: revoke_authorization("AuthP")
+    RT-->>A: ok, note line "revoke 'P' had no effect"
+    Note over RT: nothing changed, no token event, tick still 9
+```
+
+The reason text in (c) has a semicolon where the diagram shows a comma.
+
+**(d) A new grant gets a new start tick.** A ViolationResponse's
+`creates_burden` may name a permit. It grants a new instance unless the
+recipient already holds the token active, and an expired instance does
+not count.
+
+```
+violation_response GrantOnBreach {
+    on_violation_of: breachedBurden
+    obligates: H
+    response_kind: remediate
+    creates_burden: P
+}
+```
+
+```mermaid
+sequenceDiagram
+    participant S as system
+    participant RT as Runtime
+    participant H as Holder H
+    Note over RT: tick 20, P expired (old instance), breachedBurden violated
+    S->>RT: fire_violation_responses()
+    RT->>RT: new instance of P, active, granted at tick 20
+    Note over RT: token event granted, cause response, old instance stays expired
+    H->>RT: advance("useP", "H") at tick 20
+    RT-->>H: ok
+    H->>RT: advance("useP", "H") at tick 25
+    RT-->>H: blocked, "required permit 'P' time has elapsed for actor"
+```
+
+The new instance's start tick is 20. A live `effect create` cannot
+make this grant: it skips a holder who already holds an instance of the
+token, expired or not. A direct `grant_token()` call makes a new instance
+too, but leaves no ledger event. (d) is pinned by
+`tests/test_permit_expired_final.py`.
+
+### What each layer does
+
+| | Static model | Runtime engine | Hybrid model |
+|---|---|---|---|
+| Time limit at use | None: the model has no permit time | A duration limit is checked at use; an elapsed permit is refused | None: the model has no permit time |
+| Sweep | None | Writes `expired`: a duration limit counted from the start tick, a date limit against `as_at` when the runtime has a `DeadlineClock` | None: no edge writes `expired` |
+| Elapsed permit not yet swept | An exercise is offered | Refused at use; still `active` | Read as `active` at the anchor; an exercise is offered |
+| `expired` permit | Cannot occur: `expired` cannot be declared | Final for that instance | Read as not active at the anchor; no edge changes it |
+| `compelled` for a strict burden gated on a timed permit | Withheld by the status route (`mode=spec`) | Not applicable | Withheld by the status route (`mode=hybrid`) |
+
+The validator warns on an Authorization's `duration`, which is recorded
+and not enforced (`[W-authorization-duration]`), and on a strict burden
+whose discharge needs a permit with a time limit
+(`[W-strict-timed-permit]`).
+
+### The status route
+
+`GET /obligations/{token_name}/status` answers `compelled: null` and
+`status: "permit time limit: not modelled"`, in both modes, for a strict
+burden any of whose discharging actions requires a permit with a duration
+or date limit, elapsed or not (parity row R28). The model has no permit
+time, so it can offer a discharge the engine refuses. The answer depends
+only on the specification: a burden already discharged also shows
+`compelled: null`, and the runtime's token states show that it was
+discharged. `detectable`, `modal_operator` and the
+witness and counterexample paths stay as computed. A limit with no
+measurable magnitude never elapses and is not withheld.
+
+### What this does not close
+
+- The recommended action (its route, and the one execute-action returns)
+  and `GET /kripke/witness` still offer the refused path: only the status
+  route withholds.
+- `compelled` stays as computed for a strict burden that a declaration can
+  violate (parity row R8) or whose discharging action has a precondition
+  (R11).
+- `detectable` can be falsely true: the model's discharge path can need a
+  use the engine refuses (R28).
+- A date limit with no `DeadlineClock` is never judged, so it never bites;
+  the status route still withholds `compelled` for it.
+- The withholding finds the burden among top-level tokens only. A burden
+  declared inline in a role is never granted from the specification, so
+  the status route answers 404 for it (in `mode=spec` it reads top-level
+  tokens only). If a caller grants one directly with `grant_token()`, the
+  hybrid route answers for it and does not withhold `compelled`.
+- A pending or expired permit at the hybrid model's anchor (parity row
+  R29). A reinstate and an `activate` effect do not restore a pending
+  permit in the model, so the exercise behind them is falsely unreachable.
+  An action that emits the permit's triggering event does restore it in
+  the hybrid model (`_fire_event()` in `el_kripke.py`), as the engine
+  does. An expired permit at the anchor has no edge that changes it. Not
+  verified: R29's clause on the static model and its sentence on AF.
+
+### Limits
+
+- No route re-grants a permit. A new instance comes only from a
+  response's `creates_burden`, or from a direct `grant_token()` call,
+  which leaves no ledger event.
+- A clone or a transfer keeps the old start tick and state, so it never
+  renews a permit.
+- A strict burden whose discharge needs a timed permit can get stuck:
+  once the permit's time is up the discharge is refused, and the sweep
+  never violates a strict burden. The validator warns
+  (`[W-strict-timed-permit]`).
+- A limit with no measurable magnitude (for example `"thirty days"` or
+  `"referral episode"`) never elapses, and the status route does not
+  withhold `compelled` for it. `[W-strict-timed-permit]` still fires on
+  it.
 
 ---
 
