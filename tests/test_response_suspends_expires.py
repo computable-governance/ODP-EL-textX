@@ -755,11 +755,14 @@ def test_expires_to_role_with_one_filler_already_expired():
 
 # ── Through the API, and the verifier ────────────────────────────────────────
 
-def test_fire_violation_responses_endpoint_suspends_the_permit():
+def test_fire_violation_responses_endpoint_suspends_the_permit(monkeypatch):
     # Same direct-call style as tests/test_fire_violation_responses_endpoint.py.
+    # The reload resets el_api's module state to its defaults; the probe
+    # runtime is set through monkeypatch, so the default runtime is put back
+    # afterwards and later tests do not see this one.
     import el_api
     importlib.reload(el_api)
-    el_api._runtime = _one_holder()
+    monkeypatch.setattr(el_api, "_runtime", _one_holder())
 
     resp = el_api.fire_violation_responses_endpoint()
 
