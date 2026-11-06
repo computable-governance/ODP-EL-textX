@@ -541,6 +541,7 @@ class ObligationStatusResponse(BaseModel):
     # 2.1.0-20: null for a standing duty (the verifier does not model it).
     # 2.5.0-1: null for a strict burden any of whose discharging actions needs
     # a permit with a duration or date limit (the model has no permit time, R28).
+    # 2.5.0-2: null for one whose permit a violation response suspends or expires (R31).
     compelled: Optional[bool]     # AF satisfied — architecturally guaranteed
     detectable: Optional[bool]    # EF satisfied — possible on at least one path
     # AM-104: which property `compelled` reports — "AF" from w0, or
@@ -551,7 +552,8 @@ class ObligationStatusResponse(BaseModel):
     # resolved within horizon" (bounded response, and since AM-107 AF too:
     # the answer depends on what happens after the horizon). Never set
     # when compelled is True. When compelled is null: "standing duty: not
-    # modelled" (2.1.0-20) or "permit time limit: not modelled" (2.5.0-1).
+    # modelled" (2.1.0-20), "permit time limit: not modelled" (2.5.0-1) or
+    # "permit suspension or expiry by a response: not modelled" (2.5.0-2).
     status: Optional[str] = None
     horizon: int                  # AM-104: steps explored beyond the anchored world
     # AM-110: deadline scale factor k the model was built with (1 = unscaled;
@@ -1006,7 +1008,13 @@ def get_objective_reachable(community_name: str) -> ObjectiveReachableResponse:
         "and 'status' is 'permit time limit: not modelled': the model has no "
         "permit time, so it can offer a discharge the engine refuses. "
         "'detectable', 'modal_operator' and the paths stay as computed, so "
-        "they can still show a refused path."
+        "they can still show a refused path. 2.5.0-2: likewise, for a strict "
+        "burden any of whose discharging actions requires a permit granted "
+        "by an Authorization that any violation response names in suspends "
+        "or expires, in both modes and whether or not the response has fired, "
+        "'compelled' is null and 'status' is 'permit suspension or expiry by "
+        "a response: not modelled': the verifier does not read these clauses. "
+        "A permit named only in revokes is not covered."
     ),
 )
 def get_obligation_status(
@@ -1078,7 +1086,9 @@ def get_obligation_status(
         )
 
     # 2.5.0-1: the model has no permit time (parity row R28), so `compelled`
-    # is withheld for such a burden. Everything else stays as computed.
+    # is withheld for such a burden. 2.5.0-2: likewise for a permit a violation
+    # response suspends or expires (parity row R31). Everything else stays as
+    # computed.
     withheld = _compelled_withheld(source_spec, token_name)
     return ObligationStatusResponse(
         token_name=token_name,
@@ -1534,6 +1544,7 @@ def reinstate_authorization_endpoint(authorization_name: str) -> ReinstateAuthor
 
 STANDING_NOT_MODELLED = "standing duty: not modelled"
 PERMIT_TIME_NOT_MODELLED = "permit time limit: not modelled"  # 2.5.0-1
+PERMIT_RESPONSE_NOT_MODELLED = "permit suspension or expiry by a response: not modelled"  # 2.5.0-2
 
 
 def _permit_has_time_limit(permit) -> bool:
@@ -1545,11 +1556,35 @@ def _permit_has_time_limit(permit) -> bool:
     return _has_date_shape(limit) or _has_deadline_magnitude(limit)
 
 
+def _response_acted_permits(spec) -> set:
+    """2.5.0-2 (parity row R31): the names of the permits granted
+    (grants_permit) by an Authorization that any ViolationResponse in the
+    specification names in `suspends:` or `expires:`, whatever the response
+    answers. Matched by permit name, not holder. `revokes:` is not read."""
+    names = set()
+    for el in spec.elements:
+        if type(el).__name__ != "ViolationResponse":
+            continue
+        for auth in (list(getattr(el, "suspends", None) or [])
+                     + list(getattr(el, "expires", None) or [])):
+            permit = getattr(auth, "permit", None)
+            if permit is not None:
+                names.add(permit.name)
+    return names
+
+
 def _compelled_withheld(spec, token_name: str) -> Optional[str]:
     """2.5.0-1 (parity row R28): why the status route gives no `compelled` for
     this burden, or None. Set for a strict burden when any discharging action
     requires a permit with a time limit, whatever the verifier's answer and the
     burden's state, so the answer depends only on the specification.
+
+    2.5.0-2 (parity row R31): otherwise, also set when any discharging action
+    requires a permit that a violation response suspends or expires
+    (_response_acted_permits()), whether or not the response has fired. A time
+    limit is checked first, so its status takes precedence. A permit named only
+    by `revokes:` is not covered (open finding). The responder's authority is
+    not checked. State-free, so static and hybrid mode give the same answer.
 
     `_spec_token` reads top-level tokens only. An inline burden gets 404 from
     the route today, so it does not reach this check."""
@@ -1561,6 +1596,12 @@ def _compelled_withheld(spec, token_name: str) -> Optional[str]:
             if req.kind == "requires_permit" and req.token \
                     and _permit_has_time_limit(req.token):
                 return PERMIT_TIME_NOT_MODELLED
+    acted_on = _response_acted_permits(spec)
+    for action in discharging_actions(spec, token_name):
+        for req in action.deontic_requirements:
+            if req.kind == "requires_permit" and req.token \
+                    and req.token.name in acted_on:
+                return PERMIT_RESPONSE_NOT_MODELLED
     return None
 
 
