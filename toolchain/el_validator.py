@@ -96,8 +96,9 @@ Rules implemented
         enforcement point discharges it atomically.        AM-103, §6.3.8, §7.8.6
   W-21  A terminate ViolationResponse whose violator chain holds
         no revocable Authorization (with an on_revocation
-        embargo) granted by its obligates — it would fire and
-        revoke nothing. Advisory.                 AM-104, §6.3.8, §7.8.6, §6.6.4
+        embargo) granted by its obligates, and that has no revokes,
+        suspends or expires line — it would fire and revoke nothing.
+        Advisory.                                 AM-104, §6.3.8, §7.8.6, §6.6.4
   W-22  An escalate ViolationResponse with no creates_burden —
         fires as a ledger entry only; nobody becomes obligated.
         Advisory.                                AM-104, §6.3.8, §7.8.6 NOTE 2
@@ -238,7 +239,8 @@ Rules implemented
         the discharge can be refused and the burden stuck. Advisory.
                                                      clause to be confirmed
   response-permit-authority  2.5.0-2: each Authorization a ViolationResponse
-        suspends or expires is granted by its obligates.  §6.6.4, §7.8.6
+        suspends or expires is granted by its obligates.
+                                                     clause to be confirmed
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -455,7 +457,7 @@ def validate_spec(model) -> List[str]:
     errors.extend(_validate_response_revocations(model))
 
     # response-permit-authority — suspended or expired Authorizations: obligates'
-    # grant (2.5.0-2; §6.6.4, §7.8.6)
+    # grant (2.5.0-2; clause to be confirmed)
     errors.extend(_validate_response_permit_authority(model))
 
     # V-NEW-24 — declaration actions: strict burden, under a permit (AM-115,
@@ -2545,7 +2547,9 @@ def _validate_terminate_response_target(model) -> List[str]:
     resolves (root construct, then the delegation walk); a burden with no
     descriptor has no static holder and is skipped. to_role Authorizations
     are not revoked by terminate, so they do not count. A response with an
-    explicit revokes list (AM-115) is V-NEW-23's, not this rule's. Advisory."""
+    explicit revokes list (AM-115) is V-NEW-23's, not this rule's. A
+    response with a suspends or expires line (2.5.0-2) acts when it
+    fires, so it is skipped too. Advisory."""
     from el_engine import _build_obligation_descriptors, _violator_chain
 
     descriptors = _build_obligation_descriptors(model)
@@ -2556,6 +2560,8 @@ def _validate_terminate_response_target(model) -> List[str]:
             continue
         if getattr(vr, "revokes", None):
             continue  # AM-115: an explicit revokes list replaces the chain (V-NEW-23)
+        if getattr(vr, "suspends", None) or getattr(vr, "expires", None):
+            continue  # 2.5.1: a suspends or expires line acts when the response fires
         burden = _obj_name(getattr(vr, "violated_burden", None))
         desc = descriptors.get(burden)
         if desc is None:
@@ -2630,7 +2636,7 @@ def _validate_escalate_to_party(model) -> List[str]:
 def _authority_mismatch(auth, responder) -> Optional[str]:
     """The problem text when an Authorization is granted by someone other
     than the response's obligates, else None. Shared by V-NEW-23 and
-    [response-permit-authority] (§6.6.4, §7.8.6)."""
+    [response-permit-authority]; each caller adds its own citation."""
     authority = _obj_name(getattr(auth, "authority", None))
     if authority != responder:
         return f"is granted by '{authority}', not by obligates '{responder}'"
@@ -2667,7 +2673,9 @@ def _validate_response_revocations(model) -> List[str]:
 def _validate_response_permit_authority(model) -> List[str]:
     """[response-permit-authority] (2.5.0-2): each Authorization a
     ViolationResponse names in suspends or expires must have the
-    response's obligates as its authority (§6.6.4, §7.8.6). Authority
+    response's obligates as its authority. §6.6.4 identifies the authority
+    as the grantor; that only the grantor may suspend or expire its permit
+    is this toolchain's reading, clause to be confirmed. Authority
     only: suspending or expiring a grant needs neither revocable nor an
     on_revocation embargo. One error per line, suspends lines first, then
     expires lines (grammar order)."""
@@ -2681,7 +2689,7 @@ def _validate_response_permit_authority(model) -> List[str]:
                     errors.append(
                         f"[response-permit-authority] ViolationResponse '{vr.name}' "
                         f"{verb} Authorization '{auth.name}', which {mismatch}. "
-                        f"(§6.6.4, §7.8.6)"
+                        f"{_TYPED_CITATION}"
                     )
     return errors
 
@@ -2751,8 +2759,8 @@ def _validate_breach_response_duty(model) -> List[str]:
         warnings.append(
             f"[W-breach-response-duty] ViolationResponse '{vr.name}' responds to a violation "
             f"of {target.kind} '{target.name}' but obliges no action: add creates_burden "
-            f"(granted to obligates, or with creates_burden_for_role to the role's fillers) "
-            f"or a revokes line. (§6.3.8, §7.8.6 NOTE 2)"
+            f"(granted to obligates, or with creates_burden_for_role to the role's fillers), "
+            f"or a revokes, suspends or expires line. (§6.3.8, §7.8.6 NOTE 2)"
         )
     return warnings
 

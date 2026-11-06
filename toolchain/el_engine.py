@@ -4461,7 +4461,7 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
     when VR has also_on_refused_attempts. The marker key is (VR name, rule,
     violator, behaviour, occurred_at), the record's occurrence (2.3.0-7):
     one firing per occurrence, so a refused attempt and its later
-    declaration fire a flagged response once; the effects are 1–4 above, with the
+    declaration fire a flagged response once; the effects are 1–5 above, with the
     record's violator as the violator (terminate: its chain). Instances
     are taken first, then records, per response.
 

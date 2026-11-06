@@ -114,3 +114,22 @@ def test_a_revokes_line_is_left_to_the_revocation_rule():
                     other_revocation="revocable: true\n    on_revocation: activate stopE")
     assert _tagged(result.errors, "[V-NEW-23]") != []
     assert _tagged(result.errors, _TAG) == []
+
+
+def test_message_ends_clause_to_be_confirmed():
+    """The authority error cites no clause: for a suspends line and for an
+    expires line it ends "(clause to be confirmed)"."""
+    for line in ("suspends: OtherAuth", "expires: OtherAuth"):
+        result = _parse(line)
+        (err,) = _tagged(result.errors, _TAG)
+        assert err.endswith("(clause to be confirmed)"), line
+        assert "§" not in err, line
+
+
+def test_revokes_message_keeps_its_citation():
+    """The revocation rule's message is unchanged: it still ends with its own
+    citation, although it shares the authority check."""
+    result = _parse("revokes: OtherAuth",
+                    other_revocation="revocable: true\n    on_revocation: activate stopE")
+    (err,) = _tagged(result.errors, "[V-NEW-23]")
+    assert err.endswith("(§6.6.4, §7.8.6)")

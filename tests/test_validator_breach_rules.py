@@ -71,8 +71,8 @@ def test_breach_response_duty():
     assert _tagged(warnings, "[W-breach-response-duty]") == [
         "[W-breach-response-duty] ViolationResponse 'R' responds to a violation of embargo "
         "'stopE' but obliges no action: add creates_burden (granted to obligates, or with "
-        "creates_burden_for_role to the role's fillers) or a revokes line. "
-        "(§6.3.8, §7.8.6 NOTE 2)"]
+        "creates_burden_for_role to the role's fillers), or a revokes, suspends or expires "
+        "line. (§6.3.8, §7.8.6 NOTE 2)"]
 
 
 def test_breach_response_duty_accepts_a_revokes_line():

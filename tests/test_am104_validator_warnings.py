@@ -98,6 +98,72 @@ def test_w21_warns_when_nothing_to_revoke(auth):
     assert "(Bot, Operator)" in warnings[0]
 
 
+_PLAIN_AUTH = """
+authorization {name} {{
+    authority: Agency
+    {target}
+    grants_permit: botPermit
+}}
+"""
+
+_ROLE_COMMUNITY = """
+community Comm {
+    objective: "o"
+    Bot fills reader
+    role reader { action readData { actor: reader requires_permit botPermit } }
+}
+"""
+
+_TERMINATE_WITH = """
+violation_response terminateResponse {{
+    on_violation_of: noticeBurden
+    obligates: Agency
+    response_kind: terminate
+    {items}
+}}
+"""
+
+
+def _results(src):
+    result = _quiet(parse_string, src)
+    assert result.model is not None, result.errors
+    return result
+
+
+@pytest.mark.parametrize("verb", ["suspends", "expires"])
+def test_w21_silent_for_terminate_with_suspends_or_expires(verb):
+    """A terminate response whose chain has nothing to revoke, but whose
+    suspends or expires line names a non-revocable grant by obligates to
+    Bot: the line acts when the response fires, so no W-21, and the grant
+    is obligates' own, so no authority error."""
+    src = (_HEADER + _PLAIN_AUTH.format(name="PlainAuth", target="to_agent: Bot")
+           + _TERMINATE_WITH.format(items=f"{verb}: PlainAuth"))
+    result = _results(src)
+    assert not [w for w in result.warnings if w.startswith("[W-21]")]
+    assert not [e for e in result.errors if e.startswith("[response-permit-authority]")]
+
+
+def test_w21_silent_for_terminate_suspending_a_to_role_grant():
+    """A suspends line naming a to_role grant by obligates also silences
+    W-21, although the terminate chain itself never counts to_role grants."""
+    src = (_HEADER + _ROLE_COMMUNITY
+           + _PLAIN_AUTH.format(name="RoleAuth", target="to_role: reader")
+           + _TERMINATE_WITH.format(items="suspends: RoleAuth"))
+    result = _results(src)
+    assert not [w for w in result.warnings if w.startswith("[W-21]")]
+
+
+def test_w21_still_fires_with_a_grant_no_clause_names():
+    """The same non-revocable grant to Bot, but no suspends or expires line
+    names it: W-21 still fires. The line silences the warning, not the
+    grant's existence."""
+    src = (_HEADER + _PLAIN_AUTH.format(name="PlainAuth", target="to_agent: Bot")
+           + _TERMINATE_WITH.format(items=""))
+    warnings = _warnings(src, "[W-21]")
+    assert len(warnings) == 1
+    assert "would fire and do nothing" in warnings[0]
+
+
 def test_w22_escalate_without_creates_burden():
     src = _HEADER + """
 violation_response bareEscalation {
