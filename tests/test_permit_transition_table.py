@@ -21,6 +21,9 @@ claimable, expired, superseded and lapsed. Tests with several holders and new
 grants are in tests/test_permit_expired_final.py; consent events on an expired
 permit are in tests/test_fhir_event_handler.py.
 
+The last section covers a response's `suspends:` and `expires:` in all six
+states (2.5.0-2).
+
 Fixture: as tests/test_permit_clock.py. Operator performs the acts and holds
 the permit.
 """
@@ -702,3 +705,118 @@ def test_effect_create_in_each_state(permit_state):
     assert record.effects == ()
     assert record.token_events == ()
     assert rt.current_state().tick == PAST_THE_LIMIT + 1
+
+
+# ── A response's `suspends:` and `expires:`, by state (2.5.0-2) ──────────────
+#
+# The same probe with a response that suspends, or expires, TimedAuth instead
+# of revoking it. Tests that are not table cells are in
+# tests/test_response_suspends_expires.py.
+
+_SUSPENDING_RESPONSE = _RESPONSE.replace(
+    "violation_response RevokeOnBreach", "violation_response SuspendOnBreach"
+).replace("revokes: TimedAuth", "suspends: TimedAuth")
+
+_EXPIRING_RESPONSE = _RESPONSE.replace(
+    "violation_response RevokeOnBreach", "violation_response ExpireOnBreach"
+).replace("revokes: TimedAuth", "expires: TimedAuth")
+
+SUSPEND_FIRED = ("fired 'SuspendOnBreach' (remediate) on violation of 'breachedBurden' "
+                 "by 'Operator'")
+
+EXPIRE_FIRED = ("fired 'ExpireOnBreach' (remediate) on violation of 'breachedBurden' "
+                "by 'Operator'")
+
+
+def _suspending_runtime(permit_state=None) -> Runtime:
+    """As _responding_runtime(), with the response that suspends TimedAuth."""
+    return _runtime_with_response(_SUSPENDING_RESPONSE, permit_state)
+
+
+def _expiring_runtime(permit_state=None) -> Runtime:
+    """As _responding_runtime(), with the response that expires TimedAuth."""
+    return _runtime_with_response(_EXPIRING_RESPONSE, permit_state)
+
+
+def _runtime_with_response(response, permit_state) -> Runtime:
+    result = parse_string(_PROBE + response, validate=True)
+    assert result.ok, result.errors
+    spec = result.model
+    state = enroll(initial_state(), "Operator", role_name="operatorRole")
+    state = enroll(state, "Issuer")
+    state = state.with_tick(GRANT_TICK)
+    token = token_from_spec(spec, "timedPermit", "Operator", GRANT_TICK)
+    if permit_state:
+        token = replace(token, state=permit_state)
+    burden = token_from_spec(spec, "breachedBurden", "Operator", GRANT_TICK)
+    state = grant_token(grant_token(state, token), replace(burden, state="violated"))
+    return Runtime(state, spec)
+
+
+@pytest.mark.parametrize("permit_state", ALL_STATES)
+def test_response_suspends_in_each_state(permit_state):
+    rt = _suspending_runtime(permit_state)
+    _clock_to(rt, PAST_THE_LIMIT)
+
+    record = rt.fire_violation_responses()
+
+    assert record.outcome == "ok"
+    assert record.fired_responses == ("SuspendOnBreach",)
+    assert _embargo_states(rt) == []
+    assert rt.current_state().tick == PAST_THE_LIMIT + 1
+    if permit_state == "active":
+        # Active since grant, so leaving active stamps the grant tick.
+        assert _permit(rt).state == "pending"
+        assert _permit(rt).activated_at_tick == GRANT_TICK
+        assert record.effects == (
+            SUSPEND_FIRED,
+            "suspended 'TimedAuth' (to 'Operator')",
+            "  pended permit 'timedPermit' held by 'Operator'",
+        )
+        assert [(e.from_state, e.to_state) for e in _permit_events(record)] == [
+            ("active", "pending")]
+        return
+    assert _permit(rt).state == permit_state
+    assert _permit(rt).activated_at_tick is None
+    assert record.effects == (
+        SUSPEND_FIRED,
+        "not suspended 'TimedAuth' (to 'Operator'): nothing to suspend",
+        f"  suspend 'timedPermit' had no effect: 'Operator' holds it {permit_state}",
+    )
+    assert _permit_events(record) == []
+
+
+@pytest.mark.parametrize("permit_state", ALL_STATES)
+def test_response_expires_in_each_state(permit_state):
+    rt = _expiring_runtime(permit_state)
+    _clock_to(rt, PAST_THE_LIMIT)
+
+    record = rt.fire_violation_responses()
+
+    assert record.outcome == "ok"
+    assert record.fired_responses == ("ExpireOnBreach",)
+    assert _embargo_states(rt) == []
+    assert rt.current_state().tick == PAST_THE_LIMIT + 1
+    if permit_state in ("active", "pending"):
+        assert _permit(rt).state == "expired"
+        # Active since grant, so leaving active stamps the grant tick; a
+        # seeded pending permit was never active and keeps no stamp.
+        assert _permit(rt).activated_at_tick == (
+            GRANT_TICK if permit_state == "active" else None)
+        assert record.effects == (
+            EXPIRE_FIRED,
+            "expired 'TimedAuth' (to 'Operator')",
+            "  expired permit 'timedPermit' held by 'Operator'",
+        )
+        assert [(e.event, e.from_state, e.to_state, e.cause, e.cause_ref)
+                for e in _permit_events(record)] == [
+            ("expired", permit_state, "expired", "response", "ExpireOnBreach")]
+        return
+    assert _permit(rt).state == permit_state
+    assert _permit(rt).activated_at_tick is None
+    assert record.effects == (
+        EXPIRE_FIRED,
+        "not expired 'TimedAuth' (to 'Operator'): nothing to expire",
+        f"  expire 'timedPermit' had no effect: 'Operator' holds it {permit_state}",
+    )
+    assert _permit_events(record) == []

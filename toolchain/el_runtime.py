@@ -420,7 +420,12 @@ class Runtime:
         el_engine.fire_violation_responses()'s docstring for
         the exact predicate. Deliberately separate from
         check_live_violations() (kept a pure detector); mirrors its
-        direct-call pattern and conditional tick-advance (no-op stays free)."""
+        direct-call pattern and conditional tick-advance (no-op stays free).
+        2.5.0-2: a response can also suspend or expire the permit an
+        Authorization grants: `suspends:` moves it from active to pending,
+        `expires:` from active or pending to expired, for the
+        Authorization's to_agent or the actors filling its to_role; every
+        other instance gets a "had no effect" line."""
         new_state, record = _engine_fire_violation_responses(self._state, self._spec)
         self._state = new_state
         self._ledger.append(record)

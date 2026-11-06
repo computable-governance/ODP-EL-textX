@@ -4279,6 +4279,95 @@ def _revoke_for_response(
     return list(tokens)
 
 
+def _response_target_text(auth) -> str:
+    """2.5.0-2: the target of an Authorization as a response's lines name it,
+    `to '<agent>'` or `to role '<role>'`, the same words _revoke_for_response()
+    writes."""
+    to_agent = getattr(getattr(auth, "authorized_agent", None), "name", None)
+    if to_agent:
+        return f"to '{to_agent}'"
+    return f"to role '{getattr(auth, 'authorized_role', None)}'"
+
+
+# 2.5.0-2: what a response clause naming an Authorization does to the permit
+# it grants. verb -> (past tense, new state, states acted on, moved word).
+_RESPONSE_PERMIT_ACTS = {
+    "suspend": ("suspended", "pending", ("active",), "pended"),
+    "expire": ("expired", "expired", ("active", "pending"), "expired"),
+}
+
+
+def _act_on_response_permit(
+    tokens, actors, auth, responder: str, response_name: str, verb: str,
+    effects_log: List[str], causes: Optional[dict] = None,
+) -> List[TokenInstance]:
+    """2.5.0-2: one `suspends:` or `expires:` line of a firing response, with
+    the verb "suspend" or "expire". Acts on the permit the Authorization
+    grants, held by its to_agent or by the actors filling its to_role, never
+    on another holder's instance. Returns the new token list; appends to
+    effects_log.
+
+    Checks in this order, each writing one line and changing nothing when it
+    fails: the Authorization's authority is the responder; a to_role has at
+    least one filler (an unknown role has none); a target holds at least one
+    instance of the permit. Then each target instance, in token order, in a
+    state the verb acts on (suspend: active, to pending; expire: active or
+    pending, to expired) moves through _transition(), the only place the
+    permit's activation stamp is set, so a pending permit that was never
+    active keeps no stamp when it expires; every other instance, an expired
+    one included, is left as it is and gets a "had no effect" line.
+    Identical instances all move. A response is an institutional act, so
+    there is no strict-mode guard; no embargo is touched, and the
+    Authorization need not be revocable. Each instance moved has the cause
+    ("response", response_name) in its token event."""
+    past, new_state, acted_on, moved_word = _RESPONSE_PERMIT_ACTS[verb]
+    authority = getattr(getattr(auth, "authority", None), "name", None)
+    if authority != responder:
+        effects_log.append(
+            f"not {past} '{auth.name}': authority is '{authority}', not '{responder}'"
+        )
+        return list(tokens)
+    to_agent = getattr(getattr(auth, "authorized_agent", None), "name", None)
+    if to_agent:
+        holders = {to_agent}
+    else:
+        role = getattr(auth, "authorized_role", "") or ""
+        holders = {a.actor_name for a in actors if a.role_name == role}
+        if not holders:
+            effects_log.append(f"not {past} '{auth.name}': no actor fills role '{role}'")
+            return list(tokens)
+    target = _response_target_text(auth)
+    permit_name = auth.permit.name
+    tokens = list(tokens)
+    indexes = [i for i, t in enumerate(tokens)
+               if t.kind == "permit" and t.token_name == permit_name and t.holder in holders]
+    if not indexes:
+        effects_log.append(
+            f"not {past} '{auth.name}' ({target}): no instance of permit '{permit_name}'"
+        )
+        return tokens
+    lines: List[str] = []
+    moved = False
+    for i in indexes:
+        t = tokens[i]
+        if t.state in acted_on:
+            tokens[i] = _transition(t, new_state)
+            moved = True
+            if causes is not None:
+                causes[_instance_key(t)] = ("response", response_name)
+            lines.append(f"  {moved_word} permit '{permit_name}' held by '{t.holder}'")
+        else:
+            lines.append(
+                f"  {verb} '{permit_name}' had no effect: '{t.holder}' holds it {t.state}"
+            )
+    if moved:
+        effects_log.append(f"{past} '{auth.name}' ({target})")
+    else:
+        effects_log.append(f"not {past} '{auth.name}' ({target}): nothing to {verb}")
+    effects_log.extend(lines)
+    return tokens
+
+
 def _terminate_authorizations(
     tokens, spec, violators: Set[str], responder: str, tick: int, effects_log: List[str],
     causes: Optional[dict] = None,
@@ -4356,8 +4445,15 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
          covered this way. With creates_burden_for_role, effect 1 grants
          the burden to each actor filling that role instead of obligates
          (none: nothing granted, logged).
+      5. 2.5.0-2: each `suspends:` line moves the permit its Authorization
+         grants from active to pending, and each `expires:` line moves it
+         from active or pending to expired, for the Authorization's
+         to_agent or the actors filling its to_role; every other instance
+         gets a "had no effect" line. All suspends lines run first, then
+         all expires lines, after any revocation in 4. Neither touches an
+         embargo or needs a revocable Authorization.
     escalate, remediate and penalise have no effect beyond 1–3 without a
-    revokes list.
+    revokes, suspends or expires list.
 
     2.3.0-4: VR also fires once per ViolationRecord (declare_breach()) in
     state.violation_records whose rule is VR.on_violation_of — a permit,
@@ -4400,6 +4496,8 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
         escalate_to_ref = getattr(vr, "escalate_to", None)
         burden_role = getattr(getattr(vr, "burden_role", None), "name", None)  # AM-115
         revokes = getattr(vr, "revokes", None) or []  # AM-115
+        suspends = getattr(vr, "suspends", None) or []  # 2.5.0-2
+        expires = getattr(vr, "expires", None) or []  # 2.5.0-2
 
         # (responded key, what was violated, violator): each violated
         # instance, then (2.3.0-4) each violation record naming the token.
@@ -4472,6 +4570,18 @@ def fire_violation_responses(state: WorldState, spec) -> Tuple[WorldState, Trans
                     tokens, spec, _violator_chain(spec, violator),
                     responding_actor, tick, effects_log, causes,
                 )
+
+            # 5 — 2.5.0-2: suspend, then expire, each listed Authorization's
+            # permit, each list in written order, after any revocation above:
+            # every suspends line first, then every expires line.
+            for auth in suspends:
+                tokens = _act_on_response_permit(
+                    tokens, state.actors, auth, responding_actor, vr.name, "suspend",
+                    effects_log, causes)
+            for auth in expires:
+                tokens = _act_on_response_permit(
+                    tokens, state.actors, auth, responding_actor, vr.name, "expire",
+                    effects_log, causes)
 
     new_tick = tick + 1 if fired else tick
     new_state = state.with_tokens(tokens).with_tick(new_tick).with_responded(responded)
