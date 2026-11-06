@@ -5,7 +5,7 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
-## [Unreleased]
+## [2.5.0] - 2026-11-06
 
 Permit time limits and violation responses that act on a permit (2.5.0-1 and
 2.5.0-2). A permit's `deadline` is now enforced, and a permit whose time is up
@@ -122,7 +122,8 @@ responses that suspend or expire a permit (2.5.0)" in
   [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md); parity
   rows R26, R28, R29, R30 and R31 in
   [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md); the
-  Concepts Index and `CLAUDE.md` updated.
+  Concepts Index and `CLAUDE.md` updated; an explainer page,
+  [docs/explainers/permit_time_limits.html](docs/explainers/permit_time_limits.html).
 
 No verifier code changed in 2.5.0-1 or 2.5.0-2. None of the published
 specifications uses `suspends:` or `expires:`, so 2.5.0-2 changes none of
@@ -626,6 +627,7 @@ notes) is [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
   scope, and the `domain_scope` field on an Authorization is not checked.
 
 
+[2.5.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.5.0
 [2.4.1]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.4.1
 [2.4.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.4.0
 [2.3.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.3.0

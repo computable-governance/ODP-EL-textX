@@ -7801,7 +7801,10 @@ rows added in 2.1.0 and 2.2.0 (R1 to R18: deadlines, the clock, policy
 values, preconditions, standing duties; R19, 2.2.0: policy-fed deadlines;
 2.3.0: R20 and R21, token events and `blocked_by`; R22 to R25,
 violation records and refused attempts; R26, the permit check;
-2.4.0: R27, an action's `effect fill`, absent in both builders);
+2.4.0: R27, an action's `effect fill`, absent in both builders;
+2.4.1: R3, the `activate` effect's pending-only rule;
+2.5.0: R28 to R31, permit time limits and responses that suspend or
+expire a permit, and the sweep's `expired` added to R26);
 the rest of the engine is not yet listed. Updated in the same commit as any engine or Kripke rule it
 describes.
 
