@@ -135,7 +135,7 @@ def test_strict_timed_permit_withholds(install, monkeypatch, mode):
     assert status.standing is False
 
     if mode == "hybrid":
-        # Q3: no state test. A burden discharged in time is withheld too.
+        # No state test. A burden discharged in time is withheld too.
         assert _quiet(runtime.advance, "file", "Holder", {}).outcome == "ok"
         assert _hybrid_model(runtime).check_obligation("duty").satisfied is True
         status = _status(mode)
@@ -161,7 +161,7 @@ def test_no_usable_limit_keeps_the_verdict(install):
             status = _status(mode)
             assert status.compelled is True
             assert status.status is None
-    # Q5: the warning still fires for a limit the route does not withhold on.
+    # The warning still fires for a limit the route does not withhold on.
     warnings = _quiet(parse_string, no_magnitude).warnings
     assert any(w.startswith("[W-strict-timed-permit]") for w in warnings)
 

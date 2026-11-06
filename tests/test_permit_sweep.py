@@ -221,7 +221,7 @@ def _expired_runtime(*names):
     return rt
 
 
-# ── D12: the tick, the outcome and the lists ─────────────────────────────────
+# ── The tick, the outcome and the lists ──────────────────────────────────────
 
 def test_nothing_expired_leaves_the_tick_unchanged():
     rt = _runtime("timedPermit", "datedPermit")
@@ -280,7 +280,7 @@ def test_second_sweep_changes_nothing():
     assert rt.current_state().tick == PAST_THE_LIMIT + 1
 
 
-# ── D2: the state and the cause ──────────────────────────────────────────────
+# ── The state and the cause ──────────────────────────────────────────────────
 
 def test_expiry_event_and_cause_for_both_forms():
     rt = _expired_runtime("datedPermit")
@@ -305,7 +305,7 @@ def test_expiry_fires_no_response():
     assert record.fired_responses == ()
 
 
-# ── T5 with D12: discharge_mode and a strict freeze ──────────────────────────
+# ── Discharge mode and a strict freeze ───────────────────────────────────────
 
 def test_strict_permit_expires():
     rt = _runtime("strictPermit")
@@ -329,7 +329,7 @@ def test_expiry_during_a_strict_freeze_moves_the_tick():
     assert rt.current_state().tick == PAST_THE_LIMIT + 1
 
 
-# ── D4 and use after the sweep ───────────────────────────────────────────────
+# ── Use after the sweep ──────────────────────────────────────────────────────
 
 def test_date_form_stays_usable_until_the_sweep():
     rt = _runtime("datedPermit")
@@ -354,7 +354,7 @@ def test_use_after_the_sweep_names_the_expired_instance():
     assert _state_of(rt, "timedPermit") == "expired"
 
 
-# ── Q8: no measurable magnitude ──────────────────────────────────────────────
+# ── No measurable magnitude ──────────────────────────────────────────────────
 
 def test_deadline_with_no_magnitude_never_expires_and_gets_no_warning():
     rt = _runtime("wordsPermit", "episodePermit", tick=10_000_000)
@@ -370,7 +370,7 @@ def test_deadline_with_no_magnitude_never_expires_and_gets_no_warning():
             if "deadline" in w and ("wordsPermit" in w or "episodePermit" in w)] == []
 
 
-# ── T10: the not-judged list and lines ───────────────────────────────────────
+# ── The not-judged list and lines ────────────────────────────────────────────
 
 def _lines(listed):
     return tuple(f"not judged '{t}' held by '{h}': {r}" for t, h, r in listed)
@@ -441,7 +441,7 @@ def test_history_after_an_expiry():
     assert rt.in_force_at("datedPermit", "Operator", PAST_THE_LIMIT + 1) is False
 
 
-# ── T4: an elapsed, unswept permit and a discharged sibling ──────────────────
+# ── An elapsed, unswept permit and a discharged sibling ──────────────────────
 
 def test_sibling_discharged_first_wins():
     rt = _expired_runtime("siblingBurden")

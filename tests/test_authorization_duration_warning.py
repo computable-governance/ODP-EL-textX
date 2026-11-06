@@ -1,5 +1,5 @@
 """
-2.5.0-1 — [W-authorization-duration] (slot W-30).
+2.5.0 — [W-authorization-duration].
 
 An Authorization's `duration` is recorded and not enforced. The validator says
 so and nothing else changes: the permit it grants is still usable after the
@@ -75,6 +75,7 @@ def test_no_duration_is_silent():
 
 
 def _use_after_ninety_days(result):
+    # The permit reaches Worker through `party Worker { holds dataPermit }` in the spec text.
     rt = Runtime.build_from_spec(result.model)
     rt.advance_clock(_NINETY_DAYS_IN_TICKS + 1)
     return rt.advance("useData", "Worker").outcome

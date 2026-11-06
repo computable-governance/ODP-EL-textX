@@ -16,12 +16,12 @@ the engine refuses.
   - Parity, real scenario: after a refusal in the terms-of-engagement
     scenario, the engine refuses both exercises and neither builder has
     a T5 edge from that state.
-  - Invariant over the scenarios the guard changed (AM-101 Phase 1): no
+  - Invariant over the scenarios the guard changed: no
     T5 edge leaves a strict-blocked world, in either builder. None of
-    their exercised actions discharges anything (verified in Phase 1),
-    so the unconditional form of the invariant is the right one.
+    their exercised actions discharges anything (verified when AM-101
+    was made), so the unconditional form of the invariant is the right one.
 
-No world/edge counts are pinned; the Phase 1 before/after table is in
+No world/edge counts are pinned; the before/after table is in
 the AM-101 entry of docs/el_grammar_amendments.md.
 """
 import contextlib

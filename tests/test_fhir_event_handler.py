@@ -7,11 +7,12 @@ fhir_event_handler.handle_consent_event(), which for Consent.status
 path already exercised by POST /authorizations/{name}/revoke (see
 tests/test_referral_revocation.py) — this test locks in that the FHIR
 entry point produces the same AM-31/AM-31b guarantees, plus stamps
-Consent.id as fhir_provenance. Consent.status 'active' (R30 Option B,
+Consent.id as fhir_provenance. Consent.status 'active' (R30,
 2026-08-13) calls Runtime.reinstate_authorization() — this file covers
-all three shapes that call can take: idempotent (permit already active),
-fresh grant (permit never previously granted), and reinstate after a
-prior revoke (permit superseded, embargo active) — plus that reinstate
+every shape that call can take: idempotent (permit already active),
+fresh grant (permit never previously granted), reinstate after a prior
+revoke (permit superseded, embargo active), and blocked (the permit has
+expired, or a strict freeze applies) — plus that reinstate
 stamps fhir_provenance under the permit token name, mirroring how revoke
 stamps it under the embargo token name.
 
