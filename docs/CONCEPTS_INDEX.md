@@ -1924,6 +1924,8 @@ via `grep -n "AM-34" toolchain/fhir_event_handler.py`, zero matches).
 
 **Not the engine's `expired` (2.5.0-1):** the engine's permit state `expired` is a different thing: a runtime token state that the sweep writes for a permit whose time limit is up. `ObligationState.EXPIRED` is a verifier state for an obligation (a burden), and no Kripke rule produces it; no Kripke rule writes the permit state `expired` either (see "Permit time limits (2.5.0)" in `docs/DSL_TOOLCHAIN_REFERENCE.md`).
 
+**Update (2.5.0-2).** A violation response's `expires:` also writes the permit state `expired`, with the ledger cause `response`. It is the same plain-string permit state, still not `ObligationState.EXPIRED`.
+
 ---
 
 ## Layer 4 discharge has no negative preconditions; strict-mode AF may be structurally guaranteed
@@ -2532,7 +2534,8 @@ availability of a longer working block.
 finding, already noting this general territory (runtime events not
 wired into obligation-state handling) was anticipated but left unbuilt.
 That `EXPIRED` is not the engine's permit state `expired` (2.5.0-1),
-which the sweep writes for a permit whose time limit is up.
+which the sweep writes for a permit whose time limit is up and a
+response's `expires:` writes for the permit it names (2.5.0-2).
 
 **Status: RESOLVED (2026-08-13).** Option 1 (extend hybrid mode) was chosen
 and implemented as R30 Option B: live grant/reinstate, wired end-to-end
@@ -6270,6 +6273,12 @@ not modelled", in both modes (parity row R28; see "Permit time limits
 (2.5.0)" in `docs/DSL_TOOLCHAIN_REFERENCE.md`). Other strict burdens keep
 `compelled` as computed, including those a declaration can violate (R8).
 
+**Update (2.5.0-2).** A second case is withheld: a strict burden whose
+discharging action requires a permit granted by an Authorization that a
+violation response names in `suspends:` or `expires:` (status "permit
+suspension or expiry by a response: not modelled", parity row R31). A permit
+named only by `revokes:` is not covered.
+
 **Note (AM-106, 2026-09-26):** T2 can violate a `strict` burden in both
 Kripke builders — neither excludes strict burdens — while the engine
 never clock-violates one (`check_live_violations()` skips them). It
@@ -6340,6 +6349,11 @@ discharge is refused and `advance_clock()` is blocked. The validator warns
 above. For such a burden the status route answers `compelled: null` and
 status "permit time limit: not modelled", in both modes (parity row R28;
 see "Permit time limits (2.5.0)" in `docs/DSL_TOOLCHAIN_REFERENCE.md`).
+
+**Update (2.5.0-2, known limit).** A response's `suspends:` or `expires:` on
+the permit a strict burden's discharge needs gives this deadlock another way
+in, if the response fires while the burden is actionable. The status route
+withholds `compelled` for such a burden (parity row R31).
 
 **OPEN FINDING** — found during AM-103 Phase 1. If the holder of an
 actionable strict burden cannot perform its discharging action, nothing
@@ -6559,6 +6573,13 @@ Reinstating with A expired and B superseded revives B and leaves A expired. The
 verifier's anchor keeps one state per permit name (parity row R30). Run on the
 engine; still not scheduled.
 
+**Update (2.5.0-2).** A response's `suspends:` and `expires:` act per holder: on
+the Authorization's `to_agent` instance, or on the instances of the actors filling
+its `to_role`, never on another holder's. So one response now acts with two scopes:
+by name for every holder through `revokes:` or terminate, and per holder through
+the new clauses. A reinstate after a suspension still acts by name (see "A
+reinstate with several holders depends on list order"). Still not scheduled.
+
 ## terminate responses do not cover `to_role` Authorizations — OPEN FINDING (2026-09-26)
 
 **OPEN FINDING** — AM-104's terminate revokes only Authorizations whose
@@ -6576,6 +6597,12 @@ review (`escalate_to: AgencySecurityContact` / `ProviderSecurityContact`,
 the holder of `refusalReviewBurden`). To be fixed with the scenario edits
 in the violation-declaration amendment, which should also give it a
 `creates_burden` (it currently raises `[W-22]`).
+
+**Update (2.5.0-2).** `suspends:` and `expires:` do resolve `to_role`: they
+act on the instance of each actor filling the Authorization's role when the
+response fires. The terminate chain and `[W-21]` are unchanged and still
+ignore a `to_role` Authorization, so within one response terminate and the
+new clauses treat it differently.
 
 ## Hybrid mode never violates a permit-gated burden — RESOLVED (2026-09-26)
 
@@ -7396,6 +7423,11 @@ both builders) takes the first `fills` statement's object as its single
 holder. Compare the AM-105 finding on a burden created by several
 responses. Each role has one filler today.
 
+**Update (2.5.0-2).** On a `to_role` Authorization, a response's
+`suspends:` and `expires:` act on every filler's instance, as
+`creates_burden_for_role` grants to every filler. The verifier reads
+neither clause.
+
 ## `effect activate` revives a closed burden — OPEN FINDING (2026-11-04), RESOLVED 2026-11-05
 
 **OPEN FINDING (2026-11-04), RESOLVED 2026-11-05 by 2.4.1-1 and 2.4.1-2.**
@@ -7523,6 +7555,13 @@ permit with no active instance differently (2.5.0-1).
 | Pending, claimable or lapsed | `superseded`, embargo active | `not revoked` line, no embargo |
 | A expired, B superseded | Embargo goes to B | `not revoked` line, no embargo |
 
+**Update (2.5.0-2).** A response's `suspends:` and `expires:` are a third route. On
+an expired instance they behave like a response's revoke: they change nothing and
+write note lines (`suspend 'P' had no effect: 'H' holds it expired`), and the
+response still fires and moves the tick. A direct revoke still differs. On a
+pending instance they differ from each other: `suspends:` changes nothing,
+`expires:` moves it to `expired`.
+
 The direct route's other states were kept as they were on purpose. Whether the
 two routes should agree is not decided. Not scheduled.
 
@@ -7534,6 +7573,12 @@ did before. If it is active, nothing moves, so with A expired, B active and C
 superseded, C stays superseded. With C listed before B, C goes active. Left as it
 is: with no expired instance the result is the same as before. Depends on the
 per-holder revocation finding above. Not scheduled.
+
+**Update (2.5.0-2).** A response's `suspends:` gives this case a new way in: it
+pends one holder's instance and leaves another holder's active one alone. With the
+active instance first in the list, a reinstate moves nothing and the suspended
+instance stays pending, although an active embargo is lifted. With no
+`on_revocation` embargo the reinstate raises `KeyError` instead.
 
 ## A response's `creates_burden` reads a permit's state, not its time — OPEN FINDING (2026-11-05)
 
@@ -7555,6 +7600,10 @@ fresh active FHIR Consent is refused, and `effect create` skips a holder who alr
 has an instance. `effect create` for another holder makes that holder a new instance
 and does nothing for this one. A route for a new grant is not designed. Not scheduled.
 
+**Update (2.5.0-2).** A response's `expires:` is a second way into `expired`,
+beside the sweep. There is still no way out except a new grant, and the only live
+new grant is still a response's `creates_burden`.
+
 ## A response's `revokes:` leaves the static status route saying `compelled: true` — OPEN FINDING (2026-11-05)
 
 **OPEN FINDING** — Take a strict burden whose discharging action requires a permit
@@ -7573,6 +7622,21 @@ Probed on one specification, with a burden triggered by an event. The withholdin
 does not cover a permit withdrawn by `revokes:`. This gap is recorded, not changed.
 Not scheduled.
 
+**Update (2.5.0-2).** The status route now also withholds `compelled` for a permit
+that a response names in `suspends:` or `expires:` (status "permit suspension or
+expiry by a response: not modelled", parity row R31). `revokes:` is now the only
+response clause the withholding does not cover; `test_revokes_only_keeps_the_verdict`
+in `tests/test_status_response_permit.py` pins that boundary and must change when
+this finding is fixed. The statement above that the route withholds only for a
+permit with a time limit is now out of date.
+
+**Correction (2.5.0-2).** The hybrid row of the table above was read while the
+event-triggered burden was still pending. With the burden already active and the
+response not yet fired, a probe on the same specification gives `compelled: true`
+in hybrid mode as well; after the response has revoked the permit it gives `false`,
+as in the table. The spec row is unchanged. Why the hybrid model says `false` for a
+burden that is still pending has not been traced.
+
 ## The UI bridge's `POST /verify` still reports the claim the status route withholds — OPEN FINDING (2026-11-05)
 
 **OPEN FINDING** — `POST /verify` in `computable-governance-ui` calls
@@ -7585,6 +7649,10 @@ time limit, it returns `af: true`, and `platform/simulator-shell.js:215-222` sho
 The display has only two outcomes, so a future null `af` would wrongly show "AF ✗
 enforcement gap detected". Any change there must handle null. No published
 specification has such a burden today. Not scheduled; belongs to the UI repository.
+
+**Update (2.5.0-2).** The second withholding, for a permit a response suspends or
+expires, does not reach `POST /verify` either; no published specification has such
+a burden.
 
 ---
 
