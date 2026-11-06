@@ -13045,3 +13045,261 @@ the anchor); the "reserved" clause in the header removed.
 
 **Verification:** 10 new test cases in `tests/test_status_timed_permit.py`. Full suite,
 run by the author: 2302 passed, 2 skipped, 1 deselected, 1 xfailed.
+
+## 2.5.0-2 — a violation response can suspend or expire a permit (`toolchain/el_engine.py`)
+
+**Status:** IMPLEMENTED. Type: grammar and engine.
+
+**Before.** A violation response could create a burden, escalate, revoke an
+Authorization (`revokes:`) or terminate. It had no way to put a permit on hold, or to
+end it, without superseding it.
+
+**Now.** A response can name an Authorization to suspend or to expire. When the
+response fires, the permit that Authorization grants moves to pending or to `expired`.
+
+**Grammar.** Two new optional clauses on a ViolationResponse, `suspends:` and
+`expires:`, one Authorization name per line, each through a wrapper rule as for
+`revokes:`. They are written after `revokes:`, in a fixed order: revokes, suspends,
+expires.
+
+```
+ViolationResponse:
+    'violation_response' name=ID '{'
+        ...
+        (revokes+=RevokesItem)*                                 // AM-115
+        (suspends+=SuspendsItem)*                               // 2.5.0: Authorizations suspended
+        (expires+=ExpiresItem)*                                 // 2.5.0: Authorizations expired
+        ...
+    '}'
+;
+
+SuspendsItem:
+    'suspends' ':' authorization=[Authorization]
+;
+
+ExpiresItem:
+    'expires' ':' authorization=[Authorization]
+;
+```
+
+The parser step for responses (P13) unwraps them into two lists of Authorizations,
+`ViolationResponse.suspends` and `ViolationResponse.expires` (`toolchain/el_parser.py`,
+`toolchain/el_domain.py`). One test covers the clauses written in order.
+
+**Engine.** `fire_violation_responses()` acts on the permit each named Authorization
+grants.
+- `suspends:` moves the permit from active to pending. `expires:` moves it from active
+  or pending to `expired`. An instance in any other state does not change and gets note
+  lines.
+- "Active" is judged by the permit's state, not by the use check, so an elapsed permit
+  that the sweep has not yet written as `expired` can still be suspended or expired.
+- The target is the Authorization's `to_agent` instance, or the instances held by the
+  actors who fill its `to_role`. Another holder's instance is never touched. Identical
+  duplicate instances both move.
+- Order in one firing: the terminate chain or `revokes:` (they exclude each other), then
+  every `suspends:` line, then every `expires:` line, each in written order. Naming the
+  same Authorization twice gives the no-effect note lines the second time.
+- The steps run once per occurrence: a response that fires for two violated instances
+  in one call runs its `suspends:` lines twice, the second time with no effect. The tick
+  still moves once.
+- The tick moves on by one per call when any response fired, even if nothing changed.
+- There is no strict-mode guard, no embargo is touched, and the Authorization need not
+  be `revocable`. A run-time check repeats the validator's authority rule: the
+  Authorization's authority must be the response's `obligates`.
+- `terminate` is unchanged: with no `revokes:` it still revokes its chain, and the new
+  clauses add to it.
+- The verifier is unchanged: the spec and hybrid models do not read the new clauses. A
+  test pins that the static model is identical with and without `suspends:`.
+- Ledger: an instance moved by `suspends:` or by a response's `expires:` writes the
+  cause `response`, with the response's name as ref. A response's revoke still writes
+  `revocation` with the Authorization's name. The sweep's expiry writes `deadline`.
+  Token events show the net change over the whole call, so `suspends:` then `expires:`
+  on one permit gives a single event, active to expired.
+
+The note lines, shown for `suspends:`:
+
+```
+not suspended 'A': authority is '<authority>', not '<obligates>'
+not suspended 'A': no actor fills role '<role>'
+not suspended 'A' (to 'X'): no instance of permit 'P'
+suspended 'A' (to 'X')
+  pended permit 'P' held by 'X'
+not suspended 'A' (to 'X'): nothing to suspend
+  suspend 'P' had no effect: 'X' holds it <state>
+```
+
+For `expires:` the words are `expired`, `expire` and `expired permit`. For a `to_role`
+Authorization the target reads `to role '<role>'`. An authority mismatch, a role no
+actor fills, or no instance of the permit writes one line and changes nothing.
+Otherwise a headline is followed by one indented line per instance. So a complete no-op
+writes two lines.
+
+**`expired` keeps its meaning.** As in 2.5.0-1, `expired` is final for that instance. A
+response's `expires:` is a second way to reach it, beside the sweep; there is still no
+way out except a new grant.
+
+**Clauses.** ISO/IEC 15414:2015:
+- 6.4.7: speech acts.
+- 7.8.6: violations; recovery or sanction mechanisms.
+- 7.8.7: deontic token rules: the pending state, and the end of a token by a speech act
+  or a timeout.
+- 6.6.4 and 7.8.8.4: authorization: the authority is the party that grants the permit.
+
+`expired` is this toolchain's own state for the end of a permit (the standard's life
+cycle has active, pending and an end of life). That only the Authorization's authority
+may suspend or expire its permit is this toolchain's reading, clause to be confirmed: the
+standard identifies the authority as the grantor and binds the response's `obligates`,
+but does not restrict who may suspend or end a permit.
+
+**Limit.**
+- `reinstate_authorization()` raises `KeyError` for an Authorization with no
+  `on_revocation` embargo, so a permit suspended under such an Authorization comes back
+  only by `effect activate` or by an event.
+- Every restore acts by permit name across holders. With one holder's instance active
+  and another's suspended, and the active one first in the list, a reinstate moves
+  nothing and the suspended one stays pending, although an active embargo is lifted
+  (open finding "A reinstate with several holders depends on list order" in
+  `docs/CONCEPTS_INDEX.md`).
+- The ledger names differ by route: a suspension and a response's expiry name the
+  response, a response's revoke names the Authorization, and the sweep's expiry names
+  nothing.
+- A terminate response with `suspends:` or `expires:` and no `revokes:` can still get
+  `[W-21]`, which says the response "would fire and do nothing" although the clauses
+  act. Recorded only; the warning is unchanged.
+- The terminate chain and `[W-21]` still ignore a `to_role` Authorization; the new
+  clauses resolve `to_role` (open finding "terminate responses do not cover `to_role`
+  Authorizations" in `docs/CONCEPTS_INDEX.md`).
+- `revokes:` acts on a permit by name for every holder; the new clauses act per holder,
+  so a response has two scopes (open finding "Revocation supersedes a permit by name for
+  every holder" in `docs/CONCEPTS_INDEX.md`).
+- A role with several fillers: the new clauses act on every filler's instance (open
+  finding "A response to a role with several fillers: one model holder, several engine
+  grants" in `docs/CONCEPTS_INDEX.md`).
+- On an expired permit a response's `suspends:` and `expires:` change nothing, as does a
+  response's `revokes:`; a direct revoke differs (open finding "Direct and response
+  revokes differ on an expired permit" in `docs/CONCEPTS_INDEX.md`).
+- An expired permit now has one more way in, from a response, and still none out except
+  a new grant (open finding "An expired permit has one live way back" in
+  `docs/CONCEPTS_INDEX.md`).
+
+**Earlier entries left as they are.** Older entries are not edited; each is left as the
+record of its step. Points now incomplete:
+- 2.3.0-4 — violation records: responses: the effects of a response fired on a
+  violation record now also include `suspends:` and `expires:`.
+- 2.3.0-5 — violation records: validator: `[W-breach-response-duty]` now also skips a
+  response with `suspends:` or `expires:` (see the validator entry below).
+- 2.5.0-1 — permits can have a time limit: the sweep is no longer the only writer of
+  `expired`; a response's `expires:` writes it too, with the cause `response`. A
+  response can now also suspend or expire a permit, not only revoke it.
+- 2.5.0-1 — the status route withholds `compelled` for a permit with a time limit: the
+  statements on the `revokes:` gap stay true, but `revokes:` is now the only response
+  clause the withholding does not cover (see the status-route entry below).
+
+**Files changed:** `grammar/v2/el_grammar.tx`, `toolchain/el_parser.py`,
+`toolchain/el_domain.py`, `toolchain/el_engine.py`, `toolchain/el_runtime.py`
+(docstring), `toolchain/el_api.py` (the description text of the fire-violation-responses
+endpoint), `tests/test_suspends_expires_grammar.py` (new),
+`tests/test_response_suspends_expires.py` (new),
+`tests/test_permit_transition_table.py`.
+
+**Verification:** 50 new test cases: 6 in `tests/test_suspends_expires_grammar.py`, 32
+in `tests/test_response_suspends_expires.py`, 12 in
+`tests/test_permit_transition_table.py`. A later fix to one endpoint test in
+`tests/test_response_suspends_expires.py` restores the API runtime after it and adds no
+test. Full suite, run by the author: 2360 passed, 2 skipped, 1 deselected, 1 xfailed.
+
+Verifier parity: no change to the verifier; the parity rows are described in the
+status-route entry below.
+
+### 2.5.0-2 — `[response-permit-authority]`: validator error (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator error. Printed tag
+`[response-permit-authority]`.
+
+**Before.** For a `revokes:` line, V-NEW-23 checked among other things that the
+Authorization is granted by the response's `obligates`. Nothing was checked for a
+response acting on a permit in any other way.
+
+**Now.** A new error for `suspends:` and `expires:`. The Authorization named must be
+granted by the response's `obligates`. One error per line, `suspends:` lines first;
+naming one Authorization twice gives two errors. The rule requires neither `revocable`
+nor an `on_revocation` embargo. It shares one helper with V-NEW-23, whose output is
+unchanged. The message:
+
+```
+[response-permit-authority] ViolationResponse '<response>' <suspends|expires> Authorization '<authorization>', which is granted by '<authority>', not by obligates '<obligates>'. (§6.6.4, §7.8.6)
+```
+
+`[W-breach-response-duty]`, the warning for a response to a permit or embargo violation
+that obliges no action, now also skips a response with `suspends:` or `expires:`. The
+validator has 82 rules: 47 errors and 35 warnings.
+
+**Limit.**
+- The message cites 6.6.4 and 7.8.6, but no clause says that only the grantor may
+  suspend or end a permit. That part is this toolchain's reading, clause to be confirmed
+  (as in the entry above).
+- The printed advice of `[W-breach-response-duty]` still names only creates_burden or a
+  revokes line.
+- The rule checks authority only, not the state of the permit.
+
+**Published specifications.** None uses the clauses, so none gets the error or loses the
+warning, and `tests/published_specs_golden.json` is unchanged.
+
+**Files changed:** `toolchain/el_validator.py`,
+`tests/test_response_permit_authority.py` (new),
+`tests/test_validator_breach_rules.py`.
+
+**Verification:** 8 new test cases: 6 in `tests/test_response_permit_authority.py` and 2
+in `tests/test_validator_breach_rules.py`. Full suite, run by the author: 2316 passed, 2
+skipped, 1 deselected, 1 xfailed.
+
+Verifier parity: no change (static check only).
+
+### 2.5.0-2 — the status route withholds `compelled` for a permit a response suspends or expires (`toolchain/el_api.py`)
+
+**Status:** IMPLEMENTED. Type: API response change, plus a parity row. No grammar,
+engine, verifier or validator change, and the golden file is unchanged.
+
+**Before.** The verifier does not read `suspends:` or `expires:`. For a strict burden
+whose discharge needs a permit that a response suspends or expires, `GET
+/obligations/{token_name}/status` could say `compelled: true`, while the engine, once
+the response had fired, refused the discharge.
+
+**Now.** For a strict burden whose discharging action needs a permit granted by an
+Authorization that any response in the specification names in `suspends:` or
+`expires:`, the route gives `compelled: null` and status "permit suspension or expiry by
+a response: not modelled". The test reads only the specification and no state, so the
+spec and hybrid modes give the same answer, before and after a firing. Only `compelled`
+is withheld: `detectable`, the witness, `counterexample_path` and `modal_operator` stay
+as computed, and there is no new field.
+
+**Design decisions.**
+- Match by permit name, not holder.
+- Withhold whether or not the response has fired. After a firing the hybrid model's
+  correct `false` is also replaced by null; this is accepted and recorded in parity row
+  R31.
+- The time-limit status of 2.5.0-1 takes precedence.
+- Do not check the responder's authority, so an invalid specification still withholds.
+- `revokes:` is not covered (see the Limit below).
+
+**Limit.**
+- A permit named only by `revokes:` is not covered: the spec-mode answer there stays
+  `compelled: true` (open finding "A response's `revokes:` leaves the static status
+  route saying `compelled: true`" in `docs/CONCEPTS_INDEX.md`). A test,
+  `test_revokes_only_keeps_the_verdict` in `tests/test_status_response_permit.py`, pins
+  that boundary and must change when the finding is fixed.
+- The recommended-action endpoint is a separate route and is unchanged.
+- `toolchain/el_kripke.py` is unchanged; the verifier still does not model the clauses.
+
+**What it means for the demo.** None of the published specifications uses the clauses,
+so no published answer changes, and the golden file is unchanged.
+
+**Parity.** New row R31 and a sentence added to R28 in
+`docs/ENGINE_VERIFIER_PARITY.md`; the header list names 2.5.0-2. R31 also records the
+engine rule of the feature entry above.
+
+**Files changed:** `toolchain/el_api.py`, `docs/ENGINE_VERIFIER_PARITY.md`,
+`tests/test_status_response_permit.py` (new).
+
+**Verification:** 12 new test cases in `tests/test_status_response_permit.py`. Full
+suite, run by the author: 2372 passed, 2 skipped, 1 deselected, 1 xfailed.

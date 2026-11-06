@@ -552,9 +552,10 @@ intended change):
 - 2.4.0 (2.4.0-2 to 2.4.0-6): an action fills a role (`effect fill
   <Role> with <Object>`, section 5.7); the validator error
   `fill-one-filler` and the warnings `W-fill-role-filled`,
-  `W-fill-excluded-role` and `W-fill-not-modelled`. The validator has 81
-  rules: 46 errors and 35 warnings. The two added in 2.5.0-1 are
-  `[W-authorization-duration]` and `[W-strict-timed-permit]`.
+  `W-fill-excluded-role` and `W-fill-not-modelled`. The validator has 82
+  rules: 47 errors and 35 warnings. The two added in 2.5.0-1 are
+  `[W-authorization-duration]` and `[W-strict-timed-permit]`; 2.5.0-2
+  adds the error `[response-permit-authority]`.
 
 Partly implemented: Federation (specifications parse and validate; the
 loader covers Domain members only, see section 7.3 item 3).
