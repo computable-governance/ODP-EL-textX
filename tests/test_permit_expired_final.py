@@ -1,5 +1,5 @@
 """
-2.5.0-1 — `expired` is final for that instance (step A6).
+2.5.0-1 — `expired` is final for that instance.
 
 Only a new grant brings an expired permit back, and it starts a new clock. A
 revoke or a reinstate skips an expired instance beside other holders; the direct

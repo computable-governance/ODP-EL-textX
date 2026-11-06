@@ -1,5 +1,5 @@
 """
-2.5.0-1 — [W-strict-timed-permit] (slot W-31).
+2.5.0-1 — [W-strict-timed-permit].
 
 A strict burden whose discharging action requires a permit with a time limit can
 get stuck: the use check refuses the discharge once the permit's time is up, and

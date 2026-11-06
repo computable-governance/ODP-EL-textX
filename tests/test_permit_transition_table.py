@@ -15,7 +15,7 @@ states it selects and those it leaves alone, a sibling discharged or claimed and
 the five states other than pending. Tests that are not table cells are in
 tests/test_permit_sweep.py.
 
-The final section covers the acts around an expired permit (step A6): a direct
+The final section covers the acts around an expired permit: a direct
 revoke and `effect create` in all six states, and a reinstate in active,
 claimable, expired, superseded and lapsed. Tests with several holders and new
 grants are in tests/test_permit_expired_final.py; consent events on an expired
@@ -298,7 +298,7 @@ def test_response_revoke_of_an_elapsed_permit_depends_on_which_came_first():
     assert not _embargo_active(swept_first)
 
 
-# ── The sweep and the other acts, by state (step A5) ─────────────────────────
+# ── The sweep and the other acts, by state ───────────────────────────────────
 #
 # A second probe: timedPermit also has an event trigger and sits in a group
 # with one burden to discharge and one to claim; datedPermit has a date limit.
@@ -601,7 +601,7 @@ def test_event_activation_in_each_other_state(permit_state):
     assert record.effects == ()
 
 
-# ── A direct revoke, a reinstate and effect create, by state (step A6) ───────
+# ── A direct revoke, a reinstate and effect create, by state ─────────────────
 
 REVOKED_LINES = ("superseded permit 'timedPermit'", "activated embargo 'afterRevokeEmbargo'")
 REINSTATED_LINES = ("activated permit 'timedPermit'", "lifted embargo 'afterRevokeEmbargo'")

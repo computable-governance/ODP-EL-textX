@@ -12689,7 +12689,7 @@ code changed.
 
 ## 2.5.0-1 — permits can have a time limit (`toolchain/el_engine.py`)
 
-**Status:** PARTIALLY IMPLEMENTED. Type: engine.
+**Status:** IMPLEMENTED. Type: engine.
 
 **Before.** `effect activate` and event activation gave a pending permit a new
 `activated_at_tick`, so a restore restarted its clock. Reinstate wrote no stamp.
@@ -12905,7 +12905,7 @@ leaves an Under case (row R30).
 ### 2.5.0-1 — `[W-authorization-duration]`: validator warning (`toolchain/el_validator.py`)
 
 **Status:** IMPLEMENTED. Type: validator warning. Printed tag
-`[W-authorization-duration]`, slot W-30.
+`[W-authorization-duration]`.
 
 **Before.** An Authorization could carry a `duration` clause. The toolchain kept the
 text and nothing read it, and nothing told the author so. An author could write
@@ -12948,8 +12948,7 @@ Verifier parity: no change (static warning only).
 
 ### 2.5.0-1 — `[W-strict-timed-permit]`: validator warning (`toolchain/el_validator.py`)
 
-**Status:** IMPLEMENTED. Type: validator warning. Printed tag `[W-strict-timed-permit]`,
-slot W-31.
+**Status:** IMPLEMENTED. Type: validator warning. Printed tag `[W-strict-timed-permit]`.
 
 **Before.** A strict burden's discharging action could require a permit with a time
 limit, and nothing pointed out the risk. Now that the limit is enforced, the holder's
