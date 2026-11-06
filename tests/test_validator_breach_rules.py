@@ -5,8 +5,9 @@ V-NEW-24 accepts a permit or embargo as the target of
 declares_violation_of (a burden must still be strict, and the declaring
 Action must still require a permit). Three new warnings:
   [W-breach-response-duty]    a response to a permit or embargo that
-                              creates no burden and revokes nothing
-                              (terminate exempt);
+                              obliges no action (no creates_burden,
+                              revokes, suspends or expires line;
+                              terminate exempt);
   [W-refused-attempts-burden] also_on_refused_attempts on a response to
                               a burden;
   [W-breach-undeclarable]     a declared permit or embargo that applies to
@@ -86,6 +87,33 @@ authorization AgUse {
 """ + _VR.format(name="R", target="useP", kind="remediate", extra="revokes: AgUse")
     _, warnings = _messages(extra)
     assert _tagged(warnings, "[W-breach-response-duty]") == []
+
+
+_AG_USE = """
+authorization AgUse {
+    authority: Gate
+    to_agent: Ag
+    grants_permit: useP
+    revocable: true
+    on_revocation: activate stopE
+}
+"""
+
+
+def test_breach_response_duty_accepts_a_suspends_line():
+    extra = _AG_USE + _VR.format(name="R", target="useP", kind="remediate",
+                                 extra="suspends: AgUse")
+    errors, warnings = _messages(extra)
+    assert _tagged(warnings, "[W-breach-response-duty]") == []
+    assert _tagged(errors, "[response-permit-authority]") == []
+
+
+def test_breach_response_duty_accepts_an_expires_line():
+    extra = _AG_USE + _VR.format(name="R", target="useP", kind="remediate",
+                                 extra="expires: AgUse")
+    errors, warnings = _messages(extra)
+    assert _tagged(warnings, "[W-breach-response-duty]") == []
+    assert _tagged(errors, "[response-permit-authority]") == []
 
 
 def test_refused_attempts_flag_on_a_burden_response():

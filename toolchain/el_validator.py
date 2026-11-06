@@ -207,8 +207,9 @@ Rules implemented
         duration, with a usable value (a whole number of a unit, not
         negative).                                   clause to be confirmed
   W-breach-response-duty  2.3.0-5: a ViolationResponse to a permit or
-        embargo that creates no burden and revokes nothing, unless it is
-        a terminate response. Advisory.             §6.3.8, §7.8.6 NOTE 2
+        embargo that obliges no action (no creates_burden, revokes,
+        suspends or expires line; 2.5.0-2), unless it is a terminate
+        response. Advisory.                         §6.3.8, §7.8.6 NOTE 2
   W-refused-attempts-burden  2.3.0-5: also_on_refused_attempts on a
         response to a burden has no effect. Advisory.    §6.3.8, §7.8.6
   W-breach-undeclarable  2.3.0-5: a declaration Action names a permit or
@@ -236,6 +237,8 @@ Rules implemented
         requires a permit with a time limit: once the permit's time is up
         the discharge can be refused and the burden stuck. Advisory.
                                                      clause to be confirmed
+  response-permit-authority  2.5.0-2: each Authorization a ViolationResponse
+        suspends or expires is granted by its obligates.  §6.6.4, §7.8.6
   AM-31-V1  Authorization authority must be a party.               §6.6.4
   AM-31-V2  Revocable authorization must name an on_revocation
         embargo.                                                   AM-31
@@ -450,6 +453,10 @@ def validate_spec(model) -> List[str]:
 
     # V-NEW-23 — revoked Authorizations: revocable, embargo, obligates' grant (AM-115, §6.6.4)
     errors.extend(_validate_response_revocations(model))
+
+    # response-permit-authority — suspended or expired Authorizations: obligates'
+    # grant (2.5.0-2; §6.6.4, §7.8.6)
+    errors.extend(_validate_response_permit_authority(model))
 
     # V-NEW-24 — declaration actions: strict burden, under a permit (AM-115,
     # 2.3.0-5; §6.3.8, §6.6.5, §7.10.4)
@@ -2620,6 +2627,16 @@ def _validate_escalate_to_party(model) -> List[str]:
     return warnings
 
 
+def _authority_mismatch(auth, responder) -> Optional[str]:
+    """The problem text when an Authorization is granted by someone other
+    than the response's obligates, else None. Shared by V-NEW-23 and
+    [response-permit-authority] (§6.6.4, §7.8.6)."""
+    authority = _obj_name(getattr(auth, "authority", None))
+    if authority != responder:
+        return f"is granted by '{authority}', not by obligates '{responder}'"
+    return None
+
+
 def _validate_response_revocations(model) -> List[str]:
     """V-NEW-23 (AM-115): each Authorization a ViolationResponse lists in
     revokes must be revocable with an on_revocation embargo, and granted
@@ -2636,14 +2653,36 @@ def _validate_response_revocations(model) -> List[str]:
                 problems.append("is not revocable")
             if not getattr(auth, "on_revocation_embargo", ""):
                 problems.append("has no on_revocation embargo")
-            authority = _obj_name(getattr(auth, "authority", None))
-            if authority != responder:
-                problems.append(f"is granted by '{authority}', not by obligates '{responder}'")
+            mismatch = _authority_mismatch(auth, responder)
+            if mismatch:
+                problems.append(mismatch)
             if problems:
                 errors.append(
                     f"[V-NEW-23] ViolationResponse '{vr.name}' revokes Authorization "
                     f"'{auth.name}', which {' and '.join(problems)}. (§6.6.4, §7.8.6)"
                 )
+    return errors
+
+
+def _validate_response_permit_authority(model) -> List[str]:
+    """[response-permit-authority] (2.5.0-2): each Authorization a
+    ViolationResponse names in suspends or expires must have the
+    response's obligates as its authority (§6.6.4, §7.8.6). Authority
+    only: suspending or expiring a grant needs neither revocable nor an
+    on_revocation embargo. One error per line, suspends lines first, then
+    expires lines (grammar order)."""
+    errors: List[str] = []
+    for vr in _collect(model, "ViolationResponse"):
+        responder = _obj_name(getattr(vr, "responding_actor", None))
+        for verb in ("suspends", "expires"):
+            for auth in getattr(vr, verb, []) or []:
+                mismatch = _authority_mismatch(auth, responder)
+                if mismatch:
+                    errors.append(
+                        f"[response-permit-authority] ViolationResponse '{vr.name}' "
+                        f"{verb} Authorization '{auth.name}', which {mismatch}. "
+                        f"(§6.6.4, §7.8.6)"
+                    )
     return errors
 
 
@@ -2696,16 +2735,18 @@ def _breach_responses(model):
 
 def _validate_breach_response_duty(model) -> List[str]:
     """[W-breach-response-duty] (2.3.0-5): a ViolationResponse to a permit
-    or embargo violation that creates no burden and lists no revocation:
-    obligates is named, but nothing is prescribed for it to do, although
-    §7.8.6 NOTE 2 makes the response rule an obligation on that object. A
+    or embargo violation that obliges no action: obligates is named, but
+    nothing is prescribed for it to do, although §7.8.6 NOTE 2 makes the
+    response rule an obligation on that object. The response must oblige
+    an action: creates_burden, revokes, suspends or expires (2.5.0-2). A
     terminate response is exempt: it revokes the violator's Authorizations
     without a revokes line. Advisory, like W-22."""
     warnings: List[str] = []
     for vr, target in _breach_responses(model):
         if getattr(vr, "response_kind", None) == "terminate":
             continue
-        if getattr(vr, "creates_burden", None) is not None or getattr(vr, "revokes", None):
+        if (getattr(vr, "creates_burden", None) is not None or getattr(vr, "revokes", None)
+                or getattr(vr, "suspends", None) or getattr(vr, "expires", None)):
             continue
         warnings.append(
             f"[W-breach-response-duty] ViolationResponse '{vr.name}' responds to a violation "
