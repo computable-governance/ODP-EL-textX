@@ -53,7 +53,8 @@ Class inventory (mirrors STEP1_grammar_audit.md):
                (RoleFillerRef is also defined in this group but is a plain
                Python helper, not a registered grammar class — see below)
     Group I  — Commitment, Delegation, Authorization, Prescription,
-               Declaration, Evaluation, ViolationResponse, RevokesItem (AM-115)
+               Declaration, Evaluation, ViolationResponse, RevokesItem (AM-115),
+               SuspendsItem, ExpiresItem (2.5.0)
     Group J  — Correspondence
     Group K  — PolicyRef
     Enums    — all enum types (incl. AM-23: DurationUnit, EnvelopeRuleKind)
@@ -1371,6 +1372,7 @@ class ViolationResponse(_ELParentable):
     (AM-104: implemented as warning [W-23], not an error.)
     AM-104: el_engine.fire_violation_responses() reads response_kind.
     AM-115: burden_role (creates_burden_for_role) and revokes; V-NEW-23.
+    2.5.0: suspends and expires, lists of Authorizations like revokes.
     """
     name:             str            = ""
     violated_burden:  Optional[object] = None   # → DeonticToken (burden)
@@ -1380,6 +1382,8 @@ class ViolationResponse(_ELParentable):
     burden_role:      Optional[object] = None   # AM-115: → Role (creates_burden_for_role)
     escalate_to:      Optional[object] = None   # → EnterpriseObject (party)
     revokes:          List = field(default_factory=list)  # AM-115: List[Authorization] (P13 unwraps RevokesItem)
+    suspends:         List = field(default_factory=list)  # 2.5.0: List[Authorization] (P13 unwraps SuspendsItem)
+    expires:          List = field(default_factory=list)  # 2.5.0: List[Authorization] (P13 unwraps ExpiresItem)
     also_on_refused_attempts: bool   = False    # 2.3.0-4: fire on refused_attempt records too
     description:      Optional[str]   = None
 
@@ -1388,6 +1392,20 @@ class ViolationResponse(_ELParentable):
 class RevokesItem(_ELParentable):
     """AM-115, §6.6.4 — `revokes: <Authorization>` in a ViolationResponse.
     Object processor P13 unwraps each into ViolationResponse.revokes."""
+    authorization: Optional[object] = None   # → Authorization ref
+
+
+@dataclass
+class SuspendsItem(_ELParentable):
+    """2.5.0 — `suspends: <Authorization>` in a ViolationResponse.
+    Object processor P13 unwraps each into ViolationResponse.suspends."""
+    authorization: Optional[object] = None   # → Authorization ref
+
+
+@dataclass
+class ExpiresItem(_ELParentable):
+    """2.5.0 — `expires: <Authorization>` in a ViolationResponse.
+    Object processor P13 unwraps each into ViolationResponse.expires."""
     authorization: Optional[object] = None   # → Authorization ref
 
 
@@ -1459,7 +1477,7 @@ DOMAIN_CLASSES = [
     ConflictResolution,
     # I
     Commitment, Delegation, Authorization, Prescription, Declaration,
-    Evaluation, ViolationResponse, RevokesItem,
+    Evaluation, ViolationResponse, RevokesItem, SuspendsItem, ExpiresItem,
     # J
     Correspondence,
 ]

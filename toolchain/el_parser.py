@@ -307,8 +307,12 @@ def process_evaluation(ev):
 
 def process_violation_response(vr):
     """P13 (AM-115): unwrap each RevokesItem into the Authorization it
-    names, so ViolationResponse.revokes is a List[Authorization]."""
+    names, so ViolationResponse.revokes is a List[Authorization].
+    2.5.0: SuspendsItem and ExpiresItem are unwrapped the same way into
+    ViolationResponse.suspends and ViolationResponse.expires."""
     vr.revokes = [item.authorization for item in vr.revokes]
+    vr.suspends = [item.authorization for item in vr.suspends]
+    vr.expires = [item.authorization for item in vr.expires]
 
 
 def process_federation(fed):

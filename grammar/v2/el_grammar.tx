@@ -1337,6 +1337,8 @@ AcceptabilityResult:
  * (§6.6.4); each must be revocable with an on_revocation embargo and
  * granted by obligates (V-NEW-23). When revokes is present it replaces
  * terminate's inferred violator chain (AM-104).
+ * 2.5.0: a response can also suspend or expire an Authorization, one per
+ * line in the same way (suspends, expires), written after revokes.
  */
 ViolationResponse:
     'violation_response' name=ID '{'
@@ -1347,6 +1349,8 @@ ViolationResponse:
         ('creates_burden_for_role' ':' burden_role=[Role])?     // AM-115
         ('escalate_to'     ':' escalate_to=[EnterpriseObject])?
         (revokes+=RevokesItem)*                                 // AM-115
+        (suspends+=SuspendsItem)*                               // 2.5.0: Authorizations suspended
+        (expires+=ExpiresItem)*                                 // 2.5.0: Authorizations expired
         // 2.3.0-4: also fire on a violation record from a refused attempt
         // (2.3.0-8); by default only declared records fire it.
         ('also_on_refused_attempts' ':' also_on_refused_attempts?='true')?
@@ -1366,6 +1370,20 @@ ViolationResponseKind:
  */
 RevokesItem:
     'revokes' ':' authorization=[Authorization]
+;
+
+/*
+ * SuspendsItem, ExpiresItem — 2.5.0
+ * One Authorization a ViolationResponse suspends or expires, one per line,
+ * as RevokesItem. Clause order: revokes, then suspends, then expires.
+ * P13 unwraps them into ViolationResponse.suspends and .expires.
+ */
+SuspendsItem:
+    'suspends' ':' authorization=[Authorization]
+;
+
+ExpiresItem:
+    'expires' ':' authorization=[Authorization]
 ;
 
 
