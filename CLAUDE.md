@@ -281,7 +281,10 @@ numbered 2.1.0-1 to 2.1.0-25, then the 2.2.0 changes, 2.2.0-1 to 2.2.0-13
 2.4.1-2, then 2.5.0-1: a permit can carry a time limit; a new permit state,
 `expired`, is written by the sweep; a use past the limit is refused; the
 status route withholds `compelled` for a strict burden gated on a timed
-permit; two new validator warnings.
+permit; two new validator warnings. Then 2.5.0-2 (three entries): a
+violation response can suspend or expire the permit an Authorization grants
+(`suspends:`, `expires:`); the validator error `[response-permit-authority]`;
+the status route withholds `compelled` for such a permit.
 
 ### 5.7 Role fulfilment (AM-114)
 `obj fills role` in a Community or Federation body (§7.8.2; the AM-40
@@ -314,7 +317,11 @@ It ends a Step 3.5 freeze, fires no response (call
 (T5 skips it; AF for strict burdens unchanged). ViolationResponse
 `creates_burden_for_role: <Role>` grants to the role's fillers;
 `revokes: <Authorization>` (one per line) lists what it withdraws
-(V-NEW-23).
+(V-NEW-23). `suspends: <Authorization>` and `expires: <Authorization>`
+(2.5.0-2, one per line, after `revokes:`) move the permit that
+Authorization grants to pending or to `expired`, for its `to_agent` or each
+`to_role` filler only; the Authorization must be granted by `obligates`
+(`[response-permit-authority]`). The verifier reads neither.
 
 ---
 
@@ -434,7 +441,11 @@ Discovered during V-16a implementation (commit 3aae4be).
    interactions are parsed with no effect.
 4. **Thin speech act layer** — Authorization (revoke and reinstate, with API
    routes) and violation declaration (`declare_violation`, engine only) are
-   runtime acts. The top-level `declaration` element is read by nothing, and
+   runtime acts. A violation response can also suspend or expire the permit
+   an Authorization grants (2.5.0-2); `reinstate_authorization()` raises
+   `KeyError` for an Authorization with no `on_revocation` embargo, so such a
+   suspended permit comes back only by `effect activate` or by its triggering
+   event. The top-level `declaration` element is read by nothing, and
    `prescription` is checked by the validator only.
 
 ### 7.4 ODP-EL subset operationalized
@@ -446,6 +457,8 @@ effect limits: `effect destroy` does nothing on a permit or embargo and
 `docs/DSL_TOOLCHAIN_REFERENCE.md`). `effect activate` acts on pending
 instances only and `effect pend` on active instances only (2.4.1-1, 2.4.1-2).
 A permit's time limit is enforced at use and written by the sweep (2.5.0-1).
+A violation response can suspend or expire a permit (2.5.0-2, `suspends:`,
+`expires:`); `expired` is then written with the cause `response`.
 
 Policy values are typed and read by the engine (2.1.0, below): a
 comparison's policy limit, a standing duty's `ends_at` policy and (2.2.0)

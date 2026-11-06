@@ -7,11 +7,13 @@ adheres to _[Semantic Versioning][semver]_.
 
 ## [Unreleased]
 
-Permit time limits (2.5.0-1). A permit's `deadline` is now enforced, and a
-permit whose time is up moves to a new state, `expired`. No verifier code
-changed. Details are in
-[docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entry 2.5.0-1)
-and in "Permit time limits (2.5.0)" in
+Permit time limits and violation responses that act on a permit (2.5.0-1 and
+2.5.0-2). A permit's `deadline` is now enforced, and a permit whose time is up
+moves to a new state, `expired`. A violation response can now suspend or
+expire the permit an Authorization grants. No verifier code changed. Details
+are in [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md) (entries
+2.5.0-1 and 2.5.0-2) and in "Permit time limits (2.5.0)" and "Violation
+responses that suspend or expire a permit (2.5.0)" in
 [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md).
 
 ### Added
@@ -33,8 +35,23 @@ and in "Permit time limits (2.5.0)" in
   published-specs golden records them.
 - **Validator warning `[W-strict-timed-permit]`.** A strict burden whose
   discharge needs a permit with a time limit can get stuck once the time is
-  up. It fires on none of the published specifications. The validator now
-  has 81 rules: 46 errors and 35 warnings.
+  up. It fires on none of the published specifications.
+- **A violation response can suspend or expire a permit.** Two new optional
+  clauses on a ViolationResponse, `suspends:` and `expires:`, each name one
+  Authorization per line and are written after `revokes:`. When the response
+  fires, `suspends:` moves the permit that Authorization grants from active to
+  pending, and `expires:` moves it from active or pending to `expired`. They
+  act on the Authorization's `to_agent`, or on each actor filling its
+  `to_role`, and never on another holder's instance. An instance in any other
+  state does not change and gets note lines, for example `suspend 'P' had no
+  effect: 'H' holds it expired`. No embargo is touched, and the Authorization
+  need not be revocable. A response's `expires:` is a second way into
+  `expired`, beside the sweep; `expired` stays final for that instance.
+- **Validator error `[response-permit-authority]`.** Each Authorization a
+  response names in `suspends:` or `expires:` must be granted by the
+  response's `obligates`. The engine repeats the check when the response
+  fires. It fires on none of the published specifications. The validator now
+  has 82 rules: 47 errors and 35 warnings.
 
 ### Changed
 
@@ -54,7 +71,21 @@ and in "Permit time limits (2.5.0)" in
   null` with status `permit time limit: not modelled`, in both modes, for a
   strict burden any of whose discharging actions requires a permit with a
   time limit (parity row R28): the model has no permit time, so it can offer
-  a discharge the engine refuses. Other strict burdens are unchanged.
+  a discharge the engine refuses. Other strict burdens are unchanged by this
+  rule; a permit that a violation response suspends or expires is withheld
+  too (below).
+- **The status route withholds `compelled` for a permit a response suspends
+  or expires.** `GET /obligations/{token_name}/status` answers `compelled:
+  null` with status `permit suspension or expiry by a response: not
+  modelled`, in both modes and whether or not the response has fired, for a
+  strict burden any of whose discharging actions requires a permit granted by
+  an Authorization that a response names in `suspends:` or `expires:` (parity
+  row R31). The verifier reads neither clause. Only `compelled` is withheld;
+  `detectable` and the paths stay as computed. A time limit takes precedence.
+  After a firing, the hybrid model's correct `false` is withheld too. A
+  permit named only by `revokes:` is not covered.
+- **`[W-breach-response-duty]` no longer fires on a response with
+  `suspends:` or `expires:`.** Its printed advice is unchanged.
 
 ### Fixed
 
@@ -72,14 +103,30 @@ and in "Permit time limits (2.5.0)" in
 - A strict burden gated on a timed permit can get stuck once the time is up
   (the validator warns), and a limit with no measurable magnitude (for example
   `"thirty days"`) never elapses.
+- A reinstate of an Authorization with no `on_revocation` embargo raises an
+  error, so a permit suspended under such an Authorization comes back only by
+  `effect activate` or by its triggering event.
+- A restore acts by permit name across holders, so with several holders a
+  suspended instance can stay pending after a reinstate.
+- A terminate response with `suspends:` or `expires:` and no `revokes:` can
+  still get the warning that it "would fire and do nothing" although the
+  clauses act.
+- A response's `suspends:` or `expires:` on the permit a strict burden's
+  discharge needs can leave the burden stuck, as an expired permit can; the
+  status route withholds `compelled` for it.
 
 ### Documentation
 
-- New Reference section "Permit time limits (2.5.0)" in
+- New Reference sections "Permit time limits (2.5.0)" and "Violation
+  responses that suspend or expire a permit (2.5.0)" in
   [docs/DSL_TOOLCHAIN_REFERENCE.md](docs/DSL_TOOLCHAIN_REFERENCE.md); parity
-  rows R26, R28, R29 and R30 in
+  rows R26, R28, R29, R30 and R31 in
   [docs/ENGINE_VERIFIER_PARITY.md](docs/ENGINE_VERIFIER_PARITY.md); the
   Concepts Index and `CLAUDE.md` updated.
+
+No verifier code changed in 2.5.0-1 or 2.5.0-2. None of the published
+specifications uses `suspends:` or `expires:`, so 2.5.0-2 changes none of
+their parse results, errors, warnings or status-route answers.
 
 ## [2.4.1] - 2026-11-05
 
