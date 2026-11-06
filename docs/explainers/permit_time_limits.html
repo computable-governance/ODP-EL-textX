@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Permit time limits</title>
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --fg: #1f2328;
+    --muted: #5b616b;
+    --line: #8a919c;
+    --box: #ffffff;
+    --box-line: #3d4450;
+    --note: #fff6d6;
+    --note-line: #c9a227;
+    --warn: #b42318;
+    --acc: #1f6feb;
+    --sib: #8250df;
+    --ok: #1a7f37;
+    --rule: #e3e1dc;
+    --code-bg: #f0eee9;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171a;
+      --fg: #e6e7e9;
+      --muted: #a3a9b3;
+      --line: #7c8592;
+      --box: #1f2328;
+      --box-line: #aeb6c2;
+      --note: #3a3220;
+      --note-line: #b8932a;
+      --warn: #ff7b72;
+      --acc: #79b8ff;
+      --sib: #c297ff;
+      --ok: #56d364;
+      --rule: #2c3036;
+      --code-bg: #23272e;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 var(--sans);
+  }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 12px; }
+  h2 { font-size: 1.35rem; margin: 44px 0 8px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.05rem; margin: 28px 0 6px; }
+  p, li { max-width: 72ch; }
+  code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; overflow-wrap: anywhere; }
+  .lede { font-size: 1.08rem; }
+  .defs { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 20px 0; }
+  @media (min-width: 700px) { .defs { grid-template-columns: 1fr 1fr; } }
+  .def { border: 1px solid var(--rule); border-left: 4px solid var(--acc); border-radius: 6px; padding: 12px 14px; background: var(--box); }
+  .def.sweep { border-left-color: var(--warn); }
+  .def h3 { margin: 0 0 4px; }
+  .def p { margin: 0; }
+  figure { margin: 16px 0 8px; padding: 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--box); overflow-x: auto; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figure svg.state { min-width: 680px; }
+  figure svg.seq { min-width: 560px; }
+  figcaption { font-size: 0.92rem; color: var(--muted); margin-top: 8px; }
+  .legend { columns: 1; padding-left: 0; list-style: none; font-size: 0.95rem; }
+  @media (min-width: 700px) { .legend { columns: 2; column-gap: 32px; } }
+  .legend li { break-inside: avoid; margin: 0 0 6px; display: flex; gap: 8px; }
+  .legend .n { flex: none; width: 1.6em; height: 1.6em; border-radius: 50%; border: 1.5px solid var(--line); text-align: center; font-size: 0.8rem; line-height: 1.5em; }
+  .legend .n.w { border-color: var(--warn); color: var(--warn); }
+  .legend .n.s { border-color: var(--sib); color: var(--sib); }
+  .legend .grp { font-weight: 600; margin-top: 8px; display: block; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.93rem; background: var(--box); }
+  th, td { text-align: left; vertical-align: top; padding: 9px 11px; border-bottom: 1px solid var(--rule); }
+  thead th { background: var(--code-bg); }
+  tbody th { font-weight: 600; width: 22%; }
+  tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+  .closing ul { padding-left: 1.2em; }
+  .closing li { margin-bottom: 6px; }
+  footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.95rem; }
+
+  /* SVG */
+  svg text { fill: var(--fg); font-family: var(--sans); font-size: 12.5px; }
+  svg text.m { font-family: var(--mono); font-size: 11.5px; }
+  svg text.c { text-anchor: middle; }
+  svg text.e { text-anchor: end; }
+  svg text.b { font-weight: 600; }
+  svg text.w { fill: var(--warn); }
+  svg text.ok { fill: var(--ok); }
+  svg text.mut { fill: var(--muted); font-size: 11.5px; }
+  .sbox { fill: var(--box); stroke: var(--box-line); stroke-width: 1.5; }
+  .sbox.fin { stroke: var(--warn); }
+  .start { fill: var(--fg); }
+  .edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
+  .edge.fg { stroke: var(--fg); }
+  .edge.w { stroke: var(--warn); }
+  .edge.s { stroke: var(--sib); stroke-dasharray: 6 4; }
+  .badge circle { fill: var(--box); stroke: var(--line); stroke-width: 1.5; }
+  .badge.w circle { stroke: var(--warn); }
+  .badge.s circle { stroke: var(--sib); }
+  .badge text { font-size: 10.5px; text-anchor: middle; font-weight: 600; }
+  .badge.w text { fill: var(--warn); }
+  .badge.s text { fill: var(--sib); }
+  .note { fill: var(--note); stroke: var(--note-line); stroke-width: 1.2; }
+  .tie { stroke: var(--note-line); stroke-width: 1.2; stroke-dasharray: 3 3; }
+  .pbox { fill: var(--box); stroke: var(--box-line); stroke-width: 1.5; }
+  .life { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 4; }
+  .msg { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+  .msg.r { stroke-dasharray: 6 4; }
+  .msg.w { stroke: var(--warn); }
+  .msg.ok { stroke: var(--ok); }
+  .lblbg { fill: var(--box); }
+  .ah { fill: var(--fg); }
+  .ah-l { fill: var(--line); }
+  .ah-w { fill: var(--warn); }
+  .ah-s { fill: var(--sib); }
+  .ah-ok { fill: var(--ok); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="ah"/></marker>
+    <marker id="ah-l" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="ah-l"/></marker>
+    <marker id="ah-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="ah-w"/></marker>
+    <marker id="ah-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="ah-s"/></marker>
+    <marker id="ah-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="ah-ok"/></marker>
+  </defs>
+</svg>
+
+<main>
+
+<h1>Permit time limits</h1>
+
+<p class="lede">A permit can carry a time limit in its <code>deadline</code>: a duration such as
+<code>"5 minutes"</code>, a date or instant such as <code>"by 2026-05-20"</code>, or the unquoted name of
+a Policy of type duration, whose declared value is the limit (<code>policy ShortNotice : duration
+{ initial_value: 5 minutes }</code>, then <code>deadline: ShortNotice</code>).
+The engine enforces that limit. When an actor tries to use a permit whose time is up, the engine
+refuses the action. The permit only moves to its new state, <code>expired</code>, when the sweep runs.</p>
+
+<pre style="font-family:var(--mono);font-size:0.9rem;background:var(--code-bg);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:16px 0">permit timedPermit {
+    for_action: "useTimed"
+    state: active
+    deadline: "5 minutes"
+}</pre>
+
+<p><code>timedPermit</code> is only the name of this declaration. The <code>deadline</code> line is what
+makes the permit timed; without it this is an ordinary permit. Here <code>"5 minutes"</code> means
+5 steps (see below).</p>
+
+<h2>Before you start: time in the engine</h2>
+
+<p><strong>The tick.</strong> The engine keeps one counter, the tick. It starts at 0 when a
+specification loads. Each act that goes through moves it up by 1: an action run with
+<code>advance()</code>, a revoke, a reinstate, a discharge, an event or a declared violation. A
+refused act leaves it unchanged, and so does a revoke that finds every instance of the permit
+<code>expired</code>. The sweep, and the firing of violation responses, add 1 only if they changed
+something. <code>advance_clock(ticks)</code> is the one call that moves it by more than 1: it lets
+time pass with no action, and it is refused while a strict burden is active and its holder is
+enrolled.</p>
+
+<p><strong><code>advance()</code>.</strong> This is how an actor does something. The engine checks, in
+order, the actor (enrolled, and filling a role that declares the action), the strict-burden guard,
+the preconditions, any embargo and the permits the action needs. If every check passes, it applies
+the action's effects and moves the tick by 1. The use check below is the permit step inside
+<code>advance()</code>.</p>
+
+<p><strong>A step is one minute, but not on a wall clock.</strong> A deadline such as
+<code>"5 minutes"</code> means 5 steps. The engine turns each unit into minutes and rounds up, so
+<code>"5 days"</code> is 7200 steps. A permit with <code>"5 minutes"</code> runs out five ticks after
+its start tick: five acts, or one <code>advance_clock(5)</code>, however much real time passes.</p>
+
+<p><strong>Two clocks.</strong> The step clock is the tick; it judges duration limits.
+<code>DeadlineClock</code> is separate; it judges only date and instant limits, against the
+<code>as_at</code> date the caller passes. With no <code>DeadlineClock</code>, a date limit is never
+judged.</p>
+
+<p><strong>One caution.</strong> The tick is both a count of elapsed time and a count of events (the
+toolchain records this as an open finding). Read "5 steps" as "5 moves of the engine", not as a
+promise about real time.</p>
+
+<p><strong>Compelled and detectable.</strong> The tick is also how the toolchain separates two ends of
+an obligation. For a strict burden, the holder cannot simply wait: while it is active,
+<code>advance_clock()</code> is refused, so is any act that discharges nothing, and the verifier's tick
+transition is suppressed. The only way forward for the holder is to discharge it: discharge is
+<em>compelled</em>. For an ordinary
+(eventual) burden, time can pass without the act; the tick keeps counting until the deadline in steps
+is reached, and then the sweep can flag the burden as violated. That obligation is only
+<em>detectable</em>: the engine can tell afterwards that it was missed, but it could not make it
+happen.</p>
+
+<p><strong>Why this matters for permits.</strong> A permit's steps are always counted on the tick,
+both at use and in the sweep. A strict burden stops <code>advance_clock()</code> and every action that
+discharges nothing, but the tick still moves when something else goes through: another burden is
+discharged, a violation is declared, or the sweep violates an ordinary burden or expires a permit.
+The step count a watchdog passes to <code>declare_violation()</code> (<code>at_tick</code>) judges only
+the burden's deadline, never a permit's time. So a strict burden whose discharge needs a timed permit
+can get stuck: once the permit's time is up, before the burden became active or while the tick moved
+on as above, the discharge is refused, and the sweep never violates a strict burden. Only a declared
+violation ends it. The verifier has no permit time and would still show the discharge as reachable,
+which is why <code>compelled</code> is withheld for such a burden.</p>
+
+<div class="defs">
+  <div class="def">
+    <h3>The use check</h3>
+    <p>The test the engine runs when an actor tries an action that needs a permit
+    (<code>advance()</code> Step 6, which <code>declare_violation()</code> shares). It refuses
+    the action if the permit's time has run out, and leaves the permit's state and the tick as they are.
+    It checks a duration limit only. A date or instant limit is not checked at use.</p>
+  </div>
+  <div class="def sweep">
+    <h3>The sweep</h3>
+    <p>The engine's pass over live state, run when a caller asks for it
+    (<code>check_live_violations()</code>, or <code>POST /check-violations</code>). It is the only
+    place that writes a permit as <code>expired</code>. It judges both forms: a duration limit by
+    the same test as the use check, and a date or instant limit against the caller's
+    <code>as_at</code>, but only when the runtime has a <code>DeadlineClock</code>. Without one it
+    writes a <code>not judged</code> line and leaves the permit as it is. The sweep reads active and pending permits only.</p>
+  </div>
+</div>
+
+<p><strong>The start tick.</strong> A duration limit counts steps from the permit instance's start
+tick, which is the tick of its first activation (its grant tick if it is granted active). A permit
+that has never been active has no start tick, so a duration limit never elapses for it. A restore
+(<code>effect activate</code>, the triggering event, a reinstate) never changes the start tick.
+Steps keep counting while the permit is <code>pending</code> or <code>superseded</code>. Only a new
+grant gives a new start tick. A clone or a transfer copies the old one. A limit with no measurable
+magnitude, for example <code>"thirty days"</code>, never elapses.</p>
+
+<!-- ============================================================ -->
+<h2>1. The permit states</h2>
+
+<p><code>expired</code> is final for that instance. It is not <code>lapsed</code>: <code>expired</code>
+means the time limit is up (ledger cause <code>deadline</code>), while <code>lapsed</code> is a
+claimable token whose sibling in an <code>any_discharged</code> group was claimed (cause
+<code>sibling</code>). The two are unrelated.</p>
+
+<figure>
+<svg class="state" viewBox="0 0 900 472" role="img" aria-labelledby="st-title">
+  <title id="st-title">Permit state diagram: active, pending, claimable, expired, lapsed and superseded, with numbered transitions</title>
+
+  <!-- edges (drawn first) -->
+  <!-- 1 start -> active -->
+  <path class="edge fg" d="M49 250 H166" marker-end="url(#ah)"/>
+  <!-- 2 start -> pending -->
+  <path class="edge fg" d="M46 243 Q70 90 166 90" marker-end="url(#ah)"/>
+  <!-- 3 start -> claimable -->
+  <path class="edge fg" d="M46 257 Q70 410 166 410" marker-end="url(#ah)"/>
+  <!-- 4 active -> pending -->
+  <path class="edge fg" d="M205 227 V114" marker-end="url(#ah)"/>
+  <!-- 5 pending -> active -->
+  <path class="edge fg" d="M255 113 V226" marker-end="url(#ah)"/>
+  <!-- 6 claimable -> active -->
+  <path class="edge fg" d="M230 387 V274" marker-end="url(#ah)"/>
+  <!-- 7 lapsed -> active -->
+  <path class="edge fg" d="M540 396 L288 274" marker-end="url(#ah)"/>
+  <!-- 8 superseded -> active -->
+  <path class="edge fg" d="M537 236 H294" marker-end="url(#ah)"/>
+  <!-- 9 active -> superseded (revoke) -->
+  <path class="edge" d="M293 250 H536" marker-end="url(#ah-l)"/>
+  <!-- 10 pending -> superseded (revoke) -->
+  <path class="edge" d="M293 104 L575 226" marker-end="url(#ah-l)"/>
+  <!-- 11 claimable -> superseded (revoke) -->
+  <path class="edge" d="M282 433 Q282 456 306 456 H666 Q690 456 690 432 V282 Q690 258 664 258" marker-end="url(#ah-l)"/>
+  <!-- 12 lapsed -> superseded (revoke) -->
+  <path class="edge" d="M600 387 V274" marker-end="url(#ah-l)"/>
+  <!-- 13 active -> superseded (sibling discharged) -->
+  <path class="edge s" d="M293 264 H536" marker-end="url(#ah-s)"/>
+  <!-- 14 claimable -> lapsed (sibling claimed) -->
+  <path class="edge s" d="M293 418 H536" marker-end="url(#ah-s)"/>
+  <!-- 15 active -> expired (sweep) -->
+  <path class="edge w" d="M282 227 L548 94" marker-end="url(#ah-w)"/>
+  <!-- 16 pending -> expired (sweep) -->
+  <path class="edge w" d="M293 84 L536 71" marker-end="url(#ah-w)"/>
+
+  <!-- start -->
+  <circle class="start" cx="40" cy="250" r="9"/>
+
+  <!-- states -->
+  <rect class="sbox" x="168" y="68" width="124" height="44" rx="10"/>
+  <text class="c b" x="230" y="94">pending</text>
+  <rect class="sbox" x="168" y="228" width="124" height="44" rx="10"/>
+  <text class="c b" x="230" y="254">active</text>
+  <rect class="sbox" x="168" y="388" width="124" height="44" rx="10"/>
+  <text class="c b" x="230" y="414">claimable</text>
+
+  <rect class="sbox fin" x="538" y="48" width="124" height="44" rx="10"/>
+  <rect class="sbox fin" x="542" y="52" width="116" height="36" rx="7"/>
+  <text class="c b w" x="600" y="74">expired</text>
+  <rect class="sbox" x="538" y="228" width="124" height="44" rx="10"/>
+  <text class="c b" x="600" y="254">superseded</text>
+  <rect class="sbox" x="538" y="388" width="124" height="44" rx="10"/>
+  <text class="c b" x="600" y="414">lapsed</text>
+
+  <!-- note on expired -->
+  <line class="tie" x1="662" y1="70" x2="684" y2="70"/>
+  <rect class="note" x="684" y="38" width="206" height="64" rx="4"/>
+  <text x="694" y="58" class="b">Final for this instance.</text>
+  <text x="694" y="76">Only a new grant gives</text>
+  <text x="694" y="92">a new instance.</text>
+
+  <!-- badges -->
+  <g class="badge"><circle cx="108" cy="250" r="9"/><text x="108" y="254">1</text></g>
+  <g class="badge"><circle cx="88" cy="128" r="9"/><text x="88" y="132">2</text></g>
+  <g class="badge"><circle cx="88" cy="372" r="9"/><text x="88" y="376">3</text></g>
+  <g class="badge"><circle cx="205" cy="170" r="9"/><text x="205" y="174">4</text></g>
+  <g class="badge"><circle cx="255" cy="170" r="9"/><text x="255" y="174">5</text></g>
+  <g class="badge"><circle cx="230" cy="330" r="9"/><text x="230" y="334">6</text></g>
+  <g class="badge"><circle cx="481" cy="368" r="9"/><text x="481" y="372">7</text></g>
+  <g class="badge"><circle cx="350" cy="236" r="9"/><text x="350" y="240">8</text></g>
+  <g class="badge"><circle cx="415" cy="250" r="9"/><text x="415" y="254">9</text></g>
+  <g class="badge"><circle cx="518" cy="202" r="9"/><text x="518" y="206">10</text></g>
+  <g class="badge"><circle cx="480" cy="456" r="9"/><text x="480" y="460">11</text></g>
+  <g class="badge"><circle cx="600" cy="330" r="9"/><text x="600" y="334">12</text></g>
+  <g class="badge s"><circle cx="480" cy="264" r="9"/><text x="480" y="268">13</text></g>
+  <g class="badge s"><circle cx="415" cy="418" r="9"/><text x="415" y="422">14</text></g>
+  <g class="badge w"><circle cx="482" cy="127" r="9"/><text x="482" y="131">15</text></g>
+  <g class="badge w"><circle cx="415" cy="77" r="9"/><text x="415" y="81">16</text></g>
+</svg>
+<figcaption>Black arrows enter or restore a state, grey arrows are revokes, dashed purple arrows are
+sibling moves in an <code>any_discharged</code> group, and red arrows are the sweep. The double
+border marks <code>expired</code> as final.</figcaption>
+</figure>
+
+<ul class="legend">
+  <li><span class="grp">Entering a state</span></li>
+  <li><span class="n">1</span><span>start → <code>active</code>: grant (declared active), <code>effect create</code>, first reinstate</span></li>
+  <li><span class="n">2</span><span>start → <code>pending</code>: grant (declared pending)</span></li>
+  <li><span class="n">3</span><span>start → <code>claimable</code>: grant (declared claimable)</span></li>
+  <li><span class="grp">Between active and pending</span></li>
+  <li><span class="n">4</span><span><code>active</code> → <code>pending</code>: <code>effect pend</code></span></li>
+  <li><span class="n">5</span><span><code>pending</code> → <code>active</code>: <code>effect activate</code>, triggering event, or reinstate</span></li>
+  <li><span class="grp">Reinstate</span></li>
+  <li><span class="n">6</span><span><code>claimable</code> → <code>active</code>: reinstate</span></li>
+  <li><span class="n">7</span><span><code>lapsed</code> → <code>active</code>: reinstate</span></li>
+  <li><span class="n">8</span><span><code>superseded</code> → <code>active</code>: reinstate</span></li>
+  <li><span class="grp">Revoke</span></li>
+  <li><span class="n">9</span><span><code>active</code> → <code>superseded</code>: revoke</span></li>
+  <li><span class="n">10</span><span><code>pending</code> → <code>superseded</code>: revoke</span></li>
+  <li><span class="n">11</span><span><code>claimable</code> → <code>superseded</code>: revoke</span></li>
+  <li><span class="n">12</span><span><code>lapsed</code> → <code>superseded</code>: revoke</span></li>
+  <li><span class="grp">Siblings in an <code>any_discharged</code> group</span></li>
+  <li><span class="n s">13</span><span><code>active</code> → <code>superseded</code>: sibling discharged</span></li>
+  <li><span class="n s">14</span><span><code>claimable</code> → <code>lapsed</code>: sibling claimed</span></li>
+  <li><span class="grp">Time limit</span></li>
+  <li><span class="n w">15</span><span><code>active</code> → <code>expired</code>: sweep, time limit up</span></li>
+  <li><span class="n w">16</span><span><code>pending</code> → <code>expired</code>: sweep, time limit up</span></li>
+</ul>
+
+<p>A revoke here is either a direct revoke or a ViolationResponse's <code>revokes:</code>. A response
+revokes only when some instance of the permit is active. No act moves a permit into
+<code>claimable</code>: a permit is in that state only if the author declares it so, and <code>claim()</code> claims burdens
+only. A clone or a transfer copies an instance in its current state, whatever that state is.</p>
+
+<!-- ============================================================ -->
+<h2>2. Four timelines</h2>
+
+<p>In all four timelines, the permit <code>P</code> has <code>deadline: "5 minutes"</code> (5 steps) and is granted
+active to <code>H</code> at tick 3, so its start tick is 3.</p>
+
+<!-- (a) -->
+<h3>(a) A use refused past the limit</h3>
+<figure>
+<svg class="seq" viewBox="0 0 640 250" role="img" aria-labelledby="a-title">
+  <title id="a-title">Timeline (a): at tick 8 the holder's use of P is refused; P stays active and the tick stays 8</title>
+  <rect class="pbox" x="80" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="140" y="34">Holder H</text>
+  <rect class="pbox" x="440" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="500" y="34">Runtime</text>
+  <line class="life" x1="140" y1="46" x2="140" y2="244"/>
+  <line class="life" x1="500" y1="46" x2="500" y2="244"/>
+
+  <rect class="note" x="370" y="62" width="260" height="28" rx="4"/>
+  <text class="c" x="500" y="81">tick 8, P active, start tick 3</text>
+
+  <line class="msg" x1="140" y1="122" x2="498" y2="122" marker-end="url(#ah)"/>
+  <text class="c m" x="320" y="114">advance("useP", "H")</text>
+
+  <line class="msg r w" x1="500" y1="172" x2="142" y2="172" marker-end="url(#ah-w)"/>
+  <text class="c b w" x="320" y="148">blocked</text>
+  <text class="c m w" x="320" y="164">"required permit 'P' time has elapsed for actor"</text>
+
+  <rect class="note" x="370" y="188" width="260" height="46" rx="4"/>
+  <text class="c" x="500" y="207">refused attempt recorded,</text>
+  <text class="c" x="500" y="224">P still active, tick still 8</text>
+</svg>
+<figcaption>The act is <code>blocked</code>, with <code>blocked_by</code> naming the instance.
+<code>Runtime.advance()</code> records it as a refused attempt, as for any Step 6 refusal. The
+permit stays <code>active</code> until the sweep writes <code>expired</code>, and the tick does not move.</figcaption>
+</figure>
+
+<!-- (b) -->
+<h3>(b) The sweep expires the permit</h3>
+<figure>
+<svg class="seq" viewBox="0 0 720 282" role="img" aria-labelledby="b-title">
+  <title id="b-title">Timeline (b): at tick 8 the sweep moves P from active to expired, records a token event in the ledger, and moves the tick to 9</title>
+  <rect class="pbox" x="40" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="100" y="34">system</text>
+  <rect class="pbox" x="270" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="330" y="34">Runtime</text>
+  <rect class="pbox" x="560" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="620" y="34">Ledger</text>
+  <line class="life" x1="100" y1="46" x2="100" y2="276"/>
+  <line class="life" x1="330" y1="46" x2="330" y2="276"/>
+  <line class="life" x1="620" y1="46" x2="620" y2="276"/>
+
+  <rect class="note" x="200" y="62" width="260" height="28" rx="4"/>
+  <text class="c" x="330" y="81">tick 8, P active, start tick 3</text>
+
+  <line class="msg" x1="100" y1="120" x2="328" y2="120" marker-end="url(#ah)"/>
+  <text class="c m" x="215" y="112">check_live_violations()</text>
+
+  <path class="msg w" d="M330 142 H370 V172 H333" marker-end="url(#ah-w)"/>
+  <text class="b w" x="378" y="155">P active to expired</text>
+  <text class="m" x="378" y="170">(elapsed 5 &gt;= deadline 5 steps)</text>
+
+  <line class="msg" x1="330" y1="212" x2="618" y2="212" marker-end="url(#ah)"/>
+  <text class="c" x="475" y="189">token event expired,</text>
+  <text class="c" x="475" y="204">cause deadline, by system</text>
+
+  <line class="msg r ok" x1="330" y1="254" x2="102" y2="254" marker-end="url(#ah-ok)"/>
+  <text class="c ok" x="215" y="246">outcome ok, tick 8 to 9</text>
+</svg>
+<figcaption>The sweep adds one line per expired permit,
+<code>expired permit 'P' held by 'H' (elapsed 5 &gt;= deadline 5 steps)</code>, and one
+<code>expired</code> token event with cause <code>deadline</code>, by <code>system</code>. A sweep
+that only expired permits moves the tick once, and its outcome stays <code>ok</code>.</figcaption>
+</figure>
+
+<!-- (c) -->
+<h3>(c) A reinstate blocked on an expired permit</h3>
+<figure>
+<svg class="seq" viewBox="0 0 640 398" role="img" aria-labelledby="c-title">
+  <title id="c-title">Timeline (c): at tick 9, with P expired, a reinstate is blocked and a revoke has no effect; the tick stays 9</title>
+  <rect class="pbox" x="80" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="140" y="34">Authority</text>
+  <rect class="pbox" x="440" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="500" y="34">Runtime</text>
+  <line class="life" x1="140" y1="46" x2="140" y2="392"/>
+  <line class="life" x1="500" y1="46" x2="500" y2="392"/>
+
+  <rect class="note" x="370" y="62" width="260" height="28" rx="4"/>
+  <text class="c" x="500" y="81">tick 9, P expired (its only instance)</text>
+
+  <line class="msg" x1="140" y1="120" x2="498" y2="120" marker-end="url(#ah)"/>
+  <text class="c m" x="320" y="112">reinstate_authorization("AuthP")</text>
+
+  <line class="msg r w" x1="500" y1="176" x2="142" y2="176" marker-end="url(#ah-w)"/>
+  <text class="c m w" x="320" y="152">blocked, "permit 'P' has expired;</text>
+  <text class="c m w" x="320" y="167">only a new grant restores it"</text>
+
+  <rect class="note" x="370" y="192" width="260" height="46" rx="4"/>
+  <text class="c" x="500" y="211">P still expired, no embargo lifted,</text>
+  <text class="c" x="500" y="228">tick still 9</text>
+
+  <line class="msg" x1="140" y1="268" x2="498" y2="268" marker-end="url(#ah)"/>
+  <text class="c m" x="320" y="260">revoke_authorization("AuthP")</text>
+
+  <line class="msg r ok" x1="500" y1="320" x2="142" y2="320" marker-end="url(#ah-ok)"/>
+  <text class="c ok" x="320" y="296">ok, note line</text>
+  <text class="c m" x="320" y="311">"revoke 'P' had no effect: 'H' holds it expired"</text>
+
+  <rect class="note" x="370" y="336" width="260" height="46" rx="4"/>
+  <text class="c" x="500" y="355">nothing changed, no token event,</text>
+  <text class="c" x="500" y="372">tick still 9</text>
+</svg>
+<figcaption>A reinstate of an Authorization whose permit instances are all expired is refused, with
+no tick. A revoke of one changes nothing: outcome <code>ok</code>, one line per instance, no embargo,
+no token event, no tick. Beside other instances, the expired ones are skipped: a revoke supersedes
+the others, and in a reinstate the first instance not expired decides.</figcaption>
+</figure>
+
+<!-- (d) -->
+<h3>(d) A new grant gets a new start tick</h3>
+<p>A ViolationResponse's <code>creates_burden</code> may name a permit. It grants a new instance
+unless the recipient already holds the token active, and an expired instance does not count.</p>
+<pre style="font-family:var(--mono);font-size:0.9rem;background:var(--code-bg);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:12px 0">violation_response GrantOnBreach {
+    on_violation_of: breachedBurden
+    obligates: H
+    response_kind: remediate
+    creates_burden: P
+}</pre>
+<figure>
+<svg class="seq" viewBox="0 0 720 444" role="img" aria-labelledby="d-title">
+  <title id="d-title">Timeline (d): at tick 20 a violation response grants a new active instance of P; a use at tick 20 succeeds and a use at tick 25 is refused</title>
+  <rect class="pbox" x="40" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="100" y="34">system</text>
+  <rect class="pbox" x="300" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="360" y="34">Runtime</text>
+  <rect class="pbox" x="560" y="12" width="120" height="34" rx="6"/>
+  <text class="c b" x="620" y="34">Holder H</text>
+  <line class="life" x1="100" y1="46" x2="100" y2="438"/>
+  <line class="life" x1="360" y1="46" x2="360" y2="438"/>
+  <line class="life" x1="620" y1="46" x2="620" y2="438"/>
+
+  <rect class="note" x="215" y="62" width="290" height="46" rx="4"/>
+  <text class="c" x="360" y="81">tick 20, P expired (old instance),</text>
+  <text class="c" x="360" y="98">breachedBurden violated</text>
+
+  <line class="msg" x1="100" y1="136" x2="358" y2="136" marker-end="url(#ah)"/>
+  <text class="c m" x="230" y="128">fire_violation_responses()</text>
+
+  <path class="msg ok" d="M360 156 H400 V186 H363" marker-end="url(#ah-ok)"/>
+  <text class="b ok" x="408" y="169">new instance of P, active,</text>
+  <text x="408" y="184">granted at tick 20</text>
+
+  <rect class="note" x="210" y="204" width="300" height="46" rx="4"/>
+  <text class="c" x="360" y="223">token event granted, cause response,</text>
+  <text class="c" x="360" y="240">old instance stays expired</text>
+
+  <line class="msg" x1="620" y1="286" x2="362" y2="286" marker-end="url(#ah)"/>
+  <text class="c m" x="490" y="278">advance("useP", "H") at tick 20</text>
+
+  <line class="msg r ok" x1="360" y1="322" x2="618" y2="322" marker-end="url(#ah-ok)"/>
+  <text class="c ok b" x="490" y="314">ok</text>
+
+  <line class="msg" x1="620" y1="368" x2="362" y2="368" marker-end="url(#ah)"/>
+  <text class="c m" x="490" y="360">advance("useP", "H") at tick 25</text>
+
+  <line class="msg r w" x1="360" y1="420" x2="618" y2="420" marker-end="url(#ah-w)"/>
+  <text class="c m w" x="490" y="396">blocked, "required permit 'P'</text>
+  <text class="c m w" x="490" y="411">time has elapsed for actor"</text>
+</svg>
+<figcaption>The new instance's start tick is 20. A live <code>effect create</code> cannot make this
+grant: it skips a holder who already holds an instance of the token, expired or not. A direct
+<code>grant_token()</code> call makes a new instance too, but leaves no ledger event. This timeline
+is pinned by <code>tests/test_permit_expired_final.py</code>.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2>3. What each layer does</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th scope="col"></th><th scope="col">Static model</th><th scope="col">Runtime engine</th><th scope="col">Hybrid model</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th scope="row">Time limit at use</th>
+      <td>None: the model has no permit time</td>
+      <td>A duration limit is checked at use; an elapsed permit is refused</td>
+      <td>None: the model has no permit time</td>
+    </tr>
+    <tr>
+      <th scope="row">Sweep</th>
+      <td>None</td>
+      <td>Writes <code>expired</code>: a duration limit counted from the start tick, a date limit against <code>as_at</code> when the runtime has a <code>DeadlineClock</code></td>
+      <td>None: no edge writes <code>expired</code></td>
+    </tr>
+    <tr>
+      <th scope="row">Elapsed permit not yet swept</th>
+      <td>An exercise is offered</td>
+      <td>Refused at use; still <code>active</code></td>
+      <td>Read as <code>active</code> at the anchor; an exercise is offered</td>
+    </tr>
+    <tr>
+      <th scope="row"><code>expired</code> permit</th>
+      <td>Cannot occur: <code>expired</code> cannot be declared</td>
+      <td>Final for that instance</td>
+      <td>Read as not active at the anchor; no edge changes it</td>
+    </tr>
+    <tr>
+      <th scope="row"><code>compelled</code> for a strict burden gated on a timed permit</th>
+      <td>Withheld by the status route (<code>mode=spec</code>)</td>
+      <td>Not applicable</td>
+      <td>Withheld by the status route (<code>mode=hybrid</code>)</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>The validator warns on an Authorization's <code>duration</code>, which is recorded and not
+enforced (<code>[W-authorization-duration]</code>), and on a strict burden whose discharge needs a
+permit with a time limit (<code>[W-strict-timed-permit]</code>).</p>
+
+<!-- ============================================================ -->
+<section class="closing">
+<h2>What this does not close</h2>
+<ul>
+  <li>The recommended action (its route, and the one execute-action returns) and <code>GET /kripke/witness</code> still offer the refused path. Only the status route withholds.</li>
+  <li><code>compelled</code> stays as computed for a strict burden that a declaration can violate (parity row R8), or whose discharging action has a precondition (R11).</li>
+  <li><code>detectable</code> can be falsely true, because the model's discharge path can need a use the engine refuses (R28).</li>
+  <li>A date limit with no <code>DeadlineClock</code> is never judged, so it never takes effect. The status route still withholds <code>compelled</code> for it.</li>
+  <li>The withholding finds the burden among top-level tokens only. For a burden declared inline in a role, the status route answers 404.</li>
+  <li>A pending or expired permit at the hybrid model's anchor (R29). In the hybrid model an action that emits the permit's triggering event can restore a pending permit, but not on every path: an action that discharges a burden with no <code>discharged_by</code>, for example, is not modelled as firing its event, so it restores nothing. An event that no action emits never restores it. A reinstate or an <code>activate</code> effect does not restore a pending permit in the model, and no edge changes an expired permit at the anchor.</li>
+</ul>
+
+<h2>Limits</h2>
+<ul>
+  <li>No route re-grants a permit. A new instance comes only from a response's <code>creates_burden</code>, or from a direct <code>grant_token()</code> call, which leaves no ledger event.</li>
+  <li>A clone or a transfer keeps the old start tick and state, so it never renews a permit.</li>
+  <li>A strict burden whose discharge needs a timed permit can get stuck. Once the permit's time is up the discharge is refused, and the sweep never violates a strict burden (<code>[W-strict-timed-permit]</code> warns).</li>
+  <li>A limit with no measurable magnitude never elapses, and the status route does not withhold <code>compelled</code> for it. <code>[W-strict-timed-permit]</code> still fires on it.</li>
+</ul>
+</section>
+
+<footer>
+  For the full rules, see the section “Permit time limits (2.5.0)” in
+  <code>docs/DSL_TOOLCHAIN_REFERENCE.md</code>.
+</footer>
+
+</main>
+</body>
+</html>
