@@ -4938,7 +4938,8 @@ below, "The FHIR event handler misreports a refused firing").
 `aab0318` only because both its events were refused: the AM-76 fixture fix added
 a discharge of `referralInitiationBurden` to the other tests in the file and
 missed this one, and the route stamped provenance on the refused events. The
-`blocked` label (ruling A6-1 (b)) exposed it, and the test now discharges the
+`blocked` label the handler now gives a refused event exposed it, and the test
+now discharges the
 burden first. The text below is the finding as logged.
 
 **Found while landing AM-76** (`docs/el_grammar_amendments.md`), which

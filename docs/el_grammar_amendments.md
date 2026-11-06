@@ -12872,8 +12872,8 @@ same fault in `handle_encounter_event()` stays open.
 `aab0318` only because both its events were refused. The AM-76 fixture fix added a
 discharge of `referralInitiationBurden` to the other tests in that file and missed this
 one, so neither the revoke nor the reinstate happened, and the route stamped provenance
-on the refused events anyway. The handler's `blocked` label (ruling A6-1 (b)) exposed
-it: the route picks the token to stamp from the label. The test now discharges the
+on the refused events anyway. The handler's new `blocked` label for a refused event
+exposed it: the route picks the token to stamp from the label. The test now discharges the
 burden first and does the revoke and the reinstate its docstring describes.
 
 **Limit.**
@@ -12913,8 +12913,8 @@ text and nothing read it, and nothing told the author so. An author could write
 
 **Now.** Each Authorization with a `duration` gets one warning that names it, quotes
 the duration, says the duration is recorded and not enforced, and ends "(clause to be
-confirmed)". An Authorization with no `duration` gets none. Nothing else changes (ruling
-D4): a permit granted by a 90-day Authorization can still be used after 90 days. A
+confirmed)". An Authorization with no `duration` gets none. Nothing else changes:
+a permit granted by a 90-day Authorization can still be used after 90 days. A
 permit's time limit is the permit's own `deadline`.
 
 **Limit.**
@@ -12961,7 +12961,7 @@ discharging actions (by `for_action`, a `destroy` effect or `discharged_by`), ev
 required permit with a time limit gets one warning. It names the burden, the action
 and the permit, quotes the limit, and ends "(clause to be confirmed)". A policy-fed
 limit is quoted at the policy's declared value. An eventual burden, or a permit with no
-time limit, gets none. Nothing else changes (ruling D13).
+time limit, gets none. Nothing else changes.
 
 **Limit.**
 - No ISO clause is cited yet.
@@ -13000,19 +13000,19 @@ status "permit time limit: not modelled", in both modes. The test reads only the
 specification: `_compelled_withheld()` makes no time judgement and does not call
 `_permit_usable()`. Every other field stays as computed, and there is no new field.
 
-**Rulings.**
-- Q1: withhold unconditionally, whether the verifier says true or false.
-- Q2: keep `counterexample_path` and `witness_path` as computed.
-- Q3: no state test, so a burden already discharged is withheld too.
-- Q4: withhold if any discharging action needs a timed permit, not only if all do.
-- Q5: a limit with no measurable magnitude ("thirty days", "referral episode") is not
+**Design decisions.**
+- Withhold unconditionally, whether the verifier says true or false.
+- Keep `counterexample_path` and `witness_path` as computed.
+- No state test, so a burden already discharged is withheld too.
+- Withhold if any discharging action needs a timed permit, not only if all do.
+- A limit with no measurable magnitude ("thirty days", "referral episode") is not
   withheld; `compelled` keeps the verifier's value, and `[W-strict-timed-permit]` stays
   as it is.
-- Q6: `status` is overwritten with a constant; `modal_operator` and `detectable` stay.
-- Q7: the `revokes:` gap is recorded now as an open finding in `docs/CONCEPTS_INDEX.md`.
-- Q8: `POST /verify` in `computable-governance-ui` is recorded as an open finding; that
+- `status` is overwritten with a constant; `modal_operator` and `detectable` stay.
+- The `revokes:` gap is recorded now as an open finding in `docs/CONCEPTS_INDEX.md`.
+- `POST /verify` in `computable-governance-ui` is recorded as an open finding; that
   repository is not changed.
-- Q9: R28 and R29 use the Phase 1 wording: since the expired-permit step, only a pending
+- R28 and R29 state the limit now that `expired` is final for an instance: only a pending
   anchor is falsely unreachable; an expired one is correct apart from a new grant.
 
 **Limit.**
@@ -13022,7 +13022,8 @@ specification: `_compelled_withheld()` makes no time judgement and does not call
   discharge, and a date limit with no clock never bites.
 - It does not close R8 (declarations) or R11 (preconditions): `compelled` can still be
   true there.
-- An untimed permit withdrawn by a response's `revokes:` is not covered (Q7).
+- An untimed permit withdrawn by a response's `revokes:` is not covered (see the decision above on the
+  `revokes:` gap).
 - A burden declared inline in a role gets 404 from the route, as before, so this test
   does not reach it: `_spec_token()` reads top-level tokens only.
 - Not exercised: federation-built runtimes, a permit granted by `effect fill`, and
@@ -13032,7 +13033,8 @@ specification: `_compelled_withheld()` makes no time judgement and does not call
 
 **What it means for the demo.** Nothing changes on screen. No published or API scenario
 has such a burden, and no widget calls this route. The UI bridge's `POST /verify` would
-still say "obligation guaranteed" for such a specification (Q8).
+still say "obligation guaranteed" for such a specification (see the decision above on
+`POST /verify`).
 
 **Parity.** R28's last sentence replaced; new row R29 (a pending or expired permit at
 the anchor); the "reserved" clause in the header removed.
