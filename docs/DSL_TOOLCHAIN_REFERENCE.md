@@ -95,6 +95,12 @@ Added in 2.4.0 (5):
   model"); `[W-fill-role-filled]`, `[W-fill-excluded-role]`,
   `[W-fill-not-modelled]` (see "Filling a role by an action").
 
+Added in 2.5.0 (3):
+- Errors: `response-permit-authority` (see "Violation responses that
+  suspend or expire a permit (2.5.0)").
+- Warnings: `[W-authorization-duration]`, `[W-strict-timed-permit]` (see
+  "Permit time limits (2.5.0)").
+
 ### Usage
 
 ```python
@@ -598,7 +604,8 @@ action has a precondition, plain or a comparison.
 (`docs/ENGINE_VERIFIER_PARITY.md`, R11). For a strict burden whose
 discharging action has a precondition, `GET /obligations/{token}/status`
 may report `compelled: true` while the engine refuses the discharge (unlike
-a strict burden gated on a timed permit, where `compelled` is withheld, a
+a strict burden gated on a timed permit, or on a permit a violation
+response suspends or expires, where `compelled` is withheld, a
 precondition keeps `compelled` true; parity row R11); its
 field `assumes_preconditions` lists the assumed preconditions as
 `<action>: <precondition>`.
@@ -742,7 +749,9 @@ R18). The toolchain withholds its claims about them:
   other edge is the tick, the recommendation is `tick`.
 
 The status route also answers `compelled: null` for a strict burden gated
-on a permit with a time limit; see "Permit time limits (2.5.0)".
+on a permit with a time limit, or on a permit a violation response
+suspends or expires; see "Permit time limits (2.5.0)" and "Violation
+responses that suspend or expire a permit (2.5.0)".
 
 Other routes are unaffected: the objective score and reachability read
 satisfaction groups, which never contain a standing duty; available
@@ -793,7 +802,7 @@ outcomes and token states are unchanged; the events describe them in data.
 
 | field | meaning |
 |---|---|
-| `event` | `granted` (a new instance), `removed` (the instance left its holder: a transfer or a delegation reassignment, followed by a `granted` for the new holder), or the new state (`active`, `pending`, `discharged`, `violated`, `superseded`, `lifted`, `lapsed`, `expired` (the sweep writes it for a permit whose time limit is up), ...) |
+| `event` | `granted` (a new instance), `removed` (the instance left its holder: a transfer or a delegation reassignment, followed by a `granted` for the new holder), or the new state (`active`, `pending`, `discharged`, `violated`, `superseded`, `lifted`, `lapsed`, `expired` (the sweep writes it for a permit whose time limit is up, and a response's `expires:` for the permit it names), ...) |
 | `token_name`, `token_kind`, `holder`, `granted_at_tick` | the instance |
 | `from_state`, `to_state` | the state before and after (`None` before a grant, after a removal) |
 | `tick` | the record's tick |
@@ -818,7 +827,7 @@ names what it refers to:
 | `declaration` | the declaring action | `declare_violation()` |
 | `revocation` | the Authorization | `revoke_authorization()`, or a response's revocation |
 | `reinstatement` | the Authorization | `reinstate_authorization()` |
-| `response` | the ViolationResponse | a burden a response grants |
+| `response` | the ViolationResponse | a burden a response grants, or a permit a response's `suspends:` or `expires:` moves |
 | `delegation_revoked`, `delegation_reinstated` | the Delegation | `revoke_delegation()`, `reinstate_delegation()` |
 | `discharge_call` | — | `discharge_burden()` |
 
@@ -1065,15 +1074,16 @@ occurrence**, not once per record: a flagged response fires on the
 refused attempt and not again when the occurrence is declared; an
 unflagged one fires on the declaration. This is a deliberate choice
 (2.3.0-7). The effects are a
-burden response's (grant, escalation line, `revokes`, terminate on the
-violator chain), with the record's violator; the line reads `fired 'R'
+burden response's (grant, escalation line, `revokes`, `suspends`,
+`expires`, terminate on the violator chain), with the record's violator; the line reads `fired 'R'
 (kind) on violation of embargo 'E' by 'X' in 'B' at step N`. A response
 on a permit fires on a denial and on a missing requirement alike.
 
 **Validator.** V-NEW-24 accepts a permit or embargo target (a burden must
 still be strict; the Action must still require a permit). Warnings:
 `[W-breach-response-duty]` (a response to a permit or embargo that
-creates no burden and revokes nothing; terminate exempt),
+creates no burden and has no `revokes:`, `suspends:` or `expires:` line;
+terminate exempt),
 `[W-refused-attempts-burden]` (the flag on a response to a burden),
 `[W-breach-undeclarable]` (a declared permit or embargo that applies to no
 declared action).
@@ -1308,8 +1318,9 @@ when an actor tries an action that needs a permit (`advance()` Step 6): it
 refuses the action if the permit's time has run out, and leaves the
 permit's state and the tick as they are. The sweep is the engine's pass
 over live state, run when a caller asks for it (`check_live_violations()`,
-or `POST /check-violations`), and it is the only place that writes a
-permit as `expired`.
+or `POST /check-violations`), and it is the only place that writes
+`expired` for a time limit; a violation response's `expires:` also writes
+it (see "Violation responses that suspend or expire a permit (2.5.0)").
 - **At use** (`advance()` Step 6, and `declare_violation()`, which shares
   it): a duration limit only. The actor must hold an instance of the
   permit that is active and whose time has not elapsed. A date or instant
@@ -1366,7 +1377,8 @@ held by 'H' (elapsed 5 >= deadline 5 steps)` (a date limit gives `due
 outcome stays `ok`.
 
 **`expired` is not `lapsed`.** `expired` is the engine's permit state for
-a time limit that is up (ledger cause `deadline`). `lapsed` is a
+a time limit that is up (ledger cause `deadline`), or for a permit a
+response expires (cause `response`). `lapsed` is a
 claimable token whose sibling in an `any_discharged` group was claimed
 (cause `sibling`). The two are unrelated.
 
@@ -1377,7 +1389,7 @@ stateDiagram-v2
     [*] --> active : grant (declared active), effect create, first reinstate
     [*] --> pending : grant (declared pending)
     [*] --> claimable : grant (declared claimable)
-    active --> pending : effect pend
+    active --> pending : effect pend, or response suspends
     pending --> active : effect activate, triggering event, or reinstate
     claimable --> active : reinstate
     lapsed --> active : reinstate
@@ -1388,8 +1400,8 @@ stateDiagram-v2
     lapsed --> superseded : revoke
     active --> superseded : sibling discharged (any_discharged group)
     claimable --> lapsed : sibling claimed (any_discharged group)
-    active --> expired : sweep, time limit up
-    pending --> expired : sweep, time limit up
+    active --> expired : sweep, time limit up, or response expires
+    pending --> expired : sweep, time limit up, or response expires
     note right of expired
         Final for this instance.
         Only a new grant gives a new instance.
@@ -1401,6 +1413,10 @@ response revokes only when some instance of the permit is active. No act
 moves a permit into `claimable`: it is there only if the author declares
 it, and `claim()` claims burdens only. A clone or a transfer copies an
 instance in its state, whatever that state is.
+
+A response's `suspends:` and `expires:` act only on the Authorization's own
+holder, or on each actor filling its `to_role`; on any state other than
+the ones shown they change nothing and write note lines.
 
 ### Timelines
 
@@ -1513,6 +1529,15 @@ discharged. `detectable`, `modal_operator` and the
 witness and counterexample paths stay as computed. A limit with no
 measurable magnitude never elapses and is not withheld.
 
+A second status, "permit suspension or expiry by a response: not
+modelled", is given for a strict burden whose discharging action requires
+a permit granted by an Authorization that some violation response names in
+`suspends:` or `expires:` (2.5.0-2, parity row R31; see "Violation
+responses that suspend or expire a permit (2.5.0)"). The time-limit status
+takes precedence. In both cases only `compelled` is withheld. A permit
+named only by a response's `revokes:` is not covered: the static answer
+there stays `compelled: true`.
+
 ### What this does not close
 
 - The recommended action (its route, and the one execute-action returns)
@@ -1537,6 +1562,11 @@ measurable magnitude never elapses and is not withheld.
   the hybrid model (`_fire_event()` in `el_kripke.py`), as the engine
   does. An expired permit at the anchor has no edge that changes it. Not
   verified: R29's clause on the static model and its sentence on AF.
+- A permit withdrawn by a response's `revokes:` is not covered by either
+  status: in `mode=spec` the route still says `compelled: true` for a
+  strict burden that needs it (open finding "A response's `revokes:` leaves
+  the static status route saying `compelled: true`" in
+  `docs/CONCEPTS_INDEX.md`).
 
 ### Limits
 
@@ -1553,6 +1583,165 @@ measurable magnitude never elapses and is not withheld.
   `"referral episode"`) never elapses, and the status route does not
   withhold `compelled` for it. `[W-strict-timed-permit]` still fires on
   it.
+
+---
+
+## Violation responses that suspend or expire a permit (2.5.0)
+
+A ViolationResponse can name an Authorization in `suspends:` or `expires:`
+(2.5.0-2). When the response fires, the permit that Authorization grants
+moves to pending or to `expired`. Each clause names one Authorization per
+line and may be repeated. The clauses come after `revokes:`, in a fixed
+order: revokes, suspends, expires.
+
+```
+violation_response SuspendOnBreach {
+    on_violation_of: breachedBurden
+    obligates: Issuer
+    response_kind: remediate
+    suspends: TimedAuth
+}
+```
+
+The fragment is the response of a test in
+`tests/test_response_suspends_expires.py`. When a response has several of
+these clauses they come in the order revokes, suspends, expires.
+
+**What each clause does.**
+- `suspends:` moves the permit from active to pending.
+- `expires:` moves it from active or pending to `expired`.
+- An instance in any other state does not change and gets note lines.
+- "Active" is judged by the permit's state, not by the use check, so an
+  elapsed permit that the sweep has not yet written as `expired` can still
+  be suspended or expired.
+
+**Whose instance.** The target is the Authorization's `to_agent`
+instance, or the instances held by the actors who fill its `to_role`.
+Another holder's instance is never touched. Identical duplicate instances
+both move. By contrast, `revokes:` and the terminate chain act on a permit
+by name, for every holder.
+
+**Order and tick.**
+- In one firing: the terminate chain or `revokes:` (they exclude each
+  other), then every `suspends:` line, then every `expires:` line, each in
+  written order. Naming the same Authorization twice gives the no-effect
+  note lines the second time.
+- The steps run once per occurrence: a response that fires for two
+  violated instances in one call runs its `suspends:` lines twice, the
+  second time with no effect.
+- The tick moves on by one per call when any response fired, even if
+  nothing changed.
+- There is no strict-mode guard, no embargo is touched, and the
+  Authorization need not be `revocable`.
+
+**Authority.** The Authorization's authority must be the response's
+`obligates`. The validator checks it with the error
+`[response-permit-authority]`, one per line, and the engine checks it
+again when the response fires (note line `not suspended 'A': authority is
+...`). That only the Authorization's authority may suspend or expire its
+permit is this toolchain's reading, clause to be confirmed.
+
+**Ledger.** An instance moved by `suspends:` or by a response's
+`expires:` writes the cause `response`, with the response's name as ref. A
+response's revoke still writes `revocation`, with the Authorization's
+name. The sweep's expiry writes `deadline`. Token events show the net
+change over one call, so `suspends:` then `expires:` on one permit gives a
+single event, active to expired.
+
+**Note lines.** Shown for `suspends:`:
+
+```
+not suspended 'A': authority is '<authority>', not '<obligates>'
+not suspended 'A': no actor fills role '<role>'
+not suspended 'A' (to 'X'): no instance of permit 'P'
+suspended 'A' (to 'X')
+  pended permit 'P' held by 'X'
+not suspended 'A' (to 'X'): nothing to suspend
+  suspend 'P' had no effect: 'X' holds it <state>
+```
+
+For `expires:` the words are `expired`, `expire` and `expired permit`.
+For a `to_role` Authorization the target reads `to role '<role>'`. An
+authority mismatch, a role no actor fills, or no instance of the permit
+writes one line and changes nothing. Otherwise a headline is followed by
+one indented line per instance, so a complete no-op writes two lines.
+
+**`expired` keeps its meaning.** As in 2.5.0-1, `expired` is final for
+that instance. A response's `expires:` is a second way to reach it,
+beside the sweep; there is still no way out except a new grant.
+
+### Timeline
+
+The permit `P` is granted active to `H` by the Authorization `TimedAuth`,
+whose authority is the response's `obligates`. The response
+`SuspendOnBreach` answers `breachedBurden` with `suspends: TimedAuth`.
+
+```mermaid
+sequenceDiagram
+    participant S as system
+    participant RT as Runtime
+    participant L as Ledger
+    participant H as Holder H
+    Note over RT: tick 4, breachedBurden violated, P active
+    S->>RT: fire_violation_responses()
+    RT->>RT: SuspendOnBreach fires and suspends TimedAuth, P active to pending
+    RT->>L: token event pending, cause response, ref SuspendOnBreach
+    RT-->>S: outcome ok, tick 4 to 5
+    H->>RT: advance("useP", "H")
+    RT-->>H: blocked, "required permit 'P' not held by actor"
+    Note over RT: refused attempt recorded, P still pending, tick still 5
+```
+
+A pending permit gets the same refusal as one the actor does not hold.
+
+### What each layer does
+
+| | Static model | Runtime engine | Hybrid model |
+|---|---|---|---|
+| `suspends:` and `expires:` | Not read | Move the permit when the response fires | Not read |
+| `compelled` for a strict burden gated on a permit a response suspends or expires | Withheld by the status route (`mode=spec`) | Not applicable | Withheld by the status route (`mode=hybrid`), also after a firing, where the model's answer is a correct `false` |
+
+### The status route
+
+`GET /obligations/{token_name}/status` answers `compelled: null` and
+`status: "permit suspension or expiry by a response: not modelled"`, in
+both modes, for a strict burden whose discharging action needs a permit
+granted by an Authorization that any response in the specification names
+in `suspends:` or `expires:` (parity row R31). The verifier reads neither
+clause. The test reads only the specification and no state, so the answer
+is the same before and after a firing. Only `compelled` is withheld:
+`detectable`, `modal_operator` and the witness and counterexample paths
+stay as computed. The time-limit status of 2.5.0-1 takes precedence. A
+permit named only by `revokes:` is not covered.
+
+### Limits
+
+- `reinstate_authorization()` raises `KeyError` for an Authorization with
+  no `on_revocation` embargo, so a permit suspended under such an
+  Authorization comes back only by `effect activate` or by its triggering
+  event.
+- Every restore acts by permit name across holders. With one holder's
+  instance active and another's suspended, and the active one first in the
+  list, a reinstate moves nothing and the suspended one stays pending,
+  although an active embargo is lifted (open finding "A reinstate with
+  several holders depends on list order" in `docs/CONCEPTS_INDEX.md`).
+- A terminate response with `suspends:` or `expires:` and no `revokes:`
+  can still get `[W-21]`, which says the response "would fire and do
+  nothing" although the clauses act.
+- The ledger names differ by route: a suspension and a response's expiry
+  name the response, a response's revoke names the Authorization, and the
+  sweep's expiry names nothing.
+- After a firing, the hybrid answer is `null` where it used to be a
+  correct `false`.
+- The printed advice of `[W-breach-response-duty]` still names only
+  `creates_burden` or a revokes line, and the `[response-permit-authority]`
+  message cites §6.6.4 and §7.8.6, although no clause says that only the
+  grantor may suspend or end a permit. Both are to be fixed in code later.
+- A permit named only by `revokes:` is not covered by the status route
+  (open finding "A response's `revokes:` leaves the static status route
+  saying `compelled: true`" in `docs/CONCEPTS_INDEX.md`).
+- No route re-grants an expired permit; see "Limits" under "Permit time
+  limits (2.5.0)".
 
 ---
 
