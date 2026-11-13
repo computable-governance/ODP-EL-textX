@@ -6604,6 +6604,8 @@ response fires. The terminate chain and `[W-21]` are unchanged and still
 ignore a `to_role` Authorization, so within one response terminate and the
 new clauses treat it differently.
 
+**Update (2.5.1-2).** [W-21] no longer fires on a terminate response with a suspends: or expires: line, since those lines act when it fires. For the chain it still counts only to_agent Authorizations.
+
 ## Hybrid mode never violates a permit-gated burden — RESOLVED (2026-09-26)
 
 **OPEN FINDING (2026-09-26, high priority), RESOLVED 2026-09-26 by

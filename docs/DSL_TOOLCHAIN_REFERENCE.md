@@ -1639,7 +1639,8 @@ by name, for every holder.
 `[response-permit-authority]`, one per line, and the engine checks it
 again when the response fires (note line `not suspended 'A': authority is
 ...`). That only the Authorization's authority may suspend or expire its
-permit is this toolchain's reading, clause to be confirmed.
+permit is this toolchain's reading, clause to be confirmed. The message of
+the error ends "(clause to be confirmed)".
 
 **Ledger.** An instance moved by `suspends:` or by a response's
 `expires:` writes the cause `response`, with the response's name as ref. A
@@ -1725,18 +1726,11 @@ permit named only by `revokes:` is not covered.
   list, a reinstate moves nothing and the suspended one stays pending,
   although an active embargo is lifted (open finding "A reinstate with
   several holders depends on list order" in `docs/CONCEPTS_INDEX.md`).
-- A terminate response with `suspends:` or `expires:` and no `revokes:`
-  can still get `[W-21]`, which says the response "would fire and do
-  nothing" although the clauses act.
 - The ledger names differ by route: a suspension and a response's expiry
   name the response, a response's revoke names the Authorization, and the
   sweep's expiry names nothing.
 - After a firing, the hybrid answer is `null` where it used to be a
   correct `false`.
-- The printed advice of `[W-breach-response-duty]` still names only
-  `creates_burden` or a revokes line, and the `[response-permit-authority]`
-  message cites §6.6.4 and §7.8.6, although no clause says that only the
-  grantor may suspend or end a permit. Both are to be fixed in code later.
 - A permit named only by `revokes:` is not covered by the status route
   (open finding "A response's `revokes:` leaves the static status route
   saying `compelled: true`" in `docs/CONCEPTS_INDEX.md`).

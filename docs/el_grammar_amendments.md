@@ -13302,3 +13302,103 @@ engine rule of the feature entry above.
 
 **Verification:** 12 new test cases in `tests/test_status_response_permit.py`. Full
 suite, run by the author: 2372 passed, 2 skipped, 1 deselected, 1 xfailed.
+
+## 2.5.1-1 — validator messages for responses that suspend or expire a permit (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator message text, comments and docstrings. No
+grammar, engine logic, verifier or API change.
+
+**Before.** The error `[response-permit-authority]` ended "(§6.6.4, §7.8.6)", although
+no clause says that only the grantor may suspend or end a permit. The advice of
+`[W-breach-response-duty]` ended "or a revokes line", although a `suspends:` or
+`expires:` line also acts. The docstring of `fire_violation_responses()` in
+`toolchain/el_engine.py` said the effects are "1–4" above it, and there are five.
+
+**Now.**
+- The message of `[response-permit-authority]` ends "(clause to be confirmed)":
+
+  ```
+  [response-permit-authority] ViolationResponse '<response>' <suspends|expires> Authorization '<authorization>', which is granted by '<authority>', not by obligates '<obligates>'. (clause to be confirmed)
+  ```
+
+  V-NEW-23 shares the helper that finds the mismatch, and its own citation is
+  unchanged: its message still ends "(§6.6.4, §7.8.6)". The helper no longer carries a
+  citation; each caller adds its own.
+- The advice of `[W-breach-response-duty]` now ends "or a revokes, suspends or expires
+  line. (§6.3.8, §7.8.6 NOTE 2)". The full text:
+  `... add creates_burden (granted to obligates, or with creates_burden_for_role to the
+  role's fillers), or a revokes, suspends or expires line. (§6.3.8, §7.8.6 NOTE 2)`.
+- The docstring in `toolchain/el_engine.py` says "1–5".
+- Comments, docstrings and the module rule table in `toolchain/el_validator.py` are
+  updated to match: the rule table row of `response-permit-authority` now reads "clause
+  to be confirmed", and the docstring of the rule says that only the grantor may suspend
+  or expire its permit is this toolchain's reading.
+
+The `[W-21]` change of the same commit is entry 2.5.1-2.
+
+**Limit.** These dated entries are left as the record of their step, and still show the
+old wording:
+- 2.5.0-2, the feature entry: its Limit on `[W-21]`, which says a terminate response with
+  `suspends:` or `expires:` can still get the warning (fixed in 2.5.1-2).
+- 2.5.0-2, the validator entry: its message block, which ends "(§6.6.4, §7.8.6)", and its
+  Limits on the citation and on the printed advice.
+- 2.3.0-5: its quotation of the advice of `[W-breach-response-duty]`, which ends "or a
+  revokes line".
+- AM-104: the `[W-21]` entry, which describes the warning without the skip.
+
+**Published specifications.** None of the 30 published files gets
+`[response-permit-authority]` or `[W-breach-response-duty]`, and none has a `suspends:` or
+`expires:` line, so their results are unchanged and `tests/published_specs_golden.json` is
+unchanged.
+
+**Files changed:** `toolchain/el_validator.py`, `toolchain/el_engine.py` (docstring),
+`tests/test_response_permit_authority.py`, `tests/test_validator_breach_rules.py`,
+`tests/test_am104_validator_warnings.py`.
+
+**Verification:** the commit adds 6 new test cases: 2 in
+`tests/test_response_permit_authority.py` (the message ending, and V-NEW-23 keeping its
+citation) and 4 in `tests/test_am104_validator_warnings.py` (they belong to entry
+2.5.1-2). One assertion in `tests/test_validator_breach_rules.py` is changed to the new
+advice. Full suite, run by the author: 2378 passed, 2 skipped, 1 deselected, 1 xfailed
+(2372 plus the 6 new tests).
+
+## 2.5.1-2 — `[W-21]` skips a terminate response with `suspends:` or `expires:` (`toolchain/el_validator.py`)
+
+**Status:** IMPLEMENTED. Type: validator warning, narrowed. No grammar, engine, verifier
+or API change.
+
+**Before.** `[W-21]` warned about a terminate response whose violator chain holds no
+revocable Authorization granted by its `obligates`: "would fire and do nothing". It did
+not look at `suspends:` or `expires:`, so a terminate response with one of them and
+nothing to revoke got the warning, although the clauses act when the response fires.
+
+**Now.** `[W-21]` skips a terminate response that has a `suspends:` or an `expires:` line.
+The skip comes after the skip for a `revokes:` list and before the look-up of the
+burden's holder. Without such a line the warning is unchanged, including for a response
+that has a non-revocable grant no clause names. The module rule table and the docstring of
+the rule say so.
+
+**Limit.** Findings only, with no fix:
+- (a) `[W-21]` still says "would fire and do nothing" for a terminate response with
+  `creates_burden` and nothing to revoke, although the response grants a burden.
+- (b) A terminate response to a permit or embargo violation is never warned about:
+  `[W-breach-response-duty]` exempts terminate, and `[W-21]` skips a response whose token
+  has no descriptor.
+- (c) A `suspends:` or `expires:` line on a grant that the terminate chain also revokes
+  always has no effect, because the chain runs first, and no warning says so. The ledger
+  says "nothing to suspend".
+- For the chain, `[W-21]` still counts only `to_agent` Authorizations (open finding
+  "terminate responses do not cover `to_role` Authorizations" in
+  `docs/CONCEPTS_INDEX.md`).
+
+**Published specifications.** None of the 30 published files gets `[W-21]` or has a
+`suspends:` or `expires:` line, so none of them gets any message of 2.5.1-1 or 2.5.1-2 and
+their results are unchanged. `tests/published_specs_golden.json` is unchanged.
+
+**Files changed:** `toolchain/el_validator.py`, `tests/test_am104_validator_warnings.py`.
+
+**Verification:** 4 new test cases in `tests/test_am104_validator_warnings.py`: silent for
+a terminate response with `suspends:` and with `expires:` (one test, two cases), silent
+for a `suspends:` line on a `to_role` grant, and still firing for a non-revocable grant no
+clause names. Full suite, run by the author: 2378 passed, 2 skipped, 1 deselected, 1
+xfailed (see entry 2.5.1-1).

@@ -5,6 +5,22 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
+## [Unreleased]
+
+### Changed
+
+- The message of the validator error `[response-permit-authority]` now ends
+  "(clause to be confirmed)" instead of citing §6.6.4 and §7.8.6, since no
+  clause says that only the grantor may suspend or end a permit. V-NEW-23
+  keeps its own citation.
+- The advice of `[W-breach-response-duty]` now ends "or a revokes, suspends or
+  expires line".
+- `[W-21]` no longer fires on a terminate response with a `suspends:` or
+  `expires:` line, since those lines act when the response fires.
+
+None of the published specifications gets any of these messages, so their
+results are unchanged.
+
 ## [2.5.0] - 2026-11-06
 
 Permit time limits and violation responses that act on a permit (2.5.0-1 and
