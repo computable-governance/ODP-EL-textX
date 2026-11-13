@@ -5,7 +5,7 @@ All _notable_ changes to this project will be documented in this file.
 The format is based on _[Keep a Changelog][keepachangelog]_, and this project
 adheres to _[Semantic Versioning][semver]_.
 
-## [Unreleased]
+## [2.5.1] - 2026-11-13
 
 ### Changed
 
@@ -643,6 +643,7 @@ notes) is [docs/el_grammar_amendments.md](docs/el_grammar_amendments.md).
   scope, and the `domain_scope` field on an Authorization is not checked.
 
 
+[2.5.1]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.5.1
 [2.5.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.5.0
 [2.4.1]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.4.1
 [2.4.0]: https://github.com/computable-governance/ODP-EL-textX/releases/tag/v2.4.0
